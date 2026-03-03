@@ -91,7 +91,7 @@ export default function SiswaPage() {
     const fetchData = async () => {
         try {
             const [studentsRes, classesRes] = await Promise.all([
-                fetch('/api/students'),
+                fetch('/api/students?status=ACTIVE'),
                 fetch('/api/classes')
             ])
             const [studentsData, classesData] = await Promise.all([
