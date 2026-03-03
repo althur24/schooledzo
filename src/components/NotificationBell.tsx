@@ -21,13 +21,28 @@ export default function NotificationBell() {
     const [loading, setLoading] = useState(false)
     const dropdownRef = useRef<HTMLDivElement>(null)
 
-    // Fetch notifications on mount and periodically
+    // Fetch notifications on mount and periodically (with Page Visibility API)
     useEffect(() => {
         fetchNotifications()
 
-        // Poll every 30 seconds for new notifications
-        const interval = setInterval(fetchNotifications, 30000)
-        return () => clearInterval(interval)
+        // Poll every 60 seconds (reduced from 30s)
+        let interval = setInterval(fetchNotifications, 60000)
+
+        // Pause polling when tab is hidden, resume when visible
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                clearInterval(interval)
+            } else {
+                fetchNotifications() // Refresh immediately when tab becomes visible
+                interval = setInterval(fetchNotifications, 60000)
+            }
+        }
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+
+        return () => {
+            clearInterval(interval)
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
+        }
     }, [])
 
     // Close dropdown when clicking outside

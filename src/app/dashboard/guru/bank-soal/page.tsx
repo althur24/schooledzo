@@ -2,15 +2,20 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import dynamic from 'next/dynamic'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import SmartText from '@/components/SmartText'
 import Card from '@/components/ui/Card'
-import RapihAIModal from '@/components/RapihAIModal'
-import MathTextarea from '@/components/MathTextarea'
+// Dynamic imports for heavy components (mathlive 5.6MB, AI modal 724 lines)
+const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
+const MathTextarea = dynamic(() => import('@/components/MathTextarea'), {
+    ssr: false,
+    loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={3} readOnly />
+})
+const AIReviewPanel = dynamic(() => import('@/components/AIReviewPanel'), { ssr: false })
 import { Folder, Plus, Document, Delete, Edit, Discovery, Paper, ShieldDone, TickSquare, InfoCircle, CloseSquare, Download, Search, Danger } from 'react-iconly'
 import { Copy, ChevronLeft, ChevronRight } from 'lucide-react'
 import Link from 'next/link' // Keep this import as it's used later
-import AIReviewPanel from '@/components/AIReviewPanel'
 
 interface QuestionBankItem {
     id: string

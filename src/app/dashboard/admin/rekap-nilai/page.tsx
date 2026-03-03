@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import * as XLSX from 'xlsx'
 import { PageHeader, Button, EmptyState } from '@/components/ui'
 import { Graph as BarChart3, Download } from 'react-iconly'
 import { Loader2 } from 'lucide-react'
@@ -169,8 +168,11 @@ export default function RekapNilaiPage() {
         }
     }, [selectedYear, selectedClass])
 
-    const handleDownloadExcel = () => {
+    const handleDownloadExcel = async () => {
         if (studentGrades.length === 0) return
+
+        // Lazy load xlsx (7.2MB) only when user clicks export
+        const XLSX = await import('xlsx')
 
         const selectedClassName = classes.find(c => c.id === selectedClass)?.name || ''
         const selectedYearName = academicYears.find(y => y.id === selectedYear)?.name || ''

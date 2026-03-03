@@ -3,13 +3,18 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
-import MathTextarea from '@/components/MathTextarea'
+// Dynamic imports for heavy components (mathlive 5.6MB, AI modal 724 lines)
+const MathTextarea = dynamic(() => import('@/components/MathTextarea'), {
+    ssr: false,
+    loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={3} readOnly />
+})
+const PreviewModal = dynamic(() => import('@/components/PreviewModal'), { ssr: false })
+const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
 // import { PenLine, WandSparkles, FolderOpen, Plus } from 'lucide-react'
 import { Edit, Discovery, Folder, Plus, Upload, Danger, InfoCircle, TickSquare, CloseSquare, Delete, Document, Search } from 'react-iconly'
 import { Loader2, Eye, Brain } from 'lucide-react'
-import PreviewModal from '@/components/PreviewModal'
-import RapihAIModal from '@/components/RapihAIModal'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import { PageHeader, Button, Modal, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'

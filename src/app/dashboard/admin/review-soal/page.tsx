@@ -5,7 +5,8 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
-import AIReviewPanel from '@/components/AIReviewPanel'
+import dynamic from 'next/dynamic'
+const AIReviewPanel = dynamic(() => import('@/components/AIReviewPanel'), { ssr: false })
 import { ArrowLeft, Filter as Filter2, TickSquare as CheckCircle, Swap as RotateCcw, ArrowDown as ChevronDown, ArrowUp as ChevronUp, Search, User, Document as BookOpen, Discovery as Brain, Graph as BarChart3, Show as Eye, Hide as EyeOff } from 'react-iconly'
 import Link from 'next/link'
 
