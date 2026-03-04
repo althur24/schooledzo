@@ -17,12 +17,13 @@ export async function PUT(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Get the current academic year
-        const { data: currentYear, error: fetchError } = await supabase
+        // Get the current academic year (scoped by school)
+        let fetchQuery = supabase
             .from('academic_years')
             .select('*')
             .eq('id', id)
-            .single()
+        if (schoolId) fetchQuery = fetchQuery.eq('school_id', schoolId)
+        const { data: currentYear, error: fetchError } = await fetchQuery.single()
 
         if (fetchError) throw fetchError
 
@@ -31,14 +32,16 @@ export async function PUT(
         }
 
         // Update the academic year to COMPLETED
-        const { data, error } = await supabase
+        let updateQuery = supabase
             .from('academic_years')
             .update({
                 status: 'COMPLETED',
                 is_active: false,
-                end_date: new Date().toISOString().split('T')[0] // Set end_date to today if not set
+                end_date: new Date().toISOString().split('T')[0]
             })
             .eq('id', id)
+        if (schoolId) updateQuery = updateQuery.eq('school_id', schoolId)
+        const { data, error } = await updateQuery
             .select()
             .single()
 

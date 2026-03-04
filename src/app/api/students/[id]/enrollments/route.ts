@@ -18,6 +18,19 @@ export async function GET(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
+        // Verify student belongs to this school
+        if (schoolId) {
+            const { data: studentCheck } = await supabase
+                .from('students')
+                .select('id')
+                .eq('id', id)
+                .eq('school_id', schoolId)
+                .single()
+            if (!studentCheck) {
+                return NextResponse.json({ error: 'Student not found' }, { status: 404 })
+            }
+        }
+
         // Fetch enrollment history with related data
         const { data: enrollments, error } = await supabase
             .from('student_enrollments')

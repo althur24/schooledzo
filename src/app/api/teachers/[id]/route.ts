@@ -20,12 +20,13 @@ export async function PUT(
 
         const { username, password, full_name, nip, gender } = await request.json()
 
-        // Get teacher to find user_id
-        const { data: teacher } = await supabase
+        // Get teacher to find user_id (scoped by school)
+        let teacherLookup = supabase
             .from('teachers')
             .select('user_id')
             .eq('id', id)
-            .single()
+        if (schoolId) teacherLookup = teacherLookup.eq('school_id', schoolId)
+        const { data: teacher } = await teacherLookup.single()
 
         if (!teacher) {
             return NextResponse.json({ error: 'Guru tidak ditemukan' }, { status: 404 })
@@ -94,12 +95,13 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Get teacher to find user_id
-        const { data: teacher } = await supabase
+        // Get teacher to find user_id (scoped by school)
+        let teacherLookup = supabase
             .from('teachers')
             .select('user_id')
             .eq('id', id)
-            .single()
+        if (schoolId) teacherLookup = teacherLookup.eq('school_id', schoolId)
+        const { data: teacher } = await teacherLookup.single()
 
         if (!teacher) {
             return NextResponse.json({ error: 'Guru tidak ditemukan' }, { status: 404 })

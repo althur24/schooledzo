@@ -13,11 +13,11 @@ export async function GET(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        const { data, error } = await supabase
+        let query = supabase
             .from('schedules')
             .select(`
                 *,
-                class:classes(id, name, grade_level, school_level),
+                class:classes(id, name, grade_level, school_level, school_id),
                 academic_year:academic_years(id, name, is_active),
                 created_by_user:users!created_by(full_name),
                 entries:schedule_entries(
@@ -27,7 +27,8 @@ export async function GET(
                 )
             `)
             .eq('id', id)
-            .single()
+        if (schoolId) query = query.eq('class.school_id', schoolId)
+        const { data, error } = await query.single()
 
         if (error) throw error
 
@@ -60,6 +61,19 @@ export async function PUT(
         if (effective_from !== undefined) updateData.effective_from = effective_from
         if (notes !== undefined) updateData.notes = notes
         if (is_active !== undefined) updateData.is_active = is_active
+
+        // Verify schedule belongs to a class in this school
+        if (schoolId) {
+            const { data: schedCheck } = await supabase
+                .from('schedules')
+                .select('id, class:classes!inner(school_id)')
+                .eq('id', id)
+                .eq('class.school_id', schoolId)
+                .single()
+            if (!schedCheck) {
+                return NextResponse.json({ error: 'Schedule not found' }, { status: 404 })
+            }
+        }
 
         const { error: updateError } = await supabase
             .from('schedules')
@@ -130,6 +144,19 @@ export async function DELETE(
 
         if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Verify schedule belongs to this school
+        if (schoolId) {
+            const { data: schedCheck } = await supabase
+                .from('schedules')
+                .select('id, class:classes!inner(school_id)')
+                .eq('id', id)
+                .eq('class.school_id', schoolId)
+                .single()
+            if (!schedCheck) {
+                return NextResponse.json({ error: 'Schedule not found' }, { status: 404 })
+            }
         }
 
         const { error } = await supabase.from('schedules').delete().eq('id', id)

@@ -31,10 +31,12 @@ export async function PUT(
         if (expires_at !== undefined) updateData.expires_at = expires_at
         if (is_active !== undefined) updateData.is_active = is_active
 
-        const { data, error } = await supabase
+        let updateQuery = supabase
             .from('announcements')
             .update(updateData)
             .eq('id', id)
+        if (schoolId) updateQuery = updateQuery.eq('school_id', schoolId)
+        const { data, error } = await updateQuery
             .select()
             .single()
 
@@ -65,10 +67,12 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { error } = await supabase
+        let deleteQuery = supabase
             .from('announcements')
             .delete()
             .eq('id', id)
+        if (schoolId) deleteQuery = deleteQuery.eq('school_id', schoolId)
+        const { error } = await deleteQuery
 
         if (error) {
             console.error('Error deleting announcement:', error)

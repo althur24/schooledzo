@@ -32,8 +32,8 @@ export async function PUT(
             }, { status: 400 })
         }
 
-        // Get current student data with enrollments
-        const { data: student, error: studentError } = await supabase
+        // Get current student data with enrollments (scoped by school)
+        let studentQuery = supabase
             .from('students')
             .select(`
                 *,
@@ -45,7 +45,8 @@ export async function PUT(
                 )
             `)
             .eq('id', id)
-            .single()
+        if (schoolId) studentQuery = studentQuery.eq('school_id', schoolId)
+        const { data: student, error: studentError } = await studentQuery.single()
 
         if (studentError || !student) {
             return NextResponse.json({ error: 'Student not found' }, { status: 404 })
@@ -68,23 +69,25 @@ export async function PUT(
             }, { status: 400 })
         }
 
-        // Verify target class exists
-        const { data: targetClass, error: classError } = await supabase
+        // Verify target class exists (scoped by school)
+        let classQuery = supabase
             .from('classes')
             .select('id, name, academic_year_id, school_level')
             .eq('id', to_class_id)
-            .single()
+        if (schoolId) classQuery = classQuery.eq('school_id', schoolId)
+        const { data: targetClass, error: classError } = await classQuery.single()
 
         if (classError || !targetClass) {
             return NextResponse.json({ error: 'Target class not found' }, { status: 404 })
         }
 
-        // Verify academic year exists
-        const { data: targetYear, error: yearError } = await supabase
+        // Verify academic year exists (scoped by school)
+        let yearQuery = supabase
             .from('academic_years')
             .select('id, name')
             .eq('id', to_academic_year_id)
-            .single()
+        if (schoolId) yearQuery = yearQuery.eq('school_id', schoolId)
+        const { data: targetYear, error: yearError } = await yearQuery.single()
 
         if (yearError || !targetYear) {
             return NextResponse.json({ error: 'Target academic year not found' }, { status: 404 })

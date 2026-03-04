@@ -14,7 +14,7 @@ export async function GET(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        const { data: student, error } = await supabase
+        let query = supabase
             .from('students')
             .select(`
                 *,
@@ -22,7 +22,8 @@ export async function GET(
                 class:classes(id, name, school_level)
             `)
             .eq('id', id)
-            .single()
+        if (schoolId) query = query.eq('school_id', schoolId)
+        const { data: student, error } = await query.single()
 
         if (error || !student) {
             return NextResponse.json({ error: 'Siswa tidak ditemukan' }, { status: 404 })
@@ -51,12 +52,13 @@ export async function PUT(
 
         const { username, password, full_name, nis, class_id, gender, angkatan, entry_year, school_level, status, wali_password } = await request.json()
 
-        // Get student with current user info
-        const { data: student } = await supabase
+        // Get student with current user info (scoped by school)
+        let studentQuery = supabase
             .from('students')
             .select('user_id, parent_user_id')
             .eq('id', id)
-            .single()
+        if (schoolId) studentQuery = studentQuery.eq('school_id', schoolId)
+        const { data: student } = await studentQuery.single()
 
         if (!student) {
             return NextResponse.json({ error: 'Siswa tidak ditemukan' }, { status: 404 })
@@ -143,7 +145,8 @@ export async function PUT(
                         username: waliUsername,
                         password_hash: wali_hash,
                         full_name: `Orang Tua - ${full_name || newUsername}`,
-                        role: 'WALI'
+                        role: 'WALI',
+                        school_id: schoolId
                     })
                     .select('id')
                     .single()
@@ -218,12 +221,13 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Get student to find user_id and parent_user_id
-        const { data: student } = await supabase
+        // Get student to find user_id and parent_user_id (scoped by school)
+        let delQuery = supabase
             .from('students')
             .select('user_id, parent_user_id')
             .eq('id', id)
-            .single()
+        if (schoolId) delQuery = delQuery.eq('school_id', schoolId)
+        const { data: student } = await delQuery.single()
 
         if (!student) {
             return NextResponse.json({ error: 'Siswa tidak ditemukan' }, { status: 404 })

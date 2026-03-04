@@ -25,8 +25,8 @@ export async function PUT(
 
         const { notes, academic_year_id } = await request.json()
 
-        // Get current student data with active enrollment
-        const { data: student, error: studentError } = await supabase
+        // Get current student data with active enrollment (scoped by school)
+        let studentQuery = supabase
             .from('students')
             .select(`
                 *,
@@ -39,7 +39,8 @@ export async function PUT(
                 )
             `)
             .eq('id', id)
-            .single()
+        if (schoolId) studentQuery = studentQuery.eq('school_id', schoolId)
+        const { data: student, error: studentError } = await studentQuery.single()
 
         if (studentError || !student) {
             return NextResponse.json({ error: 'Student not found' }, { status: 404 })

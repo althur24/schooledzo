@@ -17,6 +17,19 @@ export async function GET(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        // Verify year belongs to this school
+        if (schoolId) {
+            const { data: yearCheck } = await supabase
+                .from('academic_years')
+                .select('id')
+                .eq('id', id)
+                .eq('school_id', schoolId)
+                .single()
+            if (!yearCheck) {
+                return NextResponse.json({ error: 'Tahun ajaran tidak ditemukan' }, { status: 404 })
+            }
+        }
+
         // Get all related data counts
         const [
             classesRes,
