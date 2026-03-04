@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
         const { data: classesData, error: classesError } = await supabase
             .from('classes')
             .select('id, name')
+            .eq('school_id', schoolId)
 
         if (classesError) throw classesError
 
@@ -36,6 +37,7 @@ export async function POST(request: NextRequest) {
             .from('academic_years')
             .select('id')
             .eq('is_active', true)
+            .eq('school_id', schoolId)
             .single()
 
         const results = []
@@ -83,7 +85,8 @@ export async function POST(request: NextRequest) {
                         username: String(username),
                         password_hash,
                         full_name: String(full_name),
-                        role: 'SISWA'
+                        role: 'SISWA',
+                        school_id: schoolId
                     })
                     .select()
                     .single()
@@ -97,6 +100,7 @@ export async function POST(request: NextRequest) {
                         user_id: newUser.id,
                         nis: nis ? String(nis) : null,
                         class_id: mapped_class_id,
+                        school_id: schoolId,
                         gender: gender === 'L' || gender === 'P' ? gender : null,
                         angkatan: angkatan ? String(angkatan) : null,
                         status: 'ACTIVE'

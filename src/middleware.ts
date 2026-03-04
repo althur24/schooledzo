@@ -1,13 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-const PUBLIC_PATHS = ['/login', '/api/auth', '/api/schools/public', '/api/debug']
-const ROLE_PATHS: Record<string, string[]> = {
-    '/dashboard/super-admin': ['SUPER_ADMIN'],
-    '/dashboard/admin': ['ADMIN'],
-    '/dashboard/guru': ['GURU'],
-    '/dashboard/siswa': ['SISWA'],
-}
+const PUBLIC_PATHS = ['/login', '/api/auth', '/api/schools/public']
 
 export function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl

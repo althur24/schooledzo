@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
             .from('schedules')
             .select(`
                 *,
-                class:classes(id, name, grade_level, school_level),
+                class:classes!inner(id, name, grade_level, school_level, school_id),
                 academic_year:academic_years(id, name, is_active),
                 created_by_user:users!created_by(full_name),
                 entries:schedule_entries(
@@ -27,6 +27,9 @@ export async function GET(request: NextRequest) {
                 )
             `)
             .order('effective_from', { ascending: false })
+
+        // School isolation: only show schedules for classes in this school
+        if (schoolId) query = query.eq('class.school_id', schoolId)
 
         if (classId) query = query.eq('class_id', classId)
         if (academicYearId) query = query.eq('academic_year_id', academicYearId)
@@ -64,6 +67,19 @@ export async function POST(request: NextRequest) {
 
         if (!class_id || !academic_year_id || !entries || !Array.isArray(entries)) {
             return NextResponse.json({ error: 'class_id, academic_year_id, dan entries harus diisi' }, { status: 400 })
+        }
+
+        // Validate class belongs to this school
+        if (schoolId) {
+            const { data: cls } = await supabase
+                .from('classes')
+                .select('id')
+                .eq('id', class_id)
+                .eq('school_id', schoolId)
+                .single()
+            if (!cls) {
+                return NextResponse.json({ error: 'Kelas tidak ditemukan di sekolah ini' }, { status: 403 })
+            }
         }
 
         // Deactivate previous active schedule for this class + year
