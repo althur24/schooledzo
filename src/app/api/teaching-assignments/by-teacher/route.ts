@@ -15,8 +15,8 @@ export async function GET(request: NextRequest) {
 
         const academicYearId = request.nextUrl.searchParams.get('academic_year_id')
 
-        // Get all teachers with their assignments
-        const { data: teachers, error: teachersError } = await supabase
+        // Get all teachers with their assignments (scoped by school)
+        let teachersQuery = supabase
             .from('teachers')
             .select(`
                 id,
@@ -24,10 +24,12 @@ export async function GET(request: NextRequest) {
                 user:users(id, full_name, username)
             `)
             .order('nip')
+        if (schoolId) teachersQuery = teachersQuery.eq('school_id', schoolId)
+        const { data: teachers, error: teachersError } = await teachersQuery
 
         if (teachersError) throw teachersError
 
-        // Get all assignments for this academic year
+        // Get all assignments for this academic year (scoped by school)
         let assignmentsQuery = supabase
             .from('teaching_assignments')
             .select(`
@@ -36,6 +38,7 @@ export async function GET(request: NextRequest) {
                 subject:subjects(id, name),
                 class:classes(id, name, school_level, grade_level)
             `)
+        if (schoolId) assignmentsQuery = assignmentsQuery.eq('school_id', schoolId)
 
         if (academicYearId) {
             assignmentsQuery = assignmentsQuery.eq('academic_year_id', academicYearId)
