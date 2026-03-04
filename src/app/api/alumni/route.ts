@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
                 )
             `)
             .eq('status', 'GRADUATED')
+            .eq('school_id', schoolId)
             .order('created_at', { ascending: false })
 
         if (school_level) {

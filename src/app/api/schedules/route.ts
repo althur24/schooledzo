@@ -8,10 +8,6 @@ export async function GET(request: NextRequest) {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
-        if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-        const user = await validateSession(token)
-        if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
         const classId = request.nextUrl.searchParams.get('class_id')
         const academicYearId = request.nextUrl.searchParams.get('academic_year_id')

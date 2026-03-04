@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
         const { user, schoolId } = ctx
 
         // Only admins can perform batch operations
-        if (session.role !== 'ADMIN') {
+        if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 })
         }
 

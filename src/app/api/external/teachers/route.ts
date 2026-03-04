@@ -11,8 +11,9 @@ export async function GET(request: NextRequest) {
 
         const limit = parseInt(request.nextUrl.searchParams.get('limit') || '100')
         const offset = parseInt(request.nextUrl.searchParams.get('offset') || '0')
+        const schoolId = request.nextUrl.searchParams.get('school_id')
 
-        const { data: teachers, error, count } = await supabase
+        let query = supabase
             .from('teachers')
             .select(`
                 id,
@@ -26,6 +27,12 @@ export async function GET(request: NextRequest) {
             `, { count: 'exact' })
             .range(offset, offset + limit - 1)
             .order('created_at', { ascending: false })
+
+        if (schoolId) {
+            query = query.eq('school_id', schoolId)
+        }
+
+        const { data: teachers, error, count } = await query
 
         if (error) throw error
 

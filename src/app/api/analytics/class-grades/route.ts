@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
         const { data: subjects, error: subjectsError } = await supabase
             .from('subjects')
             .select('id, name')
+            .eq('school_id', schoolId)
             .order('name')
 
         if (subjectsError) throw subjectsError
@@ -47,6 +48,7 @@ export async function GET(request: NextRequest) {
         const { data: students, error: studentsError } = await supabase
             .from('students')
             .select('id, nis, class_id, user:users!students_user_id_fkey(full_name)')
+            .eq('school_id', schoolId)
 
         if (studentsError) throw studentsError
 

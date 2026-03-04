@@ -12,10 +12,6 @@ export async function GET(
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
-        if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-        const user = await validateSession(token)
-        if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
         const { data, error } = await supabase
             .from('schedules')

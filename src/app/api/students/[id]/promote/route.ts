@@ -19,7 +19,7 @@ export async function PUT(
         const { user, schoolId } = ctx
 
         // Only admins can promote students
-        if (session.role !== 'ADMIN') {
+        if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 })
         }
 
