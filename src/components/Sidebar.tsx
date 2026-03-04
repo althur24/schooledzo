@@ -53,6 +53,11 @@ export const waliNav: NavItem[] = [
     { icon: Home, label: 'Dashboard', path: '/dashboard/wali' },
 ]
 
+export const superAdminNav: NavItem[] = [
+    { icon: Home, label: 'Dashboard', path: '/dashboard/super-admin' },
+    { icon: Category, label: 'Sekolah', path: '/dashboard/super-admin/sekolah' },
+]
+
 export default function Sidebar() {
     const pathname = usePathname()
     const { user } = useAuth()
@@ -61,6 +66,7 @@ export default function Sidebar() {
 
     const getNavItems = (): NavItem[] => {
         switch (user.role) {
+            case 'SUPER_ADMIN': return superAdminNav
             case 'SISWA': return siswaNav
             case 'GURU': return guruNav
             case 'ADMIN': return adminNav

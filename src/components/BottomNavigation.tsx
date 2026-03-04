@@ -71,6 +71,15 @@ const waliBarLeft: NavItem[] = [
 const waliBarRight: NavItem[] = []
 const waliArc: NavItem[] = []
 
+// --- SUPER ADMIN ---
+const superAdminBarLeft: NavItem[] = [
+    { icon: Home, label: 'Home', path: '/dashboard/super-admin' },
+]
+const superAdminBarRight: NavItem[] = [
+    { icon: Category, label: 'Sekolah', path: '/dashboard/super-admin/sekolah' },
+]
+const superAdminArc: NavItem[] = []
+
 export default function BottomNavigation() {
     const pathname = usePathname()
     const { user } = useAuth()
@@ -84,6 +93,8 @@ export default function BottomNavigation() {
 
     let barLeft: NavItem[], barRight: NavItem[], arcItems: NavItem[]
     switch (user.role) {
+        case 'SUPER_ADMIN':
+            barLeft = superAdminBarLeft; barRight = superAdminBarRight; arcItems = superAdminArc; break
         case 'SISWA':
             barLeft = siswaBarLeft; barRight = siswaBarRight; arcItems = siswaArc; break
         case 'GURU':

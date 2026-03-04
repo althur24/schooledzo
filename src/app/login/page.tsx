@@ -1,8 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+
+interface SchoolOption {
+    id: string
+    name: string
+    code: string
+    logo_url: string | null
+}
 
 export default function LoginPage() {
     const router = useRouter()
@@ -13,12 +20,41 @@ export default function LoginPage() {
     const [error, setError] = useState('')
     const [loading, setLoading] = useState(false)
 
+    // School selector state
+    const [schools, setSchools] = useState<SchoolOption[]>([])
+    const [selectedSchoolId, setSelectedSchoolId] = useState<string>('')
+    const [isSuperAdmin, setIsSuperAdmin] = useState(false)
+    const [schoolsLoading, setSchoolsLoading] = useState(true)
+
+    // Fetch available schools on mount
+    useEffect(() => {
+        const fetchSchools = async () => {
+            try {
+                const res = await fetch('/api/schools/public')
+                if (res.ok) {
+                    const data = await res.json()
+                    setSchools(data)
+                    if (data.length === 1) {
+                        setSelectedSchoolId(data[0].id)
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to fetch schools:', err)
+            } finally {
+                setSchoolsLoading(false)
+            }
+        }
+        fetchSchools()
+    }, [])
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         setError('')
         setLoading(true)
 
-        const result = await login(username, password)
+        // Super Admin logs in without school_id
+        const schoolId = isSuperAdmin ? undefined : selectedSchoolId || undefined
+        const result = await login(username, password, schoolId)
 
         if (result.success) {
             router.push('/dashboard')
@@ -40,7 +76,7 @@ export default function LoginPage() {
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-emerald-400/20 rounded-full blur-3xl pointer-events-none"></div>
                 <div className="relative bg-white/95 dark:bg-surface-dark/95 backdrop-blur-xl border border-white/50 dark:border-white/5 rounded-3xl shadow-2xl shadow-slate-300/50 dark:shadow-none p-8 sm:p-10 ring-1 ring-black/5">
                     {/* Logo/Title */}
-                    <div className="text-center mb-10">
+                    <div className="text-center mb-8">
                         <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl overflow-hidden mb-6 shadow-lg shadow-emerald-500/20 ring-4 ring-white dark:ring-surface-dark transform rotate-3 hover:rotate-6 transition-transform">
                             <img src="/logoedzo.png" alt="EDZO Logo" className="w-full h-full object-cover" />
                         </div>
@@ -59,7 +95,47 @@ export default function LoginPage() {
                     )}
 
                     {/* Login Form */}
-                    <form onSubmit={handleSubmit} className="space-y-6">
+                    <form onSubmit={handleSubmit} className="space-y-5">
+                        {/* School Selector */}
+                        {!isSuperAdmin && (
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 dark:text-white mb-2 ml-1">
+                                    Sekolah
+                                </label>
+                                <div className="relative group">
+                                    <span className="absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400 group-focus-within:text-emerald-500 transition-colors">
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                                        </svg>
+                                    </span>
+                                    {schoolsLoading ? (
+                                        <div className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-400 font-medium text-sm">
+                                            Memuat daftar sekolah...
+                                        </div>
+                                    ) : schools.length === 0 ? (
+                                        <div className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-400 font-medium text-sm">
+                                            Belum ada sekolah terdaftar
+                                        </div>
+                                    ) : (
+                                        <select
+                                            value={selectedSchoolId}
+                                            onChange={(e) => setSelectedSchoolId(e.target.value)}
+                                            className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-medium appearance-none cursor-pointer"
+                                            required
+                                        >
+                                            <option value="">— Pilih Sekolah —</option>
+                                            {schools.map((school) => (
+                                                <option key={school.id} value={school.id}>
+                                                    {school.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Username */}
                         <div>
                             <label className="block text-sm font-bold text-slate-700 dark:text-white mb-2 ml-1">
                                 Username
@@ -81,6 +157,7 @@ export default function LoginPage() {
                             </div>
                         </div>
 
+                        {/* Password */}
                         <div>
                             <label className="block text-sm font-bold text-slate-700 dark:text-white mb-2 ml-1">
                                 Password
@@ -120,7 +197,7 @@ export default function LoginPage() {
 
                         <button
                             type="submit"
-                            disabled={loading}
+                            disabled={loading || (!isSuperAdmin && !selectedSchoolId && schools.length > 0)}
                             className="w-full py-4 px-6 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl shadow-lg shadow-emerald-500/30 hover:shadow-xl hover:shadow-emerald-500/40 transition-all duration-300 transform hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-3"
                         >
                             {loading ? (
@@ -143,9 +220,22 @@ export default function LoginPage() {
                     </form>
 
                     {/* Footer */}
-                    <p className="mt-8 text-center text-sm text-slate-500">
-                        Lupa password? <a href="#" className="font-bold text-emerald-500 hover:underline">Hubungi Admin</a>
-                    </p>
+                    <div className="mt-6 space-y-3">
+                        <p className="text-center text-sm text-slate-500">
+                            Lupa password? <a href="#" className="font-bold text-emerald-500 hover:underline">Hubungi Admin</a>
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsSuperAdmin(!isSuperAdmin)
+                                setSelectedSchoolId('')
+                                setError('')
+                            }}
+                            className="w-full text-center text-xs text-slate-400 hover:text-emerald-500 transition-colors cursor-pointer py-1"
+                        >
+                            {isSuperAdmin ? '← Kembali ke login sekolah' : 'Login sebagai Super Admin →'}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
