@@ -86,7 +86,7 @@ export default function SekolahListPage() {
             ) : (
                 <div className="grid gap-4 md:grid-cols-2">
                     {filteredSchools.map((school) => (
-                        <div key={school.id} className="bg-white dark:bg-surface-dark rounded-2xl border border-[#E8F0E6] dark:border-primary/10 p-6 hover:shadow-lg transition-shadow">
+                        <a key={school.id} href={`/dashboard/super-admin/sekolah/${school.id}`} className="bg-white dark:bg-surface-dark rounded-2xl border border-[#E8F0E6] dark:border-primary/10 p-6 hover:shadow-lg transition-shadow cursor-pointer block">
                             <div className="flex items-start justify-between mb-4">
                                 <div className="flex items-center gap-4">
                                     <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-xl">
@@ -126,7 +126,7 @@ export default function SekolahListPage() {
                             {school.email && (
                                 <p className="text-xs text-text-secondary truncate">📧 {school.email}</p>
                             )}
-                        </div>
+                        </a>
                     ))}
                 </div>
             )}

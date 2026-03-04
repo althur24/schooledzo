@@ -24,11 +24,12 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Filename required' }, { status: 400 })
         }
 
-        // Generate distinctive path
+        // Generate distinctive path with school isolation
         const fileExt = filename.split('.').pop() || 'pdf'
         const uniqueId = Math.random().toString(36).substring(2, 15)
         const timestamp = Date.now()
-        const storagePath = `${timestamp}-${uniqueId}.${fileExt}`
+        const schoolPrefix = schoolId || 'global'
+        const storagePath = `${schoolPrefix}/${timestamp}-${uniqueId}.${fileExt}`
 
         console.log(`Generating signed upload URL for: ${storagePath}`)
 

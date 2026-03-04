@@ -31,10 +31,11 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Ukuran file maksimal 5MB' }, { status: 400 })
         }
 
-        // Generate unique filename
+        // Generate unique filename with school isolation
         const timestamp = Date.now()
         const ext = file.name.split('.').pop()
-        const filename = `question-images/${timestamp}-${Math.random().toString(36).substring(7)}.${ext}`
+        const schoolPrefix = schoolId || 'global'
+        const filename = `question-images/${schoolPrefix}/${timestamp}-${Math.random().toString(36).substring(7)}.${ext}`
 
         // Convert to buffer
         const arrayBuffer = await file.arrayBuffer()
