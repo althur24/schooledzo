@@ -18,6 +18,15 @@ interface StatsData {
     totalSubjects: number
 }
 
+interface SchoolInfo {
+    name: string
+    address: string | null
+    phone: string | null
+    email: string | null
+    school_level: string | null
+    logo_url: string | null
+}
+
 export default function AdminDashboard() {
     const { user } = useAuth()
     const router = useRouter()
@@ -27,6 +36,7 @@ export default function AdminDashboard() {
         totalClasses: 0,
         totalSubjects: 0
     })
+    const [school, setSchool] = useState<SchoolInfo | null>(null)
 
     useEffect(() => {
         if (user && user.role !== 'ADMIN') {
@@ -35,7 +45,7 @@ export default function AdminDashboard() {
     }, [user, router])
 
     useEffect(() => {
-        const fetchStats = async () => {
+        const fetchData = async () => {
             try {
                 const [teachersRes, studentsRes, classesRes, subjectsRes] = await Promise.all([
                     fetch('/api/teachers'),
@@ -59,7 +69,24 @@ export default function AdminDashboard() {
                 console.error('Error fetching stats:', error)
             }
         }
-        if (user) fetchStats()
+
+        const fetchSchool = async () => {
+            try {
+                const res = await fetch('/api/schools/public')
+                if (res.ok) {
+                    const schools = await res.json()
+                    const mySchool = schools.find((s: { id: string }) => s.id === user?.school_id)
+                    if (mySchool) setSchool(mySchool)
+                }
+            } catch (err) {
+                console.error('Error fetching school info:', err)
+            }
+        }
+
+        if (user) {
+            fetchData()
+            fetchSchool()
+        }
     }, [user])
 
     const menuItems = [
@@ -153,6 +180,43 @@ export default function AdminDashboard() {
                     </p>
                 </div>
             </div>
+
+            {/* School Profile Card */}
+            {school && (
+                <div className="bg-white dark:bg-surface-dark rounded-2xl border border-[#E8F0E6] dark:border-primary/10 p-6">
+                    <div className="flex items-center gap-6">
+                        {/* Logo */}
+                        <div className="flex-shrink-0 w-20 h-20 rounded-2xl bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20 border-2 border-emerald-200 dark:border-emerald-700 flex items-center justify-center overflow-hidden">
+                            {school.logo_url ? (
+                                <img src={school.logo_url} alt={school.name} className="w-full h-full object-contain p-1" />
+                            ) : (
+                                <span className="text-3xl">🏫</span>
+                            )}
+                        </div>
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                            <h2 className="text-xl font-bold text-text-main dark:text-white">{school.name}</h2>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-sm text-text-secondary">
+                                {school.school_level && (
+                                    <span className="inline-flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                        {school.school_level === 'BOTH' ? 'SMP + SMA' : school.school_level}
+                                    </span>
+                                )}
+                                {school.address && (
+                                    <span className="inline-flex items-center gap-1">📍 {school.address}</span>
+                                )}
+                                {school.phone && (
+                                    <span className="inline-flex items-center gap-1">📞 {school.phone}</span>
+                                )}
+                                {school.email && (
+                                    <span className="inline-flex items-center gap-1">📧 {school.email}</span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Stats Grid */}
             {/* Stats Grid */}

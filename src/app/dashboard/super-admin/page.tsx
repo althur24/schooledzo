@@ -43,13 +43,23 @@ export default function SuperAdminDashboard() {
     return (
         <div className="space-y-8">
             {/* Welcome */}
-            <div>
-                <h1 className="text-3xl font-bold text-text-main dark:text-white">
-                    Halo, {user?.full_name || 'Super Admin'} 👋
-                </h1>
-                <p className="text-text-secondary mt-1">
-                    Panel manajemen multi-sekolah
-                </p>
+            <div className="relative overflow-hidden rounded-3xl bg-slate-900 text-white p-8 shadow-xl shadow-slate-900/20">
+                <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
+                <div className="absolute -right-20 -top-20 w-80 h-80 bg-indigo-500/20 rounded-full blur-3xl"></div>
+
+                <div className="relative flex items-center gap-6">
+                    <div className="flex-shrink-0 w-16 h-16 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center">
+                        <span className="text-3xl">🛡️</span>
+                    </div>
+                    <div>
+                        <h1 className="text-3xl font-bold text-white mb-1 leading-tight">
+                            Halo, {user?.full_name || 'Super Admin'} 👋
+                        </h1>
+                        <p className="text-slate-300">
+                            Panel manajemen multi-sekolah • {activeSchools} sekolah aktif
+                        </p>
+                    </div>
+                </div>
             </div>
 
             {/* Stats Cards */}
