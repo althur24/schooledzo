@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import { supabase } from './supabase'
+import { supabaseAdmin as supabase } from './supabase'
 import { User, Session, AuthUser } from './types'
 
 const SALT_ROUNDS = 10
