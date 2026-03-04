@@ -43,10 +43,12 @@ export async function POST(request: NextRequest) {
             }
 
             case 'remove_orphan_students': {
-                // Find students whose user_id doesn't match any user
-                const { data: students } = await supabase
+                // Find students whose user_id doesn't match any user (scoped by school)
+                let orphanStudentQuery = supabase
                     .from('students')
                     .select('id, user_id, user:users!students_user_id_fkey(id)')
+                if (schoolId) orphanStudentQuery = orphanStudentQuery.eq('school_id', schoolId)
+                const { data: students } = await orphanStudentQuery
 
                 const orphans = (students || []).filter((s: any) => !s.user)
                 if (orphans.length > 0) {
@@ -66,9 +68,11 @@ export async function POST(request: NextRequest) {
             }
 
             case 'remove_orphan_teachers': {
-                const { data: teachers } = await supabase
+                let orphanTeacherQuery = supabase
                     .from('teachers')
                     .select('id, user_id, user:users(id)')
+                if (schoolId) orphanTeacherQuery = orphanTeacherQuery.eq('school_id', schoolId)
+                const { data: teachers } = await orphanTeacherQuery
 
                 const orphans = (teachers || []).filter((t: any) => !t.user)
                 if (orphans.length > 0) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
+import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 
 /**
  * GET /api/student-enrollments
@@ -8,10 +9,27 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
  */
 export async function GET(request: NextRequest) {
     try {
+        const ctx = await getSchoolContextOrError(request)
+        if (isErrorResponse(ctx)) return ctx
+        const { user, schoolId } = ctx
+
         const studentId = request.nextUrl.searchParams.get('student_id')
 
         if (!studentId) {
             return NextResponse.json({ error: 'student_id is required' }, { status: 400 })
+        }
+
+        // Verify student belongs to this school
+        if (schoolId) {
+            const { data: studentCheck } = await supabase
+                .from('students')
+                .select('id')
+                .eq('id', studentId)
+                .eq('school_id', schoolId)
+                .single()
+            if (!studentCheck) {
+                return NextResponse.json({ error: 'Student not found' }, { status: 404 })
+            }
         }
 
         const { data, error } = await supabase

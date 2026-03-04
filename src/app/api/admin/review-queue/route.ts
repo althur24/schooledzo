@@ -38,7 +38,8 @@ export async function GET(request: NextRequest) {
         async function fetchBySource(
             tableName: string,
             sourceType: string,
-            extraSelect: string = ''
+            extraSelect: string = '',
+            inFilter?: { field: string; values: string[] }
         ) {
             let query = supabase
                 .from(tableName)
@@ -47,6 +48,11 @@ export async function GET(request: NextRequest) {
             // Apply status filter if provided, otherwise show all
             if (statusFilter) {
                 query = query.eq('status', statusFilter)
+            }
+
+            // Apply school scoping filter
+            if (inFilter) {
+                query = query.in(inFilter.field, inFilter.values.length > 0 ? inFilter.values : ['__none__'])
             }
 
             const { data, count, error } = await query
@@ -83,25 +89,64 @@ export async function GET(request: NextRequest) {
 
         // Fetch based on source filter or all
         if (!source || source === 'bank') {
+            // For question_bank, filter by teacher's school
+            let bankTeacherIds: string[] | null = null
+            if (schoolId) {
+                const { data: schoolTeachers } = await supabase
+                    .from('teachers')
+                    .select('id')
+                    .eq('school_id', schoolId)
+                bankTeacherIds = schoolTeachers?.map(t => t.id) || []
+            }
             const bankData = await fetchBySource(
                 'question_bank', 'bank',
-                'subject:subjects(id, name), teacher:teachers(id, user:users(full_name))'
+                'subject:subjects(id, name), teacher:teachers(id, user:users(full_name))',
+                bankTeacherIds ? { field: 'teacher_id', values: bankTeacherIds } : undefined
             )
             results.push(...bankData)
         }
 
+        // For quiz/exam questions, get teaching_assignment IDs belonging to this school
+        let schoolTAIds: string[] | null = null
+        if (schoolId && (!source || source === 'quiz' || source === 'exam')) {
+            const { data: schoolTAs } = await supabase
+                .from('teaching_assignments')
+                .select('id')
+                .eq('school_id', schoolId)
+            schoolTAIds = schoolTAs?.map(ta => ta.id) || []
+        }
+
         if (!source || source === 'quiz') {
+            // Get quiz IDs belonging to this school's teaching assignments
+            let quizIdFilter: string[] | null = null
+            if (schoolTAIds) {
+                const { data: schoolQuizzes } = await supabase
+                    .from('quizzes')
+                    .select('id')
+                    .in('teaching_assignment_id', schoolTAIds.length > 0 ? schoolTAIds : ['__none__'])
+                quizIdFilter = schoolQuizzes?.map(q => q.id) || []
+            }
             const quizData = await fetchBySource(
                 'quiz_questions', 'quiz',
-                'quiz:quizzes(id, title, teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(name, school_level), teacher:teachers(id, user:users(full_name))))'
+                'quiz:quizzes(id, title, teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(name, school_level), teacher:teachers(id, user:users(full_name))))',
+                quizIdFilter ? { field: 'quiz_id', values: quizIdFilter } : undefined
             )
             results.push(...quizData)
         }
 
         if (!source || source === 'exam') {
+            let examIdFilter: string[] | null = null
+            if (schoolTAIds) {
+                const { data: schoolExams } = await supabase
+                    .from('exams')
+                    .select('id')
+                    .in('teaching_assignment_id', schoolTAIds.length > 0 ? schoolTAIds : ['__none__'])
+                examIdFilter = schoolExams?.map(e => e.id) || []
+            }
             const examData = await fetchBySource(
                 'exam_questions', 'exam',
-                'exam:exams(id, title, teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(name, school_level), teacher:teachers(id, user:users(full_name))))'
+                'exam:exams(id, title, teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(name, school_level), teacher:teachers(id, user:users(full_name))))',
+                examIdFilter ? { field: 'exam_id', values: examIdFilter } : undefined
             )
             results.push(...examData)
         }
