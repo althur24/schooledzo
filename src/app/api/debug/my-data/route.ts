@@ -14,17 +14,19 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
 
-        // Get all teachers and find current user
-        const { data: teachers, error: teachersError } = await supabase
+        // Get all teachers and find current user (scoped by school)
+        let teachersQuery = supabase
             .from('teachers')
             .select(`*, user:users(*)`)
+        if (schoolId) teachersQuery = teachersQuery.eq('school_id', schoolId)
+        const { data: teachers, error: teachersError } = await teachersQuery
 
         if (teachersError) throw teachersError
 
         const myTeacher = teachers?.find((t: any) => t.user?.id === user.id)
 
-        // Get teaching assignments
-        const { data: assignments, error: assignmentsError } = await supabase
+        // Get teaching assignments (scoped by school)
+        let assignmentsQuery = supabase
             .from('teaching_assignments')
             .select(`
                 *,
@@ -33,8 +35,8 @@ export async function GET(request: NextRequest) {
                 class:classes(*),
                 academic_year:academic_years(*)
             `)
-
-        if (assignmentsError) throw assignmentsError
+        if (schoolId) assignmentsQuery = assignmentsQuery.eq('school_id', schoolId)
+        const { data: assignments, error: assignmentsError } = await assignmentsQuery
 
         const myAssignments = myTeacher
             ? assignments?.filter((a: any) => a.teacher?.id === myTeacher.id) || []

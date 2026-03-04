@@ -150,6 +150,7 @@ export async function POST(request: NextRequest) {
                     .from('academic_years')
                     .select('id')
                     .eq('is_active', true)
+                    .eq('school_id', schoolId)
                     .single()
 
                 if (activeYear) {
