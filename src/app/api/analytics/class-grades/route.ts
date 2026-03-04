@@ -52,52 +52,82 @@ export async function GET(request: NextRequest) {
 
         if (studentsError) throw studentsError
 
-        // Get teaching assignments for this academic year
+        // Get teaching assignments for this academic year (already school-scoped via academic_year)
         const { data: teachingAssignments, error: taError } = await supabase
             .from('teaching_assignments')
             .select('id, class_id, subject_id')
             .eq('academic_year_id', academicYearId)
+            .eq('school_id', schoolId)
 
         if (taError) throw taError
 
-        // Get all assignments
+        const taIds = teachingAssignments?.map(ta => ta.id) || []
+
+        if (taIds.length === 0) {
+            return NextResponse.json([])
+        }
+
+        // Get all assignments (scoped by school's TAs)
         const { data: assignments, error: assignmentsError } = await supabase
             .from('assignments')
             .select('id, teaching_assignment_id')
+            .in('teaching_assignment_id', taIds)
 
         if (assignmentsError) throw assignmentsError
 
-        // Get student submissions for tugas
-        const { data: studentSubmissions, error: ssError } = await supabase
-            .from('student_submissions')
-            .select('id, student_id, assignment_id')
+        const assignmentIds = assignments?.map(a => a.id) || []
 
-        // Get grades for student submissions (tugas)
-        const { data: grades, error: gradesError } = await supabase
-            .from('grades')
-            .select('id, submission_id, score')
+        // Get student submissions for tugas (scoped by school's assignments)
+        const { data: studentSubmissions, error: ssError } = assignmentIds.length > 0
+            ? await supabase
+                .from('student_submissions')
+                .select('id, student_id, assignment_id')
+                .in('assignment_id', assignmentIds)
+            : { data: [] as any[], error: null }
 
-        // Get quiz submissions (submitted ones only - submitted_at is not null)
-        const { data: quizSubmissions, error: qsError } = await supabase
-            .from('quiz_submissions')
-            .select('id, student_id, quiz_id, total_score, max_score, submitted_at')
-            .not('submitted_at', 'is', null)
+        const submissionIds = studentSubmissions?.map(s => s.id) || []
 
-        // Get quizzes to map to teaching assignments
+        // Get grades for student submissions (scoped by school's submissions)
+        const { data: grades, error: gradesError } = submissionIds.length > 0
+            ? await supabase
+                .from('grades')
+                .select('id, submission_id, score')
+                .in('submission_id', submissionIds)
+            : { data: [] as any[], error: null }
+
+        // Get quizzes (scoped by school's TAs)
         const { data: quizzes, error: quizzesError } = await supabase
             .from('quizzes')
             .select('id, teaching_assignment_id')
+            .in('teaching_assignment_id', taIds)
 
-        // Get exam submissions (submitted ones)
-        const { data: examSubmissions, error: esError } = await supabase
-            .from('exam_submissions')
-            .select('id, student_id, exam_id, total_score, max_score, submitted_at, is_submitted')
-            .eq('is_submitted', true)
+        const quizIds = quizzes?.map(q => q.id) || []
 
-        // Get exams to map to teaching assignments
+        // Get quiz submissions (scoped by school's quizzes)
+        const { data: quizSubmissions, error: qsError } = quizIds.length > 0
+            ? await supabase
+                .from('quiz_submissions')
+                .select('id, student_id, quiz_id, total_score, max_score, submitted_at')
+                .in('quiz_id', quizIds)
+                .not('submitted_at', 'is', null)
+            : { data: [] as any[], error: null }
+
+        // Get exams (scoped by school's TAs)
         const { data: exams, error: examsError } = await supabase
             .from('exams')
             .select('id, teaching_assignment_id')
+            .in('teaching_assignment_id', taIds)
+
+        const examIds = exams?.map(e => e.id) || []
+
+        // Get exam submissions (scoped by school's exams)
+        const { data: examSubmissions, error: esError } = examIds.length > 0
+            ? await supabase
+                .from('exam_submissions')
+                .select('id, student_id, exam_id, total_score, max_score, submitted_at, is_submitted')
+                .in('exam_id', examIds)
+                .eq('is_submitted', true)
+            : { data: [] as any[], error: null }
 
 
 
