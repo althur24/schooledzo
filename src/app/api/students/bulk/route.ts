@@ -68,8 +68,16 @@ export async function POST(request: NextRequest) {
         // Track usernames added within this batch to detect duplicates
         const usedInBatch = new Set<string>()
 
+        // PARALLEL OPTIMIZATION: Hash ALL passwords at once (~150ms total instead of 50 × 150ms = 7.5s)
+        const passwordHashes = await Promise.all(
+            payload.map((item: any) =>
+                item.password ? hashPassword(String(item.password)) : Promise.resolve('')
+            )
+        )
+
         // Process sequentially (inserts need IDs from previous steps)
-        for (const item of payload) {
+        for (let i = 0; i < payload.length; i++) {
+            const item = payload[i]
             const { full_name, gender, nis, angkatan, kelas, username, password } = item
 
             // Resolve username: explicit username > NIS
@@ -109,8 +117,8 @@ export async function POST(request: NextRequest) {
                 }
                 usedInBatch.add(resolvedUsername)
 
-                // Hash password
-                const password_hash = await hashPassword(String(password))
+                // Use pre-computed hash (already done in parallel above)
+                const password_hash = passwordHashes[i]
 
                 // Create user (username = NIS or explicit username)
                 const { data: newUser, error: userError } = await supabase

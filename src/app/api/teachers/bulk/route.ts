@@ -28,8 +28,16 @@ export async function POST(request: NextRequest) {
             .in('username', usernames)
         const existingUsernames = new Set(existingUsers?.map(u => u.username) || [])
 
+        // PARALLEL OPTIMIZATION: Hash ALL passwords at once (~150ms total instead of N × 150ms)
+        const passwordHashes = await Promise.all(
+            payload.map((item: any) =>
+                item.password ? hashPassword(String(item.password)) : Promise.resolve('')
+            )
+        )
+
         // Process sequentially (inserts need IDs from previous steps)
-        for (const item of payload) {
+        for (let i = 0; i < payload.length; i++) {
+            const item = payload[i]
             const { full_name, gender, nip, username, password } = item
 
             if (!username || !password || !full_name) {
@@ -44,8 +52,8 @@ export async function POST(request: NextRequest) {
                     continue
                 }
 
-                // Hash password
-                const password_hash = await hashPassword(password)
+                // Use pre-computed hash (already done in parallel above)
+                const password_hash = passwordHashes[i]
 
                 // Create user
                 const { data: newUser, error: userError } = await supabase

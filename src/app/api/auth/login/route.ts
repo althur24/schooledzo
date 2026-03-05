@@ -3,7 +3,7 @@ import { authenticateUser, createSession } from '@/lib/auth'
 
 // M1 Security Fix: In-memory rate limiter for login attempts
 const loginAttempts = new Map<string, { count: number; resetTime: number }>()
-const MAX_ATTEMPTS = 5
+const MAX_ATTEMPTS = 100  // High limit: 40+ students may login from same school WiFi (shared IP)
 const WINDOW_MS = 60 * 1000 // 1 minute
 
 function checkRateLimit(ip: string): boolean {
