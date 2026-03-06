@@ -44,8 +44,7 @@ export async function POST(request: NextRequest) {
             teacher_id,
             subject_id,
             academic_year_id,
-            class_id: classId,
-            school_id: schoolId
+            class_id: classId
         }))
 
         const { data, error } = await supabase

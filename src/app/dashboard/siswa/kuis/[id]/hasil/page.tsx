@@ -30,6 +30,7 @@ interface QuizQuestion {
     correct_answer?: string
     options?: string[]
     passage_text?: string | null
+    passage_audio_url?: string | null
 }
 
 interface Quiz {
@@ -40,6 +41,7 @@ interface Quiz {
 // Group questions by passage
 interface QuestionGroup {
     passage_text: string | null
+    passage_audio_url?: string | null
     questions: { question: QuizQuestion; index: number }[]
 }
 
@@ -48,15 +50,20 @@ function groupByPassage(questions: QuizQuestion[]): QuestionGroup[] {
     let currentGroup: QuestionGroup | null = null
 
     questions.forEach((q, idx) => {
-        const passage = q.passage_text || null
-
-        if (passage) {
-            // If same passage as current group, add to it
-            if (currentGroup && currentGroup.passage_text === passage) {
+        // Audio passage: group by audio URL
+        if (q.passage_audio_url) {
+            if (currentGroup && currentGroup.passage_audio_url === q.passage_audio_url) {
                 currentGroup.questions.push({ question: q, index: idx })
             } else {
-                // Start a new passage group
-                currentGroup = { passage_text: passage, questions: [{ question: q, index: idx }] }
+                currentGroup = { passage_text: q.passage_text || null, passage_audio_url: q.passage_audio_url, questions: [{ question: q, index: idx }] }
+                groups.push(currentGroup)
+            }
+        } else if (q.passage_text) {
+            // Text passage: group by passage text
+            if (currentGroup && currentGroup.passage_text === q.passage_text && !currentGroup.passage_audio_url) {
+                currentGroup.questions.push({ question: q, index: idx })
+            } else {
+                currentGroup = { passage_text: q.passage_text, questions: [{ question: q, index: idx }] }
                 groups.push(currentGroup)
             }
         } else {
@@ -216,20 +223,30 @@ export default function HasilKuisPage() {
                 <h3 className="text-xl font-bold text-text-main dark:text-white mb-6">Review Jawaban</h3>
                 <div className="space-y-4">
                     {questionGroups.map((group, groupIdx) => {
-                        if (group.passage_text) {
+                        if (group.passage_text || group.passage_audio_url) {
                             // Passage group
                             return (
-                                <Card key={`passage-${groupIdx}`} className="overflow-hidden">
-                                    <div className="bg-indigo-50 dark:bg-indigo-500/10 border-b border-indigo-200 dark:border-indigo-500/20 p-5 -m-6 mb-6 rounded-t-2xl">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <span className="text-indigo-600 dark:text-indigo-400">
-                                                <Paper set="bold" primaryColor="currentColor" size={18} />
-                                            </span>
-                                            <span className="text-sm font-bold text-indigo-700 dark:text-indigo-300">Bacaan / Passage</span>
-                                        </div>
-                                        <div className="text-sm text-text-main dark:text-zinc-300 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-2">
-                                            <SmartText text={group.passage_text} />
-                                        </div>
+                                <Card key={`passage-${groupIdx}`} className={`overflow-hidden ${group.passage_audio_url ? 'border-violet-300 dark:border-violet-700' : ''}`}>
+                                    <div className={`${group.passage_audio_url ? 'bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-700' : 'bg-indigo-50 dark:bg-indigo-500/10 border-b border-indigo-200 dark:border-indigo-500/20'} p-5 -m-6 mb-6 rounded-t-2xl`}>
+                                        {group.passage_audio_url && (
+                                            <>
+                                                <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-2">🎧 Listening</p>
+                                                <audio controls controlsList="nodownload" className="w-full mb-3" src={group.passage_audio_url} />
+                                            </>
+                                        )}
+                                        {group.passage_text && (
+                                            <>
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <span className="text-indigo-600 dark:text-indigo-400">
+                                                        <Paper set="bold" primaryColor="currentColor" size={18} />
+                                                    </span>
+                                                    <span className="text-sm font-bold text-indigo-700 dark:text-indigo-300">📖 Bacaan</span>
+                                                </div>
+                                                <div className="text-sm text-text-main dark:text-zinc-300 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-2">
+                                                    <SmartText text={group.passage_text} />
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                     <div className="space-y-6 pt-2">
                                         {group.questions.map(({ question, index }) => renderQuestion(question, index))}

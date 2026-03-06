@@ -17,8 +17,8 @@ export async function GET(request: NextRequest) {
             .from('schedules')
             .select(`
                 *,
-                class:classes!inner(id, name, grade_level, school_level, school_id),
-                academic_year:academic_years(id, name, is_active),
+                class:classes(id, name, grade_level, school_level),
+                academic_year:academic_years!inner(id, name, is_active, school_id),
                 created_by_user:users!created_by(full_name),
                 entries:schedule_entries(
                     *,
@@ -28,8 +28,8 @@ export async function GET(request: NextRequest) {
             `)
             .order('effective_from', { ascending: false })
 
-        // School isolation: only show schedules for classes in this school
-        if (schoolId) query = query.eq('class.school_id', schoolId)
+        // School isolation: scope via academic_year (classes don't have school_id)
+        if (schoolId) query = query.eq('academic_year.school_id', schoolId)
 
         if (classId) query = query.eq('class_id', classId)
         if (academicYearId) query = query.eq('academic_year_id', academicYearId)

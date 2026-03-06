@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, supabaseAdmin } from '@/lib/supabase'
+import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 
 // GET all exams
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
         }
 
-        const { data, error } = await supabaseAdmin
+        const { data, error } = await supabase
             .from('exams')
             .insert({
                 title,
@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
 
         // Handle question duplication if requested for Remedial
         if (is_remedial && remedial_for_id && duplicate_questions) {
-            const { data: originalQuestions, error: fetchError } = await supabaseAdmin
+            const { data: originalQuestions, error: fetchError } = await supabase
                 .from('exam_questions')
                 .select('*')
                 .eq('exam_id', remedial_for_id)
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
                     points: q.points,
                     order_index: q.order_index
                 }))
-                const { error: duplicateError } = await supabaseAdmin.from('exam_questions').insert(newQuestions)
+                const { error: duplicateError } = await supabase.from('exam_questions').insert(newQuestions)
                 if (duplicateError) throw duplicateError
             }
         }
@@ -134,14 +134,14 @@ export async function POST(request: NextRequest) {
         // Send notifications to remedial students
         if (is_remedial && allowed_student_ids && allowed_student_ids.length > 0) {
             try {
-                const { data: students } = await supabaseAdmin
+                const { data: students } = await supabase
                     .from('students')
                     .select('user_id')
                     .in('id', allowed_student_ids)
 
                 if (students && students.length > 0) {
                     const startDate = new Date(start_time).toLocaleString('id-ID')
-                    await supabaseAdmin.from('notifications').insert(
+                    await supabase.from('notifications').insert(
                         students.map((s: any) => ({
                             user_id: s.user_id,
                             type: 'REMEDIAL',

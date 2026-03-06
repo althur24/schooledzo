@@ -137,26 +137,24 @@ export default function SiswaDashboard() {
                     const quizSubmissions = Array.isArray(quizSubmissionsData) ? quizSubmissionsData : []
 
                     const nowTime = new Date().getTime()
-                    const warningThreshold = 7 * 24 * 60 * 60 * 1000 // 7 days
                     const newDeadlines: DeadlineItem[] = []
 
-                    // Process Assignments
+                    // Process Assignments — show ALL that haven't been submitted (deadline not passed)
                     assignments.forEach((a: any) => {
                         if (a.teaching_assignment?.class?.id !== myStudent.class.id) return
                         if (assignmentSubmissions.some((s: any) => s.assignment_id === a.id)) return
-                        if (!a.due_date) return
 
-                        const expirationTime = new Date(a.due_date).getTime()
+                        const expirationTime = a.due_date ? new Date(a.due_date).getTime() : nowTime + 999999999
                         const startTime = new Date(a.created_at || Date.now() - 86400000).getTime()
-                        const diff = expirationTime - nowTime
 
-                        if (diff > 0 && diff <= warningThreshold) {
+                        // Show if deadline hasn't passed (or no deadline set)
+                        if (!a.due_date || expirationTime > nowTime) {
                             newDeadlines.push({
                                 id: a.id,
                                 type: 'TUGAS',
                                 title: a.title,
                                 subject: a.teaching_assignment?.subject?.name || 'Mapel',
-                                deadline: a.due_date,
+                                deadline: a.due_date || '',
                                 link: '/dashboard/siswa/tugas',
                                 expirationTime,
                                 startTime
@@ -164,7 +162,7 @@ export default function SiswaDashboard() {
                         }
                     })
 
-                    // Process Exams
+                    // Process Exams — show ALL active & not submitted, with remaining time
                     exams.forEach((e: any) => {
                         if (e.teaching_assignment?.class?.id !== myStudent.class.id) return
                         if (examSubmissions.some((s: any) => s.exam_id === e.id && s.is_submitted)) return
@@ -173,58 +171,56 @@ export default function SiswaDashboard() {
                         const startTime = new Date(e.start_time).getTime()
                         const endTime = startTime + (e.duration_minutes * 60 * 1000)
 
-                        // Show reminder if exam hasn't ended yet
+                        // Show if exam hasn't ended yet
                         if (endTime > nowTime) {
-                            // For countdown: use startTime if not started, otherwise show "Sedang Berlangsung"
                             const isStarted = startTime <= nowTime
                             const countdownTarget = isStarted ? endTime : startTime
 
-                            // Only show if within warning threshold OR already started
-                            if (isStarted || (startTime - nowTime) <= warningThreshold) {
-                                newDeadlines.push({
-                                    id: e.id,
-                                    type: 'ULANGAN',
-                                    title: e.title,
-                                    subject: e.teaching_assignment?.subject?.name || 'Mapel',
-                                    deadline: new Date(startTime).toISOString(),
-                                    link: `/dashboard/siswa/ulangan/${e.id}`,
-                                    expirationTime: countdownTarget,
-                                    startTime
-                                })
-                            }
+                            newDeadlines.push({
+                                id: e.id,
+                                type: 'ULANGAN',
+                                title: e.title,
+                                subject: e.teaching_assignment?.subject?.name || 'Mapel',
+                                deadline: new Date(startTime).toISOString(),
+                                link: `/dashboard/siswa/ulangan/${e.id}`,
+                                expirationTime: countdownTarget,
+                                startTime
+                            })
                         }
                     })
 
-                    // Process Quizzes
+                    // Process Quizzes — show ALL active & not submitted
                     quizzes.forEach((q: any) => {
                         if (q.teaching_assignment?.class?.id !== myStudent.class.id) return
                         if (quizSubmissions.some((s: any) => s.quiz_id === q.id && s.submitted_at)) return
                         if (!q.is_active) return
 
-                        const startTime = new Date(q.start_time).getTime()
-                        const endTime = startTime + (q.duration_minutes * 60 * 1000)
+                        // Use the deadline field from DB
+                        const deadlineTime = q.deadline ? new Date(q.deadline).getTime() : 0
 
-                        // Show reminder if quiz hasn't ended yet
-                        if (endTime > nowTime) {
-                            const isStarted = startTime <= nowTime
-                            const countdownTarget = isStarted ? endTime : startTime
+                        // If there's a deadline and it has passed, don't show
+                        if (deadlineTime > 0 && deadlineTime <= nowTime) return
 
-                            if (isStarted || (startTime - nowTime) <= warningThreshold) {
-                                newDeadlines.push({
-                                    id: q.id,
-                                    type: 'KUIS',
-                                    title: q.title,
-                                    subject: q.teaching_assignment?.subject?.name || 'Mapel',
-                                    deadline: new Date(startTime).toISOString(),
-                                    link: `/dashboard/siswa/kuis/${q.id}`,
-                                    expirationTime: countdownTarget,
-                                    startTime
-                                })
-                            }
-                        }
+                        newDeadlines.push({
+                            id: q.id,
+                            type: 'KUIS',
+                            title: q.title,
+                            subject: q.teaching_assignment?.subject?.name || 'Mapel',
+                            deadline: q.deadline || '',
+                            link: `/dashboard/siswa/kuis/${q.id}`,
+                            expirationTime: deadlineTime || nowTime + 999999999,
+                            startTime: deadlineTime || nowTime
+                        })
                     })
 
-                    newDeadlines.sort((a, b) => a.expirationTime - b.expirationTime)
+                    // Sort: ongoing items first, then by expiration time
+                    newDeadlines.sort((a, b) => {
+                        const aOngoing = a.startTime <= nowTime
+                        const bOngoing = b.startTime <= nowTime
+                        if (aOngoing && !bOngoing) return -1
+                        if (!aOngoing && bOngoing) return 1
+                        return a.expirationTime - b.expirationTime
+                    })
                     setUpcomingDeadlines(newDeadlines)
                 }
 
@@ -345,34 +341,39 @@ export default function SiswaDashboard() {
     }, [])
 
     // UI helpers
-    const getCountdownText = (expirationTime: number, nowMs: number, startTime?: number) => {
-        // For exams/quizzes: check if it hasn't started yet
-        if (startTime && startTime > nowMs) {
-            const diffMs = startTime - nowMs
-            const days = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-            const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
-            const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
-
-            if (days > 0) return `Mulai ${days} hari ${hours > 0 ? `${hours} jm` : ''} lagi`
-            if (hours > 0) return `Mulai ${hours} jm ${minutes > 0 ? `${minutes} mnt` : ''} lagi`
-            return `Mulai ${Math.max(1, minutes)} menit lagi`
+    const getCountdownText = (item: DeadlineItem, nowMs: number) => {
+        // Items without deadline
+        if (!item.deadline) {
+            if (item.type === 'KUIS') return '📝 Kerjakan kapan saja'
+            if (item.type === 'TUGAS') return '📝 Belum ada deadline'
         }
 
-        // For exams/quizzes that have started: show "Sedang Berlangsung"
-        if (startTime && startTime <= nowMs) {
+        // ULANGAN: show start time / sedang berlangsung
+        if (item.type === 'ULANGAN') {
+            const startTime = item.startTime
+            if (startTime > nowMs) {
+                const diffMs = startTime - nowMs
+                const days = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+                const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+                const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+
+                if (days > 0) return `Mulai ${days} hari ${hours > 0 ? `${hours} jm` : ''} lagi`
+                if (hours > 0) return `Mulai ${hours} jm ${minutes > 0 ? `${minutes} mnt` : ''} lagi`
+                return `Mulai ${Math.max(1, minutes)} menit lagi`
+            }
             return '🔴 Sedang Berlangsung — Kerjakan!'
         }
 
-        // For assignments (no startTime): countdown to deadline
-        const diffMs = expirationTime - nowMs
+        // TUGAS & KUIS with deadline: countdown to deadline
+        const diffMs = item.expirationTime - nowMs
         if (diffMs <= 0) return 'Waktu Habis'
         const days = Math.floor(diffMs / (1000 * 60 * 60 * 24))
         const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
         const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
 
-        if (days > 0) return `${days} hari ${hours > 0 ? `${hours} jm` : ''} lagi`
-        if (hours > 0) return `${hours} jm ${minutes > 0 ? `${minutes} mnt` : ''} lagi`
-        return `${Math.max(1, minutes)} menit lagi`
+        if (days > 0) return `Deadline ${days} hari ${hours > 0 ? `${hours} jm` : ''} lagi`
+        if (hours > 0) return `Deadline ${hours} jm ${minutes > 0 ? `${minutes} mnt` : ''} lagi`
+        return `Deadline ${Math.max(1, minutes)} menit lagi`
     }
 
     const getUrgencyStyles = (expirationTime: number, nowMs: number) => {
@@ -456,11 +457,11 @@ export default function SiswaDashboard() {
                             <div className="p-2 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl text-white shadow-lg shadow-amber-500/20">
                                 <Danger set="bold" size={24} />
                             </div>
-                            <h2 className="text-2xl font-bold text-text-main dark:text-white tracking-tight">Tugas yang Mendekati</h2>
+                            <h2 className="text-2xl font-bold text-text-main dark:text-white tracking-tight">Belum Dikerjakan</h2>
                         </div>
                         {!loading && upcomingDeadlines.length > 0 && (
                             <div className="bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 text-xs font-bold px-3 py-1.5 rounded-full border border-amber-200 dark:border-amber-800 animate-pulse">
-                                {upcomingDeadlines.length} Mendatang
+                                {upcomingDeadlines.length} Item
                             </div>
                         )}
                     </div>
@@ -470,15 +471,15 @@ export default function SiswaDashboard() {
                             <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500 rounded-full flex items-center justify-center mb-4">
                                 <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
                             </div>
-                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Semua Tugas Selesai!</h3>
-                            <p className="text-text-secondary dark:text-zinc-400">Kerja yang hebat, {user?.full_name?.split(' ')[0]}! Terus pertahankan semangat belajarmu. 💪</p>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Semua Sudah Dikerjakan!</h3>
+                            <p className="text-text-secondary dark:text-zinc-400">Keren, {user?.full_name?.split(' ')[0]}! Semua tugas, kuis, dan ulangan sudah selesai. 💪</p>
                         </div>
                     ) : (
                         <div className="grid gap-4">
                             {upcomingDeadlines.map((item) => {
                                 const styles = getUrgencyStyles(item.expirationTime, currentTimeMs)
                                 const progress = getProgressPercent(item.startTime, item.expirationTime, currentTimeMs)
-                                const countdownText = getCountdownText(item.expirationTime, currentTimeMs, item.type !== 'TUGAS' ? item.startTime : undefined)
+                                const countdownText = getCountdownText(item, currentTimeMs)
 
                                 return (
                                     <Link key={item.id} href={item.link}>
@@ -511,7 +512,11 @@ export default function SiswaDashboard() {
 
                                                 <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2">
                                                     <div className="text-sm font-bold text-text-secondary dark:text-zinc-500 text-right">
-                                                        {formatDate(item.deadline)} <br className="hidden sm:block" /> <span className="text-xs">{formatHour(item.deadline)}</span>
+                                                        {item.deadline ? (
+                                                            <>{formatDate(item.deadline)} <br className="hidden sm:block" /> <span className="text-xs">{formatHour(item.deadline)}</span></>
+                                                        ) : (
+                                                            <span className="text-xs text-blue-500 dark:text-blue-400">Tanpa Batas Waktu</span>
+                                                        )}
                                                     </div>
                                                     <button className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-secondary/10 text-text-secondary group-hover:bg-primary group-hover:text-white transition-colors">
                                                         <ArrowRight size={16} />
@@ -519,15 +524,17 @@ export default function SiswaDashboard() {
                                                 </div>
                                             </div>
 
-                                            {/* Progress Bar */}
-                                            <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5">
-                                                <div className="w-full bg-secondary/20 rounded-full h-1.5 overflow-hidden">
-                                                    <div
-                                                        className={`h-full rounded-full transition-all duration-1000 ${styles.progressBg}`}
-                                                        style={{ width: `${progress}%` }}
-                                                    />
+                                            {/* Progress Bar — only for items with a deadline/time */}
+                                            {item.deadline && (
+                                                <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5">
+                                                    <div className="w-full bg-secondary/20 rounded-full h-1.5 overflow-hidden">
+                                                        <div
+                                                            className={`h-full rounded-full transition-all duration-1000 ${styles.progressBg}`}
+                                                            style={{ width: `${progress}%` }}
+                                                        />
+                                                    </div>
                                                 </div>
-                                            </div>
+                                            )}
                                         </div>
                                     </Link>
                                 )

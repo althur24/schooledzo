@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, supabaseAdmin } from '@/lib/supabase'
+import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 
 // GET all assignments
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
         }
 
-        const { data, error } = await supabaseAdmin
+        const { data, error } = await supabase
             .from('assignments')
             .insert({ teaching_assignment_id, title, description, type, due_date })
             .select()
@@ -138,7 +138,7 @@ export async function POST(request: NextRequest) {
         // Send notifications to all students in the class
         try {
             // Get the teaching assignment to find the class
-            const { data: ta } = await supabaseAdmin
+            const { data: ta } = await supabase
                 .from('teaching_assignments')
                 .select('class_id, subject:subjects(name)')
                 .eq('id', teaching_assignment_id)
@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
 
             if (ta?.class_id) {
                 // Get the active academic year
-                const { data: activeYear } = await supabaseAdmin
+                const { data: activeYear } = await supabase
                     .from('academic_years')
                     .select('id')
                     .eq('is_active', true)
@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
                     .single()
 
                 if (activeYear) {
-                    const { data: enrollments } = await supabaseAdmin
+                    const { data: enrollments } = await supabase
                         .from('student_enrollments')
                         .select('student:students(user_id)')
                         .eq('academic_year_id', activeYear.id)
@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
                         const notifType = type === 'TUGAS' ? 'TUGAS_BARU' : 'TUGAS_BARU'
                         const subjectName = (ta.subject as any)?.name || ''
 
-                        await supabaseAdmin.from('notifications').insert(
+                        await supabase.from('notifications').insert(
                             userIds.map((uid: string) => ({
                                 user_id: uid,
                                 type: notifType,

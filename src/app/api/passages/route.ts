@@ -108,10 +108,10 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
         }
 
-        const { title, passage_text, subject_id, questions } = await request.json()
+        const { title, passage_text, subject_id, questions, audio_url } = await request.json()
 
-        if (!passage_text) {
-            return NextResponse.json({ error: 'Passage text required' }, { status: 400 })
+        if (!passage_text && !audio_url) {
+            return NextResponse.json({ error: 'Teks bacaan atau audio listening diperlukan' }, { status: 400 })
         }
 
         if (!questions || questions.length === 0) {
@@ -124,6 +124,7 @@ export async function POST(request: NextRequest) {
             .insert({
                 title,
                 passage_text,
+                audio_url: audio_url || null,
                 subject_id: subject_id || null,
                 teacher_id: teacher.id
             })
@@ -218,7 +219,7 @@ export async function PUT(request: NextRequest) {
 
         const { searchParams } = new URL(request.url)
         const id = searchParams.get('id')
-        const { title, passage_text, subject_id, questions } = await request.json()
+        const { title, passage_text, subject_id, questions, audio_url } = await request.json()
 
         if (!id) {
             return NextResponse.json({ error: 'Passage ID required' }, { status: 400 })
@@ -230,6 +231,7 @@ export async function PUT(request: NextRequest) {
             .update({
                 title,
                 passage_text,
+                audio_url: audio_url !== undefined ? (audio_url || null) : undefined,
                 subject_id: subject_id || null,
                 updated_at: new Date().toISOString()
             })

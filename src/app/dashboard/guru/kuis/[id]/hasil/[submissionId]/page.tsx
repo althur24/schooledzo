@@ -23,6 +23,7 @@ interface Question {
     points: number
     order_index: number
     passage_text?: string | null
+    passage_audio_url?: string | null
 }
 
 interface SubmissionDetail {
@@ -198,11 +199,21 @@ export default function GradingPage() {
                                         <span className="text-xs text-text-secondary">Max: {q.points} Poin</span>
                                     </div>
 
-                                    {/* Passage text if exists */}
-                                    {q.passage_text && (
-                                        <div className="mb-4 p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-lg">
-                                            <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1">📖 Bacaan:</p>
-                                            <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed break-all" style={{ overflowWrap: 'anywhere' }}>{q.passage_text}</p>
+                                    {/* Passage audio / text if exists */}
+                                    {(q.passage_audio_url || q.passage_text) && (
+                                        <div className={`mb-4 p-3 ${q.passage_audio_url ? 'bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-700' : 'bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700'} rounded-lg`}>
+                                            {q.passage_audio_url && (
+                                                <>
+                                                    <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-1">🎧 Listening:</p>
+                                                    <audio controls controlsList="nodownload" className="w-full mb-2" src={q.passage_audio_url} />
+                                                </>
+                                            )}
+                                            {q.passage_text && (
+                                                <>
+                                                    <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1">📖 Bacaan:</p>
+                                                    <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed break-all" style={{ overflowWrap: 'anywhere' }}>{q.passage_text}</p>
+                                                </>
+                                            )}
                                         </div>
                                     )}
 

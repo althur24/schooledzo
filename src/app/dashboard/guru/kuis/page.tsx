@@ -50,6 +50,8 @@ export default function GuruKuisPage() {
         duration_minutes: 30,
         is_randomized: true
     })
+    const [hasDeadline, setHasDeadline] = useState(false)
+    const [deadlineValue, setDeadlineValue] = useState('')
 
     // Remedial States
     const [showRemedial, setShowRemedial] = useState(false)
@@ -147,12 +149,17 @@ export default function GuruKuisPage() {
             const res = await fetch('/api/quizzes', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(form)
+                body: JSON.stringify({
+                    ...form,
+                    deadline: hasDeadline && deadlineValue ? new Date(deadlineValue).toISOString() : null
+                })
             })
             if (res.ok) {
                 const newQuiz = await res.json()
                 setShowCreate(false)
                 setForm({ teaching_assignment_id: '', title: '', description: '', duration_minutes: 30, is_randomized: true })
+                setHasDeadline(false)
+                setDeadlineValue('')
                 router.push(`/dashboard/guru/kuis/${newQuiz.id}`)
             }
         } finally {
@@ -452,6 +459,32 @@ export default function GuruKuisPage() {
                                 <span className="text-text-main dark:text-white flex items-center gap-1"><Swap set="bold" primaryColor="currentColor" size={16} /> Acak Soal</span>
                             </label>
                         </div>
+                    </div>
+                    {/* Deadline Toggle */}
+                    <div>
+                        <label className="flex items-center gap-2 cursor-pointer mb-2">
+                            <input
+                                type="checkbox"
+                                checked={hasDeadline}
+                                onChange={(e) => {
+                                    setHasDeadline(e.target.checked)
+                                    if (!e.target.checked) setDeadlineValue('')
+                                }}
+                                className="w-5 h-5 rounded bg-white border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm font-bold text-text-main dark:text-white">Batas Waktu Pengerjaan</span>
+                        </label>
+                        {hasDeadline && (
+                            <input
+                                type="datetime-local"
+                                value={deadlineValue}
+                                onChange={(e) => setDeadlineValue(e.target.value)}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        )}
+                        <p className="text-xs text-text-secondary dark:text-zinc-500 mt-1">
+                            {hasDeadline ? 'Siswa tidak bisa mengerjakan kuis setelah waktu ini.' : 'Tanpa batas waktu — siswa bisa mengerjakan kapan saja selama kuis aktif.'}
+                        </p>
                     </div>
                     <div className="flex gap-3 pt-4">
                         <Button

@@ -13,6 +13,7 @@ interface ExamQuestion {
     points: number
     image_url?: string | null
     passage_text?: string | null
+    passage_audio_url?: string | null
 }
 
 interface Exam {
@@ -561,116 +562,203 @@ export default function TakeExamPage() {
             </div>
 
             {/* Main content */}
-            <div className="flex-1 flex max-w-4xl mx-auto w-full">
-                {/* Question navigation sidebar */}
-                <div className="w-20 bg-surface-light dark:bg-surface-dark border-r border-gray-200 dark:border-gray-700 p-3 overflow-y-auto">
-                    <p className="text-xs text-text-secondary mb-3 text-center">Navigasi</p>
-                    <div className="grid grid-cols-2 gap-2">
-                        {questions.map((q, idx) => (
-                            <button
-                                key={q.id}
-                                onClick={() => setCurrentIndex(idx)}
-                                className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${currentIndex === idx ? 'bg-primary text-white' : answers[q.id] ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-500/30' : 'bg-gray-100 dark:bg-gray-700 text-text-secondary dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-600'}`}
-                            >
-                                {idx + 1}
-                            </button>
-                        ))}
-                    </div>
-                    <p className="text-xs text-text-secondary mt-4 text-center">{answeredCount}/{questions.length}</p>
-                </div>
+            {(() => {
+                // Build display items: audio groups and standalone questions
+                type DisplayItem =
+                    | { type: 'standalone'; question: ExamQuestion; questionNumbers: number[] }
+                    | { type: 'audio_group'; audioUrl: string; passageText?: string | null; questions: ExamQuestion[]; questionNumbers: number[] }
 
-                {/* Question area */}
-                <div className="flex-1 p-6">
-                    <div className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-6 min-h-[400px]">
-                        <div className="flex items-center gap-3 mb-4">
-                            <span className="w-10 h-10 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold">{currentIndex + 1}</span>
-                            <span className={`px-2 py-0.5 text-xs rounded ${currentQuestion.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
-                                {currentQuestion.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
-                            </span>
-                            <span className="text-xs text-text-secondary">({currentQuestion.points} poin)</span>
-                        </div>
+                const displayItems: DisplayItem[] = []
+                const audioGroupMap = new Map<string, { audioUrl: string; passageText?: string | null; questions: ExamQuestion[] }>()
+                const processedAudioUrls = new Set<string>()
 
-                        <SmartText text={currentQuestion.question_text} className="text-text-main dark:text-white text-lg mb-4" />
+                // First pass: identify audio groups
+                questions.forEach(q => {
+                    if (q.passage_audio_url) {
+                        const key = q.passage_audio_url
+                        if (!audioGroupMap.has(key)) {
+                            audioGroupMap.set(key, { audioUrl: q.passage_audio_url, passageText: q.passage_text, questions: [] })
+                        }
+                        audioGroupMap.get(key)!.questions.push(q)
+                    }
+                })
 
-                        {/* Display passage text if exists */}
-                        {currentQuestion.passage_text && (
-                            <div className="mb-6 p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl">
-                                <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-2">📖 Bacaan:</p>
-                                <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed">{currentQuestion.passage_text}</p>
-                            </div>
-                        )}
+                // Second pass: build display items in order
+                let questionNumber = 0
+                questions.forEach(q => {
+                    if (q.passage_audio_url) {
+                        if (!processedAudioUrls.has(q.passage_audio_url)) {
+                            processedAudioUrls.add(q.passage_audio_url)
+                            const group = audioGroupMap.get(q.passage_audio_url)!
+                            const nums: number[] = []
+                            group.questions.forEach(() => { questionNumber++; nums.push(questionNumber) })
+                            displayItems.push({ type: 'audio_group', ...group, questionNumbers: nums })
+                        }
+                    } else {
+                        questionNumber++
+                        displayItems.push({ type: 'standalone', question: q, questionNumbers: [questionNumber] })
+                    }
+                })
 
-                        {/* Display question image if exists */}
-                        {currentQuestion.image_url && (
-                            <div className="mb-6">
-                                <img
-                                    src={currentQuestion.image_url}
-                                    alt="Gambar soal"
-                                    className="max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto"
-                                />
-                            </div>
-                        )}
+                const currentItem = displayItems[currentIndex] || displayItems[0]
+                const isLastItem = currentIndex >= displayItems.length - 1
 
-                        {currentQuestion.question_type === 'MULTIPLE_CHOICE' && currentQuestion.options && (
-                            <div className="space-y-3">
-                                {currentQuestion.options.map((opt, optIdx) => {
-                                    const letter = String.fromCharCode(65 + optIdx)
-                                    const isSelected = answers[currentQuestion.id] === letter
+                return (
+                    <div className="flex-1 flex max-w-4xl mx-auto w-full">
+                        {/* Question navigation sidebar */}
+                        <div className="w-20 bg-surface-light dark:bg-surface-dark border-r border-gray-200 dark:border-gray-700 p-3 overflow-y-auto">
+                            <p className="text-xs text-text-secondary mb-3 text-center">Navigasi</p>
+                            <div className="grid grid-cols-2 gap-2">
+                                {displayItems.map((item, idx) => {
+                                    const nums = item.questionNumbers
+                                    const label = nums.length > 1 ? `${nums[0]}-${nums[nums.length - 1]}` : `${nums[0]}`
+                                    const allAnswered = item.type === 'audio_group'
+                                        ? item.questions.every(q => !!answers[q.id])
+                                        : !!answers[item.question.id]
+                                    const isAudio = item.type === 'audio_group'
                                     return (
                                         <button
-                                            key={optIdx}
-                                            onClick={() => saveAnswer(currentQuestion.id, letter)}
-                                            className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}
+                                            key={idx}
+                                            onClick={() => setCurrentIndex(idx)}
+                                            className={`${nums.length > 1 ? 'col-span-2' : ''} h-8 rounded-lg text-xs font-bold transition-all ${currentIndex === idx ? (isAudio ? 'bg-violet-500 text-white' : 'bg-primary text-white') : allAnswered ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-500/30' : isAudio ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 hover:bg-violet-200' : 'bg-gray-100 dark:bg-gray-700 text-text-secondary dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-600'}`}
                                         >
-                                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg mr-3 font-bold ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`}>{letter}</span>
-                                            {opt}
+                                            {isAudio ? `🎧${label}` : label}
                                         </button>
                                     )
                                 })}
                             </div>
-                        )}
+                            <p className="text-xs text-text-secondary mt-4 text-center">{answeredCount}/{questions.length}</p>
+                        </div>
 
-                        {currentQuestion.question_type === 'ESSAY' && (
-                            <textarea
-                                value={answers[currentQuestion.id] || ''}
-                                onChange={(e) => saveAnswer(currentQuestion.id, e.target.value)}
-                                className="w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                                rows={6}
-                                placeholder="Tulis jawaban Anda di sini..."
-                            />
-                        )}
+                        {/* Question area */}
+                        <div className="flex-1 p-6">
+                            {currentItem?.type === 'audio_group' ? (
+                                /* Audio group: show audio + all questions */
+                                <div className="bg-white dark:bg-surface-dark border border-violet-300 dark:border-violet-700 rounded-xl overflow-hidden min-h-[400px]">
+                                    {/* Audio header */}
+                                    <div className="p-5 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-700">
+                                        <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-2">🎧 Listening</p>
+                                        <audio controls controlsList="nodownload" className="w-full mb-2" src={currentItem.audioUrl} />
+                                        {currentItem.passageText && (
+                                            <>
+                                                <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1 mt-3">📖 Bacaan:</p>
+                                                <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed">{currentItem.passageText}</p>
+                                            </>
+                                        )}
+                                    </div>
+                                    {/* Questions */}
+                                    <div className="divide-y divide-violet-100 dark:divide-violet-800">
+                                        {currentItem.questions.map((q, qIdx) => (
+                                            <div key={q.id} className="p-6">
+                                                <div className="flex items-center gap-3 mb-4">
+                                                    <span className="w-10 h-10 rounded-full bg-violet-500/20 text-violet-600 dark:text-violet-400 flex items-center justify-center font-bold">{currentItem.questionNumbers[qIdx]}</span>
+                                                    <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
+                                                        {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
+                                                    </span>
+                                                    <span className="text-xs text-text-secondary">({q.points} poin)</span>
+                                                </div>
+                                                <SmartText text={q.question_text} className="text-text-main dark:text-white text-lg mb-4" />
+                                                {q.image_url && (
+                                                    <div className="mb-4">
+                                                        <img src={q.image_url} alt="Gambar soal" className="max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />
+                                                    </div>
+                                                )}
+                                                {q.question_type === 'MULTIPLE_CHOICE' && q.options && (
+                                                    <div className="space-y-3">
+                                                        {q.options.map((opt, optIdx) => {
+                                                            const letter = String.fromCharCode(65 + optIdx)
+                                                            const isSelected = answers[q.id] === letter
+                                                            return (
+                                                                <button key={optIdx} onClick={() => saveAnswer(q.id, letter)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}>
+                                                                    <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg mr-3 font-bold ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`}>{letter}</span>
+                                                                    {opt}
+                                                                </button>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                )}
+                                                {q.question_type === 'ESSAY' && (
+                                                    <textarea value={answers[q.id] || ''} onChange={(e) => saveAnswer(q.id, e.target.value)} className="w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none" rows={6} placeholder="Tulis jawaban Anda di sini..." />
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : currentItem?.type === 'standalone' ? (
+                                /* Standalone question */
+                                <div className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-6 min-h-[400px]">
+                                    <div className="flex items-center gap-3 mb-4">
+                                        <span className="w-10 h-10 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold">{currentItem.questionNumbers[0]}</span>
+                                        <span className={`px-2 py-0.5 text-xs rounded ${currentItem.question.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
+                                            {currentItem.question.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
+                                        </span>
+                                        <span className="text-xs text-text-secondary">({currentItem.question.points} poin)</span>
+                                    </div>
+                                    <SmartText text={currentItem.question.question_text} className="text-text-main dark:text-white text-lg mb-4" />
+                                    {/* Text-only passage */}
+                                    {currentItem.question.passage_text && !currentItem.question.passage_audio_url && (
+                                        <div className="mb-6 p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl">
+                                            <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-2">📖 Bacaan:</p>
+                                            <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed">{currentItem.question.passage_text}</p>
+                                        </div>
+                                    )}
+                                    {currentItem.question.image_url && (
+                                        <div className="mb-6">
+                                            <img src={currentItem.question.image_url} alt="Gambar soal" className="max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />
+                                        </div>
+                                    )}
+                                    {currentItem.question.question_type === 'MULTIPLE_CHOICE' && currentItem.question.options && (
+                                        <div className="space-y-3">
+                                            {currentItem.question.options.map((opt, optIdx) => {
+                                                const letter = String.fromCharCode(65 + optIdx)
+                                                const isSelected = answers[currentItem.question.id] === letter
+                                                return (
+                                                    <button key={optIdx} onClick={() => saveAnswer(currentItem.question.id, letter)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}>
+                                                        <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg mr-3 font-bold ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`}>{letter}</span>
+                                                        {opt}
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+                                    {currentItem.question.question_type === 'ESSAY' && (
+                                        <textarea value={answers[currentItem.question.id] || ''} onChange={(e) => saveAnswer(currentItem.question.id, e.target.value)} className="w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none" rows={6} placeholder="Tulis jawaban Anda di sini..." />
+                                    )}
+                                </div>
+                            ) : null}
+
+                            {/* Navigation buttons */}
+                            <div className="flex items-center justify-between mt-6">
+                                <button
+                                    onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
+                                    disabled={currentIndex === 0}
+                                    className="px-6 py-3 bg-gray-200 dark:bg-slate-700 text-text-main dark:text-white rounded-xl hover:bg-gray-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    ← Sebelumnya
+                                </button>
+
+                                {isLastItem ? (
+                                    <button
+                                        onClick={() => setShowConfirmSubmit(true)}
+                                        className="px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <TickSquare set="bold" primaryColor="currentColor" size={20} /> Kumpulkan Ulangan
+                                        </span>
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => setCurrentIndex(prev => Math.min(displayItems.length - 1, prev + 1))}
+                                        className="px-6 py-3 bg-primary text-white rounded-xl hover:bg-primary-dark transition-colors"
+                                    >
+                                        Selanjutnya →
+                                    </button>
+                                )}
+                            </div>
+                        </div>
                     </div>
-
-                    {/* Navigation buttons */}
-                    <div className="flex items-center justify-between mt-6">
-                        <button
-                            onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
-                            disabled={currentIndex === 0}
-                            className="px-6 py-3 bg-gray-200 dark:bg-slate-700 text-text-main dark:text-white rounded-xl hover:bg-gray-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            ← Sebelumnya
-                        </button>
-
-                        {currentIndex === questions.length - 1 ? (
-                            <button
-                                onClick={() => setShowConfirmSubmit(true)}
-                                className="px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
-                            >
-                                <span className="flex items-center gap-2">
-                                    <TickSquare set="bold" primaryColor="currentColor" size={20} /> Kumpulkan Ulangan
-                                </span>
-                            </button>
-                        ) : (
-                            <button
-                                onClick={() => setCurrentIndex(prev => Math.min(questions.length - 1, prev + 1))}
-                                className="px-6 py-3 bg-primary text-white rounded-xl hover:bg-primary-dark transition-colors"
-                            >
-                                Selanjutnya →
-                            </button>
-                        )}
-                    </div>
-                </div>
-            </div>
+                )
+            })()}
 
             {/* Submit Confirmation Modal */}
             {showConfirmSubmit && (

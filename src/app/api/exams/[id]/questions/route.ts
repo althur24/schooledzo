@@ -98,6 +98,7 @@ export async function POST(
             order_index: startOrder + idx,
             image_url: q.image_url || null,
             passage_text: q.passage_text || null,
+            passage_audio_url: q.passage_audio_url || null,
             teacher_hots_claim: q.teacher_hots_claim || false,
             // If question came from bank soal and is already approved, inherit that status
             ...(q.bank_status === 'approved' ? { status: 'approved' } : {})
@@ -164,7 +165,7 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { question_id, question_text, options, correct_answer, difficulty, points, image_url } = body
+        const { question_id, question_text, options, correct_answer, difficulty, points, image_url, passage_audio_url, teacher_hots_claim } = body
 
         if (!question_id) {
             return NextResponse.json({ error: 'question_id required' }, { status: 400 })
@@ -177,6 +178,8 @@ export async function PUT(
         if (difficulty !== undefined) updateData.difficulty = difficulty
         if (points !== undefined) updateData.points = points
         if (image_url !== undefined) updateData.image_url = image_url
+        if (passage_audio_url !== undefined) updateData.passage_audio_url = passage_audio_url
+        if (teacher_hots_claim !== undefined) updateData.teacher_hots_claim = teacher_hots_claim
 
         const { data, error } = await supabase
             .from('exam_questions')

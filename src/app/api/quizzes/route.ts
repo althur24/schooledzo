@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, supabaseAdmin } from '@/lib/supabase'
+import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 
 // GET all quizzes (filtered by teacher)
@@ -76,19 +76,20 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { title, description, start_time, duration_minutes, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, questions } = body
+        const { title, description, start_time, deadline, duration_minutes, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, questions } = body
 
         if (!title || duration_minutes === undefined || !teaching_assignment_id) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
         }
 
         // Create quiz (default: draft/inactive until published)
-        const { data: quiz, error } = await supabaseAdmin
+        const { data: quiz, error } = await supabase
             .from('quizzes')
             .insert({
                 title,
                 description,
                 start_time,
+                deadline: deadline || null,
                 duration_minutes,
                 teaching_assignment_id,
                 is_active: false,
@@ -114,7 +115,7 @@ export async function POST(request: NextRequest) {
                 order_index: idx
             }))
 
-            const { error: questionsError } = await supabaseAdmin
+            const { error: questionsError } = await supabase
                 .from('quiz_questions')
                 .insert(questionsWithQuizId)
 
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
 
         // Handle question duplication if requested for Remedial
         if (is_remedial && remedial_for_id && duplicate_questions) {
-            const { data: originalQuestions, error: fetchError } = await supabaseAdmin
+            const { data: originalQuestions, error: fetchError } = await supabase
                 .from('quiz_questions')
                 .select('*')
                 .eq('quiz_id', remedial_for_id)
@@ -138,7 +139,7 @@ export async function POST(request: NextRequest) {
                     points: q.points,
                     order_index: q.order_index
                 }))
-                const { error: duplicateError } = await supabaseAdmin.from('quiz_questions').insert(newQuestions)
+                const { error: duplicateError } = await supabase.from('quiz_questions').insert(newQuestions)
                 if (duplicateError) throw duplicateError
             }
         }

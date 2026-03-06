@@ -57,7 +57,7 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { title, description, duration_minutes, is_randomized, is_active } = body
+        const { title, description, duration_minutes, is_randomized, is_active, deadline } = body
 
         let finalIsActive = is_active
         let isPendingPublish = false
@@ -90,6 +90,7 @@ export async function PUT(
         if (duration_minutes !== undefined) updateData.duration_minutes = duration_minutes
         if (is_randomized !== undefined) updateData.is_randomized = is_randomized
         if (finalIsActive !== undefined) updateData.is_active = finalIsActive
+        if (deadline !== undefined) updateData.deadline = deadline || null
 
         // Update pending_publish status if we tried to publish
         if (is_active !== undefined) {

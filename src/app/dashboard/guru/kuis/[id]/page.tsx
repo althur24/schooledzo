@@ -29,6 +29,7 @@ interface QuizQuestion {
     order_index: number
     image_url?: string | null
     passage_text?: string | null
+    passage_audio_url?: string | null
     difficulty?: 'EASY' | 'MEDIUM' | 'HARD'
     status?: string
     teacher_hots_claim?: boolean
@@ -75,6 +76,8 @@ export default function EditQuizPage() {
     // Passage mode state
     const [isPassageMode, setIsPassageMode] = useState(false)
     const [passageText, setPassageText] = useState('')
+    const [passageAudioUrl, setPassageAudioUrl] = useState('')
+    const [uploadingAudio, setUploadingAudio] = useState(false)
     const [passageQuestions, setPassageQuestions] = useState<QuizQuestion[]>([{
         question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0
     }])
@@ -164,7 +167,7 @@ export default function EditQuizPage() {
     const handleAddManualQuestion = async () => {
         // Passage mode: save all passage questions at once
         if (isPassageMode) {
-            if (!passageText.trim() || passageQuestions.length === 0) return
+            if ((!passageText.trim() && !passageAudioUrl) || passageQuestions.length === 0) return
             const hasQuestion = passageQuestions.some(q => q.question_text.trim())
             if (!hasQuestion) return
             setSaving(true)
@@ -178,7 +181,9 @@ export default function EditQuizPage() {
                         correct_answer: q.correct_answer || null,
                         points: q.points || 10,
                         order_index: questions.length + idx,
-                        passage_text: passageText
+                        passage_text: passageText,
+                        passage_audio_url: passageAudioUrl || null,
+                        teacher_hots_claim: q.teacher_hots_claim || false
                     }))
                 await fetch(`/api/quizzes/${quizId}/questions`, {
                     method: 'POST',
@@ -186,6 +191,7 @@ export default function EditQuizPage() {
                     body: JSON.stringify(questionsToSave)
                 })
                 setPassageText('')
+                setPassageAudioUrl('')
                 setPassageQuestions([{ question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0 }])
                 setIsPassageMode(false)
                 setMode('list')
@@ -243,7 +249,8 @@ export default function EditQuizPage() {
                     question_id: editingQuestionId,
                     question_text: editForm.question_text,
                     options: editForm.options,
-                    correct_answer: editForm.correct_answer
+                    correct_answer: editForm.correct_answer,
+                    teacher_hots_claim: editForm.teacher_hots_claim || false
                 })
             })
             setEditingQuestionId(null)
@@ -332,6 +339,14 @@ export default function EditQuizPage() {
                 }
             })
 
+            // Collect audio URLs per passage group
+            const passageAudioMap = new Map<string, string>()
+            results.forEach(q => {
+                if (q.passage_text && (q as any).passage_audio_url) {
+                    passageAudioMap.set(q.passage_text, (q as any).passage_audio_url)
+                }
+            })
+
             const promises = []
 
             // Save standalone questions to question bank
@@ -364,6 +379,7 @@ export default function EditQuizPage() {
                         body: JSON.stringify({
                             title: passageText.substring(0, 50) + '...',
                             passage_text: passageText,
+                            audio_url: passageAudioMap.get(passageText) || null,
                             subject_id: subjectId,
                             questions: pQuestions.map(q => ({
                                 question_text: q.question_text,
@@ -640,11 +656,32 @@ export default function EditQuizPage() {
                             title="Belum ada soal"
                             description="Mulai tambahkan soal menggunakan salah satu menu di atas."
                         />
-                    ) : (
-                        questions.map((q, idx) => (
-                            <Card key={q.id || idx} className={`p-4 ${selectedQuestionIds.has(q.id || '') ? 'ring-2 ring-primary' : ''}`}>
+                    ) : (() => {
+                        // Group audio passage questions together
+                        type DisplayItem =
+                            | { type: 'standalone'; question: typeof questions[0]; originalIndex: number }
+                            | { type: 'audio_group'; audioUrl: string; passageText?: string | null; items: { question: typeof questions[0]; originalIndex: number }[] }
+
+                        const displayItems: DisplayItem[] = []
+                        const audioGroupMap = new Map<string, DisplayItem & { type: 'audio_group' }>()
+
+                        questions.forEach((q, idx) => {
+                            if (q.passage_audio_url) {
+                                const key = q.passage_audio_url
+                                if (!audioGroupMap.has(key)) {
+                                    const group: DisplayItem & { type: 'audio_group' } = { type: 'audio_group', audioUrl: q.passage_audio_url, passageText: q.passage_text, items: [] }
+                                    audioGroupMap.set(key, group)
+                                    displayItems.push(group)
+                                }
+                                audioGroupMap.get(key)!.items.push({ question: q, originalIndex: idx })
+                            } else {
+                                displayItems.push({ type: 'standalone', question: q, originalIndex: idx })
+                            }
+                        })
+
+                        const renderQuestionCard = (q: typeof questions[0], idx: number, isInGroup: boolean) => (
+                            <div key={q.id || idx} className={`${isInGroup ? 'p-4' : ''}`}>
                                 <div className="flex items-start gap-4">
-                                    {/* Checkbox for bulk select */}
                                     {isBulkSelectMode && (
                                         <input
                                             type="checkbox"
@@ -657,7 +694,7 @@ export default function EditQuizPage() {
                                             className="w-5 h-5 mt-1 rounded bg-secondary/10 border-secondary/30 text-primary focus:ring-primary cursor-pointer"
                                         />
                                     )}
-                                    <div className="w-8 h-8 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-sm shrink-0">
+                                    <div className={`w-8 h-8 rounded-full ${isInGroup ? 'bg-violet-500/20 text-violet-400' : 'bg-cyan-500/20 text-cyan-400'} flex items-center justify-center font-bold text-sm shrink-0`}>
                                         {idx + 1}
                                     </div>
                                     <div className="flex-1">
@@ -665,7 +702,7 @@ export default function EditQuizPage() {
                                             <span className={`px-2 py-0.5 text-xs rounded-full ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-400' : 'bg-amber-500/20 text-amber-400'}`}>
                                                 {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
                                             </span>
-                                            {q.passage_text && (
+                                            {!isInGroup && q.passage_text && (
                                                 <span className="px-2 py-0.5 text-xs rounded-full bg-teal-500/20 text-teal-400 flex items-center gap-1">
                                                     <Document set="bold" primaryColor="currentColor" size={10} /> Passage
                                                 </span>
@@ -676,11 +713,21 @@ export default function EditQuizPage() {
                                             {q.status === 'ai_reviewing' && <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 animate-pulse flex items-center gap-1"><Discovery set="bold" primaryColor="currentColor" size={10} /></span>}
                                         </div>
 
-                                        {/* Passage text if exists */}
-                                        {q.passage_text && (
+                                        {/* Show passage only for standalone (non-grouped) questions */}
+                                        {!isInGroup && (q.passage_text || q.passage_audio_url) && (
                                             <div className="mb-3 p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-lg overflow-hidden">
-                                                <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1 flex items-center gap-1"><Document set="bold" primaryColor="currentColor" size={12} /> Bacaan:</p>
-                                                <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap break-all" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{q.passage_text}</p>
+                                                {q.passage_audio_url && (
+                                                    <>
+                                                        <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-1">🎧 Listening:</p>
+                                                        <audio controls controlsList="nodownload" className="w-full mb-2" src={q.passage_audio_url} />
+                                                    </>
+                                                )}
+                                                {q.passage_text && (
+                                                    <>
+                                                        <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1 flex items-center gap-1"><Document set="bold" primaryColor="currentColor" size={12} /> Bacaan:</p>
+                                                        <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap break-all" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{q.passage_text}</p>
+                                                    </>
+                                                )}
                                             </div>
                                         )}
 
@@ -747,7 +794,6 @@ export default function EditQuizPage() {
                                             disabled={quiz?.is_active}
                                         />
 
-                                        {/* Edit Button */}
                                         <button
                                             onClick={() => {
                                                 setEditingQuestionId(q.id || null)
@@ -769,9 +815,41 @@ export default function EditQuizPage() {
                                         </button>
                                     </div>
                                 </div>
-                            </Card>
-                        ))
-                    )}
+                            </div>
+                        )
+
+                        return displayItems.map((item, itemIdx) => {
+                            if (item.type === 'audio_group') {
+                                return (
+                                    <div key={`audio-group-${itemIdx}`} className="border-2 border-violet-300 dark:border-violet-700 rounded-2xl overflow-hidden bg-surface-light dark:bg-surface-dark">
+                                        {/* Audio header — shown once */}
+                                        <div className="p-4 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-700">
+                                            <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-2">🎧 Listening — {item.items.length} soal</p>
+                                            <audio controls controlsList="nodownload" className="w-full mb-2" src={item.audioUrl} />
+                                            {item.passageText && (
+                                                <>
+                                                    <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1 flex items-center gap-1 mt-2"><Document set="bold" primaryColor="currentColor" size={12} /> Bacaan:</p>
+                                                    <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap break-all" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{item.passageText}</p>
+                                                </>
+                                            )}
+                                        </div>
+                                        {/* Individual questions */}
+                                        <div className="divide-y divide-violet-100 dark:divide-violet-800">
+                                            {item.items.map(({ question, originalIndex }) =>
+                                                renderQuestionCard(question, originalIndex, true)
+                                            )}
+                                        </div>
+                                    </div>
+                                )
+                            } else {
+                                return (
+                                    <Card key={item.question.id || item.originalIndex} className={`p-4 ${selectedQuestionIds.has(item.question.id || '') ? 'ring-2 ring-primary' : ''}`}>
+                                        {renderQuestionCard(item.question, item.originalIndex, false)}
+                                    </Card>
+                                )
+                            }
+                        })
+                    })()}
                 </div>
             )}
 
@@ -804,11 +882,21 @@ export default function EditQuizPage() {
                                 />
                             </div>
 
-                            {/* Passage Text (if exists) */}
-                            {editForm.passage_text && (
+                            {/* Passage Text / Audio (if exists) */}
+                            {(editForm.passage_text || (editForm as any).passage_audio_url) && (
                                 <div className="p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-lg">
-                                    <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1 flex items-center gap-1"><Document set="bold" primaryColor="currentColor" size={12} /> Bacaan (read-only):</p>
-                                    <p className="text-sm text-text-main dark:text-white line-clamp-3">{editForm.passage_text}</p>
+                                    {(editForm as any).passage_audio_url && (
+                                        <>
+                                            <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-1">🎧 Audio (read-only):</p>
+                                            <audio controls controlsList="nodownload" className="w-full mb-2" src={(editForm as any).passage_audio_url} />
+                                        </>
+                                    )}
+                                    {editForm.passage_text && (
+                                        <>
+                                            <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1 flex items-center gap-1"><Document set="bold" primaryColor="currentColor" size={12} /> Bacaan (read-only):</p>
+                                            <p className="text-sm text-text-main dark:text-white line-clamp-3">{editForm.passage_text}</p>
+                                        </>
+                                    )}
                                 </div>
                             )}
 
@@ -858,6 +946,21 @@ export default function EditQuizPage() {
                                     />
                                 </div>
                             )}
+
+                            {/* HOTS Toggle */}
+                            <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl">
+                                <input
+                                    type="checkbox"
+                                    id="hots-edit-kuis"
+                                    checked={editForm.teacher_hots_claim || false}
+                                    onChange={e => setEditForm({ ...editForm, teacher_hots_claim: e.target.checked })}
+                                    className="w-5 h-5 rounded text-emerald-600 focus:ring-emerald-500"
+                                />
+                                <label htmlFor="hots-edit-kuis" className="flex-1 cursor-pointer">
+                                    <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">🧠 Klaim HOTS</p>
+                                    <p className="text-xs text-emerald-600/70 dark:text-emerald-400/70">Tandai soal ini sebagai Higher Order Thinking Skills</p>
+                                </label>
+                            </div>
                         </div>
 
                         <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-secondary/20">
@@ -927,6 +1030,74 @@ export default function EditQuizPage() {
                                         className="w-full px-4 py-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-300 dark:border-teal-700 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 min-h-[120px]"
                                         placeholder="Tulis teks bacaan / passage di sini..."
                                     />
+                                </div>
+
+                                {/* Audio Upload for Listening */}
+                                <div>
+                                    <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-2">🎧 Audio Listening (Opsional)</label>
+                                    {passageAudioUrl ? (
+                                        <div className="p-4 bg-violet-50 dark:bg-violet-900/20 border border-violet-300 dark:border-violet-700 rounded-xl space-y-3">
+                                            <audio controls className="w-full" src={passageAudioUrl} />
+                                            <button
+                                                onClick={() => setPassageAudioUrl('')}
+                                                className="text-sm text-red-500 hover:text-red-700 font-medium"
+                                            >
+                                                ✕ Hapus Audio
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="relative">
+                                            <input
+                                                type="file"
+                                                accept="audio/*"
+                                                onChange={async (e) => {
+                                                    const file = e.target.files?.[0]
+                                                    if (!file) return
+                                                    if (file.size > 25 * 1024 * 1024) {
+                                                        setAlertInfo({ type: 'error', title: 'File Terlalu Besar', message: 'Maksimal ukuran audio 25MB.' })
+                                                        return
+                                                    }
+                                                    setUploadingAudio(true)
+                                                    try {
+                                                        const formData = new FormData()
+                                                        formData.append('file', file)
+                                                        const res = await fetch('/api/audio/upload', {
+                                                            method: 'POST',
+                                                            body: formData
+                                                        })
+                                                        if (!res.ok) {
+                                                            const err = await res.json()
+                                                            throw new Error(err.error || 'Upload gagal')
+                                                        }
+                                                        const { url } = await res.json()
+                                                        setPassageAudioUrl(url)
+                                                    } catch (err: any) {
+                                                        console.error('Audio upload error:', err)
+                                                        setAlertInfo({ type: 'error', title: 'Gagal Upload', message: err.message || 'Gagal mengupload audio.' })
+                                                    } finally {
+                                                        setUploadingAudio(false)
+                                                        e.target.value = ''
+                                                    }
+                                                }}
+                                                className="hidden"
+                                                id="passage-audio-upload"
+                                                disabled={uploadingAudio}
+                                            />
+                                            <label
+                                                htmlFor="passage-audio-upload"
+                                                className={`flex items-center justify-center gap-2 w-full py-3 border-2 border-dashed border-violet-300 dark:border-violet-700 rounded-xl text-sm font-medium transition-colors cursor-pointer ${uploadingAudio ? 'opacity-50 cursor-wait' : 'text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20'}`}
+                                            >
+                                                {uploadingAudio ? (
+                                                    <><Loader2 className="w-4 h-4 animate-spin" /> Mengupload...</>
+                                                ) : (
+                                                    <>🎵 Upload Audio (MP3, WAV, M4A, OGG — maks 25MB)</>
+                                                )}
+                                            </label>
+                                        </div>
+                                    )}
+                                    <p className="text-xs text-text-secondary dark:text-zinc-500 mt-1">
+                                        Siswa akan mendengar audio ini sebelum menjawab soal-soal di bawah.
+                                    </p>
                                 </div>
 
                                 {/* Questions under this passage */}
@@ -1010,6 +1181,24 @@ export default function EditQuizPage() {
                                                         </div>
                                                     </div>
                                                 )}
+
+                                                {/* HOTS Toggle */}
+                                                <div className="mt-3 flex items-center gap-3 p-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-lg">
+                                                    <input
+                                                        type="checkbox"
+                                                        id={`hots-passage-kuis-${pqIdx}`}
+                                                        checked={pq.teacher_hots_claim || false}
+                                                        onChange={e => {
+                                                            const updated = [...passageQuestions]
+                                                            updated[pqIdx] = { ...updated[pqIdx], teacher_hots_claim: e.target.checked }
+                                                            setPassageQuestions(updated)
+                                                        }}
+                                                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                                                    />
+                                                    <label htmlFor={`hots-passage-kuis-${pqIdx}`} className="cursor-pointer">
+                                                        <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">🧠 Klaim HOTS</p>
+                                                    </label>
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
@@ -1025,7 +1214,7 @@ export default function EditQuizPage() {
                                     <Button variant="secondary" onClick={() => { setMode('list'); setIsPassageMode(false) }} className="flex-1">Batal</Button>
                                     <Button
                                         onClick={handleAddManualQuestion}
-                                        disabled={saving || !passageText.trim() || !passageQuestions.some(q => q.question_text.trim())}
+                                        disabled={saving || (!passageText.trim() && !passageAudioUrl) || !passageQuestions.some(q => q.question_text.trim())}
                                         loading={saving}
                                         className="flex-1 !bg-teal-600 hover:!bg-teal-700"
                                     >
@@ -1317,7 +1506,8 @@ export default function EditQuizPage() {
                                                 const passageQuestionsWithText = bankPassages.flatMap((p: any) =>
                                                     (p.questions || []).map((q: any) => ({
                                                         ...q,
-                                                        passage_text: p.passage_text
+                                                        passage_text: p.passage_text,
+                                                        passage_audio_url: p.audio_url || null
                                                     }))
                                                 )
                                                 // Filter bankQuestions to only include standalone questions (no passage_id)
@@ -1338,6 +1528,7 @@ export default function EditQuizPage() {
                                                         points: 10,
                                                         order_index: questions.length + idx,
                                                         passage_text: q.passage_text || null,
+                                                        passage_audio_url: q.passage_audio_url || null,
                                                         teacher_hots_claim: q.teacher_hots_claim || false,
                                                         // Inherit approved status from bank soal (skip re-review)
                                                         bank_status: q.status

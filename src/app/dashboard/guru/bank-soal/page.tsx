@@ -51,6 +51,7 @@ interface Passage {
     id: string
     title: string | null
     passage_text: string
+    audio_url?: string | null
     subject: { id: string; name: string } | null
     questions: Array<{
         id: string
@@ -119,12 +120,14 @@ export default function BankSoalPage() {
         teacher_hots_claim: false
     })
     const [uploading, setUploading] = useState(false)
+    const [uploadingAudio, setUploadingAudio] = useState(false)
 
     // Passage State
     const [passages, setPassages] = useState<Passage[]>([])
     const [passageForm, setPassageForm] = useState({
         title: '',
         passage_text: '',
+        audio_url: '',
         subject_id: '',
         questions: [{
             question_text: '',
@@ -142,6 +145,7 @@ export default function BankSoalPage() {
     const [editPassageForm, setEditPassageForm] = useState({
         title: '',
         passage_text: '',
+        audio_url: '',
         subject_id: '',
         questions: [] as PassageQuestion[]
     })
@@ -275,6 +279,7 @@ export default function BankSoalPage() {
         setPassageForm({
             title: '',
             passage_text: '',
+            audio_url: '',
             subject_id: '',
             questions: [{
                 question_text: '',
@@ -316,6 +321,7 @@ export default function BankSoalPage() {
         setEditPassageForm({
             title: p.title || '',
             passage_text: p.passage_text,
+            audio_url: p.audio_url || '',
             subject_id: p.subject?.id || '',
             questions: p.questions?.map(q => ({
                 question_text: q.question_text,
@@ -853,6 +859,12 @@ export default function BankSoalPage() {
                                             </div>
                                         </div>
                                         <p className="text-sm text-text-secondary dark:text-zinc-400 mt-2 line-clamp-3">{p.passage_text}</p>
+                                        {p.audio_url && (
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <span className="px-2 py-0.5 text-xs rounded-full bg-violet-500/20 text-violet-600 dark:text-violet-400 font-medium">🎧 Listening</span>
+                                                <audio controls className="h-8" src={p.audio_url} />
+                                            </div>
+                                        )}
                                     </div>
                                     {/* Questions inside passage */}
                                     {p.questions && p.questions.length > 0 && (
@@ -1272,6 +1284,37 @@ export default function BankSoalPage() {
                                 />
                             </div>
 
+                            {/* Audio Upload */}
+                            <div>
+                                <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-2">🎧 Audio Listening (Opsional)</label>
+                                {passageForm.audio_url ? (
+                                    <div className="p-3 bg-violet-50 dark:bg-violet-900/20 border border-violet-300 dark:border-violet-700 rounded-xl space-y-2">
+                                        <audio controls className="w-full" src={passageForm.audio_url} />
+                                        <button onClick={() => setPassageForm({ ...passageForm, audio_url: '' })} className="text-sm text-red-500 hover:text-red-700 font-medium">✕ Hapus Audio</button>
+                                    </div>
+                                ) : (
+                                    <div className="relative">
+                                        <input type="file" accept="audio/*" onChange={async (e) => {
+                                            const file = e.target.files?.[0]
+                                            if (!file) return
+                                            if (file.size > 25 * 1024 * 1024) { showToast('Maksimal ukuran audio 25MB.'); return }
+                                            setUploadingAudio(true)
+                                            try {
+                                                const fd = new FormData(); fd.append('file', file)
+                                                const res = await fetch('/api/audio/upload', { method: 'POST', body: fd })
+                                                if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Upload gagal') }
+                                                const { url } = await res.json()
+                                                setPassageForm({ ...passageForm, audio_url: url })
+                                            } catch (err: any) { showToast(err.message || 'Gagal upload audio') }
+                                            finally { setUploadingAudio(false); e.target.value = '' }
+                                        }} className="hidden" id="bank-passage-audio" disabled={uploadingAudio} />
+                                        <label htmlFor="bank-passage-audio" className={`flex items-center justify-center gap-2 w-full py-3 border-2 border-dashed border-violet-300 dark:border-violet-700 rounded-xl text-sm font-medium cursor-pointer transition-colors ${uploadingAudio ? 'opacity-50 cursor-wait' : 'text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20'}`}>
+                                            {uploadingAudio ? '⏳ Mengupload...' : '🎵 Upload Audio (MP3, WAV, M4A, OGG — maks 25MB)'}
+                                        </label>
+                                    </div>
+                                )}
+                            </div>
+
                             <div className="border-t pt-4">
                                 <div className="flex items-center justify-between mb-3">
                                     <label className="text-sm font-bold text-text-main dark:text-white">Soal-Soal ({passageForm.questions.length})</label>
@@ -1381,7 +1424,7 @@ export default function BankSoalPage() {
                                 <Button variant="secondary" onClick={handleCloseModal} className="flex-1">Batal</Button>
                                 <Button
                                     onClick={handleSubmitPassage}
-                                    disabled={saving || !passageForm.passage_text.trim()}
+                                    disabled={saving || (!passageForm.passage_text.trim() && !passageForm.audio_url)}
                                     loading={saving}
                                     className="flex-1 bg-teal-500 hover:bg-teal-600"
                                 >
@@ -1555,6 +1598,37 @@ export default function BankSoalPage() {
                             className="w-full p-3 border border-secondary/30 rounded-xl bg-secondary/10 text-text-main min-h-[150px]"
                             placeholder="Tulis atau paste teks bacaan di sini..."
                         />
+                    </div>
+
+                    {/* Audio Upload */}
+                    <div>
+                        <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-1">🎧 Audio Listening (Opsional)</label>
+                        {editPassageForm.audio_url ? (
+                            <div className="p-3 bg-violet-50 dark:bg-violet-900/20 border border-violet-300 dark:border-violet-700 rounded-xl space-y-2">
+                                <audio controls className="w-full" src={editPassageForm.audio_url} />
+                                <button onClick={() => setEditPassageForm({ ...editPassageForm, audio_url: '' })} className="text-sm text-red-500 hover:text-red-700 font-medium">✕ Hapus Audio</button>
+                            </div>
+                        ) : (
+                            <div className="relative">
+                                <input type="file" accept="audio/*" onChange={async (e) => {
+                                    const file = e.target.files?.[0]
+                                    if (!file) return
+                                    if (file.size > 25 * 1024 * 1024) { showToast('Maksimal ukuran audio 25MB.'); return }
+                                    setUploadingAudio(true)
+                                    try {
+                                        const fd = new FormData(); fd.append('file', file)
+                                        const res = await fetch('/api/audio/upload', { method: 'POST', body: fd })
+                                        if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Upload gagal') }
+                                        const { url } = await res.json()
+                                        setEditPassageForm({ ...editPassageForm, audio_url: url })
+                                    } catch (err: any) { showToast(err.message || 'Gagal upload audio') }
+                                    finally { setUploadingAudio(false); e.target.value = '' }
+                                }} className="hidden" id="bank-edit-passage-audio" disabled={uploadingAudio} />
+                                <label htmlFor="bank-edit-passage-audio" className={`flex items-center justify-center gap-2 w-full py-3 border-2 border-dashed border-violet-300 dark:border-violet-700 rounded-xl text-sm font-medium cursor-pointer transition-colors ${uploadingAudio ? 'opacity-50 cursor-wait' : 'text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20'}`}>
+                                    {uploadingAudio ? '⏳ Mengupload...' : '🎵 Upload Audio (MP3, WAV, M4A, OGG — maks 25MB)'}
+                                </label>
+                            </div>
+                        )}
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Mata Pelajaran</label>

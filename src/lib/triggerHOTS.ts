@@ -151,12 +151,44 @@ export async function triggerHOTSAnalysis(input: TriggerHOTSInput): Promise<void
                 })
             }
 
-            // Notify all admins when questions need review
+            // Notify same-school admins when questions need review
             if (newStatus === 'admin_review') {
-                const { data: admins } = await supabase
+                // Determine school_id from the question's teacher
+                let questionSchoolId: string | null = null
+                if (input.questionSource === 'bank') {
+                    const { data: q } = await supabase
+                        .from('question_bank')
+                        .select('teacher:teachers(school_id)')
+                        .eq('id', input.questionId)
+                        .single()
+                    questionSchoolId = (q as any)?.teacher?.school_id || null
+                } else {
+                    const sourceTable = input.questionSource === 'quiz' ? 'quiz_questions' : 'exam_questions'
+                    const parentJoin = input.questionSource === 'quiz'
+                        ? 'quiz:quizzes(teaching_assignment:teaching_assignments(academic_year:academic_years(school_id)))'
+                        : 'exam:exams(teaching_assignment:teaching_assignments(academic_year:academic_years(school_id)))'
+                    const { data: q } = await supabase
+                        .from(sourceTable)
+                        .select(parentJoin)
+                        .eq('id', input.questionId)
+                        .single()
+                    const parent = input.questionSource === 'quiz' ? (q as any)?.quiz : (q as any)?.exam
+                    const ta = parent?.teaching_assignment
+                    const taObj = Array.isArray(ta) ? ta[0] : ta
+                    const ay = taObj?.academic_year
+                    const ayObj = Array.isArray(ay) ? ay[0] : ay
+                    questionSchoolId = ayObj?.school_id || null
+                }
+
+                // Only notify admins from the same school
+                let adminQuery = supabase
                     .from('users')
                     .select('id')
                     .eq('role', 'ADMIN')
+                if (questionSchoolId) {
+                    adminQuery = adminQuery.eq('school_id', questionSchoolId)
+                }
+                const { data: admins } = await adminQuery
 
                 if (admins?.length) {
                     const sourceLabel = input.questionSource === 'quiz' ? 'kuis' : input.questionSource === 'exam' ? 'ulangan' : 'bank soal'
