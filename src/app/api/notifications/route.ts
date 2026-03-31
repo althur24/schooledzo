@@ -166,6 +166,7 @@ export async function GET(request: NextRequest) {
                         .from('official_exams')
                         .select('id, title, exam_type, start_time, target_class_ids, subject:subjects(name)')
                         .eq('school_id', schoolId)
+                        .eq('is_active', true)
                         .gt('start_time', now.toISOString())
 
                     if (scheduledExams && scheduledExams.length > 0) {

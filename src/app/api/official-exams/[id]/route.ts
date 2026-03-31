@@ -90,7 +90,7 @@ export async function PUT(
 
         if (error) throw error
 
-        // If just activated, send notifications to all target students
+        // If just activated, send notifications to all target students and teachers
         if (is_active === true && data) {
             try {
                 const { data: activeYear } = await supabase
@@ -101,6 +101,12 @@ export async function PUT(
                     .single()
 
                 if (activeYear && data.target_class_ids?.length > 0) {
+                    const isFuture = new Date(data.start_time) > new Date()
+                    const startDate = new Date(data.start_time).toLocaleString('id-ID')
+                    const examLabel = data.exam_type === 'UTS' ? 'UTS' : 'UAS'
+                    const subjectName = (data as any).subject?.name || ''
+
+                    // 1. Student Notifications
                     const { data: enrollments } = await supabase
                         .from('student_enrollments')
                         .select('student:students(user_id)')
@@ -108,17 +114,20 @@ export async function PUT(
                         .in('class_id', data.target_class_ids)
 
                     if (enrollments && enrollments.length > 0) {
-                        const subjectName = (data as any).subject?.name || ''
-                        const startDate = new Date(data.start_time).toLocaleString('id-ID')
-                        const examLabel = data.exam_type === 'UTS' ? 'UTS' : 'UAS'
+                        const studentTitle = isFuture 
+                            ? `📅 ${examLabel} Dijadwalkan: ${data.title}`
+                            : `🔔 ${examLabel} Sekarang Aktif: ${data.title}`
+                        const studentMessage = isFuture
+                            ? `${subjectName} — Dimulai pada: ${startDate}`
+                            : `${subjectName} — Silakan kerjakan pada: ${startDate}`
 
-                        // Dedup: find students who already have a notification for this exam
                         const userIds = enrollments.map((e: any) => e.student.user_id).filter(Boolean)
                         const { data: existingNotifs } = await supabase
                             .from('notifications')
                             .select('user_id')
                             .in('user_id', userIds)
-                            .ilike('title', `%${data.title}%`)
+                            .eq('title', studentTitle)
+                            .eq('type', 'UJIAN_RESMI')
 
                         const alreadyNotified = new Set((existingNotifs || []).map((n: any) => n.user_id))
                         const toNotify = userIds.filter((uid: string) => !alreadyNotified.has(uid))
@@ -128,59 +137,62 @@ export async function PUT(
                                 toNotify.map((uid: string) => ({
                                     user_id: uid,
                                     type: 'UJIAN_RESMI',
-                                    title: `🔔 ${examLabel} Sekarang Aktif: ${data.title}`,
-                                    message: `${subjectName} — Silakan kerjakan pada: ${startDate}`,
+                                    title: studentTitle,
+                                    message: studentMessage,
                                     link: '/dashboard/siswa/uts-uas'
                                 }))
                             )
                         }
                     }
-                }
 
-                // Also notify teachers when exam goes active
-                const { data: teacherAssignments } = await supabase
-                    .from('teaching_assignments')
-                    .select('teacher:teachers(user_id)')
-                    .eq('subject_id', data.subject_id)
-                    .in('class_id', data.target_class_ids)
-                    .eq('academic_year_id', activeYear?.id || '')
+                    // 2. Teacher Notifications
+                    const { data: teacherAssignments } = await supabase
+                        .from('teaching_assignments')
+                        .select('teacher:teachers(user_id)')
+                        .eq('subject_id', data.subject_id)
+                        .in('class_id', data.target_class_ids)
+                        .eq('academic_year_id', activeYear.id)
 
-                if (teacherAssignments && teacherAssignments.length > 0) {
-                    const teacherUserIds = [...new Set(
-                        teacherAssignments.map((a: any) => {
-                            const t = Array.isArray(a.teacher) ? a.teacher[0] : a.teacher
-                            return t?.user_id
-                        }).filter(Boolean)
-                    )]
+                    if (teacherAssignments && teacherAssignments.length > 0) {
+                        const teacherTitle = isFuture
+                            ? `📋 ${examLabel} Dijadwalkan: ${data.title}`
+                            : `🔔 ${examLabel} Dimulai: ${data.title}`
+                        const teacherMessage = isFuture
+                            ? `${subjectName} — Admin menjadwalkan ujian kelas Anda pada: ${startDate}`
+                            : `${subjectName} — Siswa diijinkan mulai mengerjakan ujian.`
 
-                    // Dedup: skip teachers already notified for this exact event type
-                    const { data: existingTeacherNotifs } = await supabase
-                        .from('notifications')
-                        .select('user_id')
-                        .in('user_id', teacherUserIds)
-                        .ilike('title', `%Dimulai: ${data.title}%`)
-                        .eq('type', 'UJIAN_RESMI')
+                        const teacherUserIds = [...new Set(
+                            teacherAssignments.map((a: any) => {
+                                const t = Array.isArray(a.teacher) ? a.teacher[0] : a.teacher
+                                return t?.user_id
+                            }).filter(Boolean)
+                        )]
 
-                    const alreadyNotifiedTeachers = new Set(
-                        (existingTeacherNotifs || []).map((n: any) => n.user_id)
-                    )
-                    const teachersToNotify = teacherUserIds.filter(
-                        uid => !alreadyNotifiedTeachers.has(uid)
-                    )
+                        const { data: existingTeacherNotifs } = await supabase
+                            .from('notifications')
+                            .select('user_id')
+                            .in('user_id', teacherUserIds)
+                            .eq('title', teacherTitle)
+                            .eq('type', 'UJIAN_RESMI')
 
-                    if (teachersToNotify.length > 0) {
-                        const subjectName = (data as any).subject?.name || ''
-                        const examLabel = data.exam_type === 'UTS' ? 'UTS' : 'UAS'
-
-                        await supabase.from('notifications').insert(
-                            teachersToNotify.map(uid => ({
-                                user_id: uid,
-                                type: 'UJIAN_RESMI',
-                                title: `🔔 ${examLabel} Dimulai: ${data.title}`,
-                                message: `${subjectName} — Siswa diijinkan mulai mengerjakan ujian.`,
-                                link: '/dashboard/guru/uts-uas'
-                            }))
+                        const alreadyNotifiedTeachers = new Set(
+                            (existingTeacherNotifs || []).map((n: any) => n.user_id)
                         )
+                        const teachersToNotify = teacherUserIds.filter(
+                            uid => !alreadyNotifiedTeachers.has(uid)
+                        )
+
+                        if (teachersToNotify.length > 0) {
+                            await supabase.from('notifications').insert(
+                                teachersToNotify.map(uid => ({
+                                    user_id: uid,
+                                    type: 'UJIAN_RESMI',
+                                    title: teacherTitle,
+                                    message: teacherMessage,
+                                    link: '/dashboard/guru/uts-uas'
+                                }))
+                            )
+                        }
                     }
                 }
             } catch (notifError) {
