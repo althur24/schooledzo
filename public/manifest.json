@@ -1,9 +1,9 @@
 {
-  "name": "Education Zone",
-  "short_name": "EduZone",
+  "name": "Edzo - LMS YPP",
+  "short_name": "Edzo LMS",
   "description": "Platform Belajar Digital YPP",
-  "theme_color": "#1E293B",
-  "background_color": "#1E293B",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
   "display": "standalone",
   "start_url": "/dashboard",
   "scope": "/",
