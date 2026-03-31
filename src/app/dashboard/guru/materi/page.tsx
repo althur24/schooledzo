@@ -468,7 +468,7 @@ export default function MateriPage() {
         )
     }
 
-    if (assignments.length === 0) {
+    if (assignments.length === 0 && !isOffline) {
         return (
             <EmptyState
                 icon={<div className="text-secondary"><BookOpen set="bold" primaryColor="currentColor" size={48} /></div>}
