@@ -300,6 +300,44 @@ export async function GET(request: NextRequest) {
                                     }
                                 }
                             }
+
+                            // Teacher "Dimulai" — notify when exam start_time has arrived
+                            const { data: startedExams } = await supabase
+                                .from('official_exams')
+                                .select('id, title, exam_type, start_time, end_time, target_class_ids, subject_id, subject:subjects(name)')
+                                .eq('school_id', schoolId)
+                                .eq('is_active', true)
+                                .in('subject_id', subjectIds)
+                                .lte('start_time', now.toISOString())
+                                .gt('end_time', now.toISOString())
+
+                            if (startedExams) {
+                                for (const exam of startedExams) {
+                                    if (!exam.target_class_ids?.some((cid: string) => classIds.includes(cid))) continue
+
+                                    const label = exam.exam_type === 'UTS' ? 'UTS' : 'UAS'
+                                    const dimulaiTitle = `🔔 ${label} Dimulai: ${exam.title}`
+
+                                    const { data: existingDimulai } = await supabase
+                                        .from('notifications')
+                                        .select('id')
+                                        .eq('user_id', user.id)
+                                        .eq('title', dimulaiTitle)
+                                        .eq('type', 'UJIAN_RESMI')
+                                        .limit(1)
+
+                                    if (!existingDimulai || existingDimulai.length === 0) {
+                                        const startStr = new Date(exam.start_time).toLocaleString('id-ID')
+                                        await supabase.from('notifications').insert({
+                                            user_id: user.id,
+                                            type: 'UJIAN_RESMI',
+                                            title: dimulaiTitle,
+                                            message: `${(exam as any).subject?.name || ''} — Siswa sedang mengerjakan sejak ${startStr}`,
+                                            link: '/dashboard/guru/uts-uas'
+                                        })
+                                    }
+                                }
+                            }
                         }
                     }
                 }
