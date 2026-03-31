@@ -115,24 +115,36 @@ export default function KerjakanKuisPage() {
 
     const syncLocalToServer = async () => {
         const localAnswers = loadAnswersFromLocal()
-        if (Object.keys(localAnswers).length > 0 && startTime) {
-            try {
-                const formattedAnswers = Object.entries(localAnswers).map(([qId, val]) => ({
-                    question_id: qId,
-                    answer: val
-                }))
-                await fetch('/api/quiz-submissions', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        quiz_id: quizId,
-                        answers: formattedAnswers,
-                        started_at: startTime
-                    })
+        if (Object.keys(localAnswers).length === 0 || !startTime) return
+
+        try {
+            const formattedAnswers = Object.entries(localAnswers).map(([qId, val]) => ({
+                question_id: qId,
+                answer: val
+            }))
+
+            // Check if time is already up
+            const durationMs = quiz ? quiz.duration_minutes * 60 * 1000 : 0
+            const elapsed = Date.now() - new Date(startTime).getTime()
+            const isTimeUp = durationMs > 0 && elapsed >= durationMs
+
+            await fetch('/api/quiz-submissions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    quiz_id: quizId,
+                    answers: formattedAnswers,
+                    started_at: startTime,
+                    submit: isTimeUp
                 })
-            } catch (error) {
-                console.error('Error syncing to server:', error)
+            })
+
+            if (isTimeUp) {
+                clearLocalAnswers()
+                router.replace(`/dashboard/siswa/kuis/${quizId}/hasil`)
             }
+        } catch (error) {
+            console.error('Error syncing to server:', error)
         }
     }
 
@@ -439,6 +451,11 @@ export default function KerjakanKuisPage() {
     return (
         <div className="space-y-6 pb-20">
             {/* Header Sticky */}
+            {!navigator.onLine && (
+                <div className="bg-red-500 text-white text-xs font-bold text-center py-1.5 animate-pulse w-full">
+                    ⚠️ Koneksi terputus — jawaban disimpan lokal & akan otomatis dikirim saat online
+                </div>
+            )}
             <div className="sticky top-0 z-10 bg-surface-light/90 dark:bg-surface-dark/90 backdrop-blur border-b border-gray-200 dark:border-gray-700 pb-4 pt-2 -mx-4 px-4 md:-mx-8 md:px-8">
                 <div className="flex items-center justify-between">
                     <div>

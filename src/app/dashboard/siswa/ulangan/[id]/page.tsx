@@ -119,6 +119,12 @@ export default function TakeExamPage() {
         }
     }
 
+    const submissionRef = useRef(submission)
+
+    useEffect(() => {
+        submissionRef.current = submission
+    }, [submission])
+
     // Sync local answers to server when reconnected
     useEffect(() => {
         const handleOnline = () => {
@@ -138,7 +144,7 @@ export default function TakeExamPage() {
 
     const syncLocalToServer = async () => {
         const localAnswers = loadAnswersFromLocal()
-        if (Object.keys(localAnswers).length > 0 && submission) {
+        if (Object.keys(localAnswers).length > 0 && submissionRef.current) {
             try {
                 const answersArray = Object.entries(localAnswers).map(([question_id, answer]) => ({
                     question_id, answer
@@ -147,7 +153,7 @@ export default function TakeExamPage() {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        submission_id: submission.id,
+                        submission_id: submissionRef.current.id,
                         answers: answersArray
                     })
                 })
@@ -542,6 +548,13 @@ export default function TakeExamPage() {
                         <Scan set="bold" primaryColor="currentColor" size={24} />
                         Masuk Layar Penuh Sekarang
                     </button>
+                </div>
+            )}
+
+            {/* Offline Banner */}
+            {!navigator.onLine && (
+                <div className="bg-red-500 text-white text-xs font-bold text-center py-1.5 animate-pulse w-full">
+                    ⚠️ Koneksi terputus — jawaban disimpan lokal & akan otomatis dikirim saat online
                 </div>
             )}
 

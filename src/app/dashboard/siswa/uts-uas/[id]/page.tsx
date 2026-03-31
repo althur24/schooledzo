@@ -153,6 +153,30 @@ export default function TakeOfficialExamPage() {
         }
     }, [examId, router])
 
+    const submissionRef = useRef(submission)
+    useEffect(() => {
+        submissionRef.current = submission
+    }, [submission])
+
+    // Sync local answers when reconnected
+    useEffect(() => {
+        const handleOnline = async () => {
+            const localAnswers = loadLocal()
+            if (Object.keys(localAnswers).length > 0 && submissionRef.current) {
+                try {
+                    const answersArray = Object.entries(localAnswers).map(([question_id, answer]) => ({ question_id, answer }))
+                    await fetch('/api/official-exam-submissions', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ submission_id: submissionRef.current.id, answers: answersArray })
+                    })
+                } catch (e) { console.error('Error syncing:', e) }
+            }
+        }
+        window.addEventListener('online', handleOnline)
+        return () => window.removeEventListener('online', handleOnline)
+    }, [])
+
     useEffect(() => {
         startExam()
         return () => { if (timerRef.current) clearInterval(timerRef.current) }
@@ -341,6 +365,13 @@ export default function TakeOfficialExamPage() {
                         <Scan set="bold" primaryColor="currentColor" size={24} />
                         Masuk Layar Penuh Sekarang
                     </button>
+                </div>
+            )}
+
+            {/* Offline Banner */}
+            {!navigator.onLine && (
+                <div className="bg-red-500 text-white text-xs font-bold text-center py-1.5 animate-pulse w-full">
+                    ⚠️ Koneksi terputus — jawaban disimpan lokal & akan otomatis dikirim saat online
                 </div>
             )}
 
