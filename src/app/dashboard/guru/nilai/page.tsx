@@ -103,6 +103,7 @@ export default function NilaiPage() {
     const [loading, setLoading] = useState(true)
     const [loadingData, setLoadingData] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
+    const [exportSuccess, setExportSuccess] = useState(false)
 
     useEffect(() => {
         const fetchInitial = async () => {
@@ -367,6 +368,10 @@ export default function NilaiPage() {
         a.click()
         document.body.removeChild(a)
         URL.revokeObjectURL(url)
+
+        // Show success toast
+        setExportSuccess(true)
+        setTimeout(() => setExportSuccess(false), 4000)
     }
 
     const selectedTAData = teachingAssignments.find(t => t.id === selectedTA)
@@ -845,6 +850,27 @@ export default function NilaiPage() {
             )}
 
             {loading && <div className="text-center text-text-secondary py-8">Memuat...</div>}
+
+            {/* Export Success Toast */}
+            {exportSuccess && (
+                <div className="fixed bottom-6 right-6 z-50 animate-[slideUp_0.3s_ease-out]">
+                    <div className="flex items-center gap-3 bg-white dark:bg-surface-dark border border-primary/30 shadow-2xl shadow-primary/20 rounded-2xl px-6 py-4">
+                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            <TickSquare set="bold" primaryColor="#10B981" size={24} />
+                        </div>
+                        <div>
+                            <p className="text-text-main dark:text-white font-bold">Export Berhasil! ✅</p>
+                            <p className="text-sm text-text-secondary">File Excel telah diunduh ke perangkat Anda</p>
+                        </div>
+                        <button
+                            onClick={() => setExportSuccess(false)}
+                            className="ml-2 text-text-secondary hover:text-text-main transition-colors"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
