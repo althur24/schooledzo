@@ -135,7 +135,7 @@ export default function PreviewModal({
                                             {item.passageText && (
                                                 <>
                                                     <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1 mt-3">📖 Bacaan:</p>
-                                                    <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed">{item.passageText}</p>
+                                                    <SmartText text={item.passageText} className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed" />
                                                 </>
                                             )}
                                         </div>
@@ -168,7 +168,7 @@ export default function PreviewModal({
                                                                                     {isSelected && <TickSquare set="bold" primaryColor="currentColor" size={16} />}
                                                                                 </div>
                                                                                 <input type="radio" name={`preview-q-${qId}`} value={letter} checked={isSelected} onChange={() => setAnswers({ ...answers, [qId]: letter })} className="hidden" />
-                                                                                <span className="font-medium"><span className="mr-2 font-bold opacity-70">{letter}.</span>{opt}</span>
+                                                                                <span className="font-medium"><span className="mr-2 font-bold opacity-70">{letter}.</span><SmartText text={opt} as="span" /></span>
                                                                             </label>
                                                                         )
                                                                     })}
@@ -192,7 +192,7 @@ export default function PreviewModal({
                                         {q.passage_text && !q.passage_audio_url && (
                                             <div className="mb-4 p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl">
                                                 <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-2">📖 Bacaan:</p>
-                                                <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed">{q.passage_text}</p>
+                                                <SmartText text={q.passage_text} className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed" />
                                             </div>
                                         )}
                                         <div className="flex items-start gap-4 mb-4">
@@ -219,7 +219,7 @@ export default function PreviewModal({
                                                                     {isSelected && <TickSquare set="bold" primaryColor="currentColor" size={16} />}
                                                                 </div>
                                                                 <input type="radio" name={`preview-q-${qId}`} value={letter} checked={isSelected} onChange={() => setAnswers({ ...answers, [qId]: letter })} className="hidden" />
-                                                                <span className="font-medium"><span className="mr-2 font-bold opacity-70">{letter}.</span>{opt}</span>
+                                                                <span className="font-medium"><span className="mr-2 font-bold opacity-70">{letter}.</span><SmartText text={opt} as="span" /></span>
                                                             </label>
                                                         )
                                                     })}
