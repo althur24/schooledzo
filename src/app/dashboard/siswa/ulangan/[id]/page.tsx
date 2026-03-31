@@ -436,22 +436,41 @@ export default function TakeExamPage() {
     // Request fullscreen
     const requestFullscreen = async () => {
         try {
-            if (containerRef.current?.requestFullscreen) {
-                await containerRef.current.requestFullscreen()
+            const el = containerRef.current as any
+            if (el?.requestFullscreen) {
+                await el.requestFullscreen()
+                setIsFullscreen(true)
+            } else if (el?.webkitRequestFullscreen) {
+                await el.webkitRequestFullscreen()
+                setIsFullscreen(true)
+            } else {
+                // Fullscreen API not supported (mobile browsers) — bypass
                 setIsFullscreen(true)
             }
-        } catch (error) {
-            console.error('Fullscreen error:', error)
+        } catch {
+            // Fullscreen request failed — bypass
+            setIsFullscreen(true)
         }
     }
 
     // Exit fullscreen handler
     useEffect(() => {
+        // On mobile devices or browsers without Fullscreen API support, auto-bypass
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+        const supportsFullscreen = !!(document.documentElement as any).requestFullscreen || !!(document.documentElement as any).webkitRequestFullscreen
+        if (isMobile || !supportsFullscreen) {
+            setIsFullscreen(true)
+        }
+
         const handleFullscreenChange = () => {
-            setIsFullscreen(!!document.fullscreenElement)
+            setIsFullscreen(!!document.fullscreenElement || !!(document as any).webkitFullscreenElement)
         }
         document.addEventListener('fullscreenchange', handleFullscreenChange)
-        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+        document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+        return () => {
+            document.removeEventListener('fullscreenchange', handleFullscreenChange)
+            document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+        }
     }, [])
 
     // Save answer
