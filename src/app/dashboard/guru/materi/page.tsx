@@ -70,6 +70,7 @@ export default function MateriPage() {
     const [savingStates, setSavingStates] = useState<Record<string, boolean>>({})
     const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null)
     const [viewingMaterialText, setViewingMaterialText] = useState<Material | null>(null)
+    const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
     useEffect(() => {
         const handleOnline = () => setIsOffline(false)
@@ -431,10 +432,10 @@ export default function MateriPage() {
     }
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Apakah Anda yakin ingin menghapus materi ini?')) return
+        setDeleteTarget(null)
 
         try {
-            const res = await fetch(`/api/materials?id=${id}`, {
+            const res = await fetch(`/api/materials/${id}`, {
                 method: 'DELETE'
             })
 
@@ -665,7 +666,7 @@ export default function MateriPage() {
 
                                         <div className="flex-1 min-w-[20px]"></div>
                                         <button
-                                            onClick={() => handleDelete(material.id)}
+                                            onClick={() => setDeleteTarget(material.id)}
                                             disabled={isOffline}
                                             className={`text-xs font-bold transition-colors flex items-center gap-1 ${isOffline ? 'text-red-500/30 cursor-not-allowed' : 'text-red-500/70 hover:text-red-600'}`}
                                         >
@@ -930,6 +931,35 @@ export default function MateriPage() {
                             className="bg-primary h-full rounded-full transition-all duration-300 ease-out"
                             style={{ width: `${uploadProgress}%` }}
                         ></div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Modal */}
+            {deleteTarget && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl">
+                        <div className="w-16 h-16 bg-red-500/15 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Trash set="bold" primaryColor="currentColor" size={32} />
+                        </div>
+                        <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Hapus Materi?</h3>
+                        <p className="text-text-secondary mb-6 text-sm">
+                            Materi yang sudah dihapus tidak dapat dikembalikan.
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setDeleteTarget(null)}
+                                className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-800 text-text-main dark:text-white rounded-xl font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                onClick={() => handleDelete(deleteTarget)}
+                                className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600 transition-colors"
+                            >
+                                Ya, Hapus
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
