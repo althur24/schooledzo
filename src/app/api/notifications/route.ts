@@ -26,6 +26,41 @@ export async function GET(request: NextRequest) {
             console.error('Notification cleanup error:', cleanupError)
         }
 
+        // Auto-cleanup: Remove "Dijadwalkan" notifications for exams that are NOT published
+        try {
+            const { data: userDijadwalkanNotifs } = await supabase
+                .from('notifications')
+                .select('id, title')
+                .eq('user_id', user.id)
+                .eq('type', 'UJIAN_RESMI')
+                .ilike('title', '%Dijadwalkan%')
+
+            if (userDijadwalkanNotifs && userDijadwalkanNotifs.length > 0) {
+                // Get all active official exams for this school
+                const { data: activeExams } = await supabase
+                    .from('official_exams')
+                    .select('title')
+                    .eq('school_id', schoolId)
+                    .eq('is_active', true)
+
+                const activeExamTitles = new Set((activeExams || []).map((e: any) => e.title))
+
+                // Find notifications that reference exams that are NOT active
+                const staleNotifIds = userDijadwalkanNotifs
+                    .filter(n => !activeExamTitles.has(n.title.replace(/^.*Dijadwalkan:\s*/, '')))
+                    .map(n => n.id)
+
+                if (staleNotifIds.length > 0) {
+                    await supabase
+                        .from('notifications')
+                        .delete()
+                        .in('id', staleNotifIds)
+                }
+            }
+        } catch (staleCleanupError) {
+            console.error('Stale exam notification cleanup error:', staleCleanupError)
+        }
+
         // Fix #5: Deadline reminder — check for assignments due within 24 hours
         if (user.role === 'SISWA') {
             try {
