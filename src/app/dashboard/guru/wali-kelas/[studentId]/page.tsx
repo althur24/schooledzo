@@ -7,7 +7,7 @@ import Card from '@/components/ui/Card'
 import { PageHeader, EmptyState } from '@/components/ui'
 import {
     HeartHandshake, Loader2, BookOpen, PenTool,
-    Brain, Clock, TrendingUp
+    Brain, Clock, TrendingUp, GraduationCap, FileText
 } from 'lucide-react'
 
 export default function WaliKelasStudentDetail() {
@@ -116,7 +116,10 @@ export default function WaliKelasStudentDetail() {
     subjects.forEach((subj: any) => {
         const subjData = studentGrade?.subjects?.[subj.id]
         if (subjData) {
-            const allScores = [...subjData.tugas_scores, ...subjData.kuis_scores, ...subjData.ulangan_scores]
+            const allScores = [
+                ...subjData.tugas_scores, ...subjData.kuis_scores, ...subjData.ulangan_scores,
+                ...(subjData.uts_scores || []), ...(subjData.uas_scores || [])
+            ]
             subjectAvgs.push({ name: subj.name, avg: calcAvg(allScores) })
         } else {
             subjectAvgs.push({ name: subj.name, avg: null })
@@ -134,7 +137,10 @@ export default function WaliKelasStudentDetail() {
         if (!sg?.subjects) return { id: s.id, avg: null }
         const avgs: number[] = []
         Object.values(sg.subjects).forEach((subj: any) => {
-            const allScores = [...subj.tugas_scores, ...subj.kuis_scores, ...subj.ulangan_scores]
+            const allScores = [
+                ...subj.tugas_scores, ...subj.kuis_scores, ...subj.ulangan_scores,
+                ...(subj.uts_scores || []), ...(subj.uas_scores || [])
+            ]
             const avg = calcAvg(allScores)
             if (avg !== null) avgs.push(avg)
         })
@@ -217,7 +223,10 @@ export default function WaliKelasStudentDetail() {
                         const colorSet = iconColors[idx % iconColors.length]
                         const IconComponent = colorSet.icon
                         const allScores = subjData
-                            ? [...subjData.tugas_scores, ...subjData.kuis_scores, ...subjData.ulangan_scores]
+                            ? [
+                                ...subjData.tugas_scores, ...subjData.kuis_scores, ...subjData.ulangan_scores,
+                                ...(subjData.uts_scores || []), ...(subjData.uas_scores || [])
+                            ]
                             : []
                         const avg = calcAvg(allScores)
 
@@ -245,7 +254,7 @@ export default function WaliKelasStudentDetail() {
 
                                 {/* Score Breakdown */}
                                 {subjData && (
-                                    <div className="p-4 grid grid-cols-3 gap-3">
+                                <div className="p-4 grid grid-cols-2 md:grid-cols-5 gap-3">
                                         {/* Tugas */}
                                         <div className="bg-secondary/5 dark:bg-white/5 rounded-xl p-3">
                                             <div className="flex items-center gap-1.5 mb-2">
@@ -305,6 +314,54 @@ export default function WaliKelasStudentDetail() {
                                             {subjData.ulangan_scores.length > 0 ? (
                                                 <div className="flex flex-wrap gap-1.5">
                                                     {subjData.ulangan_scores.map((score: number, i: number) => (
+                                                        <span
+                                                            key={i}
+                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score)}`}
+                                                        >
+                                                            {score}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-xs text-text-secondary">Belum ada</span>
+                                            )}
+                                        </div>
+
+                                        {/* UTS */}
+                                        <div className="bg-secondary/5 dark:bg-white/5 rounded-xl p-3">
+                                            <div className="flex items-center gap-1.5 mb-2">
+                                                <GraduationCap className="w-3.5 h-3.5 text-indigo-500" />
+                                                <span className="text-xs font-bold text-text-main dark:text-white">
+                                                    UTS
+                                                </span>
+                                            </div>
+                                            {(subjData.uts_scores || []).length > 0 ? (
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {subjData.uts_scores.map((score: number, i: number) => (
+                                                        <span
+                                                            key={i}
+                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score)}`}
+                                                        >
+                                                            {score}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-xs text-text-secondary">Belum ada</span>
+                                            )}
+                                        </div>
+
+                                        {/* UAS */}
+                                        <div className="bg-secondary/5 dark:bg-white/5 rounded-xl p-3">
+                                            <div className="flex items-center gap-1.5 mb-2">
+                                                <FileText className="w-3.5 h-3.5 text-teal-500" />
+                                                <span className="text-xs font-bold text-text-main dark:text-white">
+                                                    UAS
+                                                </span>
+                                            </div>
+                                            {(subjData.uas_scores || []).length > 0 ? (
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {subjData.uas_scores.map((score: number, i: number) => (
                                                         <span
                                                             key={i}
                                                             className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score)}`}

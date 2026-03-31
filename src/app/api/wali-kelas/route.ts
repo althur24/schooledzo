@@ -169,6 +169,37 @@ export async function GET(request: NextRequest) {
             examSubmissions = eSubs || []
         }
 
+        // 4. Official exams (UTS/UAS) — fetch by subject IDs for this class
+        const subjectIds = activeAssignments
+            .map((ta) => unwrap(ta.subject)?.id)
+            .filter((id: string | undefined): id is string => !!id)
+        const uniqueSubjectIds = [...new Set(subjectIds)]
+
+        let officialExams: any[] = []
+        let officialExamSubs: any[] = []
+        if (uniqueSubjectIds.length > 0 && classId) {
+            const { data: oeData } = await supabase
+                .from('official_exams')
+                .select('id, title, exam_type, subject_id, target_class_ids')
+                .eq('school_id', schoolId)
+                .in('subject_id', uniqueSubjectIds)
+
+            officialExams = (oeData || []).filter((oe: any) =>
+                oe.target_class_ids?.includes(classId)
+            )
+
+            const oeIds = officialExams.map((oe: any) => oe.id)
+            if (oeIds.length > 0) {
+                const { data: oeSubs } = await supabase
+                    .from('official_exam_submissions')
+                    .select('id, exam_id, student_id, total_score, max_score, is_submitted, is_graded')
+                    .in('exam_id', oeIds)
+                    .in('student_id', studentIds)
+                    .eq('is_submitted', true)
+                officialExamSubs = oeSubs || []
+            }
+        }
+
         // Build per-student, per-subject grade summary
         const studentGrades = studentIds.map((studentId: string) => {
             const subjectScores: Record<string, {
@@ -177,6 +208,8 @@ export async function GET(request: NextRequest) {
                 tugas_scores: number[]
                 kuis_scores: number[]
                 ulangan_scores: number[]
+                uts_scores: number[]
+                uas_scores: number[]
             }> = {}
 
             // Initialize subjects
@@ -188,7 +221,9 @@ export async function GET(request: NextRequest) {
                         subject_name: subj.name,
                         tugas_scores: [],
                         kuis_scores: [],
-                        ulangan_scores: []
+                        ulangan_scores: [],
+                        uts_scores: [],
+                        uas_scores: []
                     }
                 }
             })
@@ -238,6 +273,21 @@ export async function GET(request: NextRequest) {
                     }
                 })
 
+            // Official exam scores (UTS/UAS)
+            officialExamSubs
+                .filter((os: any) => os.student_id === studentId && os.is_graded && os.max_score > 0)
+                .forEach((os: any) => {
+                    const oe = officialExams.find((e: any) => e.id === os.exam_id)
+                    if (oe && subjectScores[oe.subject_id]) {
+                        const score = Math.round((os.total_score / os.max_score) * 100)
+                        if (oe.exam_type === 'UTS') {
+                            subjectScores[oe.subject_id].uts_scores.push(score)
+                        } else {
+                            subjectScores[oe.subject_id].uas_scores.push(score)
+                        }
+                    }
+                })
+
             return {
                 student_id: studentId,
                 subjects: subjectScores
@@ -259,7 +309,9 @@ export async function GET(request: NextRequest) {
                 quizzes: quizzes || [],
                 quiz_submissions: quizSubmissions,
                 exams: exams || [],
-                exam_submissions: examSubmissions
+                exam_submissions: examSubmissions,
+                official_exams: officialExams,
+                official_exam_submissions: officialExamSubs
             }
         })
     } catch (error) {
