@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Edzo - Education Zone",
-  description: "Learning Management System powered by AI",
+  description: "Next-Generation Learning Management System powered by AI",
   manifest: "/manifest.json",
   themeColor: "#ffffff",
   appleWebApp: {
