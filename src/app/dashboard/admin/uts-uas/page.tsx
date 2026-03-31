@@ -49,6 +49,14 @@ export default function AdminUtsUasPage() {
     const [filterSubject, setFilterSubject] = useState<string>('')
     const [submissionCounts, setSubmissionCounts] = useState<Record<string, { submitted: number; total: number }>>({})
 
+    // Toast & confirm dialog
+    const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+    const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null)
+    const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+        setToast({ message, type })
+        setTimeout(() => setToast(null), 3000)
+    }
+
     const [form, setForm] = useState({
         exam_type: 'UTS' as 'UTS' | 'UAS',
         title: '',
@@ -138,10 +146,21 @@ export default function AdminUtsUasPage() {
         }
     }
 
-    const handleDelete = async (id: string) => {
-        if (!confirm('Hapus ujian ini? Semua soal dan submission akan dihapus.')) return
-        await fetch(`/api/official-exams/${id}`, { method: 'DELETE' })
-        fetchData()
+    const handleDelete = (id: string) => {
+        setConfirmDialog({
+            title: 'Hapus Ujian',
+            message: 'Hapus ujian ini? Semua soal dan submission akan dihapus.',
+            onConfirm: async () => {
+                const res = await fetch(`/api/official-exams/${id}`, { method: 'DELETE' })
+                if (res.ok) {
+                    showToast('Ujian berhasil dihapus', 'success')
+                } else {
+                    showToast('Gagal menghapus ujian', 'error')
+                }
+                fetchData()
+                setConfirmDialog(null)
+            }
+        })
     }
 
     const toggleClassSelection = (classId: string) => {
@@ -502,6 +521,32 @@ export default function AdminUtsUasPage() {
                     </div>
                 </div>
             </Modal>
+
+            {/* Toast */}
+            {toast && (
+                <div className={`fixed bottom-6 right-6 z-[200] px-5 py-3 rounded-xl shadow-2xl text-white font-medium text-sm flex items-center gap-3 animate-in slide-in-from-bottom-4 duration-300 ${toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
+                    <span>{toast.type === 'success' ? '✅' : '❌'}</span>
+                    {toast.message}
+                    <button onClick={() => setToast(null)} className="ml-2 opacity-70 hover:opacity-100">✕</button>
+                </div>
+            )}
+
+            {/* Confirm Dialog */}
+            {confirmDialog && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white dark:bg-surface-dark rounded-2xl p-6 max-w-sm w-full text-center shadow-2xl animate-in zoom-in-95 duration-200">
+                        <div className="w-16 h-16 mx-auto bg-red-100 dark:bg-red-900/30 text-red-500 rounded-full flex items-center justify-center mb-4">
+                            <Trash2 className="w-7 h-7" />
+                        </div>
+                        <h3 className="text-lg font-bold text-text-main dark:text-white mb-2">{confirmDialog.title}</h3>
+                        <p className="text-text-secondary mb-6">{confirmDialog.message}</p>
+                        <div className="flex gap-3">
+                            <button onClick={() => setConfirmDialog(null)} className="flex-1 py-3 bg-gray-200 dark:bg-slate-700 text-text-main dark:text-white rounded-xl font-bold hover:bg-gray-300 transition-colors">Batal</button>
+                            <button onClick={confirmDialog.onConfirm} className="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-colors">Hapus</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

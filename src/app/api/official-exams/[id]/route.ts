@@ -163,6 +163,35 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        // Cascade: delete related records first (foreign key constraints)
+        // 1. Delete submission answers (if table exists)
+        try {
+            const { data: subs } = await supabase
+                .from('official_exam_submissions')
+                .select('id')
+                .eq('exam_id', id)
+            if (subs && subs.length > 0) {
+                const subIds = subs.map(s => s.id)
+                await supabase
+                    .from('official_exam_answers')
+                    .delete()
+                    .in('submission_id', subIds)
+            }
+        } catch { }
+
+        // 2. Delete submissions
+        await supabase
+            .from('official_exam_submissions')
+            .delete()
+            .eq('exam_id', id)
+
+        // 3. Delete questions
+        await supabase
+            .from('official_exam_questions')
+            .delete()
+            .eq('exam_id', id)
+
+        // 4. Delete the exam itself
         const { error } = await supabase
             .from('official_exams')
             .delete()
