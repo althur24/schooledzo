@@ -139,6 +139,11 @@ export default function TakeExamPage() {
         submissionRef.current = submission
     }, [submission])
 
+    const examRef = useRef(exam)
+    useEffect(() => {
+        examRef.current = exam
+    }, [exam])
+
     // Sync local answers to server when reconnected
     useEffect(() => {
         const handleOnline = () => {
@@ -165,7 +170,7 @@ export default function TakeExamPage() {
                 }))
 
                 // Check if exam time is expired
-                const currentExam = exam
+                const currentExam = examRef.current
                 const currentSub = submissionRef.current
                 let isTimeUp = false
                 if (currentExam && currentSub) {
