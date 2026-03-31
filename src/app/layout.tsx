@@ -3,14 +3,14 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Edzo - LMS YPP",
-  description: "Learning Management System Yayasan Pendidikan Pesantren",
+  title: "Edzo - Education Zone",
+  description: "Learning Management System powered by AI",
   manifest: "/manifest.json",
   themeColor: "#ffffff",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Edzo - LMS YPP",
+    title: "Edzo - Education Zone",
   },
   formatDetection: {
     telephone: false,
