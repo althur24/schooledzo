@@ -5,8 +5,15 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Modal, Button, EmptyState, Toast, type ToastType, PageHeader } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import { Document as BookOpen, Paper as FileText, Video, Document as Type, Discovery as LinkIcon, Plus, Show as Eye, Delete as Trash, Download, ArrowRight, TickSquare as CheckCircle, Danger as AlertTriangle } from 'react-iconly'
-import { Loader2 } from 'lucide-react'
+import { Loader2, WifiOff, CheckSquare } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import {
+    formatToOfflineMaterial,
+    saveMaterialOffline,
+    getAllOfflineMaterials,
+    getBlobOffline,
+    removeMaterialOffline
+} from '@/lib/offlineMateri'
 
 interface TeachingAssignment {
     id: string
@@ -57,8 +64,48 @@ export default function MateriPage() {
     const [previewingPDF, setPreviewingPDF] = useState<string | null>(null)
     const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
 
+    // Offline Mode States
+    const [isOffline, setIsOffline] = useState(false)
+    const [savedMaterials, setSavedMaterials] = useState<Set<string>>(new Set())
+    const [savingStates, setSavingStates] = useState<Record<string, boolean>>({})
+    const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null)
+    const [viewingMaterialText, setViewingMaterialText] = useState<Material | null>(null)
+
+    useEffect(() => {
+        const handleOnline = () => setIsOffline(false)
+        const handleOffline = () => setIsOffline(true)
+
+        setIsOffline(!navigator.onLine)
+        window.addEventListener('online', handleOnline)
+        window.addEventListener('offline', handleOffline)
+
+        const loadSavedMaterials = async () => {
+            const saved = await getAllOfflineMaterials()
+            setSavedMaterials(new Set(saved.map(m => m.id)))
+        }
+        loadSavedMaterials()
+
+        return () => {
+            window.removeEventListener('online', handleOnline)
+            window.removeEventListener('offline', handleOffline)
+        }
+    }, [])
+
+    useEffect(() => {
+        const currentUrl = previewPdfUrl
+        return () => {
+            if (currentUrl && currentUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(currentUrl)
+            }
+        }
+    }, [previewPdfUrl])
+
     const fetchData = async () => {
         try {
+            if (!navigator.onLine) {
+                throw new Error('Offline')
+            }
+
             const [assignmentsRes, materialsRes] = await Promise.all([
                 fetch('/api/my-teaching-assignments'),
                 fetch('/api/materials')
@@ -100,8 +147,41 @@ export default function MateriPage() {
             setGroupedSubjects(Object.values(groups))
             return Object.values(groups)
         } catch (error) {
-            console.error('Error:', error)
-            return []
+            console.error('Error or Offline:', error)
+            setIsOffline(true)
+            const offlineMats = await getAllOfflineMaterials()
+            const groups: Record<string, SubjectGroup> = {}
+            offlineMats.forEach(om => {
+                const subjectName = om.subjectName || 'Lainnya'
+                const subjectId = `offline-${subjectName}`
+                if (!groups[subjectId]) {
+                    groups[subjectId] = {
+                        subjectId,
+                        subjectName,
+                        classes: om.className ? [om.className] : [],
+                        materials: []
+                    }
+                } else if (om.className && !groups[subjectId].classes.includes(om.className)) {
+                    groups[subjectId].classes.push(om.className)
+                }
+                groups[subjectId].materials.push({
+                     id: om.id,
+                     title: om.title,
+                     description: om.description,
+                     type: om.type,
+                     content_url: om.content_url,
+                     content_text: om.content_text,
+                     created_at: om.savedAt,
+                     teaching_assignment: {
+                          id: 'offline',
+                          subject: { id: subjectId, name: subjectName },
+                          class: { name: om.className || '' }
+                     }
+                })
+            })
+            setAssignments([]) 
+            setGroupedSubjects(Object.values(groups))
+            return Object.values(groups)
         } finally {
             setLoading(false)
         }
@@ -109,11 +189,80 @@ export default function MateriPage() {
 
     useEffect(() => {
         if (user) fetchData()
-    }, [user])
-
-
+    }, [user, isOffline])
 
     const [videoSource, setVideoSource] = useState<'UPLOAD' | 'YOUTUBE'>('YOUTUBE')
+
+    const handleToggleOffline = async (material: Material) => {
+        const isSaved = savedMaterials.has(material.id)
+
+        if (isSaved) {
+            await removeMaterialOffline(material.id)
+            setSavedMaterials(prev => {
+                const next = new Set(prev)
+                next.delete(material.id)
+                return next
+            })
+            return
+        }
+
+        if (isOffline) return
+
+        setSavingStates(prev => ({ ...prev, [material.id]: true }))
+        try {
+            const isPdf = material.type === 'PDF' && material.content_url
+            const offlineData = formatToOfflineMaterial(
+                material,
+                material.teaching_assignment?.subject?.name || 'Lainnya',
+                material.teaching_assignment?.class?.name || '',
+                isPdf ? true : false
+            )
+
+            let blob: Blob | undefined
+            if (isPdf) {
+                const response = await fetch(material.content_url!)
+                if (!response.ok) throw new Error('Failed to fetch PDF')
+                blob = await response.blob()
+            }
+
+            await saveMaterialOffline(offlineData, blob)
+
+            setSavedMaterials(prev => {
+                const next = new Set(prev)
+                next.add(material.id)
+                return next
+            })
+            setToast({ message: 'Materi disimpan ke perangkat', type: 'success' })
+        } catch (error) {
+            console.error('Save offline error:', error)
+            setToast({ message: 'Gagal menyimpan materi offline', type: 'error' })
+        } finally {
+            setSavingStates(prev => ({ ...prev, [material.id]: false }))
+        }
+    }
+
+    const handlePreviewPDF = async (material: Material) => {
+        if (previewPdfUrl && previewPdfUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(previewPdfUrl)
+        }
+
+        if (savedMaterials.has(material.id)) {
+            const offlineBlob = await getBlobOffline(material.id)
+            if (offlineBlob && offlineBlob.data) {
+                const blobUrl = URL.createObjectURL(offlineBlob.data)
+                setPreviewPdfUrl(blobUrl)
+                setPreviewingPDF(material.id)
+                return
+            }
+        }
+        
+        if (isOffline) return
+
+        if (material.content_url) {
+            setPreviewPdfUrl(material.content_url)
+            setPreviewingPDF(material.id)
+        }
+    }
 
     // Helper to get YouTube Embed URL
     const getYouTubeEmbedUrl = (url: string) => {
@@ -329,11 +478,20 @@ export default function MateriPage() {
     if (!selectedSubject) {
         return (
             <div className="space-y-6">
-                <PageHeader
-                    title="Materi Pembelajaran"
-                    subtitle="Pilih mata pelajaran untuk mengelola materi"
-                    backHref="/dashboard/guru"
-                />
+                <div className="flex items-center justify-between gap-4">
+                    <PageHeader
+                        title="Materi Pembelajaran"
+                        subtitle="Pilih mata pelajaran untuk mengelola materi"
+                        backHref="/dashboard/guru"
+                    />
+                    
+                    {isOffline && (
+                        <div className="flex items-center gap-2 bg-red-100/50 text-red-600 px-4 py-2 rounded-xl font-bold border border-red-200 mt-6">
+                            <WifiOff size={20} />
+                            <span className="hidden sm:inline">Mode Offline - Hanya materi tersimpan yang dapat diakses</span>
+                        </div>
+                    )}
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {groupedSubjects.map((subject) => (
@@ -365,18 +523,26 @@ export default function MateriPage() {
 
     return (
         <div className="space-y-6">
-            <PageHeader
-                title={selectedSubject.subjectName}
-                subtitle={`${selectedSubject.materials.length} file tersedia`}
-                onBack={() => setSelectedSubject(null)}
-                action={
-                    <Button onClick={handleAddMaterial} icon={
-                        <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
-                    }>
-                        Tambah Materi
-                    </Button>
-                }
-            />
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <PageHeader
+                    title={selectedSubject.subjectName}
+                    subtitle={`${selectedSubject.materials.length} file tersedia${isOffline ? ' (Offline)' : ''}`}
+                    onBack={() => setSelectedSubject(null)}
+                    action={
+                        <Button disabled={isOffline} onClick={handleAddMaterial} icon={
+                            <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
+                        }>
+                            Tambah Materi
+                        </Button>
+                    }
+                />
+                {isOffline && (
+                    <div className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-2 rounded-xl font-bold border border-red-200">
+                        <WifiOff size={20} />
+                        <span className="text-sm">Tambah/Hapus dinonaktifkan</span>
+                    </div>
+                )}
+            </div>
 
             {selectedSubject.materials.length === 0 ? (
                 <EmptyState
@@ -431,42 +597,77 @@ export default function MateriPage() {
 
                                     </div>
 
-                                    <div className="flex items-center gap-2 border-t border-secondary/10 dark:border-white/5 pt-3">
-                                        {material.type === 'PDF' && material.content_url && (
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-secondary/10 dark:border-white/5 pt-3 mt-3">
+                                        {material.type === 'TEXT' ? (
                                             <>
                                                 <button
-                                                    onClick={() => setPreviewingPDF(material.content_url)}
+                                                    onClick={() => setViewingMaterialText(material)}
                                                     className="text-xs font-bold text-primary-dark dark:text-primary hover:text-text-main transition-colors flex items-center gap-1"
+                                                >
+                                                    <span className="text-primary"><Eye set="bold" primaryColor="currentColor" size={16} /></span> Baca
+                                                </button>
+                                                <span className="text-secondary/30 hidden sm:inline">|</span>
+                                            </>
+                                        ) : material.type === 'PDF' && material.content_url ? (
+                                            <>
+                                                <button
+                                                    onClick={() => handlePreviewPDF(material)}
+                                                    disabled={isOffline && !savedMaterials.has(material.id)}
+                                                    className={`text-xs font-bold transition-colors flex items-center gap-1 ${isOffline && !savedMaterials.has(material.id) ? 'text-secondary/50 cursor-not-allowed' : 'text-primary-dark dark:text-primary hover:text-text-main'}`}
                                                 >
                                                     <span className="text-primary"><Eye set="bold" primaryColor="currentColor" size={16} /></span> Preview
                                                 </button>
-                                                <span className="text-secondary/30">|</span>
+                                                <span className="text-secondary/30 hidden sm:inline">|</span>
                                                 <a
                                                     href={material.content_url}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    className="text-xs font-bold text-text-secondary hover:text-text-main transition-colors flex items-center gap-1"
+                                                    className={`text-xs font-bold transition-colors flex items-center gap-1 ${isOffline && !savedMaterials.has(material.id) ? 'text-secondary/50 pointer-events-none' : 'text-text-secondary hover:text-text-main'}`}
+                                                    onClick={(e) => { if(isOffline && !savedMaterials.has(material.id)) e.preventDefault() }}
                                                 >
-                                                    <span className="text-text-secondary"><Download set="bold" primaryColor="currentColor" size={16} /></span> Download
+                                                    <span className={isOffline && !savedMaterials.has(material.id) ? "text-secondary/50" : "text-text-secondary"}><Download set="bold" primaryColor="currentColor" size={16} /></span> File Asli
                                                 </a>
+                                                <span className="text-secondary/30 hidden sm:inline">|</span>
+                                            </>
+                                        ) : material.content_url && material.type !== 'VIDEO' && (
+                                            <>
+                                                <a
+                                                    href={material.content_url}
+                                                    target={isOffline && !savedMaterials.has(material.id) ? "_self" : "_blank"}
+                                                    rel="noopener noreferrer"
+                                                    className={`text-xs font-bold transition-colors flex items-center gap-1 ${isOffline && !savedMaterials.has(material.id) ? 'text-secondary/50 cursor-not-allowed pointer-events-none' : 'text-primary hover:underline'}`}
+                                                    onClick={(e) => { if (isOffline && !savedMaterials.has(material.id)) e.preventDefault() }}
+                                                >
+                                                    <span className="text-primary"><ArrowRight set="bold" primaryColor="currentColor" size={16} /></span> Buka Link
+                                                </a>
+                                                <span className="text-secondary/30 hidden sm:inline">|</span>
                                             </>
                                         )}
-                                        {material.content_url && material.type !== 'PDF' && material.type !== 'TEXT' && material.type !== 'VIDEO' && (
-                                            <a
-                                                href={material.content_url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
-                                            >
-                                                <span className="text-primary"><ArrowRight set="bold" primaryColor="currentColor" size={16} /></span> Buka Link
-                                            </a>
+                                        {/* Offline Toggle — only for PDF and TEXT */}
+                                        {(material.type === 'PDF' || material.type === 'TEXT') && (
+                                        <button
+                                            onClick={() => handleToggleOffline(material)}
+                                            disabled={savingStates[material.id] || (isOffline && !savedMaterials.has(material.id))}
+                                            className={`text-xs font-bold transition-colors flex items-center gap-1 ${savingStates[material.id] ? 'text-secondary/50 cursor-not-allowed' : savedMaterials.has(material.id) ? 'text-green-600 hover:text-red-500 group relative' : isOffline ? 'text-secondary/50 cursor-not-allowed' : 'text-text-secondary hover:text-primary'}`}
+                                            title={savedMaterials.has(material.id) ? 'Hapus Offline (Tersimpan)' : 'Offlinekan Materi'}
+                                        >
+                                            {savingStates[material.id] ? (
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : savedMaterials.has(material.id) ? (
+                                                <><span className="text-green-600 flex group-hover:hidden items-center gap-1"><CheckSquare size={16} /> Tersimpan</span><span className="hidden group-hover:flex items-center gap-1"><Trash set="bold" primaryColor="currentColor" size={16} /> Hapus Offline</span></>
+                                            ) : (
+                                                <><span className="text-text-secondary"><Download set="bold" primaryColor="currentColor" size={16} /></span> Offlinekan Materi</>
+                                            )}
+                                        </button>
                                         )}
-                                        <div className="flex-1"></div>
+
+                                        <div className="flex-1 min-w-[20px]"></div>
                                         <button
                                             onClick={() => handleDelete(material.id)}
-                                            className="text-xs font-bold text-red-500/70 hover:text-red-600 transition-colors flex items-center gap-1"
+                                            disabled={isOffline}
+                                            className={`text-xs font-bold transition-colors flex items-center gap-1 ${isOffline ? 'text-red-500/30 cursor-not-allowed' : 'text-red-500/70 hover:text-red-600'}`}
                                         >
-                                            <span className="text-red-500"><Trash set="bold" primaryColor="currentColor" size={16} /></span> Hapus
+                                            <span className={isOffline ? 'text-red-500/30' : 'text-red-500'}><Trash set="bold" primaryColor="currentColor" size={16} /></span> Hapus Materi
                                         </button>
                                     </div>
                                 </div>
@@ -643,31 +844,64 @@ export default function MateriPage() {
                 </form>
             </Modal>
 
-            {previewingPDF && (
-                <div className="fixed inset-0 bg-background-dark/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setPreviewingPDF(null)}>
+            {viewingMaterialText && (
+                <Modal
+                    open={!!viewingMaterialText}
+                    onClose={() => setViewingMaterialText(null)}
+                    title={viewingMaterialText.title || ''}
+                    maxWidth="2xl"
+                >
+                    <div className="space-y-4">
+                        <div className="bg-secondary/5 p-4 rounded-xl border border-secondary/20">
+                            <p className="text-sm text-text-secondary dark:text-[#A8BC9F] italic">
+                                {viewingMaterialText.description || 'Tidak ada deskripsi tambahan.'}
+                            </p>
+                        </div>
+                        <div className="prose prose-slate dark:prose-invert max-w-none text-text-main dark:text-white leading-relaxed whitespace-pre-wrap">
+                            {viewingMaterialText.content_text}
+                        </div>
+                        <div className="pt-4 flex justify-end">
+                            <Button variant="secondary" onClick={() => setViewingMaterialText(null)}>
+                                Tutup
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+
+            {previewingPDF && previewPdfUrl && (
+                <div className="fixed inset-0 bg-background-dark/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { setPreviewingPDF(null); setPreviewPdfUrl(null) }}>
                     <div className="bg-white dark:bg-surface-dark rounded-3xl w-full max-w-6xl h-[90vh] flex flex-col shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-between p-4 px-6 border-b border-secondary/20">
-                            <h3 className="text-lg font-bold text-text-main dark:text-white">📄 Preview Document</h3>
+                            <h3 className="text-lg font-bold text-text-main dark:text-white flex items-center gap-2">
+                                📄 Preview Document
+                                {savedMaterials.has(previewingPDF) && (
+                                   <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full ml-2">Offline Ready</span> 
+                                )}
+                            </h3>
                             <div className="flex gap-3">
-                                <a
-                                    href={previewingPDF}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="px-4 py-2 bg-primary/10 text-primary-dark rounded-full transition-colors text-sm font-bold hover:bg-primary hover:text-white"
-                                >
-                                    📥 Download
-                                </a>
+                                {(!isOffline || savedMaterials.has(previewingPDF)) && (
+                                    <a
+                                        href={previewPdfUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="px-4 py-2 bg-primary/10 text-primary-dark rounded-full transition-colors text-sm font-bold hover:bg-primary hover:text-white flex items-center gap-2"
+                                    >
+                                        <Download set="bold" primaryColor="currentColor" size={20} />
+                                        Download File
+                                    </a>
+                                )}
                                 <button
-                                    onClick={() => setPreviewingPDF(null)}
+                                    onClick={() => { setPreviewingPDF(null); setPreviewPdfUrl(null) }}
                                     className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center text-text-secondary hover:bg-red-100 hover:text-red-500 transition-colors"
                                 >
                                     ✕
                                 </button>
                             </div>
                         </div>
-                        <div className="flex-1 overflow-hidden bg-slate-50">
+                        <div className="flex-1 overflow-hidden bg-slate-50 relative">
                             <iframe
-                                src={previewingPDF}
+                                src={previewPdfUrl}
                                 className="w-full h-full"
                                 title="PDF Preview"
                             />
