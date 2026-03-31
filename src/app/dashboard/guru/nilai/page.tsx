@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { PageHeader, Card, Button, StatsCard, EmptyState } from '@/components/ui'
 import { Chart, User, TickSquare, TimeCircle, Activity, Search, ArrowRight, Document, Discovery, Download, Paper, Edit } from 'react-iconly'
 import { GraduationCap } from 'lucide-react'
+import * as XLSX from 'xlsx'
 
 interface Student {
     id: string
@@ -278,96 +279,95 @@ export default function NilaiPage() {
         return Math.round(grades.reduce((sum, g) => sum + g, 0) / grades.length)
     }
 
-    // Export to Excel
+    // Export to Excel (proper .xlsx)
     const handleExport = () => {
         const ta = teachingAssignments.find(t => t.id === selectedTA)
         if (!ta) return
 
-        const tugasAssignments = assignments.filter(a => a.type === 'TUGAS')
-        const utsExams = officialExams.filter(oe => oe.exam_type === 'UTS')
-        const uasExams = officialExams.filter(oe => oe.exam_type === 'UAS')
+        const tugasAssignmentsLocal = assignments.filter(a => a.type === 'TUGAS')
+        const utsExamsLocal = officialExams.filter(oe => oe.exam_type === 'UTS')
+        const uasExamsLocal = officialExams.filter(oe => oe.exam_type === 'UAS')
 
-        let html = `
-            <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:x='urn:schemas-microsoft-com:office:excel'>
-            <head><meta charset='utf-8'><style>
-                table { border-collapse: collapse; width: 100%; }
-                th, td { border: 1px solid #000; padding: 8px; text-align: center; }
-                th { background-color: #4472C4; color: white; }
-                .student-name { text-align: left; }
-                .avg { background-color: #FFC000; font-weight: bold; }
-            </style></head>
-            <body>
-            <h2 style="text-align:center;">DAFTAR NILAI SISWA</h2>
-            <p><strong>Kelas:</strong> ${ta.class.name}</p>
-            <p><strong>Mata Pelajaran:</strong> ${ta.subject.name}</p>
-            <br/>
-            <table>
-                <thead>
-                    <tr>
-                        <th>No</th>
-                        <th>NIS</th>
-                        <th>Nama Siswa</th>
-                        ${tugasAssignments.map((a, i) => `<th>T${i + 1}</th>`).join('')}
-                        ${quizzes.map((q, i) => `<th>K${i + 1}</th>`).join('')}
-                        ${exams.map((e, i) => `<th>U${i + 1}</th>`).join('')}
-                        ${utsExams.map((oe, i) => `<th>UTS${utsExams.length > 1 ? i + 1 : ''}</th>`).join('')}
-                        ${uasExams.map((oe, i) => `<th>UAS${uasExams.length > 1 ? i + 1 : ''}</th>`).join('')}
-                        <th class="avg">Rata-rata</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${students.map((student, idx) => {
-            const tugasGrades = tugasAssignments.map(a => {
+        // Build header row
+        const headers = [
+            'No',
+            'NIS',
+            'Nama Siswa',
+            ...tugasAssignmentsLocal.map((_, i) => `T${i + 1}`),
+            ...quizzes.map((_, i) => `K${i + 1}`),
+            ...exams.map((_, i) => `U${i + 1}`),
+            ...utsExamsLocal.map((_, i) => `UTS${utsExamsLocal.length > 1 ? i + 1 : ''}`),
+            ...uasExamsLocal.map((_, i) => `UAS${uasExamsLocal.length > 1 ? i + 1 : ''}`),
+            'Rata-rata'
+        ]
+
+        // Build data rows
+        const rows = students.map((student, idx) => {
+            const tugasGrades = tugasAssignmentsLocal.map(a => {
                 const sub = allSubmissions.find(s => s.student?.id === student.id && s.assignment?.id === a.id)
-                return sub?.grade?.[0]?.score ?? '-'
+                return sub?.grade?.[0]?.score ?? ''
             })
             const kuisGrades = quizzes.map(q => {
                 const qs = quizSubmissions.find(qs => qs.student_id === student.id && qs.quiz.id === q.id)
-                return qs?.is_graded ? Math.round((qs.total_score / qs.max_score) * 100) : '-'
+                return qs?.is_graded ? Math.round((qs.total_score / qs.max_score) * 100) : ''
             })
             const ulanganGrades = exams.map(e => {
                 const es = examSubmissions.find(es => es.student?.id === student.id && es.exam.id === e.id)
-                return es ? Math.round((es.total_score / es.max_score) * 100) : '-'
+                return es ? Math.round((es.total_score / es.max_score) * 100) : ''
             })
-            const utsGrades = utsExams.map(oe => {
+            const utsGrades = utsExamsLocal.map(oe => {
                 const os = officialExamSubs.find(s => s.student_id === student.id && s.exam_id === oe.id)
-                return os?.is_graded && os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : '-'
+                return os?.is_graded && os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : ''
             })
-            const uasGrades = uasExams.map(oe => {
+            const uasGrades = uasExamsLocal.map(oe => {
                 const os = officialExamSubs.find(s => s.student_id === student.id && s.exam_id === oe.id)
-                return os?.is_graded && os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : '-'
+                return os?.is_graded && os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : ''
             })
             const avg = calculateAverage(student.id)
 
-            return `
-                        <tr>
-                            <td>${idx + 1}</td>
-                            <td>${student.nis}</td>
-                            <td class="student-name">${student.user.full_name}</td>
-                            ${tugasGrades.map(g => `<td>${g}</td>`).join('')}
-                            ${kuisGrades.map(g => `<td>${g}</td>`).join('')}
-                            ${ulanganGrades.map(g => `<td>${g}</td>`).join('')}
-                            ${utsGrades.map(g => `<td>${g}</td>`).join('')}
-                            ${uasGrades.map(g => `<td>${g}</td>`).join('')}
-                            <td class="avg">${avg ?? '-'}</td>
-                        </tr>
-                    `
-        }).join('')}
-                </tbody>
-            </table>
-            </body>
-            </html>
-        `
+            return [
+                idx + 1,
+                student.nis,
+                student.user.full_name,
+                ...tugasGrades,
+                ...kuisGrades,
+                ...ulanganGrades,
+                ...utsGrades,
+                ...uasGrades,
+                avg ?? ''
+            ]
+        })
 
-        const blob = new Blob([html], { type: 'application/vnd.ms-excel' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `Nilai_${ta.class.name}_${ta.subject.name}.xls`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
+        // Build info rows at top
+        const sheetData = [
+            ['DAFTAR NILAI SISWA'],
+            [`Kelas: ${ta.class.name}`],
+            [`Mata Pelajaran: ${ta.subject.name}`],
+            [`Tanggal Export: ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`],
+            [],
+            headers,
+            ...rows
+        ]
+
+        const ws = XLSX.utils.aoa_to_sheet(sheetData)
+
+        // Set column widths
+        ws['!cols'] = [
+            { wch: 4 },   // No
+            { wch: 12 },  // NIS
+            { wch: 30 },  // Nama
+            ...Array(headers.length - 3).fill({ wch: 8 }),
+        ]
+
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, 'Nilai')
+
+        // Sanitize filename
+        const safeClass = ta.class.name.replace(/[^a-zA-Z0-9\s]/g, '').trim()
+        const safeSubject = ta.subject.name.replace(/[^a-zA-Z0-9\s]/g, '').trim()
+        const filename = `Nilai_${safeClass}_${safeSubject}.xlsx`
+
+        XLSX.writeFile(wb, filename)
 
         // Show success toast
         setExportSuccess(true)
