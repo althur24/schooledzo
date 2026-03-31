@@ -55,7 +55,6 @@ export default function TakeOfficialExamPage() {
     const [forceSubmitted, setForceSubmitted] = useState(false)
     const [alertMessage, setAlertMessage] = useState<string | null>(null)
     const [isOffline, setIsOffline] = useState(false)
-    const [pendingViolation, setPendingViolation] = useState(false)
 
     const containerRef = useRef<HTMLDivElement>(null)
     const hasStarted = useRef(false)
@@ -238,22 +237,55 @@ export default function TakeOfficialExamPage() {
         return () => { if (timerRef.current) clearInterval(timerRef.current) }
     }, [submission, timeLeft > 0])
 
-    // Tab lock
+    // Tab lock — multi-layered violation detection for PWA + browser
+    const pendingViolationRef = useRef(false)
+    const violationCooldownRef = useRef(false)
+
+    const triggerViolation = useCallback(async (type: string) => {
+        // Prevent rapid-fire duplicate violations
+        if (violationCooldownRef.current) return
+        violationCooldownRef.current = true
+        setTimeout(() => { violationCooldownRef.current = false }, 2000)
+
+        pendingViolationRef.current = true
+        await logViolation(type)
+    }, [submission, forceSubmitted])
+
+    const showReturnWarning = useCallback(() => {
+        if (pendingViolationRef.current) {
+            pendingViolationRef.current = false
+            setShowViolationWarning(true)
+            setTimeout(() => setShowViolationWarning(false), 4000)
+        }
+    }, [])
+
     useEffect(() => {
         if (!submission || submission.is_submitted) return
 
-        const handleVisibility = async () => {
+        // Method 1: Page Visibility API (works for browser tab switches)
+        const handleVisibility = () => {
             if (document.hidden) {
-                // Student left the tab — log violation in background
-                setPendingViolation(true)
-                await logViolation('TAB_SWITCH')
-            } else if (pendingViolation) {
-                // Student came BACK — show the red warning now
-                setPendingViolation(false)
-                setShowViolationWarning(true)
-                setTimeout(() => setShowViolationWarning(false), 4000)
+                triggerViolation('TAB_SWITCH')
+            } else {
+                showReturnWarning()
             }
         }
+
+        // Method 2: Window blur/focus (works for PWA standalone, app switching, 3-finger swipe)
+        const handleBlur = () => {
+            triggerViolation('WINDOW_BLUR')
+        }
+        const handleFocus = () => {
+            showReturnWarning()
+        }
+
+        // Method 3: Periodic focus check (failsafe for edge cases)
+        const focusInterval = setInterval(() => {
+            if (!document.hasFocus() && !pendingViolationRef.current && !violationCooldownRef.current) {
+                triggerViolation('FOCUS_LOST')
+            }
+        }, 2000)
+
         const handleBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = 'Anda sedang dalam ujian!' }
         const handleContextMenu = (e: MouseEvent) => e.preventDefault()
         const handleCopy = (e: ClipboardEvent) => e.preventDefault()
@@ -263,6 +295,8 @@ export default function TakeOfficialExamPage() {
         }
 
         document.addEventListener('visibilitychange', handleVisibility)
+        window.addEventListener('blur', handleBlur)
+        window.addEventListener('focus', handleFocus)
         window.addEventListener('beforeunload', handleBeforeUnload)
         document.addEventListener('contextmenu', handleContextMenu)
         document.addEventListener('copy', handleCopy)
@@ -270,12 +304,15 @@ export default function TakeOfficialExamPage() {
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibility)
+            window.removeEventListener('blur', handleBlur)
+            window.removeEventListener('focus', handleFocus)
             window.removeEventListener('beforeunload', handleBeforeUnload)
             document.removeEventListener('contextmenu', handleContextMenu)
             document.removeEventListener('copy', handleCopy)
             document.removeEventListener('keydown', handleKeyDown)
+            clearInterval(focusInterval)
         }
-    }, [submission, pendingViolation])
+    }, [submission, triggerViolation, showReturnWarning])
 
     const logViolation = async (type: string) => {
         if (!submission || submission.is_submitted || forceSubmitted) return
@@ -288,7 +325,7 @@ export default function TakeOfficialExamPage() {
             const data = await res.json()
             if (data.force_submitted) {
                 setForceSubmitted(true)
-                setPendingViolation(false)
+                pendingViolationRef.current = false
                 setAlertMessage('Ujian otomatis dikumpulkan karena pelanggaran melebihi batas!')
                 setTimeout(() => router.push('/dashboard/siswa/ulangan'), 3000)
                 return
