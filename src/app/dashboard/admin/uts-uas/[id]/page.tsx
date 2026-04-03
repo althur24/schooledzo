@@ -10,7 +10,7 @@ import { Edit, Discovery, Folder, Plus, Delete, Document } from 'react-iconly'
 import {
     Loader2, ArrowLeft, Trash2, Save, Eye, EyeOff,
     Settings, FileText, BarChart3, Sparkles,
-    ChevronUp, ChevronDown as ChevronDownIcon, CheckCircle, Download
+    ChevronUp, ChevronDown as ChevronDownIcon, CheckCircle, Download, RotateCcw
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
@@ -111,6 +111,8 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     const [submissions, setSubmissions] = useState<any[]>([])
     const [resultsLoading, setResultsLoading] = useState(false)
     const [resultsClassFilter, setResultsClassFilter] = useState('')
+    const [resettingId, setResettingId] = useState<string | null>(null)
+    const [resetMenuId, setResetMenuId] = useState<string | null>(null)
 
     // AI Review setting
     const [aiReviewEnabled, setAiReviewEnabled] = useState(false)
@@ -174,6 +176,51 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     useEffect(() => {
         if (activeTab === 'hasil') fetchResults()
     }, [activeTab, resultsClassFilter])
+
+    const handleResetAttempt = async (submissionId: string, studentName: string, mode: 'soft' | 'hard') => {
+        const confirmMsg = mode === 'soft'
+            ? `Soft Reset: Izinkan "${studentName}" melanjutkan ujian?\n\nTimer tetap berjalan dan pelanggaran di-reset. Jawaban yang sudah tersimpan tetap ada.`
+            : `Hard Reset: Mulai ulang ujian untuk "${studentName}"?\n\nSiswa akan mendapat durasi penuh baru, TETAPI SEMUA JAWABAN AKAN DIHAPUS.`;
+            
+        if (!confirm(confirmMsg)) {
+            setResetMenuId(null)
+            return
+        }
+        
+        setResettingId(submissionId)
+        setResetMenuId(null)
+        try {
+            const res = await fetch('/api/official-exam-submissions', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ submission_id: submissionId, reset_attempt: mode })
+            })
+            if (res.ok) {
+                showToast(mode === 'hard' ? `Hard Reset untuk ${studentName} berhasil` : `Soft Reset untuk ${studentName} berhasil`, 'success')
+                fetchResults()
+            } else {
+                const err = await res.json()
+                showToast(err.error || 'Gagal mereset attempt', 'error')
+            }
+        } catch {
+            showToast('Gagal mereset attempt', 'error')
+        } finally {
+            setResettingId(null)
+        }
+    }
+
+    // Close dropdown on outside click
+    useEffect(() => {
+        if (!resetMenuId) return
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement
+            if (!target.closest('[data-reset-menu]')) {
+                setResetMenuId(null)
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [resetMenuId])
 
     const handleDownloadExcel = () => {
         if (!exam || submissions.length === 0) return
@@ -702,10 +749,11 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                         <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Pelanggaran</th>
                                         <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Status</th>
                                         <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Waktu Submit</th>
+                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Aksi</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-secondary/10">
-                                    {submissions.map((sub: any, idx: number) => {
+                                    {[...submissions].sort((a, b) => (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '')).map((sub: any, idx: number) => {
                                         const percentage = sub.max_score > 0 ? Math.round((sub.total_score / sub.max_score) * 100) : 0
                                         return (
                                             <tr key={sub.id} className="hover:bg-secondary/5">
@@ -737,6 +785,51 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                 </td>
                                                 <td className="px-4 py-3 text-center text-xs text-text-secondary">
                                                     {sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    {sub.is_submitted && exam?.is_active ? (
+                                                        <div className="relative inline-block text-left" data-reset-menu>
+                                                            <button
+                                                                onClick={() => setResetMenuId(resetMenuId === sub.id ? null : sub.id)}
+                                                                disabled={resettingId === sub.id}
+                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400 rounded-lg hover:bg-orange-200 dark:hover:bg-orange-500/30 transition-colors text-xs font-bold disabled:opacity-50"
+                                                            >
+                                                                {resettingId === sub.id ? (
+                                                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                                ) : (
+                                                                    <RotateCcw className="w-3.5 h-3.5" />
+                                                                )}
+                                                                Izinkan Ulang
+                                                                <ChevronDownIcon className="w-3.5 h-3.5 ml-1" />
+                                                            </button>
+                                                            {resetMenuId === sub.id && (
+                                                                <div className="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-xl bg-white dark:bg-surface-dark shadow-xl ring-1 ring-black ring-opacity-5 border border-secondary/20 focus:outline-none overflow-hidden">
+                                                                    <div className="p-1.5">
+                                                                        <button
+                                                                            onClick={() => handleResetAttempt(sub.id, sub.student?.user?.full_name || 'Siswa', 'soft')}
+                                                                            className="w-full text-left px-3 py-2.5 hover:bg-secondary/10 rounded-lg transition-colors flex flex-col mb-1"
+                                                                        >
+                                                                            <span className="font-bold text-text-main dark:text-white flex items-center gap-1.5 text-xs">
+                                                                                <RotateCcw className="w-3.5 h-3.5 text-blue-500" /> Soft Reset
+                                                                            </span>
+                                                                            <span className="text-text-secondary mt-0.5 text-[10px] leading-tight">Lanjutkan, timer tetap berjalan & jawaban aman</span>
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => handleResetAttempt(sub.id, sub.student?.user?.full_name || 'Siswa', 'hard')}
+                                                                            className="w-full text-left px-3 py-2.5 hover:bg-red-500/10 rounded-lg transition-colors flex flex-col"
+                                                                        >
+                                                                            <span className="font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5 text-xs">
+                                                                                <RotateCcw className="w-3.5 h-3.5" /> Hard Reset
+                                                                            </span>
+                                                                            <span className="text-red-600/70 dark:text-red-400/80 mt-0.5 text-[10px] leading-tight">Mulai dari awal (Jawaban dihapus, timer penuh)</span>
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-text-secondary text-xs">—</span>
+                                                    )}
                                                 </td>
                                             </tr>
                                         )
@@ -806,15 +899,15 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                 {pq.question_type === 'MULTIPLE_CHOICE' && (
                                                     <div className="mt-3 space-y-2">
                                                         <div className="grid grid-cols-2 gap-2">
-                                                            {['A','B','C','D'].map((letter, optIdx) => (
+                                                            {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
                                                                 <input key={letter} type="text" value={pq.options?.[optIdx] || ''} onChange={(e) => { const u = [...passageQuestions]; const newOpts = [...(u[pqIdx].options || ['','','',''])]; newOpts[optIdx] = e.target.value; u[pqIdx] = { ...u[pqIdx], options: newOpts }; setPassageQuestions(u) }} className="px-3 py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white" placeholder={`Opsi ${letter}`} />
-                                                            ))}
+                                                            )})}
                                                         </div>
                                                         <div className="flex gap-2 mt-2">
                                                             <span className="text-xs text-text-secondary mt-1">Jawaban:</span>
-                                                            {['A','B','C','D'].map(letter => (
+                                                            {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
                                                                 <button key={letter} onClick={() => { const u = [...passageQuestions]; u[pqIdx] = { ...u[pqIdx], correct_answer: letter }; setPassageQuestions(u) }} className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${pq.correct_answer === letter ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>{letter}</button>
-                                                            ))}
+                                                            )})}
                                                         </div>
                                                     </div>
                                                 )}
@@ -837,7 +930,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                 {manualForm.question_type === 'MULTIPLE_CHOICE' && (
                                     <>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            {['A','B','C','D'].map((letter, idx) => (
+                                            {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                                 <div key={letter}>
                                                     <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Opsi {letter}</label>
                                                     <div className="relative">
@@ -845,14 +938,14 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                         <input type="text" value={manualForm.options?.[idx] || ''} onChange={(e) => { const o = [...(manualForm.options || ['','','',''])]; o[idx] = e.target.value; setManualForm({ ...manualForm, options: o }) }} className="w-full pl-12 pr-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm" placeholder={`Jawaban ${letter}`} />
                                                     </div>
                                                 </div>
-                                            ))}
+                                            )})}
                                         </div>
                                         <div>
                                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kunci Jawaban</label>
-                                            <div className="flex gap-3">
-                                                {['A','B','C','D'].map(letter => (
+                                        <div className="flex gap-3">
+                                                {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                                     <button key={letter} onClick={() => setManualForm({ ...manualForm, correct_answer: letter })} className={`w-12 h-12 rounded-xl font-bold transition-all ${manualForm.correct_answer === letter ? 'bg-green-500 text-white shadow-lg shadow-green-500/30 scale-110' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>{letter}</button>
-                                                ))}
+                                                )})}
                                             </div>
                                         </div>
                                     </>
@@ -991,19 +1084,19 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         {editQuestionForm.question_type === 'MULTIPLE_CHOICE' && editQuestionForm.options && (
                             <>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {['A','B','C','D'].map((letter, idx) => (
+                                    {(editQuestionForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                         <div key={letter}>
                                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Opsi {letter}</label>
                                             <input type="text" value={editQuestionForm.options?.[idx] || ''} onChange={(e) => { const o = [...(editQuestionForm.options || [])]; o[idx] = e.target.value; setEditQuestionForm({ ...editQuestionForm, options: o }) }} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm" placeholder={`Opsi ${letter}`} />
                                         </div>
-                                    ))}
+                                    )})}
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kunci Jawaban</label>
-                                    <div className="flex gap-3">
-                                        {['A','B','C','D'].map(letter => (
+                                    <div className="flex gap-3 mt-2">
+                                        {(editQuestionForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                             <button key={letter} onClick={() => setEditQuestionForm({ ...editQuestionForm, correct_answer: letter })} className={`w-12 h-12 rounded-xl font-bold transition-all ${editQuestionForm.correct_answer === letter ? 'bg-green-500 text-white shadow-lg shadow-green-500/30 scale-110' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>{letter}</button>
-                                        ))}
+                                        )})}
                                     </div>
                                 </div>
                             </>

@@ -1157,7 +1157,7 @@ export default function EditQuizPage() {
                                                 {pq.question_type === 'MULTIPLE_CHOICE' && (
                                                     <div className="mt-3 space-y-2">
                                                         <div className="grid grid-cols-2 gap-2">
-                                                            {['A', 'B', 'C', 'D'].map((letter, optIdx) => (
+                                                            {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
                                                                 <input
                                                                     key={letter}
                                                                     type="text"
@@ -1172,11 +1172,11 @@ export default function EditQuizPage() {
                                                                     className="px-3 py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
                                                                     placeholder={`Opsi ${letter}`}
                                                                 />
-                                                            ))}
+                                                            )})}
                                                         </div>
                                                         <div className="flex gap-2 mt-2">
                                                             <span className="text-xs text-text-secondary mt-1">Jawaban:</span>
-                                                            {['A', 'B', 'C', 'D'].map((letter) => (
+                                                            {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
                                                                 <button
                                                                     key={letter}
                                                                     onClick={() => {
@@ -1186,7 +1186,7 @@ export default function EditQuizPage() {
                                                                     }}
                                                                     className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${pq.correct_answer === letter ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}
                                                                 >{letter}</button>
-                                                            ))}
+                                                            )})}
                                                         </div>
                                                     </div>
                                                 )}
@@ -1249,7 +1249,7 @@ export default function EditQuizPage() {
                                 {manualForm.question_type === 'MULTIPLE_CHOICE' && (
                                     <>
                                         <div className="grid grid-cols-2 gap-3">
-                                            {['A', 'B', 'C', 'D'].map((letter, idx) => (
+                                            {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                                 <div key={letter}>
                                                     <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Opsi {letter}</label>
                                                     <input
@@ -1263,20 +1263,18 @@ export default function EditQuizPage() {
                                                         className="w-full px-3 py-2 bg-secondary/5 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                                                     />
                                                 </div>
-                                            ))}
+                                            )})}
                                         </div>
                                         <div>
                                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kunci Jawaban</label>
                                             <div className="flex gap-2">
-                                                {['A', 'B', 'C', 'D'].map((letter) => (
+                                                {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                                     <button
                                                         key={letter}
                                                         onClick={() => setManualForm({ ...manualForm, correct_answer: letter })}
                                                         className={`w-12 h-12 rounded-lg font-bold transition-colors ${manualForm.correct_answer === letter ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300 hover:bg-secondary/20'}`}
-                                                    >
-                                                        {letter}
-                                                    </button>
-                                                ))}
+                                                    >{letter}</button>
+                                                )})}
                                             </div>
                                         </div>
                                     </>

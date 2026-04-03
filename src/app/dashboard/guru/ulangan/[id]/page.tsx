@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
 // Dynamic imports for heavy components (mathlive 5.6MB, AI modal 724 lines)
@@ -14,7 +14,8 @@ const PreviewModal = dynamic(() => import('@/components/PreviewModal'), { ssr: f
 const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
 // import { PenLine, WandSparkles, FolderOpen, Plus } from 'lucide-react'
 import { Edit, Discovery, Folder, Plus, Setting, Upload, Danger, InfoCircle, Document, TickSquare, CloseSquare, Delete } from 'react-iconly'
-import { Loader2, Eye, Brain } from 'lucide-react'
+import { Loader2, Eye, Brain, BarChart3, FileText, Download } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
@@ -52,9 +53,11 @@ interface Exam {
 }
 
 type Mode = 'list' | 'manual' | 'clean' | 'ai' | 'bank'
+type TabType = 'soal' | 'hasil'
 
 export default function EditExamPage() {
     const params = useParams()
+    const searchParams = useSearchParams()
     const examId = params.id as string
 
     const [exam, setExam] = useState<Exam | null>(null)
@@ -62,6 +65,7 @@ export default function EditExamPage() {
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [mode, setMode] = useState<Mode>('list')
+    const [activeTab, setActiveTab] = useState<TabType>(searchParams.get('tab') === 'hasil' ? 'hasil' : 'soal')
     const [showAddDropdown, setShowAddDropdown] = useState(false)
 
     // Manual mode state
@@ -111,6 +115,11 @@ export default function EditExamPage() {
     const [alertInfo, setAlertInfo] = useState<{ type: 'info' | 'warning' | 'error' | 'success', title: string, message: string } | null>(null)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
 
+    // Results state
+    const [submissions, setSubmissions] = useState<any[]>([])
+    const [resultsLoading, setResultsLoading] = useState(false)
+    const [selectedSubmission, setSelectedSubmission] = useState<any>(null)
+
     // Edit settings state
     const [showEditSettings, setShowEditSettings] = useState(false)
     const [editForm, setEditForm] = useState({
@@ -149,6 +158,31 @@ export default function EditExamPage() {
             if (d) setAiReviewEnabled(d.ai_review_enabled !== false)
         }).catch(() => { })
     }, [])
+
+    const fetchResults = useCallback(async () => {
+        setResultsLoading(true)
+        try {
+            const res = await fetch(`/api/exam-submissions?exam_id=${examId}`)
+            if (res.ok) {
+                const data = await res.json()
+                setSubmissions(Array.isArray(data) ? data : [])
+            }
+        } catch (error) {
+            console.error('Error fetching results:', error)
+        } finally {
+            setResultsLoading(false)
+        }
+    }, [examId])
+
+    useEffect(() => {
+        if (activeTab === 'hasil') {
+            fetchResults()
+            if (exam?.is_active) {
+                const interval = setInterval(fetchResults, 10000)
+                return () => clearInterval(interval)
+            }
+        }
+    }, [activeTab, exam?.is_active, fetchResults])
 
     const handlePublishClick = () => {
         if (questions.length === 0) {
@@ -495,6 +529,85 @@ export default function EditExamPage() {
         })
     }
 
+    // Helper functions for Results
+    const getScoreColor = (score: number, max: number) => {
+        const percentage = max > 0 ? (score / max) * 100 : 0
+        if (percentage >= 80) return 'text-green-600 dark:text-green-400'
+        if (percentage >= 60) return 'text-amber-600 dark:text-amber-400'
+        return 'text-red-600 dark:text-red-400'
+    }
+
+    const formatDuration = (start: string, end: string | null) => {
+        if (!end) return '-'
+        const diff = new Date(end).getTime() - new Date(start).getTime()
+        const mins = Math.floor(diff / 60000)
+        const secs = Math.floor((diff % 60000) / 1000)
+        return `${mins}m ${secs}s`
+    }
+
+    const calculateStats = () => {
+        const submitted = submissions.filter(s => s.is_submitted)
+        if (submitted.length === 0) return { avg: 0, highest: 0, lowest: 0, count: 0 }
+
+        const scores = submitted.map(s => (s.max_score > 0 ? (s.total_score / s.max_score) * 100 : 0))
+        return {
+            avg: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+            highest: Math.round(Math.max(...scores)),
+            lowest: Math.round(Math.min(...scores)),
+            count: submitted.length
+        }
+    }
+
+    const handleDownloadExcel = () => {
+        if (!exam || submissions.length === 0) return
+
+        const formattedData = submissions.map((sub: any, index: number) => {
+            const maxScore = sub.max_score || 1
+            const percentage = Math.round((sub.total_score / maxScore) * 100)
+            
+            let status = 'Mengerjakan'
+            if (sub.is_submitted) {
+                status = sub.is_graded ? 'Selesai' : 'Perlu Koreksi'
+            }
+
+            return {
+                'No': index + 1,
+                'Nama Siswa': sub.student?.user?.full_name || '-',
+                'NIS': sub.student?.nis || '-',
+                'Skor': sub.total_score || 0,
+                'Max Skor': sub.max_score || 0,
+                'Persentase': `${percentage}%`,
+                'Durasi': sub.submitted_at ? formatDuration(sub.started_at, sub.submitted_at) : '-',
+                'Pelanggaran': sub.violation_count || 0,
+                'Status': status,
+                'Waktu Submit': sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'
+            }
+        })
+
+        const ws = XLSX.utils.json_to_sheet(formattedData)
+        
+        const colWidths = [
+            { wch: 5 },  // No
+            { wch: 30 }, // Nama
+            { wch: 15 }, // NIS
+            { wch: 10 }, // Skor
+            { wch: 10 }, // Max
+            { wch: 15 }, // Persentase
+            { wch: 15 }, // Durasi
+            { wch: 15 }, // Pelanggaran
+            { wch: 15 }, // Status
+            { wch: 20 }, // Waktu
+        ]
+        ws['!cols'] = colWidths
+
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, "Hasil_Ulangan")
+
+        const fileName = `Hasil_Ulangan_${exam.title.replace(/ /g, '_')}.xlsx`
+        
+        XLSX.writeFile(wb, fileName)
+    }
+
     if (loading) {
         return <div className="text-center text-text-secondary py-12 flex justify-center"><div className="animate-spin text-primary"><Loader2 className="w-10 h-10" /></div></div>
     }
@@ -551,7 +664,19 @@ export default function EditExamPage() {
                 }
             />
 
-            {/* Points Warning */}
+            {/* Tabs */}
+            <div className="flex gap-1 bg-secondary/5 p-1 rounded-xl border border-secondary/10 mt-4 mb-6">
+                {([{ key: 'soal' as TabType, label: 'Soal', icon: FileText }, { key: 'hasil' as TabType, label: 'Hasil', icon: BarChart3 }]).map(tab => (
+                    <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-bold transition-all ${activeTab === tab.key ? 'bg-white dark:bg-surface-dark text-primary shadow-sm' : 'text-text-secondary hover:text-text-main'}`}>
+                        <tab.icon className="w-5 h-5" /> {tab.label}
+                    </button>
+                ))}
+            </div>
+
+            {/* ===== TAB: SOAL ===== */}
+            {activeTab === 'soal' && (
+                <div className="space-y-4">
+                    {/* Points Warning */}
             {totalPoints !== 100 && questions.length > 0 && (
                 <div className={`px-4 py-3 rounded-xl flex items-center justify-between ${totalPoints > 100 ? 'bg-red-500/10 border border-red-200 dark:border-red-500/30' : 'bg-amber-500/10 border border-amber-200 dark:border-amber-500/30'}`}>
                     <div className="flex items-center gap-2">
@@ -1236,7 +1361,7 @@ export default function EditExamPage() {
                                                     {pq.question_type === 'MULTIPLE_CHOICE' && (
                                                         <div className="mt-3 space-y-2">
                                                             <div className="grid grid-cols-2 gap-2">
-                                                                {['A', 'B', 'C', 'D'].map((letter, optIdx) => (
+                                                                {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
                                                                     <input
                                                                         key={letter}
                                                                         type="text"
@@ -1251,11 +1376,11 @@ export default function EditExamPage() {
                                                                         className="px-3 py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
                                                                         placeholder={`Opsi ${letter}`}
                                                                     />
-                                                                ))}
+                                                                )})}
                                                             </div>
                                                             <div className="flex gap-2 mt-2">
                                                                 <span className="text-xs text-text-secondary mt-1">Jawaban:</span>
-                                                                {['A', 'B', 'C', 'D'].map((letter) => (
+                                                                {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
                                                                     <button
                                                                         key={letter}
                                                                         onClick={() => {
@@ -1265,7 +1390,7 @@ export default function EditExamPage() {
                                                                         }}
                                                                         className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${pq.correct_answer === letter ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}
                                                                     >{letter}</button>
-                                                                ))}
+                                                                )})}
                                                             </div>
                                                         </div>
                                                     )}
@@ -1327,7 +1452,7 @@ export default function EditExamPage() {
                                     {manualForm.question_type === 'MULTIPLE_CHOICE' && (
                                         <>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {['A', 'B', 'C', 'D'].map((letter, idx) => (
+                                                {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                                     <div key={letter}>
                                                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Opsi {letter}</label>
                                                         <div className="relative">
@@ -1335,14 +1460,14 @@ export default function EditExamPage() {
                                                             <input type="text" value={manualForm.options?.[idx] || ''} onChange={(e) => { const newOptions = [...(manualForm.options || ['', '', '', ''])]; newOptions[idx] = e.target.value; setManualForm({ ...manualForm, options: newOptions }) }} className="w-full pl-12 pr-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm" placeholder={`Jawaban ${letter}`} />
                                                         </div>
                                                     </div>
-                                                ))}
+                                                )})}
                                             </div>
                                             <div>
                                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kunci Jawaban</label>
                                                 <div className="flex gap-3">
-                                                    {['A', 'B', 'C', 'D'].map((letter) => (
+                                                    {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                                         <button key={letter} onClick={() => setManualForm({ ...manualForm, correct_answer: letter })} className={`w-12 h-12 rounded-xl font-bold transition-all ${manualForm.correct_answer === letter ? 'bg-green-500 text-white shadow-lg shadow-green-500/30 scale-110' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>{letter}</button>
-                                                    ))}
+                                                    )})}
                                                 </div>
                                             </div>
                                         </>
@@ -1619,6 +1744,194 @@ export default function EditExamPage() {
                     </Card>
                 )
             }
+
+                </div>
+            )}
+
+            {/* ===== TAB: HASIL ===== */}
+            {activeTab === 'hasil' && (
+                <div className="space-y-4">
+                    {/* Stats Cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <Card padding="p-4" className="text-center">
+                            <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">{calculateStats().count}</p>
+                            <p className="text-xs text-text-secondary dark:text-zinc-400 mt-1">Mengumpulkan</p>
+                        </Card>
+                        <Card padding="p-4" className="text-center">
+                            <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{calculateStats().avg}%</p>
+                            <p className="text-xs text-text-secondary dark:text-zinc-400 mt-1">Rata-rata</p>
+                        </Card>
+                        <Card padding="p-4" className="text-center">
+                            <p className="text-3xl font-bold text-green-600 dark:text-green-400">{calculateStats().highest}%</p>
+                            <p className="text-xs text-text-secondary dark:text-zinc-400 mt-1">Tertinggi</p>
+                        </Card>
+                        <Card padding="p-4" className="text-center">
+                            <p className="text-3xl font-bold text-red-600 dark:text-red-400">{calculateStats().lowest}%</p>
+                            <p className="text-xs text-text-secondary dark:text-zinc-400 mt-1">Terendah</p>
+                        </Card>
+                    </div>
+
+                    {/* Action Bar — matches UTS/UAS pattern */}
+                    <div className="flex justify-between items-center bg-white dark:bg-surface-dark border border-secondary/20 p-3 rounded-xl shadow-sm">
+                        <div className="flex gap-3 items-center">
+                            {exam?.is_active && (
+                                <span className="flex items-center gap-1.5 text-xs font-bold text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-500/20 px-2.5 py-1 rounded-full">
+                                    <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                                    </span>
+                                    Live
+                                </span>
+                            )}
+                            <span className="text-sm font-medium text-text-secondary border-l border-secondary/20 pl-3">{submissions.length} submission</span>
+                        </div>
+                        {submissions.length > 0 && (
+                            <Button onClick={handleDownloadExcel} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm" icon={<Download className="w-4 h-4 ml-1" />}>
+                                Download Excel
+                            </Button>
+                        )}
+                    </div>
+
+                    {/* Submissions Table */}
+                    {resultsLoading && submissions.length === 0 ? (
+                        <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+                    ) : submissions.length === 0 ? (
+                        <Card padding="p-8" className="text-center">
+                            <BarChart3 className="w-12 h-12 text-text-secondary/50 mx-auto mb-3" />
+                            <p className="text-text-secondary">Belum ada siswa yang mengerjakan ulangan ini.</p>
+                        </Card>
+                    ) : (
+                        <Card padding="p-0" className="overflow-hidden">
+                            <table className="w-full">
+                                <thead className="bg-secondary/5">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white">No</th>
+                                        <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white">Nama Siswa</th>
+                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Skor</th>
+                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Durasi</th>
+                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Pelanggaran</th>
+                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Status</th>
+                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Waktu Submit</th>
+                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-secondary/10">
+                                    {submissions.map((sub: any, idx: number) => {
+                                        const percentage = sub.max_score > 0 ? Math.round((sub.total_score / sub.max_score) * 100) : 0
+                                        return (
+                                            <tr key={sub.id} className="hover:bg-secondary/5">
+                                                <td className="px-4 py-3 text-sm text-text-secondary">{idx + 1}</td>
+                                                <td className="px-4 py-3">
+                                                    <span className="text-sm font-medium text-text-main dark:text-white">{sub.student?.user?.full_name || '-'}</span>
+                                                    <span className="text-xs text-text-secondary ml-2">{sub.student?.nis}</span>
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    {sub.is_submitted ? (
+                                                        <span className={`font-bold text-sm ${percentage >= 75 ? 'text-green-600' : percentage >= 50 ? 'text-amber-600' : 'text-red-600'}`}>
+                                                            {sub.total_score}/{sub.max_score} ({percentage}%)
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-text-secondary text-sm">-</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-center text-xs text-text-secondary">
+                                                    {sub.submitted_at ? formatDuration(sub.started_at, sub.submitted_at) : '-'}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <span className={`text-xs font-medium ${sub.violation_count > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                                        {sub.violation_count || 0}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    {sub.is_submitted ? (
+                                                        sub.is_graded ? (
+                                                            <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 font-bold">Selesai</span>
+                                                        ) : (
+                                                            <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400 font-bold">Perlu Koreksi</span>
+                                                        )
+                                                    ) : (
+                                                        <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 font-bold">Mengerjakan</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-center text-xs text-text-secondary">
+                                                    {sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    {sub.is_submitted ? (
+                                                        <div className="flex items-center justify-center gap-2">
+                                                            <Link href={`/dashboard/guru/ulangan/${examId}/hasil/${sub.id}`}>
+                                                                <Button size="sm" variant={sub.is_graded ? 'ghost' : 'primary'} className={!sub.is_graded ? 'bg-gradient-to-r from-blue-600 to-cyan-600' : ''}>
+                                                                    {sub.is_graded ? 'Lihat' : 'Koreksi'}
+                                                                </Button>
+                                                            </Link>
+                                                            <button
+                                                                onClick={() => setSelectedSubmission(sub)}
+                                                                className="px-3 py-1.5 bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-400 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-500/30 transition-colors text-sm font-medium"
+                                                            >
+                                                                Detail
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-text-secondary text-xs">—</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        </Card>
+                    )}
+                </div>
+            )}
+
+            {/* Submission Detail Modal */}
+            <Modal open={!!selectedSubmission} onClose={() => setSelectedSubmission(null)} title="Detail Submission" maxWidth="lg">
+                {selectedSubmission && (
+                    <div className="space-y-4">
+                        <div className="bg-secondary/10 rounded-xl p-4">
+                            <p className="text-sm text-text-secondary dark:text-zinc-400">Siswa</p>
+                            <p className="text-lg font-bold text-text-main dark:text-white">{selectedSubmission.student?.user?.full_name}</p>
+                            <p className="text-sm text-text-secondary dark:text-zinc-500">NIS: {selectedSubmission.student?.nis}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-secondary/10 rounded-xl p-4 text-center">
+                                <p className="text-sm text-text-secondary dark:text-zinc-400">Nilai</p>
+                                <p className={`text-2xl font-bold ${getScoreColor(selectedSubmission.total_score, selectedSubmission.max_score).split(' ')[0]}`}>
+                                    {selectedSubmission.total_score}/{selectedSubmission.max_score}
+                                </p>
+                            </div>
+                            <div className="bg-secondary/10 rounded-xl p-4 text-center">
+                                <p className="text-sm text-text-secondary dark:text-zinc-400">Pelanggaran</p>
+                                <p className={`text-2xl font-bold ${selectedSubmission.violation_count > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                                    {selectedSubmission.violation_count || 0}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="bg-secondary/10 rounded-xl p-4">
+                            <p className="text-sm text-text-secondary dark:text-zinc-400 mb-2">Waktu</p>
+                            <div className="text-sm text-text-main dark:text-zinc-300 space-y-1">
+                                <p>Mulai: {new Date(selectedSubmission.started_at).toLocaleString('id-ID')}</p>
+                                <p>Selesai: {selectedSubmission.submitted_at ? new Date(selectedSubmission.submitted_at).toLocaleString('id-ID') : '-'}</p>
+                                <p>Durasi: {selectedSubmission.submitted_at ? formatDuration(selectedSubmission.started_at, selectedSubmission.submitted_at) : '-'}</p>
+                            </div>
+                        </div>
+                        {selectedSubmission.violations_log && selectedSubmission.violations_log.length > 0 && (
+                            <div className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl p-4">
+                                <p className="text-sm text-red-600 dark:text-red-400 font-medium mb-2">⚠️ Log Pelanggaran</p>
+                                <div className="space-y-1 text-sm max-h-48 overflow-y-auto pr-2">
+                                    {selectedSubmission.violations_log.map((v: any, idx: number) => (
+                                        <div key={idx} className="flex justify-between text-text-main dark:text-zinc-300 border-b border-red-500/10 last:border-0 pb-1 last:pb-0">
+                                            <span>{v.type}</span>
+                                            <span className="text-text-secondary dark:text-zinc-500">{new Date(v.timestamp).toLocaleTimeString('id-ID')}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </Modal>
 
             {/* Publish Confirmation Modal */}
             <Modal

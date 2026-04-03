@@ -382,6 +382,20 @@ export async function PUT(request: NextRequest) {
         // Handle violation logging
         if (violation) {
             const currentViolations = currentSubmission.violations_log || []
+            
+            // Server-side deduplication (3 second gap)
+            if (currentViolations.length > 0) {
+                const lastViolation = currentViolations[currentViolations.length - 1]
+                const lastTime = new Date(lastViolation.timestamp).getTime()
+                const now = new Date().getTime()
+                if (now - lastTime < 3000) {
+                    return NextResponse.json({
+                        violation_count: currentSubmission.violation_count,
+                        max_violations: currentSubmission.exam?.max_violations || 3
+                    }) // Ignore duplicate
+                }
+            }
+
             const newViolationCount = currentSubmission.violation_count + 1
             const maxViolations = currentSubmission.exam?.max_violations || 3
 

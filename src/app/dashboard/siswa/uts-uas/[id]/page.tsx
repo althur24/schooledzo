@@ -131,8 +131,25 @@ export default function TakeOfficialExamPage() {
                 setQuestions(questionArr)
             }
 
-            // Load local answers
-            const localAnswers = loadLocal()
+            // Load local answers (but clear if a hard reset made them stale)
+            const localRaw = typeof window !== 'undefined' ? localStorage.getItem(`official_exam_${examId}_answers`) : null
+            let localAnswers: { [key: string]: string } = {}
+            let localLastSaved: string | null = null
+            if (localRaw) {
+                try {
+                    const parsed = JSON.parse(localRaw)
+                    localAnswers = parsed.answers || {}
+                    localLastSaved = parsed.lastSaved || null
+                } catch { /* ignore parse error */ }
+            }
+
+            // If submission was restarted (hard reset), started_at will be newer than localStorage lastSaved
+            // In that case, discard stale local answers
+            if (localLastSaved && new Date(subData.started_at).getTime() > new Date(localLastSaved).getTime()) {
+                localAnswers = {}
+                clearLocal()
+            }
+
             let initialAnswers: { [key: string]: string } = {}
             if (Object.keys(localAnswers).length > 0) {
                 setAnswers(localAnswers)
@@ -240,12 +257,13 @@ export default function TakeOfficialExamPage() {
     // Tab lock — multi-layered violation detection for PWA + browser
     const pendingViolationRef = useRef(false)
     const violationCooldownRef = useRef(false)
+    const isFullscreenTransition = useRef(false)
 
     const triggerViolation = useCallback(async (type: string) => {
-        // Prevent rapid-fire duplicate violations
-        if (violationCooldownRef.current) return
+        // Prevent rapid-fire duplicate violations & fullscreen transition false positives
+        if (violationCooldownRef.current || isFullscreenTransition.current) return
         violationCooldownRef.current = true
-        setTimeout(() => { violationCooldownRef.current = false }, 2000)
+        setTimeout(() => { violationCooldownRef.current = false }, 5000)
 
         pendingViolationRef.current = true
         await logViolation(type)
@@ -271,21 +289,6 @@ export default function TakeOfficialExamPage() {
             }
         }
 
-        // Method 2: Window blur/focus (works for PWA standalone, app switching, 3-finger swipe)
-        const handleBlur = () => {
-            triggerViolation('WINDOW_BLUR')
-        }
-        const handleFocus = () => {
-            showReturnWarning()
-        }
-
-        // Method 3: Periodic focus check (failsafe for edge cases)
-        const focusInterval = setInterval(() => {
-            if (!document.hasFocus() && !pendingViolationRef.current && !violationCooldownRef.current) {
-                triggerViolation('FOCUS_LOST')
-            }
-        }, 2000)
-
         const handleBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = 'Anda sedang dalam ujian!' }
         const handleContextMenu = (e: MouseEvent) => e.preventDefault()
         const handleCopy = (e: ClipboardEvent) => e.preventDefault()
@@ -295,8 +298,6 @@ export default function TakeOfficialExamPage() {
         }
 
         document.addEventListener('visibilitychange', handleVisibility)
-        window.addEventListener('blur', handleBlur)
-        window.addEventListener('focus', handleFocus)
         window.addEventListener('beforeunload', handleBeforeUnload)
         document.addEventListener('contextmenu', handleContextMenu)
         document.addEventListener('copy', handleCopy)
@@ -304,13 +305,10 @@ export default function TakeOfficialExamPage() {
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibility)
-            window.removeEventListener('blur', handleBlur)
-            window.removeEventListener('focus', handleFocus)
             window.removeEventListener('beforeunload', handleBeforeUnload)
             document.removeEventListener('contextmenu', handleContextMenu)
             document.removeEventListener('copy', handleCopy)
             document.removeEventListener('keydown', handleKeyDown)
-            clearInterval(focusInterval)
         }
     }, [submission, triggerViolation, showReturnWarning])
 
@@ -362,7 +360,11 @@ export default function TakeOfficialExamPage() {
             setIsFullscreen(true)
         }
 
-        const handler = () => setIsFullscreen(!!document.fullscreenElement || !!(document as any).webkitFullscreenElement)
+        const handler = () => {
+            isFullscreenTransition.current = true
+            setIsFullscreen(!!document.fullscreenElement || !!(document as any).webkitFullscreenElement)
+            setTimeout(() => { isFullscreenTransition.current = false }, 1000)
+        }
         document.addEventListener('fullscreenchange', handler)
         document.addEventListener('webkitfullscreenchange', handler)
         return () => {

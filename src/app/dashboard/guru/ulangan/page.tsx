@@ -500,7 +500,7 @@ export default function GuruUlanganPage() {
                                                         </div>
                                                     </div>
                                                     {pendingGrading > 0 && (
-                                                        <Link href={`/dashboard/guru/ulangan/${exam.id}/hasil`} className="block">
+                                                        <Link href={`/dashboard/guru/ulangan/${exam.id}?tab=hasil`} className="block">
                                                             <div className="flex items-center justify-between text-xs mt-1 px-2 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition-colors cursor-pointer">
                                                                 <span className="text-amber-600 dark:text-amber-400 font-medium">📝 Perlu Dikoreksi</span>
                                                                 <span className="font-bold text-amber-600 dark:text-amber-400">{pendingGrading}</span>
@@ -516,7 +516,7 @@ export default function GuruUlanganPage() {
                                         <div className="flex gap-2 w-full">
                                             {exam.is_active ? (
                                                 <>
-                                                    <Link href={`/dashboard/guru/ulangan/${exam.id}/hasil`} className="flex-1">
+                                                    <Link href={`/dashboard/guru/ulangan/${exam.id}?tab=hasil`} className="flex-1">
                                                         <Button variant="secondary" size="sm" className="w-full justify-center">
                                                             <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> Hasil
                                                         </Button>

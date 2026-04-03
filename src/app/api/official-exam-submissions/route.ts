@@ -215,7 +215,7 @@ export async function PUT(request: NextRequest) {
         const { user } = ctx
 
         const body = await request.json()
-        const { submission_id, answers, submit, violation } = body
+        const { submission_id, answers, submit, violation, reset_attempt } = body
 
         if (!submission_id) {
             return NextResponse.json({ error: 'submission_id required' }, { status: 400 })
@@ -230,6 +230,58 @@ export async function PUT(request: NextRequest) {
 
         if (!currentSubmission) {
             return NextResponse.json({ error: 'Submission not found' }, { status: 404 })
+        }
+
+        // Handle reset attempt (Admin only) — must be checked BEFORE the is_submitted guard
+        if (reset_attempt) {
+            if (user.role !== 'ADMIN') {
+                return NextResponse.json({ error: 'Hanya admin yang dapat mereset attempt siswa' }, { status: 403 })
+            }
+
+            if (!currentSubmission.is_submitted) {
+                return NextResponse.json({ error: 'Submission belum di-submit, tidak perlu di-reset' }, { status: 400 })
+            }
+
+            if (reset_attempt === 'hard') {
+                // Delete existing answers for Hard Reset
+                const { error: deleteAnswersError } = await supabase
+                    .from('official_exam_answers')
+                    .delete()
+                    .eq('submission_id', submission_id)
+
+                if (deleteAnswersError) throw deleteAnswersError
+            }
+
+            const updateData: any = {
+                is_submitted: false,
+                submitted_at: null,
+                violation_count: 0,
+                violations_log: [],
+                total_score: 0,
+                is_graded: false
+            }
+
+            // Hard reset: fresh timer
+            if (reset_attempt === 'hard') {
+                updateData.started_at = new Date().toISOString()
+            }
+
+            const { data: resetSubmission, error: resetError } = await supabase
+                .from('official_exam_submissions')
+                .update(updateData)
+                .eq('id', submission_id)
+                .select()
+                .single()
+
+            if (resetError) throw resetError
+
+            return NextResponse.json({
+                reset_success: true,
+                message: reset_attempt === 'hard' 
+                    ? 'Hard reset berhasil. Jawaban dihapus dan timer di-reset.' 
+                    : 'Soft reset berhasil. Siswa dapat melanjutkan dengan sisa waktu.',
+                submission: resetSubmission
+            })
         }
 
         // Verify ownership for SISWA
@@ -253,6 +305,20 @@ export async function PUT(request: NextRequest) {
         // Handle violation logging
         if (violation) {
             const currentViolations = currentSubmission.violations_log || []
+            
+            // Server-side deduplication (3 second gap)
+            if (currentViolations.length > 0) {
+                const lastViolation = currentViolations[currentViolations.length - 1]
+                const lastTime = new Date(lastViolation.timestamp).getTime()
+                const now = new Date().getTime()
+                if (now - lastTime < 3000) {
+                    return NextResponse.json({
+                        violation_count: currentSubmission.violation_count,
+                        max_violations: currentSubmission.exam?.max_violations || 3
+                    }) // Ignore duplicate
+                }
+            }
+
             const newViolationCount = currentSubmission.violation_count + 1
             const maxViolations = currentSubmission.exam?.max_violations || 3
 

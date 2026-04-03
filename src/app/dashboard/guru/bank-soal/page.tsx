@@ -1187,7 +1187,7 @@ export default function BankSoalPage() {
                             {questionForm.question_type === 'MULTIPLE_CHOICE' && (
                                 <>
                                     <div className="grid grid-cols-2 gap-3">
-                                        {['A', 'B', 'C', 'D'].map((letter, idx) => (
+                                        {(questionForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                             <div key={letter}>
                                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Opsi {letter}</label>
                                                 <input
@@ -1202,12 +1202,12 @@ export default function BankSoalPage() {
                                                     className="w-full px-3 py-2 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-sm"
                                                 />
                                             </div>
-                                        ))}
+                                        )})}
                                     </div>
                                     <div>
                                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kunci Jawaban</label>
                                         <div className="flex gap-2">
-                                            {['A', 'B', 'C', 'D'].map(letter => (
+                                            {(questionForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                                 <button
                                                     key={letter}
                                                     type="button"
@@ -1216,7 +1216,7 @@ export default function BankSoalPage() {
                                                 >
                                                     {letter}
                                                 </button>
-                                            ))}
+                                            )})}
                                         </div>
                                     </div>
                                 </>
@@ -1394,7 +1394,7 @@ export default function BankSoalPage() {
 
                                             {pq.question_type === 'MULTIPLE_CHOICE' && (
                                                 <div className="grid grid-cols-2 gap-2">
-                                                    {['A', 'B', 'C', 'D'].map((letter, optIdx) => (
+                                                    {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
                                                         <div key={letter} className="flex items-center gap-2">
                                                             <input
                                                                 type="radio"
@@ -1421,7 +1421,7 @@ export default function BankSoalPage() {
                                                                 className="flex-1 px-2 py-1.5 bg-white dark:bg-surface-dark border border-secondary/20 rounded text-sm"
                                                             />
                                                         </div>
-                                                    ))}
+                                                    )})}
                                                 </div>
                                             )}
                                         </div>

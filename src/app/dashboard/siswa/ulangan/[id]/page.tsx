@@ -344,13 +344,27 @@ export default function TakeExamPage() {
     }, [submission, timeLeft > 0])
 
     // Tab lock: detect visibility change
+    const pendingViolationRef = useRef(false)
+    const violationCooldownRef = useRef(false)
+    const isFullscreenTransition = useRef(false)
+
     useEffect(() => {
         if (!submission || submission.is_submitted) return
 
         const handleVisibilityChange = async () => {
             if (document.hidden) {
                 // User switched tab or minimized
+                if (violationCooldownRef.current || isFullscreenTransition.current) return
+                violationCooldownRef.current = true
+                setTimeout(() => { violationCooldownRef.current = false }, 5000)
+
+                pendingViolationRef.current = true
                 await logViolation('TAB_SWITCH')
+            } else if (pendingViolationRef.current) {
+                // Determine show return warning upon return
+                pendingViolationRef.current = false
+                setShowViolationWarning(true)
+                setTimeout(() => setShowViolationWarning(false), 4000)
             }
         }
 
@@ -400,7 +414,7 @@ export default function TakeExamPage() {
             document.removeEventListener('paste', handlePaste)
             document.removeEventListener('keydown', handleKeyDown)
         }
-    }, [submission])
+    }, [submission, forceSubmitted]) // added dependencies
 
     // Log violation
     const logViolation = async (type: string) => {
@@ -420,14 +434,14 @@ export default function TakeExamPage() {
 
             if (data.force_submitted) {
                 setForceSubmitted(true)
+                pendingViolationRef.current = false // cancel warning
                 alert('Ulangan otomatis dikumpulkan karena pelanggaran melebihi batas!')
                 router.push('/dashboard/siswa/ulangan')
                 return
             }
 
             setViolationCount(data.violation_count)
-            setShowViolationWarning(true)
-            setTimeout(() => setShowViolationWarning(false), 3000)
+            // Wait to show violation warning when they return (handled in visibility handler)
         } catch (error) {
             console.error('Error logging violation:', error)
         }
@@ -463,7 +477,9 @@ export default function TakeExamPage() {
         }
 
         const handleFullscreenChange = () => {
+            isFullscreenTransition.current = true
             setIsFullscreen(!!document.fullscreenElement || !!(document as any).webkitFullscreenElement)
+            setTimeout(() => { isFullscreenTransition.current = false }, 1000)
         }
         document.addEventListener('fullscreenchange', handleFullscreenChange)
         document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
