@@ -344,7 +344,7 @@ export async function PUT(request: NextRequest) {
         const { user, schoolId } = ctx
 
         const body = await request.json()
-        const { submission_id, answers, submit, violation } = body
+        const { submission_id, answers, submit, violation, reset_attempt } = body
 
         if (!submission_id) {
             return NextResponse.json({ error: 'submission_id required' }, { status: 400 })
@@ -373,6 +373,55 @@ export async function PUT(request: NextRequest) {
             }
         } else if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        }
+
+        // Handle Reset Attempt (Soft & Hard)
+        if (reset_attempt) {
+            if (user.role !== 'GURU' && user.role !== 'ADMIN') {
+                return NextResponse.json({ error: 'Tidak punya izin untuk melakukan reset' }, { status: 403 })
+            }
+            if (!currentSubmission.is_submitted) {
+                return NextResponse.json({ error: 'Submission ini belum dikumpulkan/di-submit' }, { status: 400 })
+            }
+
+            // Jika hard reset, hapus semua jawaban yang tersimpan
+            if (reset_attempt === 'hard') {
+                await supabase
+                    .from('exam_answers')
+                    .delete()
+                    .eq('submission_id', submission_id)
+            }
+
+            const updateData: any = {
+                is_submitted: false,
+                submitted_at: null,
+                violation_count: 0,
+                violations_log: [],
+                total_score: 0,
+                is_graded: false
+            }
+
+            // Jika hard reset, perbarui started_at agar mendapat full timer kembali
+            if (reset_attempt === 'hard') {
+                updateData.started_at = new Date().toISOString()
+            }
+
+            const { data, error } = await supabase
+                .from('exam_submissions')
+                .update(updateData)
+                .eq('id', submission_id)
+                .select()
+                .single()
+
+            if (error) throw error
+
+            return NextResponse.json({
+                reset_success: true,
+                message: reset_attempt === 'hard'
+                    ? 'Hard reset berhasil. Jawaban dikosongkan dan timer diulang.'
+                    : 'Soft reset berhasil. Siswa dapat melanjutkan dengan sisa waktu.',
+                submission: data
+            })
         }
 
         if (currentSubmission.is_submitted) {

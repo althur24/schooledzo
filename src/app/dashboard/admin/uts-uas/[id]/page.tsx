@@ -37,6 +37,7 @@ interface Question {
     order_index: number; difficulty: string | null; passage_text: string | null
     passage_audio_url?: string | null; image_url?: string | null; status?: string
     teacher_hots_claim?: boolean
+    text_direction?: 'ltr' | 'rtl'
 }
 
 type TabType = 'soal' | 'pengaturan' | 'hasil'
@@ -68,7 +69,8 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     const [manualForm, setManualForm] = useState<Question>({
         id: '', question_text: '', question_type: 'MULTIPLE_CHOICE',
         options: ['', '', '', ''], correct_answer: '', points: 10,
-        order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false
+        order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false,
+        text_direction: 'ltr'
     })
 
     // Passage mode
@@ -78,7 +80,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     const [uploadingAudio, setUploadingAudio] = useState(false)
     const [passageQuestions, setPassageQuestions] = useState<Question[]>([{
         id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''],
-        correct_answer: '', points: 10, order_index: 0, difficulty: null, passage_text: null
+        correct_answer: '', points: 10, order_index: 0, difficulty: null, passage_text: null, text_direction: 'ltr'
     }])
 
     // Bank Soal
@@ -380,9 +382,13 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                 method: 'PUT', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     question_id: editingQuestionId, question_text: editQuestionForm.question_text,
+                    question_type: editQuestionForm.question_type,
                     options: editQuestionForm.options, correct_answer: editQuestionForm.correct_answer,
+                    difficulty: editQuestionForm.difficulty,
+                    points: editQuestionForm.points,
                     teacher_hots_claim: editQuestionForm.teacher_hots_claim || false,
-                    image_url: editQuestionForm.image_url || null
+                    image_url: editQuestionForm.image_url || null,
+                    text_direction: editQuestionForm.text_direction || 'ltr'
                 })
             })
             setEditingQuestionId(null); setEditQuestionForm(null); fetchQuestions()
@@ -852,7 +858,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Soal</label>
                             <div className="flex gap-2">
-                                <button onClick={() => { setIsPassageMode(false); setManualForm({ ...manualForm, question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''] }) }} className={`flex-1 px-4 py-3 rounded-xl text-sm font-bold transition-all ${!isPassageMode && manualForm.question_type === 'MULTIPLE_CHOICE' ? 'bg-primary text-white shadow-lg shadow-primary/30' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>Pilihan Ganda</button>
+                                <button onClick={() => { setIsPassageMode(false); setManualForm({ ...manualForm, question_type: 'MULTIPLE_CHOICE', options: manualForm.options || ['', '', '', ''], correct_answer: '' }) }} className={`flex-1 px-4 py-3 rounded-xl text-sm font-bold transition-all ${!isPassageMode && manualForm.question_type === 'MULTIPLE_CHOICE' ? 'bg-primary text-white shadow-lg shadow-primary/30' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>Pilihan Ganda</button>
                                 <button onClick={() => { setIsPassageMode(false); setManualForm({ ...manualForm, question_type: 'ESSAY', options: null, correct_answer: null }) }} className={`flex-1 px-4 py-3 rounded-xl text-sm font-bold transition-all ${!isPassageMode && manualForm.question_type === 'ESSAY' ? 'bg-primary text-white shadow-lg shadow-primary/30' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>Essay</button>
                                 <button onClick={() => setIsPassageMode(true)} className={`flex-1 px-4 py-3 rounded-xl text-sm font-bold transition-all ${isPassageMode ? 'bg-teal-500 text-white shadow-lg shadow-teal-500/30' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>📖 Passage</button>
                             </div>
@@ -888,7 +894,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                 <div className="flex items-center justify-between mb-3">
                                                     <span className="text-sm font-bold text-text-main dark:text-white">Soal {pqIdx + 1}</span>
                                                     <div className="flex items-center gap-2">
-                                                        <select value={pq.question_type} onChange={(e) => { const u = [...passageQuestions]; u[pqIdx] = { ...u[pqIdx], question_type: e.target.value as any, options: e.target.value === 'MULTIPLE_CHOICE' ? ['','','',''] : null, correct_answer: e.target.value === 'MULTIPLE_CHOICE' ? '' : null }; setPassageQuestions(u) }} className="text-xs px-2 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-secondary/30 text-text-main dark:text-white">
+                                                        <select value={pq.question_type} onChange={(e) => { const u = [...passageQuestions]; u[pqIdx] = { ...u[pqIdx], question_type: e.target.value as any, options: e.target.value === 'MULTIPLE_CHOICE' ? (u[pqIdx].options || ['','','','']) : null, correct_answer: e.target.value === 'MULTIPLE_CHOICE' ? '' : null }; setPassageQuestions(u) }} className="text-xs px-2 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-secondary/30 text-text-main dark:text-white">
                                                             <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
                                                             <option value="ESSAY">Essay</option>
                                                         </select>
@@ -898,11 +904,50 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                 <textarea value={pq.question_text} onChange={(e) => { const u = [...passageQuestions]; u[pqIdx] = { ...u[pqIdx], question_text: e.target.value }; setPassageQuestions(u) }} className="w-full px-3 py-2 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" rows={2} placeholder="Tulis pertanyaan..." />
                                                 {pq.question_type === 'MULTIPLE_CHOICE' && (
                                                     <div className="mt-3 space-y-2">
-                                                        <div className="grid grid-cols-2 gap-2">
+                                                        <div className="space-y-2">
                                                             {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
-                                                                <input key={letter} type="text" value={pq.options?.[optIdx] || ''} onChange={(e) => { const u = [...passageQuestions]; const newOpts = [...(u[pqIdx].options || ['','','',''])]; newOpts[optIdx] = e.target.value; u[pqIdx] = { ...u[pqIdx], options: newOpts }; setPassageQuestions(u) }} className="px-3 py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white" placeholder={`Opsi ${letter}`} />
+                                                                <div key={letter} className="flex gap-2">
+                                                                    <div className="relative flex-1">
+                                                                        <div className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary">{letter}</div>
+                                                                        <input key={letter} type="text" value={pq.options?.[optIdx] || ''} onChange={(e) => { const u = [...passageQuestions]; const newOpts = [...(u[pqIdx].options || ['','','',''])]; newOpts[optIdx] = e.target.value; u[pqIdx] = { ...u[pqIdx], options: newOpts }; setPassageQuestions(u) }} className="w-full pl-10 pr-3 py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500" placeholder={`Opsi ${letter}`} />
+                                                                    </div>
+                                                                    {(pq.options || []).length > 2 && (
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                const u = [...passageQuestions]
+                                                                                const newOpts = [...(u[pqIdx].options || ['', '', '', ''])]
+                                                                                newOpts.splice(optIdx, 1)
+                                                                                let newCorrectAnswer = u[pqIdx].correct_answer
+                                                                                if (newCorrectAnswer) {
+                                                                                    const charCode = newCorrectAnswer.charCodeAt(0) - 65
+                                                                                    if (charCode === optIdx) newCorrectAnswer = ''
+                                                                                    else if (charCode > optIdx) newCorrectAnswer = String.fromCharCode(charCode + 65 - 1)
+                                                                                }
+                                                                                u[pqIdx] = { ...u[pqIdx], options: newOpts, correct_answer: newCorrectAnswer }
+                                                                                setPassageQuestions(u)
+                                                                            }}
+                                                                            className="px-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
+                                                                        >
+                                                                            ✕
+                                                                        </button>
+                                                                    )}
+                                                                </div>
                                                             )})}
                                                         </div>
+                                                        {(pq.options || []).length < 6 && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    const u = [...passageQuestions]
+                                                                    const newOpts = [...(u[pqIdx].options || ['', '', '', ''])]
+                                                                    newOpts.push('')
+                                                                    u[pqIdx] = { ...u[pqIdx], options: newOpts }
+                                                                    setPassageQuestions(u)
+                                                                }}
+                                                                className="text-xs text-primary font-bold hover:underline flex items-center gap-1 mt-1"
+                                                            >
+                                                                <Plus set="bold" primaryColor="currentColor" size={14} /> Tambah Opsi
+                                                            </button>
+                                                        )}
                                                         <div className="flex gap-2 mt-2">
                                                             <span className="text-xs text-text-secondary mt-1">Jawaban:</span>
                                                             {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
@@ -928,11 +973,29 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                     <MathTextarea value={manualForm.question_text} onChange={(val: string) => setManualForm({ ...manualForm, question_text: val })} placeholder="Tulis pertanyaan..." rows={3} />
                                 </div>
                                 {manualForm.question_type === 'MULTIPLE_CHOICE' && (
-                                    <>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <>
+                                        <div className="grid grid-cols-2 gap-3">
                                             {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
-                                                <div key={letter}>
-                                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Opsi {letter}</label>
+                                                <div key={letter} className="flex flex-col">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <label className="text-sm font-bold text-text-main dark:text-white">Opsi {letter}</label>
+                                                        {(manualForm.options || []).length > 2 && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    const newOpts = [...(manualForm.options || ['', '', '', ''])]
+                                                                    newOpts.splice(idx, 1)
+                                                                    let newCorrectAnswer = manualForm.correct_answer
+                                                                    if (newCorrectAnswer) {
+                                                                        const charCode = newCorrectAnswer.charCodeAt(0) - 65
+                                                                        if (charCode === idx) newCorrectAnswer = ''
+                                                                        else if (charCode > idx) newCorrectAnswer = String.fromCharCode(charCode + 65 - 1)
+                                                                    }
+                                                                    setManualForm({ ...manualForm, options: newOpts, correct_answer: newCorrectAnswer })
+                                                                }}
+                                                                className="text-xs font-bold text-red-500 hover:text-red-700"
+                                                            >✕ Hapus</button>
+                                                        )}
+                                                    </div>
                                                     <div className="relative">
                                                         <div className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary">{letter}</div>
                                                         <input type="text" value={manualForm.options?.[idx] || ''} onChange={(e) => { const o = [...(manualForm.options || ['','','',''])]; o[idx] = e.target.value; setManualForm({ ...manualForm, options: o }) }} className="w-full pl-12 pr-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm" placeholder={`Jawaban ${letter}`} />
@@ -940,9 +1003,21 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                 </div>
                                             )})}
                                         </div>
+                                        {(manualForm.options || []).length < 6 && (
+                                            <button
+                                                onClick={() => {
+                                                    const newOpts = [...(manualForm.options || ['', '', '', ''])]
+                                                    newOpts.push('')
+                                                    setManualForm({ ...manualForm, options: newOpts })
+                                                }}
+                                                className="mt-2 text-sm text-primary font-bold hover:underline flex items-center gap-1"
+                                            >
+                                                <Plus set="bold" primaryColor="currentColor" size={16} /> Tambah Opsi
+                                            </button>
+                                        )}
                                         <div>
-                                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kunci Jawaban</label>
-                                        <div className="flex gap-3">
+                                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2 mt-4">Kunci Jawaban</label>
+                                            <div className="flex gap-3">
                                                 {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                                     <button key={letter} onClick={() => setManualForm({ ...manualForm, correct_answer: letter })} className={`w-12 h-12 rounded-xl font-bold transition-all ${manualForm.correct_answer === letter ? 'bg-green-500 text-white shadow-lg shadow-green-500/30 scale-110' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>{letter}</button>
                                                 )})}
@@ -1062,9 +1137,53 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
             <Modal open={!!editingQuestionId} onClose={() => { setEditingQuestionId(null); setEditQuestionForm(null) }} title="✏️ Edit Soal">
                 {editQuestionForm && (
                     <div className="space-y-4">
+                        <div className="flex items-center gap-4">
+                            <div className="flex-1">
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Soal</label>
+                                <select 
+                                    value={editQuestionForm.question_type} 
+                                    onChange={(e) => {
+                                        const type = e.target.value as 'MULTIPLE_CHOICE' | 'ESSAY'
+                                        if (type === 'ESSAY') {
+                                            if (confirm('Beralih ke Essay akan menghapus opsi dan kunci jawaban yang ada saat ini. Lanjutkan?')) {
+                                                setEditQuestionForm({ ...editQuestionForm, question_type: type, options: null, correct_answer: null })
+                                            }
+                                        } else {
+                                            setEditQuestionForm({ ...editQuestionForm, question_type: type, options: editQuestionForm.options || ['', '', '', ''], correct_answer: '' })
+                                        }
+                                    }}
+                                    className="w-full px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                >
+                                    <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
+                                    <option value="ESSAY">Essay</option>
+                                </select>
+                            </div>
+                            <div className="flex-1">
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Arah Teks</label>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditQuestionForm({ ...editQuestionForm, text_direction: 'ltr' })}
+                                        className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border ${editQuestionForm.text_direction !== 'rtl' ? 'bg-primary text-white border-primary' : 'bg-secondary/5 text-text-main dark:text-white border-secondary/20'}`}
+                                    >
+                                        Kiri ke Kanan
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditQuestionForm({ ...editQuestionForm, text_direction: 'rtl' })}
+                                        className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border ${editQuestionForm.text_direction === 'rtl' ? 'bg-primary text-white border-primary' : 'bg-secondary/5 text-text-main dark:text-white border-secondary/20'}`}
+                                    >
+                                        Arab (RTL)
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pertanyaan</label>
-                            <MathTextarea value={editQuestionForm.question_text} onChange={(val: string) => setEditQuestionForm({ ...editQuestionForm, question_text: val })} placeholder="Tulis pertanyaan..." rows={3} />
+                            <div dir={editQuestionForm.text_direction || 'ltr'}>
+                                <MathTextarea value={editQuestionForm.question_text} onChange={(val: string) => setEditQuestionForm({ ...editQuestionForm, question_text: val })} placeholder="Tulis pertanyaan..." rows={3} />
+                            </div>
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Gambar Soal (Opsional)</label>
@@ -1083,16 +1202,49 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         </div>
                         {editQuestionForm.question_type === 'MULTIPLE_CHOICE' && editQuestionForm.options && (
                             <>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-2 gap-3">
                                     {(editQuestionForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
-                                        <div key={letter}>
-                                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Opsi {letter}</label>
-                                            <input type="text" value={editQuestionForm.options?.[idx] || ''} onChange={(e) => { const o = [...(editQuestionForm.options || [])]; o[idx] = e.target.value; setEditQuestionForm({ ...editQuestionForm, options: o }) }} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm" placeholder={`Opsi ${letter}`} />
+                                        <div key={letter} className="flex flex-col">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <label className="text-sm font-bold text-text-main dark:text-white">Opsi {letter}</label>
+                                                {(editQuestionForm.options || []).length > 2 && (
+                                                    <button
+                                                        onClick={() => {
+                                                            const newOpts = [...(editQuestionForm.options || [])]
+                                                            newOpts.splice(idx, 1)
+                                                            let newCorrectAnswer = editQuestionForm.correct_answer
+                                                            if (newCorrectAnswer) {
+                                                                const charCode = newCorrectAnswer.charCodeAt(0) - 65
+                                                                if (charCode === idx) newCorrectAnswer = ''
+                                                                else if (charCode > idx) newCorrectAnswer = String.fromCharCode(charCode + 65 - 1)
+                                                            }
+                                                            setEditQuestionForm({ ...editQuestionForm, options: newOpts, correct_answer: newCorrectAnswer })
+                                                        }}
+                                                        className="text-xs font-bold text-red-500 hover:text-red-700"
+                                                    >✕ Hapus</button>
+                                                )}
+                                            </div>
+                                            <div className="relative">
+                                                <div className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary">{letter}</div>
+                                                <input dir={editQuestionForm.text_direction || 'ltr'} type="text" value={editQuestionForm.options?.[idx] || ''} onChange={(e) => { const o = [...(editQuestionForm.options || [])]; o[idx] = e.target.value; setEditQuestionForm({ ...editQuestionForm, options: o }) }} className={`w-full pl-10 pr-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm ${editQuestionForm.text_direction === 'rtl' ? 'px-4 pl-10 text-right' : ''}`} placeholder={`Opsi ${letter}`} />
+                                            </div>
                                         </div>
                                     )})}
                                 </div>
+                                {(editQuestionForm.options || []).length < 6 && (
+                                    <button
+                                        onClick={() => {
+                                            const newOpts = [...(editQuestionForm.options || [])]
+                                            newOpts.push('')
+                                            setEditQuestionForm({ ...editQuestionForm, options: newOpts })
+                                        }}
+                                        className="mt-2 text-sm text-primary font-bold hover:underline flex items-center gap-1"
+                                    >
+                                        <Plus set="bold" primaryColor="currentColor" size={16} /> Tambah Opsi
+                                    </button>
+                                )}
                                 <div>
-                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kunci Jawaban</label>
+                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2 mt-4">Kunci Jawaban</label>
                                     <div className="flex gap-3 mt-2">
                                         {(editQuestionForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                             <button key={letter} onClick={() => setEditQuestionForm({ ...editQuestionForm, correct_answer: letter })} className={`w-12 h-12 rounded-xl font-bold transition-all ${editQuestionForm.correct_answer === letter ? 'bg-green-500 text-white shadow-lg shadow-green-500/30 scale-110' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>{letter}</button>
@@ -1101,6 +1253,30 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                 </div>
                             </>
                         )}
+                        <div className="flex items-center gap-4 pb-2">
+                            <div className="flex-1">
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tingkat Kesulitan</label>
+                                <select 
+                                    className="w-full px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                                    value={editQuestionForm.difficulty || 'MEDIUM'}
+                                    onChange={e => setEditQuestionForm({ ...editQuestionForm, difficulty: e.target.value })}
+                                >
+                                    <option value="EASY">Mudah</option>
+                                    <option value="MEDIUM">Sedang</option>
+                                    <option value="HARD">Sulit</option>
+                                </select>
+                            </div>
+                            <div className="flex-1">
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Poin Soal</label>
+                                <input 
+                                    type="number" 
+                                    className="w-full px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                                    value={editQuestionForm.points}
+                                    onChange={e => setEditQuestionForm({ ...editQuestionForm, points: Number(e.target.value) || 1 })}
+                                    min={1}
+                                />
+                            </div>
+                        </div>
                         {aiReviewEnabled && (
                             <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
                                 <input type="checkbox" id="hots-edit" checked={editQuestionForm.teacher_hots_claim || false} onChange={e => setEditQuestionForm({ ...editQuestionForm, teacher_hots_claim: e.target.checked })} className="w-5 h-5 accent-emerald-600 rounded" />

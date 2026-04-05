@@ -14,6 +14,7 @@ interface ExamQuestion {
     image_url?: string | null
     passage_text?: string | null
     passage_audio_url?: string | null
+    text_direction?: 'ltr' | 'rtl'
 }
 
 interface Exam {
@@ -244,7 +245,26 @@ export default function TakeExamPage() {
             }
 
             // Load answers from localStorage if available
-            const localAnswers = loadAnswersFromLocal()
+            const localAnswersRaw = localStorage.getItem(`exam_${examId}_answers`)
+            let localAnswers = {}
+            if (localAnswersRaw) {
+                try {
+                    const parsed = JSON.parse(localAnswersRaw)
+                    // Deteksi Hard Reset: jika started_at server lebih baru dari lastSaved lokal,
+                    // artinya ini adalah attempt baru dari Hard Reset. Abaikan & hapus cache lokal yang lama.
+                    const startedAtTime = new Date(subData.started_at).getTime()
+                    const lastSavedTime = parsed.lastSaved ? new Date(parsed.lastSaved).getTime() : 0
+
+                    if (startedAtTime > lastSavedTime + 2000) { // margin 2 detik
+                        clearLocalAnswers()
+                    } else {
+                        localAnswers = parsed.answers || {}
+                    }
+                } catch (e) {
+                    localAnswers = {}
+                }
+            }
+
             let initialAnswers = {}
             if (Object.keys(localAnswers).length > 0) {
                 setAnswers(localAnswers)
@@ -745,7 +765,9 @@ export default function TakeExamPage() {
                                                     </span>
                                                     <span className="text-xs text-text-secondary">({q.points} poin)</span>
                                                 </div>
-                                                <SmartText text={q.question_text} className="text-text-main dark:text-white text-lg mb-4" />
+                                                <div dir={q.text_direction || 'ltr'}>
+                                                    <SmartText text={q.question_text} className="text-text-main dark:text-white text-lg mb-4 whitespace-pre-wrap" />
+                                                </div>
                                                 {q.image_url && (
                                                     <div className="mb-4">
                                                         <img src={q.image_url} alt="Gambar soal" className="max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />
@@ -757,16 +779,16 @@ export default function TakeExamPage() {
                                                             const letter = String.fromCharCode(65 + optIdx)
                                                             const isSelected = answers[q.id] === letter
                                                             return (
-                                                                <button key={optIdx} onClick={() => saveAnswer(q.id, letter)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}>
-                                                                    <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg mr-3 font-bold ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`}>{letter}</span>
-                                                                    <SmartText text={opt} as="span" />
+                                                                <button key={optIdx} onClick={() => saveAnswer(q.id, letter)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'} flex items-center`}>
+                                                                    <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${q.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`} dir="ltr">{letter}</span>
+                                                                    <div className="flex-1" dir={q.text_direction || 'ltr'}><SmartText text={opt} as="span" className={q.text_direction === 'rtl' ? 'text-right block' : ''} /></div>
                                                                 </button>
                                                             )
                                                         })}
                                                     </div>
                                                 )}
                                                 {q.question_type === 'ESSAY' && (
-                                                    <textarea value={answers[q.id] || ''} onChange={(e) => saveAnswer(q.id, e.target.value)} className="w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none" rows={6} placeholder="Tulis jawaban Anda di sini..." />
+                                                    <textarea dir={q.text_direction || 'ltr'} value={answers[q.id] || ''} onChange={(e) => saveAnswer(q.id, e.target.value)} className={`w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none ${q.text_direction === 'rtl' ? 'text-right' : ''}`} rows={6} placeholder="Tulis jawaban Anda di sini..." />
                                                 )}
                                             </div>
                                         ))}
@@ -782,7 +804,9 @@ export default function TakeExamPage() {
                                         </span>
                                         <span className="text-xs text-text-secondary">({currentItem.question.points} poin)</span>
                                     </div>
-                                    <SmartText text={currentItem.question.question_text} className="text-text-main dark:text-white text-lg mb-4" />
+                                    <div dir={currentItem.question.text_direction || 'ltr'}>
+                                        <SmartText text={currentItem.question.question_text} className="text-text-main dark:text-white text-lg mb-4 whitespace-pre-wrap" />
+                                    </div>
                                     {/* Text-only passage */}
                                     {currentItem.question.passage_text && !currentItem.question.passage_audio_url && (
                                         <div className="mb-6 p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl">
@@ -801,16 +825,16 @@ export default function TakeExamPage() {
                                                 const letter = String.fromCharCode(65 + optIdx)
                                                 const isSelected = answers[currentItem.question.id] === letter
                                                 return (
-                                                    <button key={optIdx} onClick={() => saveAnswer(currentItem.question.id, letter)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}>
-                                                        <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg mr-3 font-bold ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`}>{letter}</span>
-                                                        <SmartText text={opt} as="span" />
+                                                    <button key={optIdx} onClick={() => saveAnswer(currentItem.question.id, letter)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}>
+                                                        <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${currentItem.question.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`} dir="ltr">{letter}</span>
+                                                        <div className="flex-1" dir={currentItem.question.text_direction || 'ltr'}><SmartText text={opt} as="span" className={currentItem.question.text_direction === 'rtl' ? 'text-right block' : ''} /></div>
                                                     </button>
                                                 )
                                             })}
                                         </div>
                                     )}
                                     {currentItem.question.question_type === 'ESSAY' && (
-                                        <textarea value={answers[currentItem.question.id] || ''} onChange={(e) => saveAnswer(currentItem.question.id, e.target.value)} className="w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none" rows={6} placeholder="Tulis jawaban Anda di sini..." />
+                                        <textarea dir={currentItem.question.text_direction || 'ltr'} value={answers[currentItem.question.id] || ''} onChange={(e) => saveAnswer(currentItem.question.id, e.target.value)} className={`w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none ${currentItem.question.text_direction === 'rtl' ? 'text-right' : ''}`} rows={6} placeholder="Tulis jawaban Anda di sini..." />
                                     )}
                                 </div>
                             ) : null}

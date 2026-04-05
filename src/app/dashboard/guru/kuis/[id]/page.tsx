@@ -33,6 +33,7 @@ interface QuizQuestion {
     difficulty?: 'EASY' | 'MEDIUM' | 'HARD'
     status?: string
     teacher_hots_claim?: boolean
+    text_direction?: 'ltr' | 'rtl'
 }
 
 interface Quiz {
@@ -70,7 +71,8 @@ export default function EditQuizPage() {
         difficulty: undefined as any,
         points: 10,
         order_index: 0,
-        teacher_hots_claim: false
+        teacher_hots_claim: false,
+        text_direction: 'ltr'
     })
 
     // Passage mode state
@@ -79,7 +81,7 @@ export default function EditQuizPage() {
     const [passageAudioUrl, setPassageAudioUrl] = useState('')
     const [uploadingAudio, setUploadingAudio] = useState(false)
     const [passageQuestions, setPassageQuestions] = useState<QuizQuestion[]>([{
-        question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0
+        question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, text_direction: 'ltr'
     }])
 
     // Calculate total points
@@ -255,9 +257,14 @@ export default function EditQuizPage() {
                 body: JSON.stringify({
                     question_id: editingQuestionId,
                     question_text: editForm.question_text,
+                    question_type: editForm.question_type,
                     options: editForm.options,
                     correct_answer: editForm.correct_answer,
-                    teacher_hots_claim: editForm.teacher_hots_claim || false
+                    difficulty: editForm.difficulty,
+                    points: editForm.points,
+                    image_url: editForm.image_url,
+                    teacher_hots_claim: editForm.teacher_hots_claim || false,
+                    text_direction: editForm.text_direction || 'ltr'
                 })
             })
             setEditingQuestionId(null)
@@ -878,15 +885,76 @@ export default function EditQuizPage() {
 
                         <div className="space-y-4">
                             {/* Question Text */}
+                            <div className="flex items-center gap-4">
+                                <div className="flex-1">
+                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Soal</label>
+                                    <select 
+                                        value={editForm.question_type} 
+                                        onChange={(e) => {
+                                            const type = e.target.value as 'MULTIPLE_CHOICE' | 'ESSAY'
+                                            if (type === 'ESSAY') {
+                                                if (confirm('Beralih ke Essay akan menghapus opsi dan kunci jawaban yang ada saat ini. Lanjutkan?')) {
+                                                    setEditForm({ ...editForm, question_type: type, options: null, correct_answer: null })
+                                                }
+                                            } else {
+                                                setEditForm({ ...editForm, question_type: type, options: editForm.options || ['', '', '', ''], correct_answer: '' })
+                                            }
+                                        }}
+                                        className="w-full px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                    >
+                                        <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
+                                        <option value="ESSAY">Essay</option>
+                                    </select>
+                                </div>
+                                <div className="flex-1">
+                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Arah Teks</label>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setEditForm({ ...editForm, text_direction: 'ltr' })}
+                                            className={`flex-1 py-1.5 rounded-xl text-sm font-bold transition-all border ${editForm.text_direction !== 'rtl' ? 'bg-primary text-white border-primary' : 'bg-secondary/5 text-text-main dark:text-white border-secondary/20'}`}
+                                        >
+                                            Kiri ke Kanan
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setEditForm({ ...editForm, text_direction: 'rtl' })}
+                                            className={`flex-1 py-1.5 rounded-xl text-sm font-bold transition-all border ${editForm.text_direction === 'rtl' ? 'bg-primary text-white border-primary' : 'bg-secondary/5 text-text-main dark:text-white border-secondary/20'}`}
+                                        >
+                                            Arab (RTL)
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Question Text */}
                             <div>
                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Teks Soal</label>
-                                <textarea
-                                    value={editForm.question_text}
-                                    onChange={(e) => setEditForm({ ...editForm, question_text: e.target.value })}
-                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/30 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                                    rows={4}
-                                    placeholder="Masukkan teks soal..."
-                                />
+                                <div dir={editForm.text_direction || 'ltr'}>
+                                    <textarea
+                                        value={editForm.question_text}
+                                        onChange={(e) => setEditForm({ ...editForm, question_text: e.target.value })}
+                                        className="w-full px-4 py-3 bg-secondary/5 border border-secondary/30 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                                        rows={4}
+                                        placeholder="Masukkan teks soal..."
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Gambar Soal (Opsional)</label>
+                                <div className="flex items-start gap-4">
+                                    <QuestionImageUpload
+                                        imageUrl={editForm.image_url}
+                                        onImageChange={(url) => setEditForm({ ...editForm, image_url: url })}
+                                        disabled={false}
+                                    />
+                                    {editForm.image_url && (
+                                        <div className="flex-1 bg-secondary/5 rounded-xl border border-secondary/20 p-2 text-center">
+                                            <img src={editForm.image_url} className="max-h-40 mx-auto rounded-lg" alt="Preview" />
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Passage Text / Audio (if exists) */}
@@ -918,6 +986,7 @@ export default function EditQuizPage() {
                                                     {String.fromCharCode(65 + optIdx)}
                                                 </span>
                                                 <input
+                                                    dir={editForm.text_direction || 'ltr'}
                                                     type="text"
                                                     value={opt}
                                                     onChange={(e) => {
@@ -925,7 +994,7 @@ export default function EditQuizPage() {
                                                         newOptions[optIdx] = e.target.value
                                                         setEditForm({ ...editForm, options: newOptions })
                                                     }}
-                                                    className="flex-1 px-4 py-2 bg-secondary/5 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                    className={`flex-1 px-4 py-2 bg-secondary/5 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary ${editForm.text_direction === 'rtl' ? 'text-right' : ''}`}
                                                     placeholder={`Pilihan ${String.fromCharCode(65 + optIdx)}`}
                                                 />
                                                 <button
@@ -934,8 +1003,34 @@ export default function EditQuizPage() {
                                                 >
                                                     {editForm.correct_answer === String.fromCharCode(65 + optIdx) ? '✓ Benar' : 'Set Benar'}
                                                 </button>
+                                                {editForm.options!.length > 2 && (
+                                                    <button
+                                                        onClick={() => {
+                                                            const newOptions = [...editForm.options!]
+                                                            newOptions.splice(optIdx, 1)
+                                                            let newCorrectAnswer = editForm.correct_answer
+                                                            if (newCorrectAnswer) {
+                                                                const charCode = newCorrectAnswer.charCodeAt(0) - 65
+                                                                if (charCode === optIdx) newCorrectAnswer = ''
+                                                                else if (charCode > optIdx) newCorrectAnswer = String.fromCharCode(charCode + 65 - 1)
+                                                            }
+                                                            setEditForm({ ...editForm, options: newOptions, correct_answer: newCorrectAnswer })
+                                                        }}
+                                                        className="px-3 py-2 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                )}
                                             </div>
                                         ))}
+                                        {editForm.options.length < 6 && (
+                                            <button
+                                                onClick={() => setEditForm({ ...editForm, options: [...editForm.options!, ''] })}
+                                                className="mt-2 text-sm text-primary font-bold hover:underline flex items-center gap-1"
+                                            >
+                                                <Plus set="bold" primaryColor="currentColor" size={16} /> Tambah Opsi
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -947,12 +1042,38 @@ export default function EditQuizPage() {
                                     <textarea
                                         value={editForm.correct_answer || ''}
                                         onChange={(e) => setEditForm({ ...editForm, correct_answer: e.target.value })}
-                                        className="w-full px-4 py-3 bg-secondary/5 border border-secondary/30 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                                        className={`w-full px-4 py-3 bg-secondary/5 border border-secondary/30 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none ${editForm.text_direction === 'rtl' ? 'text-right' : ''}`}
                                         rows={3}
+                                        dir={editForm.text_direction || 'ltr'}
                                         placeholder="Kunci jawaban essay..."
                                     />
                                 </div>
                             )}
+
+                            <div className="flex items-center gap-4">
+                                <div className="flex-1">
+                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tingkat Kesulitan</label>
+                                    <select 
+                                        className="w-full px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                                        value={editForm.difficulty || 'MEDIUM'}
+                                        onChange={e => setEditForm({ ...editForm, difficulty: e.target.value as any })}
+                                    >
+                                        <option value="EASY">Mudah</option>
+                                        <option value="MEDIUM">Sedang</option>
+                                        <option value="HARD">Sulit</option>
+                                    </select>
+                                </div>
+                                <div className="flex-1">
+                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Poin Soal</label>
+                                    <input 
+                                        type="number" 
+                                        className="w-full px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                                        value={editForm.points}
+                                        onChange={e => setEditForm({ ...editForm, points: Number(e.target.value) || 1 })}
+                                        min={1}
+                                    />
+                                </div>
+                            </div>
 
                             {/* HOTS Toggle */}
                             {aiReviewEnabled && (
@@ -1007,7 +1128,7 @@ export default function EditQuizPage() {
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Soal</label>
                             <div className="flex gap-2">
                                 <button
-                                    onClick={() => { setIsPassageMode(false); setManualForm({ ...manualForm, question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''] }) }}
+                                    onClick={() => { setIsPassageMode(false); setManualForm({ ...manualForm, question_type: 'MULTIPLE_CHOICE', options: manualForm.options || ['', '', '', ''], correct_answer: '' }) }}
                                     className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${!isPassageMode && manualForm.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300 hover:bg-secondary/20'}`}
                                 >
                                     Pilihan Ganda
@@ -1118,20 +1239,20 @@ export default function EditQuizPage() {
                                                 <div className="flex items-center justify-between mb-3">
                                                     <span className="text-sm font-bold text-text-main dark:text-white">Soal {pqIdx + 1}</span>
                                                     <div className="flex items-center gap-2">
-                                                        <select
-                                                            value={pq.question_type}
-                                                            onChange={(e) => {
-                                                                const updated = [...passageQuestions]
-                                                                updated[pqIdx] = {
-                                                                    ...updated[pqIdx],
-                                                                    question_type: e.target.value as 'MULTIPLE_CHOICE' | 'ESSAY',
-                                                                    options: e.target.value === 'MULTIPLE_CHOICE' ? ['', '', '', ''] : null,
-                                                                    correct_answer: e.target.value === 'MULTIPLE_CHOICE' ? '' : null
-                                                                }
-                                                                setPassageQuestions(updated)
-                                                            }}
-                                                            className="text-xs px-2 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-secondary/30 text-text-main dark:text-white"
-                                                        >
+                                                            <select
+                                                                value={pq.question_type}
+                                                                onChange={(e) => {
+                                                                    const updated = [...passageQuestions]
+                                                                    updated[pqIdx] = {
+                                                                        ...updated[pqIdx],
+                                                                        question_type: e.target.value as 'MULTIPLE_CHOICE' | 'ESSAY',
+                                                                        options: e.target.value === 'MULTIPLE_CHOICE' ? (updated[pqIdx].options || ['', '', '', '']) : null,
+                                                                        correct_answer: e.target.value === 'MULTIPLE_CHOICE' ? '' : null
+                                                                    }
+                                                                    setPassageQuestions(updated)
+                                                                }}
+                                                                className="text-xs px-2 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-secondary/30 text-text-main dark:text-white"
+                                                            >
                                                             <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
                                                             <option value="ESSAY">Essay</option>
                                                         </select>
@@ -1156,24 +1277,62 @@ export default function EditQuizPage() {
                                                 />
                                                 {pq.question_type === 'MULTIPLE_CHOICE' && (
                                                     <div className="mt-3 space-y-2">
-                                                        <div className="grid grid-cols-2 gap-2">
+                                                        <div className="space-y-2">
                                                             {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
-                                                                <input
-                                                                    key={letter}
-                                                                    type="text"
-                                                                    value={pq.options?.[optIdx] || ''}
-                                                                    onChange={(e) => {
-                                                                        const updated = [...passageQuestions]
-                                                                        const newOpts = [...(updated[pqIdx].options || ['', '', '', ''])]
-                                                                        newOpts[optIdx] = e.target.value
-                                                                        updated[pqIdx] = { ...updated[pqIdx], options: newOpts }
-                                                                        setPassageQuestions(updated)
-                                                                    }}
-                                                                    className="px-3 py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
-                                                                    placeholder={`Opsi ${letter}`}
-                                                                />
+                                                                <div key={letter} className="flex gap-2">
+                                                                    <div className="relative flex-1">
+                                                                        <div className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary">{letter}</div>
+                                                                        <input
+                                                                            type="text"
+                                                                            value={pq.options?.[optIdx] || ''}
+                                                                            onChange={(e) => {
+                                                                                const updated = [...passageQuestions]
+                                                                                const newOpts = [...(updated[pqIdx].options || ['', '', '', ''])]
+                                                                                newOpts[optIdx] = e.target.value
+                                                                                updated[pqIdx] = { ...updated[pqIdx], options: newOpts }
+                                                                                setPassageQuestions(updated)
+                                                                            }}
+                                                                            className="w-full pl-10 pr-3 py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                                                            placeholder={`Opsi ${letter}`}
+                                                                        />
+                                                                    </div>
+                                                                    {(pq.options || []).length > 2 && (
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                const updated = [...passageQuestions]
+                                                                                const newOpts = [...(updated[pqIdx].options || ['', '', '', ''])]
+                                                                                newOpts.splice(optIdx, 1)
+                                                                                let newCorrectAnswer = updated[pqIdx].correct_answer
+                                                                                if (newCorrectAnswer) {
+                                                                                    const charCode = newCorrectAnswer.charCodeAt(0) - 65
+                                                                                    if (charCode === optIdx) newCorrectAnswer = ''
+                                                                                    else if (charCode > optIdx) newCorrectAnswer = String.fromCharCode(charCode + 65 - 1)
+                                                                                }
+                                                                                updated[pqIdx] = { ...updated[pqIdx], options: newOpts, correct_answer: newCorrectAnswer }
+                                                                                setPassageQuestions(updated)
+                                                                            }}
+                                                                            className="px-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
+                                                                        >
+                                                                            ✕
+                                                                        </button>
+                                                                    )}
+                                                                </div>
                                                             )})}
                                                         </div>
+                                                        {(pq.options || []).length < 6 && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    const updated = [...passageQuestions]
+                                                                    const newOpts = [...(updated[pqIdx].options || ['', '', '', ''])]
+                                                                    newOpts.push('')
+                                                                    updated[pqIdx] = { ...updated[pqIdx], options: newOpts }
+                                                                    setPassageQuestions(updated)
+                                                                }}
+                                                                className="text-xs text-primary font-bold hover:underline flex items-center gap-1 mt-1"
+                                                            >
+                                                                <Plus set="bold" primaryColor="currentColor" size={14} /> Tambah Opsi
+                                                            </button>
+                                                        )}
                                                         <div className="flex gap-2 mt-2">
                                                             <span className="text-xs text-text-secondary mt-1">Jawaban:</span>
                                                             {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
@@ -1250,8 +1409,26 @@ export default function EditQuizPage() {
                                     <>
                                         <div className="grid grid-cols-2 gap-3">
                                             {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
-                                                <div key={letter}>
-                                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Opsi {letter}</label>
+                                                <div key={letter} className="flex flex-col">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <label className="text-sm font-bold text-text-main dark:text-white">Opsi {letter}</label>
+                                                        {(manualForm.options || []).length > 2 && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    const newOpts = [...(manualForm.options || ['', '', '', ''])]
+                                                                    newOpts.splice(idx, 1)
+                                                                    let newCorrectAnswer = manualForm.correct_answer
+                                                                    if (newCorrectAnswer) {
+                                                                        const charCode = newCorrectAnswer.charCodeAt(0) - 65
+                                                                        if (charCode === idx) newCorrectAnswer = ''
+                                                                        else if (charCode > idx) newCorrectAnswer = String.fromCharCode(charCode + 65 - 1)
+                                                                    }
+                                                                    setManualForm({ ...manualForm, options: newOpts, correct_answer: newCorrectAnswer })
+                                                                }}
+                                                                className="text-xs font-bold text-red-500 hover:text-red-700"
+                                                            >✕ Hapus</button>
+                                                        )}
+                                                    </div>
                                                     <input
                                                         type="text"
                                                         value={manualForm.options?.[idx] || ''}
@@ -1265,6 +1442,18 @@ export default function EditQuizPage() {
                                                 </div>
                                             )})}
                                         </div>
+                                        {(manualForm.options || []).length < 6 && (
+                                            <button
+                                                onClick={() => {
+                                                    const newOpts = [...(manualForm.options || ['', '', '', ''])]
+                                                    newOpts.push('')
+                                                    setManualForm({ ...manualForm, options: newOpts })
+                                                }}
+                                                className="mt-2 text-sm text-primary font-bold hover:underline flex items-center gap-1"
+                                            >
+                                                <Plus set="bold" primaryColor="currentColor" size={16} /> Tambah Opsi
+                                            </button>
+                                        )}
                                         <div>
                                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kunci Jawaban</label>
                                             <div className="flex gap-2">

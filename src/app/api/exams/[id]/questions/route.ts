@@ -100,6 +100,7 @@ export async function POST(
             passage_text: q.passage_text || null,
             passage_audio_url: q.passage_audio_url || null,
             teacher_hots_claim: q.teacher_hots_claim || false,
+            text_direction: q.text_direction || 'ltr',
             // If question came from bank soal and is already approved, inherit that status
             ...(q.bank_status === 'approved' ? { status: 'approved' } : {})
         }))
@@ -172,7 +173,7 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { question_id, question_text, options, correct_answer, difficulty, points, image_url, passage_audio_url, teacher_hots_claim } = body
+        const { question_id, question_text, question_type, options, correct_answer, difficulty, points, image_url, passage_audio_url, teacher_hots_claim, text_direction } = body
 
         if (!question_id) {
             return NextResponse.json({ error: 'question_id required' }, { status: 400 })
@@ -180,6 +181,7 @@ export async function PUT(
 
         const updateData: any = {}
         if (question_text !== undefined) updateData.question_text = question_text
+        if (question_type !== undefined) updateData.question_type = question_type
         if (options !== undefined) updateData.options = options
         if (correct_answer !== undefined) updateData.correct_answer = correct_answer
         if (difficulty !== undefined) updateData.difficulty = difficulty
@@ -187,6 +189,7 @@ export async function PUT(
         if (image_url !== undefined) updateData.image_url = image_url
         if (passage_audio_url !== undefined) updateData.passage_audio_url = passage_audio_url
         if (teacher_hots_claim !== undefined) updateData.teacher_hots_claim = teacher_hots_claim
+        if (text_direction !== undefined) updateData.text_direction = text_direction
 
         const { data, error } = await supabase
             .from('exam_questions')

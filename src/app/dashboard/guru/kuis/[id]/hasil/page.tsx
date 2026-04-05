@@ -55,6 +55,11 @@ export default function QuizSubmissionsPage() {
                 const quizData = await quizRes.json()
                 const subsData = await subsRes.json()
 
+                // Sort submissions alphabetically by student name
+                subsData.sort((a: QuizSubmission, b: QuizSubmission) => 
+                    a.student.user.full_name.localeCompare(b.student.user.full_name)
+                )
+
                 setQuiz(quizData)
                 setSubmissions(subsData)
 
@@ -82,7 +87,9 @@ export default function QuizSubmissionsPage() {
 
     // Calculate not submitted students
     const submittedStudentIds = submissions.map(s => s.student.id)
-    const notSubmittedStudents = classStudents.filter(s => !submittedStudentIds.includes(s.id))
+    const notSubmittedStudents = classStudents
+        .filter(s => !submittedStudentIds.includes(s.id))
+        .sort((a, b) => a.user.full_name.localeCompare(b.user.full_name))
 
     if (loading) return (
         <div className="flex justify-center py-12">

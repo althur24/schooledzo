@@ -96,6 +96,7 @@ export async function POST(
             passage_audio_url: q.passage_audio_url || null,
             image_url: q.image_url || null,
             teacher_hots_claim: q.teacher_hots_claim || false,
+            text_direction: q.text_direction || 'ltr',
             // If question came from bank soal and is already approved, inherit that status
             ...(q.bank_status === 'approved' ? { status: 'approved' } : {})
         }))

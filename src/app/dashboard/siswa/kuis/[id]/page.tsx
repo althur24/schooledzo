@@ -16,6 +16,7 @@ interface QuizQuestion {
     image_url?: string | null
     passage_text?: string | null
     passage_audio_url?: string | null
+    text_direction?: 'ltr' | 'rtl'
 }
 
 interface Quiz {
@@ -551,7 +552,7 @@ export default function KerjakanKuisPage() {
                                                         <span className="w-8 h-8 flex-shrink-0 bg-violet-500 text-white rounded-full flex items-center justify-center font-bold">
                                                             {questionNumber}
                                                         </span>
-                                                        <div className="flex-1">
+                                                        <div className="flex-1" dir={q.text_direction || 'ltr'}>
                                                             <SmartText text={q.question_text} className="text-text-main dark:text-white text-lg leading-relaxed whitespace-pre-wrap" />
                                                         </div>
                                                         <span className="text-xs text-text-secondary font-medium px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">
@@ -575,13 +576,13 @@ export default function KerjakanKuisPage() {
                                                                                 {isSelected && <TickSquare set="bold" primaryColor="currentColor" size={16} />}
                                                                             </div>
                                                                             <input type="radio" name={`q-${q.id}`} value={letter} checked={isSelected} onChange={() => { const newAnswers = { ...answers, [q.id]: letter }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className="hidden" />
-                                                                            <span className="font-medium"><span className="mr-2 font-bold opacity-70">{letter}.</span><SmartText text={opt} as="span" /></span>
+                                                                            <span className="font-medium flex-1" dir={q.text_direction || 'ltr'}><span className="mr-2 font-bold opacity-70" dir="ltr">{letter}.</span><SmartText text={opt} as="span" /></span>
                                                                         </label>
                                                                     )
                                                                 })}
                                                             </div>
                                                         ) : (
-                                                            <textarea value={answers[q.id] || ''} onChange={(e) => { const newAnswers = { ...answers, [q.id]: e.target.value }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className="w-full h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400" placeholder="Tulis jawaban Anda di sini..." />
+                                                            <textarea dir={q.text_direction || 'ltr'} value={answers[q.id] || ''} onChange={(e) => { const newAnswers = { ...answers, [q.id]: e.target.value }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className={`w-full h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} placeholder="Tulis jawaban Anda di sini..." />
                                                         )}
                                                     </div>
                                                 </div>
@@ -607,8 +608,8 @@ export default function KerjakanKuisPage() {
                                         <span className="w-8 h-8 flex-shrink-0 bg-primary text-white rounded-full flex items-center justify-center font-bold">
                                             {questionNumber}
                                         </span>
-                                        <div className="flex-1">
-                                            <SmartText text={q.question_text} className="text-text-main dark:text-white text-lg leading-relaxed whitespace-pre-wrap" />
+                                        <div className="flex-1" dir={q.text_direction || 'ltr'}>
+                                            <SmartText text={q.question_text} className={`text-text-main dark:text-white text-lg leading-relaxed whitespace-pre-wrap ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
                                         </div>
                                         <span className="text-xs text-text-secondary font-medium px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">
                                             {q.points} Poin
@@ -631,13 +632,13 @@ export default function KerjakanKuisPage() {
                                                                 {isSelected && <TickSquare set="bold" primaryColor="currentColor" size={16} />}
                                                             </div>
                                                             <input type="radio" name={`q-${q.id}`} value={letter} checked={isSelected} onChange={() => { const newAnswers = { ...answers, [q.id]: letter }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className="hidden" />
-                                                            <span className="font-medium"><span className="mr-2 font-bold opacity-70">{letter}.</span><SmartText text={opt} as="span" /></span>
+                                                            <span className={`font-medium flex-1 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} dir={q.text_direction || 'ltr'}><span className="mr-2 font-bold opacity-70" dir="ltr">{letter}.</span><SmartText text={opt} as="span" /></span>
                                                         </label>
                                                     )
                                                 })}
                                             </div>
                                         ) : (
-                                            <textarea value={answers[q.id] || ''} onChange={(e) => { const newAnswers = { ...answers, [q.id]: e.target.value }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className="w-full h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400" placeholder="Tulis jawaban Anda di sini..." />
+                                            <textarea dir={q.text_direction || 'ltr'} value={answers[q.id] || ''} onChange={(e) => { const newAnswers = { ...answers, [q.id]: e.target.value }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className={`w-full h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} placeholder="Tulis jawaban Anda di sini..." />
                                         )}
                                     </div>
                                 </div>

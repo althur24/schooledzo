@@ -14,6 +14,7 @@ interface ExamQuestion {
     points: number
     passage_text?: string | null
     image_url?: string | null
+    text_direction?: 'ltr' | 'rtl'
 }
 
 interface OfficialExam {
@@ -547,7 +548,9 @@ export default function TakeOfficialExamPage() {
                                 </div>
                             )}
 
-                            <SmartText text={currentQuestion.question_text} className="text-text-main dark:text-white text-lg mb-4" />
+                            <div dir={currentQuestion.text_direction || 'ltr'}>
+                                <SmartText text={currentQuestion.question_text} className="text-text-main dark:text-white text-lg mb-4 whitespace-pre-wrap" />
+                            </div>
 
                             {currentQuestion.image_url && (
                                 <div className="mb-4">
@@ -562,9 +565,9 @@ export default function TakeOfficialExamPage() {
                                         const isSelected = answers[currentQuestion.id] === letter
                                         return (
                                             <button key={optIdx} onClick={() => saveAnswer(currentQuestion.id, letter)}
-                                                className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${isSelected ? 'bg-indigo-500/10 border-indigo-500 text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary hover:border-gray-400'}`}>
-                                                <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg mr-3 font-bold ${isSelected ? 'bg-indigo-500 text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary'}`}>{letter}</span>
-                                                <SmartText text={opt} as="span" />
+                                                className={`w-full text-left px-4 py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-indigo-500/10 border-indigo-500 text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary hover:border-gray-400'}`}>
+                                                <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${currentQuestion.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary'}`} dir="ltr">{letter}</span>
+                                                <div className="flex-1" dir={currentQuestion.text_direction || 'ltr'}><SmartText text={opt} as="span" className={currentQuestion.text_direction === 'rtl' ? 'text-right block' : ''} /></div>
                                             </button>
                                         )
                                     })}
@@ -572,8 +575,8 @@ export default function TakeOfficialExamPage() {
                             )}
 
                             {currentQuestion.question_type === 'ESSAY' && (
-                                <textarea value={answers[currentQuestion.id] || ''} onChange={(e) => saveAnswer(currentQuestion.id, e.target.value)}
-                                    className="w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" rows={6} placeholder="Tulis jawaban Anda di sini..." />
+                                <textarea dir={currentQuestion.text_direction || 'ltr'} value={answers[currentQuestion.id] || ''} onChange={(e) => saveAnswer(currentQuestion.id, e.target.value)}
+                                    className={`w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none ${currentQuestion.text_direction === 'rtl' ? 'text-right' : ''}`} rows={6} placeholder="Tulis jawaban Anda di sini..." />
                             )}
                         </div>
                     </div>
