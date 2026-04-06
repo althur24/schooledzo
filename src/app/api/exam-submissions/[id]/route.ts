@@ -22,6 +22,8 @@ export async function GET(
                 exam:exams(
                     id,
                     title,
+                    show_results_immediately,
+                    results_released,
                     questions:exam_questions(*)
                 ),
                 student:students(
@@ -35,6 +37,12 @@ export async function GET(
 
         if (error) throw error
 
+        // Check visibility for SISWA
+        const examObj = (data as any)?.exam || {}
+        const showImmediately = examObj.show_results_immediately ?? true
+        const isReleased = examObj.results_released || false
+        const isHidden = user.role === 'SISWA' && !showImmediately && !isReleased
+
         // Fetch answers from exam_answers table
         const { data: examAnswers, error: answersError } = await supabase
             .from('exam_answers')
@@ -47,15 +55,23 @@ export async function GET(
         const answers = (examAnswers || []).map(a => ({
             question_id: a.question_id,
             answer: a.answer,
-            is_correct: a.is_correct,
-            score: a.points_earned,
-            feedback: a.feedback || ''
+            is_correct: isHidden ? undefined : a.is_correct,
+            score: isHidden ? undefined : a.points_earned,
+            feedback: isHidden ? '' : (a.feedback || '')
         }))
 
-        return NextResponse.json({
+        const responseData = {
             ...data,
-            answers
-        })
+            answers,
+            results_hidden: isHidden
+        }
+
+        if (isHidden) {
+            responseData.total_score = null
+            responseData.max_score = null
+        }
+
+        return NextResponse.json(responseData)
     } catch (error) {
         console.error('Error fetching exam submission:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
