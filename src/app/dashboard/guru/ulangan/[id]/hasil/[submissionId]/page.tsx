@@ -24,6 +24,7 @@ interface Question {
     order_index: number
     passage_text?: string | null
     passage_audio_url?: string | null
+    text_direction?: 'ltr' | 'rtl'
 }
 
 interface SubmissionDetail {
@@ -217,7 +218,9 @@ export default function ExamGradingPage() {
                                         </div>
                                     )}
 
-                                    <SmartText text={q.question_text} className="text-text-main dark:text-white text-lg mb-4" />
+                                    <div dir={q.text_direction || 'ltr'}>
+                                        <SmartText text={q.question_text} className={`text-text-main dark:text-white text-lg mb-4 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
+                                    </div>
 
                                     <div className="bg-secondary/5 dark:bg-black/20 p-4 rounded-xl border border-secondary/20 dark:border-white/10 space-y-3">
                                         <div>

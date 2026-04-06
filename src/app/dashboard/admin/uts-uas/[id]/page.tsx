@@ -308,14 +308,15 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     options: q.question_type === 'MULTIPLE_CHOICE' ? q.options : null,
                     correct_answer: q.correct_answer || null, points: q.points || 10,
                     order_index: questions.length + idx, passage_text: passageText,
-                    passage_audio_url: passageAudioUrl || null, teacher_hots_claim: q.teacher_hots_claim || false
+                    passage_audio_url: passageAudioUrl || null, teacher_hots_claim: q.teacher_hots_claim || false,
+                    text_direction: q.text_direction || 'ltr'
                 }))
                 await fetch(`/api/official-exams/${examId}/questions`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ questions: questionsToSave })
                 })
                 setPassageText(''); setPassageAudioUrl('')
-                setPassageQuestions([{ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: null, passage_text: null }])
+                setPassageQuestions([{ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: null, passage_text: null, text_direction: 'ltr' }])
                 setIsPassageMode(false); setSoalMode('list'); fetchQuestions()
             } finally { setSaving(false) }
             return
@@ -330,10 +331,10 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     options: manualForm.question_type === 'MULTIPLE_CHOICE' ? manualForm.options : null,
                     correct_answer: manualForm.correct_answer || null, points: manualForm.points,
                     difficulty: manualForm.difficulty, teacher_hots_claim: manualForm.teacher_hots_claim || false,
-                    order_index: questions.length
+                    order_index: questions.length, text_direction: manualForm.text_direction || 'ltr'
                 })
             })
-            setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false })
+            setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false, text_direction: 'ltr' })
             setSoalMode('list'); fetchQuestions()
         } finally { setSaving(false) }
     }
@@ -598,14 +599,16 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                 {q.difficulty && <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/10 text-text-secondary font-medium">{q.difficulty}</span>}
                                             </div>
                                             {q.passage_text && (<div className="mb-3 p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-lg overflow-hidden"><p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1">📖 Bacaan:</p><p className="text-sm text-text-main dark:text-white whitespace-pre-wrap line-clamp-3">{q.passage_text}</p></div>)}
-                                            <SmartText text={q.question_text} className="prose dark:prose-invert max-w-none text-text-main dark:text-white mb-4" />
+                                            <div dir={q.text_direction || 'ltr'}>
+                                                <SmartText text={q.question_text} className={`prose dark:prose-invert max-w-none text-text-main dark:text-white mb-4 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
+                                            </div>
                                             {q.image_url && (
                                                 <div className="mb-4">
                                                     <img src={q.image_url} alt="Gambar soal" className="max-h-60 rounded-xl border border-secondary/20" />
                                                 </div>
                                             )}
                                             {q.question_type === 'MULTIPLE_CHOICE' && q.options && (
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm" dir={q.text_direction || 'ltr'}>
                                                     {q.options.map((opt: string, optIdx: number) => (
                                                         <div key={optIdx} className={`px-4 py-3 rounded-xl border flex items-center gap-3 ${q.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-500/10 border-green-200 text-green-700 dark:border-green-500/30 dark:text-green-400' : 'bg-secondary/5 border-transparent text-text-secondary'}`}>
                                                             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${q.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-500 text-white' : 'bg-secondary/20 text-text-secondary'}`}>{String.fromCharCode(65 + optIdx)}</span>
@@ -901,7 +904,14 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                         {passageQuestions.length > 1 && <button onClick={() => setPassageQuestions(passageQuestions.filter((_, i) => i !== pqIdx))} className="text-red-500 hover:text-red-700 text-sm font-bold px-2">✕</button>}
                                                     </div>
                                                 </div>
-                                                <textarea value={pq.question_text} onChange={(e) => { const u = [...passageQuestions]; u[pqIdx] = { ...u[pqIdx], question_text: e.target.value }; setPassageQuestions(u) }} className="w-full px-3 py-2 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" rows={2} placeholder="Tulis pertanyaan..." />
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-xs text-text-secondary">Arah Teks:</span>
+                                                    <div className="flex gap-1">
+                                                        <button type="button" onClick={() => { const u = [...passageQuestions]; u[pqIdx] = { ...u[pqIdx], text_direction: 'ltr' }; setPassageQuestions(u) }} className={`px-2 py-0.5 text-[10px] font-bold rounded transition-colors ${pq.text_direction !== 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary'}`}>LTR</button>
+                                                        <button type="button" onClick={() => { const u = [...passageQuestions]; u[pqIdx] = { ...u[pqIdx], text_direction: 'rtl' }; setPassageQuestions(u) }} className={`px-2 py-0.5 text-[10px] font-bold rounded transition-colors ${pq.text_direction === 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary'}`}>RTL</button>
+                                                    </div>
+                                                </div>
+                                                <textarea dir={pq.text_direction || 'ltr'} value={pq.question_text} onChange={(e) => { const u = [...passageQuestions]; u[pqIdx] = { ...u[pqIdx], question_text: e.target.value }; setPassageQuestions(u) }} className={`w-full px-3 py-2 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${pq.text_direction === 'rtl' ? 'text-right' : ''}`} rows={2} placeholder="Tulis pertanyaan..." />
                                                 {pq.question_type === 'MULTIPLE_CHOICE' && (
                                                     <div className="mt-3 space-y-2">
                                                         <div className="space-y-2">
@@ -969,8 +979,16 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         ) : (
                             <>
                                 <div>
-                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pertanyaan</label>
-                                    <MathTextarea value={manualForm.question_text} onChange={(val: string) => setManualForm({ ...manualForm, question_text: val })} placeholder="Tulis pertanyaan..." rows={3} />
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="block text-sm font-bold text-text-main dark:text-white">Pertanyaan</label>
+                                        <div className="flex gap-1">
+                                            <button type="button" onClick={() => setManualForm({ ...manualForm, text_direction: 'ltr' })} className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors ${manualForm.text_direction !== 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>LTR</button>
+                                            <button type="button" onClick={() => setManualForm({ ...manualForm, text_direction: 'rtl' })} className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors ${manualForm.text_direction === 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>Arab (RTL)</button>
+                                        </div>
+                                    </div>
+                                    <div dir={manualForm.text_direction || 'ltr'}>
+                                        <MathTextarea value={manualForm.question_text} onChange={(val: string) => setManualForm({ ...manualForm, question_text: val })} placeholder="Tulis pertanyaan..." rows={3} />
+                                    </div>
                                 </div>
                                 {manualForm.question_type === 'MULTIPLE_CHOICE' && (
                                 <>

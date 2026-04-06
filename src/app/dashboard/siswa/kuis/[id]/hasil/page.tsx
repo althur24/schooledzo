@@ -31,6 +31,7 @@ interface QuizQuestion {
     options?: string[]
     passage_text?: string | null
     passage_audio_url?: string | null
+    text_direction?: 'ltr' | 'rtl'
 }
 
 interface Quiz {
@@ -144,7 +145,9 @@ export default function HasilKuisPage() {
                     )}
                 </div>
                 <div className="flex-1">
-                    <SmartText text={q.question_text} className="text-text-main dark:text-white mb-3" />
+                    <div dir={q.text_direction || 'ltr'}>
+                        <SmartText text={q.question_text} className={`text-text-main dark:text-white mb-3 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
+                    </div>
 
                     <div className="bg-secondary/10 rounded-lg p-4 text-sm space-y-2">
                         <div>

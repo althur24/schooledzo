@@ -192,7 +192,8 @@ export default function EditQuizPage() {
                         order_index: questions.length + idx,
                         passage_text: passageText,
                         passage_audio_url: passageAudioUrl || null,
-                        teacher_hots_claim: q.teacher_hots_claim || false
+                        teacher_hots_claim: q.teacher_hots_claim || false,
+                        text_direction: q.text_direction || 'ltr'
                     }))
                 await fetch(`/api/quizzes/${quizId}/questions`, {
                     method: 'POST',
@@ -201,7 +202,7 @@ export default function EditQuizPage() {
                 })
                 setPassageText('')
                 setPassageAudioUrl('')
-                setPassageQuestions([{ question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0 }])
+                setPassageQuestions([{ question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, text_direction: 'ltr' }])
                 setIsPassageMode(false)
                 setMode('list')
                 fetchQuiz()
@@ -232,7 +233,8 @@ export default function EditQuizPage() {
                 difficulty: undefined as any,
                 points: 10,
                 order_index: 0,
-                teacher_hots_claim: false
+                teacher_hots_claim: false,
+                text_direction: 'ltr'
             })
             setMode('list')
             fetchQuiz()
@@ -745,7 +747,9 @@ export default function EditQuizPage() {
                                             </div>
                                         )}
 
-                                        <SmartText text={q.question_text} className="text-text-main dark:text-white mb-2" />
+                                        <div dir={q.text_direction || 'ltr'}>
+                                            <SmartText text={q.question_text} className={`text-text-main dark:text-white mb-2 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
+                                        </div>
 
                                         {q.image_url && (
                                             <div className="mb-3">
@@ -754,7 +758,7 @@ export default function EditQuizPage() {
                                         )}
 
                                         {q.question_type === 'MULTIPLE_CHOICE' && q.options && (
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm" dir={q.text_direction || 'ltr'}>
                                                 {q.options.map((opt, optIdx) => (
                                                     <div key={optIdx} className={`px-3 py-2 rounded-lg border ${q.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400 border-green-300 dark:border-green-500/30' : 'bg-secondary/5 text-text-main dark:text-zinc-300 border-secondary/20'}`}>
                                                         <span className="font-bold mr-2">{String.fromCharCode(65 + optIdx)}.</span>
@@ -1264,14 +1268,22 @@ export default function EditQuizPage() {
                                                         )}
                                                     </div>
                                                 </div>
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-xs text-text-secondary">Arah Teks:</span>
+                                                    <div className="flex gap-1">
+                                                        <button type="button" onClick={() => { const updated = [...passageQuestions]; updated[pqIdx] = { ...updated[pqIdx], text_direction: 'ltr' }; setPassageQuestions(updated) }} className={`px-2 py-0.5 text-[10px] font-bold rounded transition-colors ${pq.text_direction !== 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary'}`}>LTR</button>
+                                                        <button type="button" onClick={() => { const updated = [...passageQuestions]; updated[pqIdx] = { ...updated[pqIdx], text_direction: 'rtl' }; setPassageQuestions(updated) }} className={`px-2 py-0.5 text-[10px] font-bold rounded transition-colors ${pq.text_direction === 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary'}`}>RTL</button>
+                                                    </div>
+                                                </div>
                                                 <textarea
+                                                    dir={pq.text_direction || 'ltr'}
                                                     value={pq.question_text}
                                                     onChange={(e) => {
                                                         const updated = [...passageQuestions]
                                                         updated[pqIdx] = { ...updated[pqIdx], question_text: e.target.value }
                                                         setPassageQuestions(updated)
                                                     }}
-                                                    className="w-full px-3 py-2 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                                    className={`w-full px-3 py-2 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${pq.text_direction === 'rtl' ? 'text-right' : ''}`}
                                                     rows={2}
                                                     placeholder="Tulis pertanyaan..."
                                                 />
@@ -1396,13 +1408,21 @@ export default function EditQuizPage() {
                             /* === NORMAL MODE (PG / Essay) === */
                             <>
                                 <div>
-                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pertanyaan</label>
-                                    <MathTextarea
-                                        value={manualForm.question_text}
-                                        onChange={(val) => setManualForm({ ...manualForm, question_text: val })}
-                                        placeholder="Tulis pertanyaan..."
-                                        rows={3}
-                                    />
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="block text-sm font-bold text-text-main dark:text-white">Pertanyaan</label>
+                                        <div className="flex gap-1">
+                                            <button type="button" onClick={() => setManualForm({ ...manualForm, text_direction: 'ltr' })} className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors ${manualForm.text_direction !== 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>LTR</button>
+                                            <button type="button" onClick={() => setManualForm({ ...manualForm, text_direction: 'rtl' })} className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors ${manualForm.text_direction === 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>Arab (RTL)</button>
+                                        </div>
+                                    </div>
+                                    <div dir={manualForm.text_direction || 'ltr'}>
+                                        <MathTextarea
+                                            value={manualForm.question_text}
+                                            onChange={(val) => setManualForm({ ...manualForm, question_text: val })}
+                                            placeholder="Tulis pertanyaan..."
+                                            rows={3}
+                                        />
+                                    </div>
                                 </div>
 
                                 {manualForm.question_type === 'MULTIPLE_CHOICE' && (
