@@ -25,7 +25,7 @@ const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: f
 interface ExamDetail {
     id: string; exam_type: 'UTS' | 'UAS'; title: string; description: string | null
     start_time: string; duration_minutes: number; is_active: boolean; is_randomized: boolean
-    max_violations: number; target_class_ids: string[]
+    max_violations: number; show_results_immediately: boolean; results_released: boolean; target_class_ids: string[]
     subject: { id: string; name: string }
     target_classes: { id: string; name: string; school_level: string; grade_level: number }[]
     academic_year: { id: string; name: string }
@@ -105,6 +105,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     const [settingsForm, setSettingsForm] = useState({
         title: '', description: '', start_time: '',
         duration_minutes: 90, is_randomized: true, max_violations: 3,
+        show_results_immediately: true,
         target_class_ids: [] as string[]
     })
     const [settingsSaving, setSettingsSaving] = useState(false)
@@ -134,6 +135,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                 start_time: data.start_time ? new Date(new Date(data.start_time).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '',
                 duration_minutes: data.duration_minutes || 90,
                 is_randomized: data.is_randomized ?? true,
+                show_results_immediately: data.show_results_immediately ?? true,
                 max_violations: data.max_violations || 3,
                 target_class_ids: data.target_class_ids || []
             })
@@ -444,6 +446,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     title: settingsForm.title, description: settingsForm.description,
                     start_time: localDate.toISOString(), duration_minutes: settingsForm.duration_minutes,
                     is_randomized: settingsForm.is_randomized, max_violations: settingsForm.max_violations,
+                    show_results_immediately: settingsForm.show_results_immediately,
                     target_class_ids: settingsForm.target_class_ids
                 })
             })
@@ -453,6 +456,27 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                 showToast('Pengaturan berhasil disimpan!', 'success')
             }
         } finally { setSettingsSaving(false) }
+    }
+
+    // Share results
+    const handleShareResults = async () => {
+        if (!confirm('Apakah Anda yakin ingin membagikan hasil ke siswa sekarang? Siswa akan bisa melihat nilai mereka.')) return
+        
+        try {
+            const res = await fetch(`/api/official-exams/${examId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ results_released: true })
+            })
+            if (res.ok) {
+                showToast('Hasil ujian telah dibagikan ke siswa.', 'success')
+                fetchExam() // Refresh to update button visibility
+            } else {
+                throw new Error('Gagal membagikan hasil')
+            }
+        } catch (error: any) {
+            showToast(error.message, 'error')
+        }
     }
 
     // Balance points
@@ -678,9 +702,24 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran (auto-submit)</label>
                         <input type="number" value={settingsForm.max_violations} onChange={(e) => setSettingsForm({ ...settingsForm, max_violations: parseInt(e.target.value) || 3 })} min={1} max={10} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" />
                     </div>
-                    <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
-                        <input type="checkbox" id="settings_randomize" checked={settingsForm.is_randomized} onChange={(e) => setSettingsForm({ ...settingsForm, is_randomized: e.target.checked })} className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary" />
-                        <label htmlFor="settings_randomize" className="text-sm font-medium text-text-main dark:text-white cursor-pointer">Acak urutan soal per siswa</label>
+                    <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
+                            <input type="checkbox" id="settings_randomize" checked={settingsForm.is_randomized} onChange={(e) => setSettingsForm({ ...settingsForm, is_randomized: e.target.checked })} className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary" />
+                            <label htmlFor="settings_randomize" className="text-sm font-medium text-text-main dark:text-white cursor-pointer">Acak urutan soal per siswa</label>
+                        </div>
+                        <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
+                            <input
+                                type="checkbox"
+                                id="settings_show_results"
+                                checked={settingsForm.show_results_immediately}
+                                onChange={(e) => setSettingsForm({ ...settingsForm, show_results_immediately: e.target.checked })}
+                                className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="settings_show_results" className="text-sm font-medium text-text-main dark:text-white cursor-pointer flex flex-col">
+                                <span>Tampilkan Hasil Langsung</span>
+                                <span className="text-xs text-text-secondary font-normal mt-0.5">Jika dimatikan, siswa baru bisa melihat nilai setelah Anda klik "Bagikan Hasil"</span>
+                            </label>
+                        </div>
                     </div>
 
                     {/* Target classes */}
@@ -733,11 +772,18 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                             </select>
                             <span className="text-sm font-medium text-text-secondary border-l border-secondary/20 pl-3">{submissions.length} submission</span>
                         </div>
-                        {submissions.length > 0 && (
-                            <Button onClick={handleDownloadExcel} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm" icon={<Download className="w-4 h-4 ml-1" />}>
-                                Download Excel
-                            </Button>
-                        )}
+                        <div className="flex items-center gap-2">
+                            {exam?.show_results_immediately === false && exam?.results_released === false && submissions.length > 0 && (
+                                <Button onClick={handleShareResults} className="bg-primary hover:bg-primary-dark text-white text-sm">
+                                    Bagikan Hasil
+                                </Button>
+                            )}
+                            {submissions.length > 0 && (
+                                <Button onClick={handleDownloadExcel} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm" icon={<Download className="w-4 h-4 ml-1" />}>
+                                    Download Excel
+                                </Button>
+                            )}
+                        </div>
                     </div>
 
                     {resultsLoading ? (

@@ -63,7 +63,7 @@ export async function PUT(
         const {
             title, description, start_time, duration_minutes,
             is_randomized, is_active, max_violations,
-            target_class_ids, subject_id
+            target_class_ids, subject_id, show_results_immediately, results_released
         } = body
 
         const updateData: any = { updated_at: new Date().toISOString() }
@@ -76,6 +76,8 @@ export async function PUT(
         if (max_violations !== undefined) updateData.max_violations = max_violations
         if (target_class_ids !== undefined) updateData.target_class_ids = target_class_ids
         if (subject_id !== undefined) updateData.subject_id = subject_id
+        if (show_results_immediately !== undefined) updateData.show_results_immediately = show_results_immediately
+        if (results_released !== undefined) updateData.results_released = results_released
 
         const { data, error } = await supabase
             .from('official_exams')

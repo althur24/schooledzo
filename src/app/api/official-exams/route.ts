@@ -146,7 +146,8 @@ export async function POST(request: NextRequest) {
         const {
             exam_type, title, description, subject_id,
             start_time, duration_minutes, is_randomized,
-            max_violations, target_class_ids, academic_year_id
+            max_violations, target_class_ids, academic_year_id,
+            show_results_immediately
         } = body
 
         if (!exam_type || !title || !subject_id || !start_time || !target_class_ids?.length) {
@@ -184,7 +185,8 @@ export async function POST(request: NextRequest) {
                 max_violations: max_violations || 3,
                 target_class_ids,
                 created_by: user.id,
-                is_active: false
+                is_active: false,
+                show_results_immediately: show_results_immediately ?? true
             })
             .select(`
                 *,

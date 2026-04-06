@@ -9,8 +9,9 @@ import { TickSquare, TimeCircle, Danger, Calendar } from 'react-iconly'
 
 interface ExamResult {
     id: string
-    total_score: number
-    max_score: number
+    total_score: number | null
+    max_score: number | null
+    results_hidden?: boolean
     violation_count: number
     started_at: string
     submitted_at: string
@@ -94,7 +95,7 @@ export default function ExamResultPage() {
     }
 
     const maxScore = result.max_score || 1
-    const percentage = Math.round((result.total_score / maxScore) * 100)
+    const percentage = result.results_hidden ? 0 : Math.round(((result.total_score || 0) / maxScore) * 100)
 
     return (
         <div className="space-y-6 max-w-3xl mx-auto">
@@ -104,15 +105,25 @@ export default function ExamResultPage() {
                 backHref="/dashboard/siswa/ulangan"
             />
 
-            {/* Score Card */}
-            <div className={`bg-gradient-to-r ${getGradeColor(percentage)} p-6 rounded-2xl text-white text-center shadow-lg`}>
-                <p className="text-lg opacity-90 mb-2 font-medium">{result.exam?.teaching_assignment?.subject?.name}</p>
-                <p className="text-6xl font-bold mb-2">{result.total_score}<span className="text-3xl opacity-80">/{result.max_score}</span></p>
-                <p className="text-2xl font-bold">{percentage}%</p>
-                <p className="mt-4 text-lg font-medium bg-white/20 inline-block px-4 py-1 rounded-full backdrop-blur-sm">
-                    {percentage >= 80 ? '🎉 Excellent!' : percentage >= 60 ? '👍 Good Job!' : percentage >= 40 ? '💪 Keep Trying!' : '📚 Need More Study'}
-                </p>
-            </div>
+            {/* Score Card or Hidden State */}
+            {result.results_hidden ? (
+                <div className="bg-gradient-to-r from-slate-500 to-slate-700 p-8 rounded-2xl text-white text-center shadow-lg">
+                    <div className="w-16 h-16 mx-auto bg-white/20 rounded-full flex items-center justify-center mb-4">
+                        <TimeCircle set="bold" size={32} primaryColor="currentColor" />
+                    </div>
+                    <p className="text-xl font-bold mb-2">Menunggu Hasil</p>
+                    <p className="opacity-90">Nilai akan muncul setelah guru membagikan hasil.</p>
+                </div>
+            ) : (
+                <div className={`bg-gradient-to-r ${getGradeColor(percentage)} p-6 rounded-2xl text-white text-center shadow-lg`}>
+                    <p className="text-lg opacity-90 mb-2 font-medium">{result.exam?.teaching_assignment?.subject?.name}</p>
+                    <p className="text-6xl font-bold mb-2">{result.total_score}<span className="text-3xl opacity-80">/{result.max_score}</span></p>
+                    <p className="text-2xl font-bold">{percentage}%</p>
+                    <p className="mt-4 text-lg font-medium bg-white/20 inline-block px-4 py-1 rounded-full backdrop-blur-sm">
+                        {percentage >= 80 ? '🎉 Excellent!' : percentage >= 60 ? '👍 Good Job!' : percentage >= 40 ? '💪 Keep Trying!' : '📚 Need More Study'}
+                    </p>
+                </div>
+            )}
 
             {/* Stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

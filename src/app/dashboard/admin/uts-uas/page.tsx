@@ -66,6 +66,7 @@ export default function AdminUtsUasPage() {
         duration_minutes: 90,
         is_randomized: true,
         max_violations: 3,
+        show_results_immediately: true,
         target_class_ids: [] as string[]
     })
 
@@ -137,6 +138,7 @@ export default function AdminUtsUasPage() {
                     duration_minutes: 90,
                     is_randomized: true,
                     max_violations: 3,
+                    show_results_immediately: true,
                     target_class_ids: []
                 })
                 router.push(`/dashboard/admin/uts-uas/${newExam.id}`)
@@ -488,9 +490,24 @@ export default function AdminUtsUasPage() {
                     </div>
 
                     {/* Options */}
-                    <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
-                        <input type="checkbox" id="randomize_official" checked={form.is_randomized} onChange={(e) => setForm({ ...form, is_randomized: e.target.checked })} className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary" />
-                        <label htmlFor="randomize_official" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none">Acak urutan soal per siswa</label>
+                    <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
+                            <input type="checkbox" id="randomize_official" checked={form.is_randomized} onChange={(e) => setForm({ ...form, is_randomized: e.target.checked })} className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary" />
+                            <label htmlFor="randomize_official" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none">Acak urutan soal per siswa</label>
+                        </div>
+                        <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
+                            <input
+                                type="checkbox"
+                                id="showResultsOfficial"
+                                checked={form.show_results_immediately}
+                                onChange={(e) => setForm({ ...form, show_results_immediately: e.target.checked })}
+                                className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="showResultsOfficial" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none flex flex-col">
+                                <span>Tampilkan Hasil Langsung</span>
+                                <span className="text-xs text-text-secondary font-normal mt-0.5">Jika dimatikan, siswa baru bisa melihat nilai setelah Anda klik "Bagikan Hasil"</span>
+                            </label>
+                        </div>
                     </div>
 
                     {/* Max Violations */}

@@ -66,7 +66,8 @@ export default function GuruUlanganPage() {
         start_time: '',
         duration_minutes: 60,
         is_randomized: true,
-        max_violations: 3
+        max_violations: 3,
+        show_results_immediately: true
     })
 
     // Remedial States
@@ -206,7 +207,8 @@ export default function GuruUlanganPage() {
                     start_time: '',
                     duration_minutes: 60,
                     is_randomized: true,
-                    max_violations: 3
+                    max_violations: 3,
+                    show_results_immediately: true
                 })
                 router.push(`/dashboard/guru/ulangan/${newExam.id}`)
             }
@@ -774,6 +776,20 @@ export default function GuruUlanganPage() {
                             className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
                         />
                         <label htmlFor="randomize" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none">Acak urutan soal per siswa</label>
+                    </div>
+
+                    <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
+                        <input
+                            type="checkbox"
+                            id="showResults"
+                            checked={form.show_results_immediately}
+                            onChange={(e) => setForm({ ...form, show_results_immediately: e.target.checked })}
+                            className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
+                        />
+                        <label htmlFor="showResults" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none flex flex-col">
+                            <span>Tampilkan Hasil Langsung</span>
+                            <span className="text-xs text-text-secondary font-normal mt-0.5">Jika dimatikan, siswa baru bisa melihat nilai setelah Anda klik "Bagikan Hasil"</span>
+                        </label>
                     </div>
 
                     <div className="flex gap-3 pt-4 border-t border-secondary/10 mt-2">

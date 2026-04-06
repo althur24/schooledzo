@@ -46,6 +46,8 @@ interface Exam {
     is_active: boolean
     pending_publish: boolean
     is_randomized: boolean
+    show_results_immediately: boolean
+    results_released: boolean
     max_violations: number
     teaching_assignment: {
         subject: { id: string; name: string }
@@ -132,7 +134,8 @@ export default function EditExamPage() {
         start_time: '',
         duration_minutes: 60,
         max_violations: 3,
-        is_randomized: true
+        is_randomized: true,
+        show_results_immediately: true
     })
     const [savingSettings, setSavingSettings] = useState(false)
 
@@ -282,7 +285,8 @@ export default function EditExamPage() {
                 start_time: formattedTime,
                 duration_minutes: exam.duration_minutes,
                 max_violations: exam.max_violations,
-                is_randomized: exam.is_randomized
+                is_randomized: exam.is_randomized,
+                show_results_immediately: exam.show_results_immediately ?? true
             })
             setShowEditSettings(true)
         }
@@ -311,20 +315,41 @@ export default function EditExamPage() {
                     start_time: formattedStartTime,
                     duration_minutes: editForm.duration_minutes,
                     max_violations: editForm.max_violations,
-                    is_randomized: editForm.is_randomized
+                    is_randomized: editForm.is_randomized,
+                    show_results_immediately: editForm.show_results_immediately
                 })
             })
             if (res.ok) {
                 setShowEditSettings(false)
                 fetchExam()
             } else {
-                setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: 'Gagal menyimpan pengaturan ulangan. Coba lagi.' })
+                setAlertInfo({ type: 'error', title: 'Gagal', message: 'Gagal menyimpan pengaturan.' })
             }
         } catch (error) {
-            console.error('Error saving settings:', error)
-            setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: 'Gagal menyimpan pengaturan ulangan. Coba lagi.' })
+            console.error(error)
+            setAlertInfo({ type: 'error', title: 'Gagal', message: 'Terjadi kesalahan sistem.' })
         } finally {
             setSavingSettings(false)
+        }
+    }
+
+    const handleShareResults = async () => {
+        if (!confirm('Apakah Anda yakin ingin membagikan hasil ke siswa sekarang? Siswa akan bisa melihat nilai mereka.')) return
+        
+        try {
+            const res = await fetch(`/api/exams/${examId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ results_released: true })
+            })
+            if (res.ok) {
+                setAlertInfo({ type: 'success', title: 'Berhasil', message: 'Hasil ulangan telah dibagikan ke siswa.' })
+                fetchExam() // Refresh to update button visibility
+            } else {
+                throw new Error('Gagal membagikan hasil')
+            }
+        } catch (error: any) {
+            setAlertInfo({ type: 'error', title: 'Gagal', message: error.message })
         }
     }
 
@@ -2038,11 +2063,18 @@ export default function EditExamPage() {
                             )}
                             <span className="text-sm font-medium text-text-secondary border-l border-secondary/20 pl-3">{submissions.length} submission</span>
                         </div>
-                        {submissions.length > 0 && (
-                            <Button onClick={handleDownloadExcel} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm" icon={<Download className="w-4 h-4 ml-1" />}>
-                                Download Excel
-                            </Button>
-                        )}
+                        <div className="flex items-center gap-2">
+                           {exam?.show_results_immediately === false && exam?.results_released === false && submissions.length > 0 && (
+                                <Button onClick={handleShareResults} className="bg-primary hover:bg-primary-dark text-white text-sm">
+                                    Bagikan Hasil
+                                </Button>
+                            )}
+                            {submissions.length > 0 && (
+                                <Button onClick={handleDownloadExcel} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm" icon={<Download className="w-4 h-4 ml-1" />}>
+                                    Download Excel
+                                </Button>
+                            )}
+                        </div>
                     </div>
 
                     {/* Submissions Table */}
@@ -2311,6 +2343,19 @@ export default function EditExamPage() {
                             className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
                         />
                         <label htmlFor="edit-randomize" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none">Acak urutan soal per siswa</label>
+                    </div>
+                    <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
+                        <input
+                            type="checkbox"
+                            id="edit-show-results"
+                            checked={editForm.show_results_immediately}
+                            onChange={(e) => setEditForm({ ...editForm, show_results_immediately: e.target.checked })}
+                            className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
+                        />
+                        <label htmlFor="edit-show-results" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none flex flex-col">
+                            <span>Tampilkan Hasil Langsung</span>
+                            <span className="text-xs text-text-secondary font-normal mt-0.5">Jika dimatikan, siswa baru bisa melihat nilai setelah Anda klik "Bagikan Hasil"</span>
+                        </label>
                     </div>
                     <div className="flex gap-3 pt-6 border-t border-secondary/10 mt-2">
                         <Button variant="secondary" onClick={() => setShowEditSettings(false)} className="flex-1">Batal</Button>

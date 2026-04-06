@@ -115,6 +115,8 @@ export async function GET(request: NextRequest) {
                     id, 
                     title, 
                     duration_minutes,
+                    show_results_immediately,
+                    results_released,
                     teaching_assignment:teaching_assignments(
                         academic_year_id,
                         subject:subjects(id, name),
@@ -224,6 +226,26 @@ export async function GET(request: NextRequest) {
                     });
                 }
             }
+        }
+
+        // Apply visibility rules for SISWA
+        if (user.role === 'SISWA') {
+            finalData = finalData.map((sub: any) => {
+                const examObj = sub.exam || {}
+                const showImmediately = examObj.show_results_immediately ?? true
+                const isReleased = examObj.results_released || false
+                const isHidden = !showImmediately && !isReleased
+
+                if (isHidden) {
+                    return {
+                        ...sub,
+                        total_score: null,
+                        max_score: null,
+                        results_hidden: true
+                    }
+                }
+                return { ...sub, results_hidden: false }
+            })
         }
 
         return NextResponse.json(finalData)
@@ -353,7 +375,7 @@ export async function PUT(request: NextRequest) {
         // Get current submission
         const { data: currentSubmission } = await supabase
             .from('exam_submissions')
-            .select('*, exam:exams(max_violations)')
+            .select('*, exam:exams(max_violations, show_results_immediately, results_released)')
             .eq('id', submission_id)
             .single()
 
@@ -587,7 +609,18 @@ export async function PUT(request: NextRequest) {
             // Notify teacher about exam submission
             await notifyTeacherExamSubmission(currentSubmission.exam_id, user.full_name || 'Siswa')
 
-            return NextResponse.json(updatedSubmission)
+            const examConfig = currentSubmission.exam || {}
+            const showImmediately = examConfig.show_results_immediately ?? true
+            const isReleased = examConfig.results_released || false
+            const isHidden = !showImmediately && !isReleased
+
+            const responseData = { ...updatedSubmission, results_hidden: isHidden }
+            if (isHidden) {
+                responseData.total_score = null
+                responseData.max_score = null
+            }
+
+            return NextResponse.json(responseData)
         }
 
         return NextResponse.json({ success: true })

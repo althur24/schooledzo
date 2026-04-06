@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
                 student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name)),
                 exam:official_exams(
                     id, title, exam_type, duration_minutes, is_active, subject_id,
+                    show_results_immediately, results_released,
                     subject:subjects(id, name)
                 )
             `)
@@ -93,6 +94,26 @@ export async function GET(request: NextRequest) {
         // Additional class filter
         if (classId) {
             result = result.filter((sub: any) => sub.student?.class_id === classId)
+        }
+
+        // Apply visibility rules for SISWA
+        if (user.role === 'SISWA') {
+            result = result.map((sub: any) => {
+                const examObj = sub.exam || {}
+                const showImmediately = examObj.show_results_immediately ?? true
+                const isReleased = examObj.results_released || false
+                const isHidden = !showImmediately && !isReleased
+
+                if (isHidden) {
+                    return {
+                        ...sub,
+                        total_score: null,
+                        max_score: null,
+                        results_hidden: true
+                    }
+                }
+                return { ...sub, results_hidden: false }
+            })
         }
 
         return NextResponse.json(result)
@@ -224,7 +245,7 @@ export async function PUT(request: NextRequest) {
         // Get current submission
         const { data: currentSubmission } = await supabase
             .from('official_exam_submissions')
-            .select('*, exam:official_exams(max_violations)')
+            .select('*, exam:official_exams(max_violations, show_results_immediately, results_released)')
             .eq('id', submission_id)
             .single()
 
@@ -441,7 +462,18 @@ export async function PUT(request: NextRequest) {
 
             if (error) throw error
 
-            return NextResponse.json(updatedSubmission)
+            const examConfig = currentSubmission.exam || {}
+            const showImmediately = examConfig.show_results_immediately ?? true
+            const isReleased = examConfig.results_released || false
+            const isHidden = !showImmediately && !isReleased
+
+            const responseData = { ...updatedSubmission, results_hidden: isHidden }
+            if (isHidden) {
+                responseData.total_score = null
+                responseData.max_score = null
+            }
+
+            return NextResponse.json(responseData)
         }
 
         return NextResponse.json({ success: true })

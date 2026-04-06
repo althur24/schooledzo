@@ -26,8 +26,9 @@ interface ExamSubmission {
     id: string
     exam_id: string
     is_submitted: boolean
-    total_score: number
-    max_score: number
+    total_score: number | null
+    max_score: number | null
+    results_hidden?: boolean
     started_at: string
 }
 
@@ -48,8 +49,9 @@ interface OfficialSubmission {
     id: string
     exam_id: string
     is_submitted: boolean
-    total_score: number
-    max_score: number
+    total_score: number | null
+    max_score: number | null
+    results_hidden?: boolean
     started_at: string
 }
 
@@ -280,9 +282,15 @@ export default function SiswaUlanganPage() {
 
                                                 {submission?.is_submitted && (
                                                     <div className="mt-auto p-3 bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30 rounded-lg text-center">
-                                                        <p className="text-green-600 dark:text-green-400 font-bold text-sm">
-                                                            Nilai: {submission.total_score} / {submission.max_score}
-                                                        </p>
+                                                        {submission.results_hidden ? (
+                                                            <p className="text-amber-600 dark:text-amber-400 font-bold text-sm">
+                                                                Menunggu Nilai
+                                                            </p>
+                                                        ) : (
+                                                            <p className="text-green-600 dark:text-green-400 font-bold text-sm">
+                                                                Nilai: {submission.total_score} / {submission.max_score}
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 )}
 
@@ -370,9 +378,15 @@ export default function SiswaUlanganPage() {
 
                                                 {submission?.is_submitted && (
                                                     <div className="mt-auto p-3 bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30 rounded-lg text-center">
-                                                        <p className="text-green-600 dark:text-green-400 font-bold text-sm">
-                                                            Nilai: {submission.total_score} / {submission.max_score}
-                                                        </p>
+                                                        {submission.results_hidden ? (
+                                                            <p className="text-amber-600 dark:text-amber-400 font-bold text-sm">
+                                                                Menunggu Nilai
+                                                            </p>
+                                                        ) : (
+                                                            <p className="text-green-600 dark:text-green-400 font-bold text-sm">
+                                                                Nilai: {submission.total_score} / {submission.max_score}
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 )}
 
