@@ -1566,8 +1566,9 @@ export default function EditExamPage() {
                                                                 {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
                                                                     <div key={letter} className="flex gap-2">
                                                                         <div className="relative flex-1">
-                                                                            <div className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary">{letter}</div>
+                                                                            <div className={`absolute ${pq.text_direction === 'rtl' ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary`}>{letter}</div>
                                                                             <input
+                                                                                dir={pq.text_direction || 'ltr'}
                                                                                 type="text"
                                                                                 value={pq.options?.[optIdx] || ''}
                                                                                 onChange={(e) => {
@@ -1577,7 +1578,7 @@ export default function EditExamPage() {
                                                                                     updated[pqIdx] = { ...updated[pqIdx], options: newOpts }
                                                                                     setPassageQuestions(updated)
                                                                                 }}
-                                                                                className="w-full pl-10 pr-3 py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                                                                className={`w-full ${pq.text_direction === 'rtl' ? 'pr-10 pl-3 text-right' : 'pl-10 pr-3'} py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500`}
                                                                                 placeholder={`Opsi ${letter}`}
                                                                             />
                                                                         </div>
@@ -1722,8 +1723,8 @@ export default function EditExamPage() {
                                                             )}
                                                         </div>
                                                         <div className="relative">
-                                                            <div className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary">{letter}</div>
-                                                            <input type="text" value={manualForm.options?.[idx] || ''} onChange={(e) => { const newOptions = [...(manualForm.options || ['', '', '', ''])]; newOptions[idx] = e.target.value; setManualForm({ ...manualForm, options: newOptions }) }} className="w-full pl-12 pr-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm" placeholder={`Jawaban ${letter}`} />
+                                                            <div className={`absolute ${manualForm.text_direction === 'rtl' ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary`}>{letter}</div>
+                                                            <input dir={manualForm.text_direction || 'ltr'} type="text" value={manualForm.options?.[idx] || ''} onChange={(e) => { const newOptions = [...(manualForm.options || ['', '', '', ''])]; newOptions[idx] = e.target.value; setManualForm({ ...manualForm, options: newOptions }) }} className={`w-full ${manualForm.text_direction === 'rtl' ? 'pr-12 pl-4 text-right' : 'pl-12 pr-4'} py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm`} placeholder={`Jawaban ${letter}`} />
                                                         </div>
                                                     </div>
                                                 )})}

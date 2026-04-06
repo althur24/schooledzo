@@ -1293,8 +1293,9 @@ export default function EditQuizPage() {
                                                             {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
                                                                 <div key={letter} className="flex gap-2">
                                                                     <div className="relative flex-1">
-                                                                        <div className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary">{letter}</div>
+                                                                        <div className={`absolute ${pq.text_direction === 'rtl' ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary`}>{letter}</div>
                                                                         <input
+                                                                            dir={pq.text_direction || 'ltr'}
                                                                             type="text"
                                                                             value={pq.options?.[optIdx] || ''}
                                                                             onChange={(e) => {
@@ -1304,7 +1305,7 @@ export default function EditQuizPage() {
                                                                                 updated[pqIdx] = { ...updated[pqIdx], options: newOpts }
                                                                                 setPassageQuestions(updated)
                                                                             }}
-                                                                            className="w-full pl-10 pr-3 py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                                                            className={`w-full ${pq.text_direction === 'rtl' ? 'pr-10 pl-3 text-right' : 'pl-10 pr-3'} py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500`}
                                                                             placeholder={`Opsi ${letter}`}
                                                                         />
                                                                     </div>
@@ -1450,6 +1451,7 @@ export default function EditQuizPage() {
                                                         )}
                                                     </div>
                                                     <input
+                                                        dir={manualForm.text_direction || 'ltr'}
                                                         type="text"
                                                         value={manualForm.options?.[idx] || ''}
                                                         onChange={(e) => {
@@ -1457,7 +1459,8 @@ export default function EditQuizPage() {
                                                             newOptions[idx] = e.target.value
                                                             setManualForm({ ...manualForm, options: newOptions })
                                                         }}
-                                                        className="w-full px-3 py-2 bg-secondary/5 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                                        className={`w-full px-3 py-2 bg-secondary/5 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm ${manualForm.text_direction === 'rtl' ? 'text-right' : ''}`}
+                                                        placeholder={`Pilihan ${letter}`}
                                                     />
                                                 </div>
                                             )})}
