@@ -148,7 +148,16 @@ export default function GuruUtsUasPage() {
                                                     <span className="flex items-center gap-1 font-medium"><Clock className="w-3.5 h-3.5" /> {exam.duration_minutes}m</span>
                                                 </div>
                                             </div>
-                                            <div className="text-xs text-text-secondary text-right">{formatDateTime(exam.start_time)}</div>
+                                            <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                <span>Mulai</span>
+                                                <span className="font-medium">{formatDateTime(exam.start_time)}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between text-xs text-text-secondary pb-1">
+                                                <span>Berakhir</span>
+                                                <span className="font-medium text-red-500 dark:text-red-400">
+                                                    {formatDateTime(new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
+                                                </span>
+                                            </div>
                                         </div>
                                     </div>
                                 </Card>

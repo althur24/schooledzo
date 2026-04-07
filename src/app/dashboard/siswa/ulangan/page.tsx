@@ -273,6 +273,12 @@ export default function SiswaUlanganPage() {
                                                         </span>
                                                     </div>
                                                     <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                        <span>Waktu Berakhir</span>
+                                                        <span className="font-medium text-red-500 dark:text-red-400">
+                                                            {formatDateTime(new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between text-xs text-text-secondary">
                                                         <span>Max Pelanggaran</span>
                                                         <span className="font-medium text-red-500 flex items-center gap-1">
                                                             <Danger set="bold" primaryColor="currentColor" size={14} /> {exam.max_violations}x
@@ -366,6 +372,12 @@ export default function SiswaUlanganPage() {
                                                         <span>Durasi</span>
                                                         <span className="font-medium flex items-center gap-1">
                                                             <TimeCircle set="bold" primaryColor="currentColor" size={14} /> {exam.duration_minutes} menit
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                        <span>Waktu Berakhir</span>
+                                                        <span className="font-medium text-red-500 dark:text-red-400">
+                                                            {formatDateTime(new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
                                                         </span>
                                                     </div>
                                                     <div className="flex items-center justify-between text-xs text-text-secondary">

@@ -698,6 +698,15 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                             <input type="number" value={settingsForm.duration_minutes} onChange={(e) => setSettingsForm({ ...settingsForm, duration_minutes: parseInt(e.target.value) || 90 })} min={5} max={300} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" />
                         </div>
                     </div>
+                    {settingsForm.start_time && settingsForm.duration_minutes > 0 && (
+                        <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700/30 rounded-xl">
+                            <p className="text-xs text-text-secondary mb-0.5">Waktu Berakhir (otomatis)</p>
+                            <p className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                                {new Date(new Date(settingsForm.start_time).getTime() + settingsForm.duration_minutes * 60000)
+                                    .toLocaleString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                        </div>
+                    )}
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran (auto-submit)</label>
                         <input type="number" value={settingsForm.max_violations} onChange={(e) => setSettingsForm({ ...settingsForm, max_violations: parseInt(e.target.value) || 3 })} min={1} max={10} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" />

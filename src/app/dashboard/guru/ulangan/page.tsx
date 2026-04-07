@@ -477,8 +477,15 @@ export default function GuruUlanganPage() {
                                                 </span>
                                             </div>
                                         </div>
-                                        <div className="text-xs text-text-secondary text-right">
-                                            <span className="inline-flex items-center gap-1"><Calendar set="bold" primaryColor="currentColor" size={14} /> {formatDateTime(exam.start_time)}</span>
+                                        <div className="flex items-center justify-between text-xs text-text-secondary">
+                                            <span>Mulai</span>
+                                            <span className="font-medium">{formatDateTime(exam.start_time)}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between text-xs text-text-secondary">
+                                            <span>Berakhir</span>
+                                            <span className="font-medium text-red-500 dark:text-red-400">
+                                                {formatDateTime(new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
+                                            </span>
                                         </div>
                                         {(() => {
                                             const classId = exam.teaching_assignment?.class?.id
@@ -638,7 +645,16 @@ export default function GuruUlanganPage() {
                                                                 <span className="flex items-center gap-1 font-medium"><div className="w-3.5 h-3.5"><Clock set="bold" primaryColor="currentColor" size={14} /></div> {exam.duration_minutes}m</span>
                                                             </div>
                                                         </div>
-                                                        <div className="text-xs text-text-secondary text-right pb-1">{formatDateTime(exam.start_time)}</div>
+                                                        <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                            <span>Mulai</span>
+                                                            <span className="font-medium">{formatDateTime(exam.start_time)}</span>
+                                                        </div>
+                                                        <div className="flex items-center justify-between text-xs text-text-secondary pb-1">
+                                                            <span>Berakhir</span>
+                                                            <span className="font-medium text-red-500 dark:text-red-400">
+                                                                {formatDateTime(new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
+                                                            </span>
+                                                        </div>
                                                         {(() => {
                                                             const total = exam.target_class_ids?.reduce((sum, cid) => sum + (studentCounts[cid] || 0), 0) || 0
                                                             const submitted = submissionCounts[exam.id] || 0
@@ -755,6 +771,15 @@ export default function GuruUlanganPage() {
                             />
                         </div>
                     </div>
+                    {form.start_time && form.duration_minutes > 0 && (
+                        <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700/30 rounded-xl">
+                            <p className="text-xs text-text-secondary mb-0.5">Waktu Berakhir (otomatis)</p>
+                            <p className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                                {new Date(new Date(form.start_time).getTime() + form.duration_minutes * 60000)
+                                    .toLocaleString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                        </div>
+                    )}
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran (auto-submit)</label>
                         <input

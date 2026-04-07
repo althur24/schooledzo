@@ -184,7 +184,10 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
                             LIVE
                         </span>
                     </div>
-                    <p className="text-sm text-text-secondary mt-1">{exam.subject_name} • {exam.total_questions} Soal • {exam.duration_minutes} Menit</p>
+                    <p className="text-sm text-text-secondary mt-1">
+                        {exam.subject_name} • {exam.total_questions} Soal • {exam.duration_minutes} Menit
+                        • <span className="text-red-500 font-bold">Berakhir {new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                    </p>
                 </div>
 
                 <div className="flex items-center gap-4 bg-white dark:bg-surface-dark px-4 py-3 rounded-2xl shadow-sm border border-secondary/20">

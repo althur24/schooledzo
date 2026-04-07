@@ -2325,6 +2325,15 @@ export default function EditExamPage() {
                             />
                         </div>
                     </div>
+                    {editForm.start_time && editForm.duration_minutes > 0 && (
+                        <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700/30 rounded-xl">
+                            <p className="text-xs text-text-secondary mb-0.5">Waktu Berakhir (otomatis)</p>
+                            <p className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                                {new Date(new Date(editForm.start_time).getTime() + editForm.duration_minutes * 60000)
+                                    .toLocaleString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                        </div>
+                    )}
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran</label>
                         <input
