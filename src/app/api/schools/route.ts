@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
         // Get counts per school
         const enriched = await Promise.all((schools || []).map(async (school) => {
             const [students, teachers, classes] = await Promise.all([
-                supabase.from('students').select('id', { count: 'exact', head: true }).eq('school_id', school.id),
+                supabase.from('students').select('id', { count: 'exact', head: true }).eq('school_id', school.id).eq('status', 'ACTIVE'),
                 supabase.from('teachers').select('id', { count: 'exact', head: true }).eq('school_id', school.id),
                 supabase.from('classes').select('id', { count: 'exact', head: true })
                     .in('academic_year_id',

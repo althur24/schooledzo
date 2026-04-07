@@ -258,25 +258,97 @@ export async function DELETE(
             return NextResponse.json({ error: 'Siswa tidak ditemukan' }, { status: 404 })
         }
 
-        // Delete .wali user first (if exists)
+        // === STEP 1: Clear parent_user_id FK reference ===
         if (student.parent_user_id) {
             await supabase
+                .from('students')
+                .update({ parent_user_id: null })
+                .eq('id', id)
+        }
+
+        // === STEP 2: Delete all student-related records ===
+        // These tables reference students(id) - some may not have ON DELETE CASCADE
+        const studentCleanupTables = [
+            'student_enrollments',
+            'quiz_submissions',
+            'exam_submissions',
+            'official_exam_submissions',
+            'student_submissions',
+            'material_chat_history',
+        ]
+
+        for (const table of studentCleanupTables) {
+            const { error } = await supabase
+                .from(table)
+                .delete()
+                .eq('student_id', id)
+            if (error) {
+                console.warn(`Cleanup ${table}: ${error.message} (may not exist, continuing)`)
+            }
+        }
+
+        // === STEP 3: Delete the student record ===
+        const { error: studentDelError } = await supabase
+            .from('students')
+            .delete()
+            .eq('id', id)
+        if (studentDelError) {
+            console.error('Delete student record failed:', studentDelError)
+            return NextResponse.json({
+                error: `Gagal menghapus data siswa: ${studentDelError.message}`
+            }, { status: 500 })
+        }
+
+        // === STEP 4: Delete user-related records ===
+        // These tables reference users(id) - clean up before deleting user
+        const userIds = [student.user_id, student.parent_user_id].filter(Boolean) as string[]
+        const userCleanupTables = [
+            'sessions',
+            'notifications',
+        ]
+
+        for (const userId of userIds) {
+            for (const table of userCleanupTables) {
+                const { error } = await supabase
+                    .from(table)
+                    .delete()
+                    .eq('user_id', userId)
+                if (error) {
+                    console.warn(`Cleanup ${table} for user ${userId}: ${error.message}`)
+                }
+            }
+        }
+
+        // === STEP 5: Delete the .wali user (if exists) ===
+        if (student.parent_user_id) {
+            const { error: waliError } = await supabase
                 .from('users')
                 .delete()
                 .eq('id', student.parent_user_id)
+            if (waliError) {
+                console.warn('Delete wali user failed (non-fatal):', waliError.message)
+            }
         }
 
-        // Delete student user (will cascade to student record)
-        const { error } = await supabase
+        // === STEP 6: Delete the student user ===
+        const { error: userDelError } = await supabase
             .from('users')
             .delete()
             .eq('id', student.user_id)
 
-        if (error) throw error
+        if (userDelError) {
+            console.error('Delete student user failed:', userDelError)
+            return NextResponse.json({
+                error: `Siswa dihapus, tapi gagal menghapus akun user: ${userDelError.message}`
+            }, { status: 500 })
+        }
 
         return NextResponse.json({ success: true })
-    } catch (error) {
+    } catch (error: any) {
         console.error('Error deleting student:', error)
-        return NextResponse.json({ error: 'Server error' }, { status: 500 })
+        return NextResponse.json({
+            error: error?.message || 'Server error'
+        }, { status: 500 })
     }
 }
+

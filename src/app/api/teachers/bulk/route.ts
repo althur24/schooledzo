@@ -63,7 +63,8 @@ export async function POST(request: NextRequest) {
                         password_hash,
                         full_name,
                         role: 'GURU',
-                        school_id: schoolId
+                        school_id: schoolId,
+                        must_change_password: true
                     })
                     .select()
                     .single()

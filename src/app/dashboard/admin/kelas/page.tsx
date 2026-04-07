@@ -4,8 +4,15 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
-import { School, Plus } from 'lucide-react'
+import { School, Plus, ChevronRight } from 'lucide-react'
 import { Class, AcademicYear, SchoolLevel } from '@/lib/types'
+
+const inferSchoolLevel = (gradeLevel?: number | null): 'SMP' | 'SMA' | null => {
+    if (!gradeLevel) return null
+    if (gradeLevel >= 7 && gradeLevel <= 9) return 'SMP'
+    if (gradeLevel >= 10 && gradeLevel <= 12) return 'SMA'
+    return null
+}
 
 interface Student {
     id: string
@@ -28,6 +35,8 @@ export default function KelasPage() {
     // Filter state
     const [gradeFilter, setGradeFilter] = useState<number | null>(null)
     const [yearFilter, setYearFilter] = useState<string>('')
+    const [levelFilter, setLevelFilter] = useState<string>('')
+    const [expandedLevels, setExpandedLevels] = useState<Set<string>>(new Set())
 
     // Students modal state
     const [showStudentsModal, setShowStudentsModal] = useState(false)
@@ -107,7 +116,8 @@ export default function KelasPage() {
 
     const openEdit = (cls: Class) => {
         setEditingClass(cls)
-        setFormData({ name: cls.name, academic_year_id: cls.academic_year_id, grade_level: cls.grade_level, school_level: cls.school_level })
+        const detectedLevel = cls.school_level || inferSchoolLevel(cls.grade_level) || null
+        setFormData({ name: cls.name, academic_year_id: cls.academic_year_id, grade_level: cls.grade_level, school_level: detectedLevel })
         setShowModal(true)
     }
 
@@ -134,6 +144,40 @@ export default function KelasPage() {
         }
     }
 
+    // Derived states and grouping
+    const getClassLevel = (cls: Class): string =>
+        cls.school_level || inferSchoolLevel(cls.grade_level) || 'Lainnya'
+
+    const displayClasses = levelFilter
+        ? classes.filter(c => getClassLevel(c) === levelFilter)
+        : classes
+
+    const levelGroups = displayClasses.reduce((acc, cls) => {
+        const level = getClassLevel(cls)
+        if (!acc[level]) acc[level] = []
+        acc[level].push(cls)
+        return acc
+    }, {} as Record<string, Class[]>)
+
+    const levelOrder = Object.keys(levelGroups).sort((a, b) => {
+        const w = (x: string) => x === 'SMP' ? 1 : x === 'SMA' ? 2 : 3
+        return w(a) - w(b) || a.localeCompare(b)
+    })
+
+    const toggleLevel = (level: string) => {
+        const next = new Set(expandedLevels)
+        next.has(level) ? next.delete(level) : next.add(level)
+        setExpandedLevels(next)
+    }
+
+    const toggleAllLevels = () => {
+        expandedLevels.size === levelOrder.length
+            ? setExpandedLevels(new Set())
+            : setExpandedLevels(new Set(levelOrder))
+    }
+
+    const uniqueGrades = [...new Set(classes.map(c => c.grade_level).filter(Boolean))].sort((a, b) => (a as number) - (b as number))
+
     return (
         <div className="space-y-6">
             <PageHeader
@@ -150,150 +194,199 @@ export default function KelasPage() {
 
             {/* Filter Section */}
             <div className="bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl p-4 shadow-sm">
-                <div className="flex flex-wrap items-center gap-4">
-                    <div className="flex items-center gap-2">
-                        <label className="text-sm font-bold text-text-main dark:text-white whitespace-nowrap">Tahun Ajaran:</label>
-                        <div className="relative">
-                            <select
-                                value={yearFilter}
-                                onChange={(e) => setYearFilter(e.target.value)}
-                                className="px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none pr-8"
-                            >
-                                <option value="">Semua Tahun</option>
-                                {academicYears.map(y => (
-                                    <option key={y.id} value={y.id}>{y.name} {y.is_active && '(Aktif)'}</option>
-                                ))}
-                            </select>
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary text-xs">▼</div>
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-wrap items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <label className="text-sm font-bold text-text-main dark:text-white whitespace-nowrap">Tahun Ajaran:</label>
+                            <div className="relative">
+                                <select
+                                    value={yearFilter}
+                                    onChange={(e) => setYearFilter(e.target.value)}
+                                    className="px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none pr-8"
+                                >
+                                    <option value="">Semua Tahun</option>
+                                    {academicYears.map(y => (
+                                        <option key={y.id} value={y.id}>{y.name} {y.is_active && '(Aktif)'}</option>
+                                    ))}
+                                </select>
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary text-xs">▼</div>
+                            </div>
                         </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <label className="text-sm font-bold text-text-main dark:text-white whitespace-nowrap">Tingkat:</label>
-                        <div className="relative">
-                            <select
-                                value={gradeFilter || ''}
-                                onChange={(e) => setGradeFilter(e.target.value ? parseInt(e.target.value) : null)}
-                                className="px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none pr-8"
-                            >
-                                <option value="">Semua Tingkat</option>
-                                <option value="1">Kelas 1</option>
-                                <option value="2">Kelas 2</option>
-                                <option value="3">Kelas 3</option>
-                            </select>
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary text-xs">▼</div>
+                        <div className="flex items-center gap-2">
+                            <label className="text-sm font-bold text-text-main dark:text-white whitespace-nowrap">Jenjang:</label>
+                            <div className="relative">
+                                <select
+                                    value={levelFilter}
+                                    onChange={(e) => setLevelFilter(e.target.value)}
+                                    className="px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none pr-8"
+                                >
+                                    <option value="">Semua Jenjang</option>
+                                    <option value="SMP">SMP</option>
+                                    <option value="SMA">SMA</option>
+                                    {levelGroups['Lainnya'] && <option value="Lainnya">Lainnya</option>}
+                                </select>
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary text-xs">▼</div>
+                            </div>
                         </div>
+                        <div className="flex items-center gap-2">
+                            <label className="text-sm font-bold text-text-main dark:text-white whitespace-nowrap">Tingkat:</label>
+                            <div className="relative">
+                                <select
+                                    value={gradeFilter || ''}
+                                    onChange={(e) => setGradeFilter(e.target.value ? parseInt(e.target.value) : null)}
+                                    className="px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none pr-8"
+                                >
+                                    <option value="">Semua Tingkat</option>
+                                    {uniqueGrades.map(grade => (
+                                        <option key={grade as number} value={grade as number}>Kelas {grade}</option>
+                                    ))}
+                                </select>
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary text-xs">▼</div>
+                            </div>
+                        </div>
+                        {(gradeFilter || levelFilter || (yearFilter && yearFilter !== academicYears.find(y => y.is_active)?.id)) && (
+                            <button
+                                onClick={() => {
+                                    setGradeFilter(null)
+                                    setLevelFilter('')
+                                    const activeYear = academicYears.find(y => y.is_active)
+                                    setYearFilter(activeYear?.id || '')
+                                }}
+                                className="text-sm font-medium text-text-secondary hover:text-text-main dark:hover:text-white transition-colors"
+                            >
+                                Reset Filter
+                            </button>
+                        )}
                     </div>
-                    {(gradeFilter || (yearFilter && yearFilter !== academicYears.find(y => y.is_active)?.id)) && (
+                    {levelOrder.length > 0 && (
                         <button
-                            onClick={() => {
-                                setGradeFilter(null)
-                                const activeYear = academicYears.find(y => y.is_active)
-                                setYearFilter(activeYear?.id || '')
-                            }}
-                            className="text-sm font-medium text-text-secondary hover:text-text-main dark:hover:text-white transition-colors"
+                            onClick={toggleAllLevels}
+                            className="text-sm font-medium text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300 transition-colors"
                         >
-                            Reset Filter
+                            {expandedLevels.size === levelOrder.length ? 'Tutup Semua Jenjang' : 'Buka Semua Jenjang'}
                         </button>
                     )}
-                    <div className="text-sm text-text-secondary dark:text-zinc-400 ml-auto">
-                        Menampilkan: <span className="font-bold text-primary">{classes.length} kelas</span>
-                    </div>
                 </div>
             </div>
 
-            <Card className="overflow-hidden p-0">
-                {loading ? (
-                    <div className="p-12 flex justify-center">
-                        <div className="animate-spin text-primary"><School className="w-8 h-8" /></div>
+            <Card className="overflow-hidden p-0 bg-transparent border-none shadow-none">
+                <div className="mb-4 px-1">
+                    <div className="text-sm font-medium text-text-secondary inline-flex items-center gap-2 bg-secondary/5 px-3 py-1.5 rounded-lg border border-secondary/10">
+                        Total: <span className="text-text-main dark:text-white font-bold">{displayClasses.length}</span> Kelas
                     </div>
-                ) : classes.length === 0 ? (
-                    <div className="p-6">
+                </div>
+
+                {loading ? (
+                    <Card className="p-12 flex justify-center">
+                        <div className="animate-spin text-primary"><School className="w-8 h-8" /></div>
+                    </Card>
+                ) : displayClasses.length === 0 ? (
+                    <Card className="p-6">
                         <EmptyState
                             icon={<School className="w-12 h-12 text-secondary" />}
                             title="Belum Ada Kelas"
-                            description="Tambahkan kelas untuk memulai"
+                            description="Tidak ada kelas yang sesuai pencarian atau filter"
                             action={<Button onClick={openAdd}>Tambah Kelas</Button>}
                         />
-                    </div>
+                    </Card>
                 ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead className="bg-secondary/10 dark:bg-white/5 border-b border-secondary/20">
-                                <tr>
-                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Nama Kelas</th>
-                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Jenjang</th>
-                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Tingkat</th>
-                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Tahun Ajaran</th>
-                                    <th className="px-6 py-4 text-right text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Aksi</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-secondary/20 dark:divide-white/5">
-                                {classes.map((cls) => (
-                                    <tr key={cls.id} className="hover:bg-secondary/5 transition-colors">
-                                        <td className="px-6 py-4 text-text-main dark:text-white font-medium">{cls.name}</td>
-                                        <td className="px-6 py-4">
-                                            {cls.school_level ? (
-                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${cls.school_level === 'SMP' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                                                    'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                                                    }`}>
-                                                    {cls.school_level}
-                                                </span>
-                                            ) : (
-                                                <span className="text-text-secondary dark:text-zinc-500 text-sm">-</span>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            {cls.grade_level ? (
-                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${cls.school_level === 'SMP' && cls.grade_level === 1 ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                                                    cls.school_level === 'SMP' && cls.grade_level === 2 ? 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' :
-                                                        cls.school_level === 'SMP' && cls.grade_level === 3 ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' :
-                                                            cls.school_level === 'SMA' && cls.grade_level === 1 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                                                                cls.school_level === 'SMA' && cls.grade_level === 2 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
-                                                                    cls.school_level === 'SMA' && cls.grade_level === 3 ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' :
-                                                                        'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400'
-                                                    }`}>
-                                                    {cls.school_level === 'SMP' ? `MP${cls.grade_level}` : cls.school_level === 'SMA' ? `MA${cls.grade_level}` : `Tingkat ${cls.grade_level}`}
-                                                </span>
-                                            ) : (
-                                                <span className="text-text-secondary dark:text-zinc-500 text-sm">-</span>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-4 text-text-secondary dark:text-zinc-400">{cls.academic_year?.name || '-'}</td>
-                                        <td className="px-6 py-4 text-right">
-                                            <div className="flex items-center justify-end gap-2">
-                                                <button
-                                                    onClick={() => viewStudents(cls)}
-                                                    className="w-8 h-8 rounded-lg bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-500/20 flex items-center justify-center transition-colors"
-                                                    title="Lihat Siswa"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                                                    </svg>
-                                                </button>
-                                                <button
-                                                    onClick={() => openEdit(cls)}
-                                                    className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 flex items-center justify-center transition-colors"
-                                                    title="Edit"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                    </svg>
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDelete(cls.id)}
-                                                    className="w-8 h-8 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 flex items-center justify-center transition-colors"
-                                                    title="Hapus"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                    </svg>
-                                                </button>
+                    <div className="space-y-6">
+                        {levelOrder.map((level) => {
+                            const isExpanded = expandedLevels.has(level)
+                            const classCount = levelGroups[level].length
+                            const bgColors = level === 'SMP' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800' 
+                                            : level === 'SMA' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 border-purple-200 dark:border-purple-800'
+                                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                            
+                            return (
+                                <div key={level} className="space-y-3">
+                                    {/* Level Card */}
+                                    <button 
+                                        onClick={() => toggleLevel(level)}
+                                        className={`w-full flex items-center justify-between p-4 rounded-2xl border ${bgColors} transition-all hover:brightness-95`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="text-current transition-transform duration-200" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                                                <ChevronRight className="w-6 h-6" />
                                             </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                            <h2 className="text-xl font-black tracking-tight">{level}</h2>
+                                        </div>
+                                        <div className="flex items-center gap-2 bg-white/50 dark:bg-black/20 px-4 py-1.5 rounded-full">
+                                            <School className="w-4 h-4" />
+                                            <span className="font-bold text-sm">{classCount} Kelas</span>
+                                        </div>
+                                    </button>
+
+                                    {/* Classes Table */}
+                                    {isExpanded && (
+                                        <div className="pl-4 border-l-2 border-slate-100 dark:border-slate-800 ml-4 mt-2">
+                                            <Card className="overflow-hidden p-0">
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full">
+                                                        <thead className="bg-secondary/10 dark:bg-white/5 border-b border-secondary/20">
+                                                            <tr>
+                                                                <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider w-1/3">Nama Kelas</th>
+                                                                <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider w-1/4">Tingkat</th>
+                                                                <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider w-1/4">Tahun Ajaran</th>
+                                                                <th className="px-6 py-4 text-right text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Aksi</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-secondary/20 dark:divide-white/5">
+                                                            {levelGroups[level].map((cls) => (
+                                                                <tr key={cls.id} className="hover:bg-secondary/5 transition-colors">
+                                                                    <td className="px-6 py-4 text-text-main dark:text-white font-medium">{cls.name}</td>
+                                                                    <td className="px-6 py-4">
+                                                                        {cls.grade_level ? (
+                                                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${level === 'SMP' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : level === 'SMA' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' : 'bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400'}`}>
+                                                                                {level === 'SMP' ? `MP${cls.grade_level}` : level === 'SMA' ? `MA${cls.grade_level}` : `Kelas ${cls.grade_level}`}
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className="text-text-secondary dark:text-zinc-500 text-sm">-</span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-6 py-4 text-text-secondary dark:text-zinc-400">{cls.academic_year?.name || '-'}</td>
+                                                                    <td className="px-6 py-4 text-right">
+                                                                        <div className="flex items-center justify-end gap-2">
+                                                                            <button
+                                                                                onClick={() => viewStudents(cls)}
+                                                                                className="w-8 h-8 rounded-lg bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-500/20 flex items-center justify-center transition-colors"
+                                                                                title="Lihat Siswa"
+                                                                            >
+                                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                                                                                </svg>
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => openEdit(cls)}
+                                                                                className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 flex items-center justify-center transition-colors"
+                                                                                title="Edit"
+                                                                            >
+                                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                                                </svg>
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => handleDelete(cls.id)}
+                                                                                className="w-8 h-8 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 flex items-center justify-center transition-colors"
+                                                                                title="Hapus"
+                                                                            >
+                                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                                                </svg>
+                                                                            </button>
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </Card>
+                                        </div>
+                                    )}
+                                </div>
+                            )
+                        })}
                     </div>
                 )}
             </Card>

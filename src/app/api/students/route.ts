@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
                 `)
                 .eq('academic_year_id', enrollment_year_id)
                 .order('created_at', { ascending: false })
+                .range(0, 4999)
 
             const { data: enrollments, error: enrollError } = await enrollQuery
 
@@ -65,29 +66,48 @@ export async function GET(request: NextRequest) {
             return NextResponse.json(result)
         }
 
-        let query = supabase
-            .from('students')
-            .select(`
-        *,
-        user:users!students_user_id_fkey(id, username, full_name, role, must_change_password, is_locked),
-        class:classes(id, name, grade_level, school_level)
-      `)
-            .order('created_at', { ascending: false })
+        // Paginated fetch to bypass Supabase's default 1000-row limit
+        const PAGE_SIZE = 1000
+        let allData: any[] = []
+        let page = 0
+        let hasMore = true
 
-        // School filter
-        if (schoolId) query = query.eq('school_id', schoolId)
+        while (hasMore) {
+            let query = supabase
+                .from('students')
+                .select(`
+                    *,
+                    user:users!students_user_id_fkey(id, username, full_name, role, must_change_password, is_locked),
+                    class:classes(id, name, grade_level, school_level)
+                `)
+                .order('created_at', { ascending: false })
+                .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
 
-        // Apply filters
-        if (class_id) query = query.eq('class_id', class_id)
-        if (angkatan) query = query.eq('angkatan', angkatan)
-        if (school_level) query = query.eq('school_level', school_level)
-        if (status) query = query.eq('status', status)
+            // School filter
+            if (schoolId) query = query.eq('school_id', schoolId)
 
-        const { data, error } = await query
+            // Apply filters
+            if (class_id) query = query.eq('class_id', class_id)
+            if (angkatan) query = query.eq('angkatan', angkatan)
+            if (school_level) query = query.eq('school_level', school_level)
+            if (status) query = query.eq('status', status)
 
-        if (error) throw error
+            const { data, error } = await query
 
-        return NextResponse.json(data || [])
+            if (error) throw error
+
+            const rows = data || []
+            allData = allData.concat(rows)
+
+            // If we got fewer rows than PAGE_SIZE, we've reached the end
+            hasMore = rows.length === PAGE_SIZE
+            page++
+
+            // Safety limit: max 10 pages (10,000 students)
+            if (page >= 10) break
+        }
+
+        return NextResponse.json(allData)
     } catch (error) {
         console.error('Error fetching students:', error)
         return NextResponse.json([])

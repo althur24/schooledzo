@@ -33,10 +33,13 @@ export async function PUT(
         }
 
         // Update user
-        const userUpdate: Record<string, string> = {}
+        const userUpdate: Record<string, any> = {}
         if (username) userUpdate.username = username
         if (full_name) userUpdate.full_name = full_name
-        if (password) userUpdate.password_hash = await hashPassword(password)
+        if (password) {
+            userUpdate.password_hash = await hashPassword(password)
+            userUpdate.must_change_password = true
+        }
 
         if (Object.keys(userUpdate).length > 0) {
             const { error: userError } = await supabase
@@ -107,7 +110,21 @@ export async function DELETE(
             return NextResponse.json({ error: 'Guru tidak ditemukan' }, { status: 404 })
         }
 
-        // Delete user (will cascade to teacher)
+        // Manual cascade cleanup for FKs that reference users(id) WITHOUT ON DELETE CASCADE/SET NULL
+        // These would cause a 500 FK constraint error if not cleared first.
+        
+        // 1. schedules.created_by → REFERENCES users(id) (no ON DELETE action = RESTRICT)
+        await supabase.from('schedules').update({ created_by: null }).eq('created_by', teacher.user_id)
+        
+        // 2. admin_reviews.reviewer_id → REFERENCES users(id) (no ON DELETE action = RESTRICT)
+        await supabase.from('admin_reviews').update({ reviewer_id: null }).eq('reviewer_id', teacher.user_id)
+
+        // Now safe to delete the user — cascades to:
+        // sessions (ON DELETE CASCADE), teachers (ON DELETE CASCADE),
+        // teaching_assignments (ON DELETE CASCADE via teachers),
+        // schedules.teacher_id (ON DELETE SET NULL),
+        // classes.homeroom_teacher_id (ON DELETE SET NULL),
+        // notifications (ON DELETE CASCADE), etc.
         const { error } = await supabase
             .from('users')
             .delete()

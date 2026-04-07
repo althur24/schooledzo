@@ -7,6 +7,7 @@ import { User as Users, AddUser as UserPlus, Edit as Pencil, Delete as Trash2, S
 import Link from 'next/link'
 import { Loader2, Upload, FileDown, CheckCircle2, XCircle, Search as SearchIcon } from 'lucide-react'
 import Papa from 'papaparse'
+import * as XLSX from 'xlsx'
 import { parseSpreadsheet } from '@/lib/parseSpreadsheet'
 import { Class, SchoolLevel } from '@/lib/types'
 
@@ -58,6 +59,14 @@ const defaultFormData: FormData = {
 const currentYear = new Date().getFullYear()
 const angkatanOptions = Array.from({ length: 10 }, (_, i) => (currentYear - i).toString())
 
+// Helper: infer school_level from grade_level
+const inferSchoolLevel = (gradeLevel?: number | null): 'SMP' | 'SMA' | null => {
+    if (!gradeLevel) return null
+    if (gradeLevel >= 7 && gradeLevel <= 9) return 'SMP'
+    if (gradeLevel >= 10 && gradeLevel <= 12) return 'SMA'
+    return null
+}
+
 export default function SiswaPage() {
     const [students, setStudents] = useState<Student[]>([])
     const [filteredStudents, setFilteredStudents] = useState<Student[]>([])
@@ -87,6 +96,7 @@ export default function SiswaPage() {
 
     // Accordion State
     const [expandedClasses, setExpandedClasses] = useState<Set<string>>(new Set())
+    const [expandedLevels, setExpandedLevels] = useState<Set<string>>(new Set())
 
     const [confirmDialog, setConfirmDialog] = useState<{
         isOpen: boolean;
@@ -157,6 +167,29 @@ export default function SiswaPage() {
             filtered = filtered.filter(s => !!s.user.is_locked === isLocked)
         }
         setFilteredStudents(filtered)
+
+        // Auto-expand groups when searching
+        if (searchQuery.trim().length > 0) {
+            setExpandedLevels(prev => {
+                const next = new Set(prev)
+                filtered.forEach(student => {
+                    const schoolLevel = student.class?.school_level || 
+                        (student.class?.grade_level ? inferSchoolLevel(student.class.grade_level) : null) || 
+                        (student.class ? 'Lainnya' : 'Belum Masuk Kelas')
+                    next.add(schoolLevel as string)
+                })
+                return next
+            })
+
+            setExpandedClasses(prev => {
+                const next = new Set(prev)
+                filtered.forEach(student => {
+                    const className = student.class?.name || 'Belum Masuk Kelas'
+                    next.add(className)
+                })
+                return next
+            })
+        }
     }, [students, searchQuery, filterAngkatan, filterSchoolLevel, filterPasswordStatus, filterLockStatus])
 
     // Grouping by class
@@ -166,7 +199,7 @@ export default function SiswaPage() {
             acc[className] = {
                 name: className,
                 grade_level: student.class?.grade_level || 0,
-                school_level: student.class?.school_level || 'Belum Masuk Kelas',
+                school_level: student.class?.school_level || inferSchoolLevel(student.class?.grade_level) || (student.class ? 'Lainnya' : 'Belum Masuk Kelas'),
                 students: []
             }
         }
@@ -198,11 +231,43 @@ export default function SiswaPage() {
         setExpandedClasses(newExpanded)
     }
 
+    const toggleLevel = (level: string) => {
+        const newExpandedLevels = new Set(expandedLevels)
+        if (newExpandedLevels.has(level)) {
+            newExpandedLevels.delete(level)
+            // also collapse all classes in this level
+            const newExpandedClasses = new Set(expandedClasses)
+            sortedGroups.filter(g => (g.school_level || 'Belum Masuk Kelas') === level).forEach(g => {
+                newExpandedClasses.delete(g.name)
+            })
+            setExpandedClasses(newExpandedClasses)
+        } else {
+            newExpandedLevels.add(level)
+        }
+        setExpandedLevels(newExpandedLevels)
+    }
+
+    const levelGroups = sortedGroups.reduce((acc, group) => {
+        const level = (group.school_level as string) || 'Belum Masuk Kelas'
+        if (!acc[level]) acc[level] = []
+        acc[level].push(group)
+        return acc
+    }, {} as Record<string, typeof sortedGroups>)
+
+    const levelOrder = Object.keys(levelGroups).sort((a, b) => {
+        const weightA = a === 'SMP' ? 1 : a === 'SMA' ? 2 : 3
+        const weightB = b === 'SMP' ? 1 : b === 'SMA' ? 2 : 3
+        if (weightA !== weightB) return weightA - weightB
+        return a.localeCompare(b)
+    })
+
     const toggleAllClasses = () => {
         if (expandedClasses.size === sortedGroups.length) {
             setExpandedClasses(new Set())
+            setExpandedLevels(new Set())
         } else {
             setExpandedClasses(new Set(sortedGroups.map(g => g.name)))
+            setExpandedLevels(new Set(levelOrder))
         }
     }
 
@@ -267,8 +332,18 @@ export default function SiswaPage() {
             isDanger: true,
             onConfirm: async () => {
                 setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-                await fetch(`/api/students/${id}`, { method: 'DELETE' })
-                fetchData()
+                try {
+                    const res = await fetch(`/api/students/${id}`, { method: 'DELETE' })
+                    if (!res.ok) {
+                        const data = await res.json()
+                        setError(data.error || 'Gagal menghapus siswa')
+                        return
+                    }
+                    setSuccessMessage('Siswa berhasil dihapus')
+                    fetchData()
+                } catch (err) {
+                    setError('Terjadi kesalahan jaringan')
+                }
             }
         });
     }
@@ -310,6 +385,11 @@ export default function SiswaPage() {
 
     const openEdit = (student: Student) => {
         setEditingStudent(student)
+        // Cascade: student.school_level -> class.school_level -> infer from grade_level
+        const detectedLevel = student.school_level 
+            || student.class?.school_level 
+            || inferSchoolLevel(student.class?.grade_level) 
+            || ''
         setFormData({
             password: '',
             full_name: student.user.full_name || '',
@@ -318,7 +398,7 @@ export default function SiswaPage() {
             gender: student.gender || '',
             angkatan: student.angkatan || '',
             entry_year: student.entry_year?.toString() || '',
-            school_level: student.school_level || '',
+            school_level: detectedLevel,
             wali_password: ''
         })
         setError('')
@@ -353,6 +433,28 @@ export default function SiswaPage() {
         document.body.appendChild(link)
         link.click()
         document.body.removeChild(link)
+    }
+
+    const downloadExcel = () => {
+        if (filteredStudents.length === 0) return
+        const data = filteredStudents.map((s, i) => ({
+            'No': i + 1,
+            'Nama Lengkap': s.user.full_name || '-',
+            'NIS': s.nis || '-',
+            'Jenis Kelamin': s.gender === 'L' ? 'Laki-laki' : s.gender === 'P' ? 'Perempuan' : '-',
+            'Jenjang': s.school_level || '-',
+            'Kelas': s.class?.name || '-',
+            'Angkatan': s.angkatan || '-',
+            'Username': s.user.username,
+            'Status Password': s.user.must_change_password ? 'Belum Diganti' : 'Sudah Diganti'
+        }))
+        const ws = XLSX.utils.json_to_sheet(data)
+        // Auto-fit column widths
+        ws['!cols'] = Object.keys(data[0] || {}).map(k => ({ wch: Math.max(k.length, 15) }))
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, 'Data Siswa')
+        const today = new Date().toISOString().split('T')[0]
+        XLSX.writeFile(wb, `Data_Siswa_${today}.xlsx`)
     }
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -420,6 +522,9 @@ export default function SiswaPage() {
                 icon={<div className="text-violet-500"><Users set="bold" primaryColor="currentColor" size={24} /></div>}
                 action={
                     <div className="flex flex-wrap gap-2 justify-end">
+                        <Button variant="secondary" onClick={downloadExcel} icon={<FileDown className="w-5 h-5" />}>
+                            Download Excel
+                        </Button>
                         <Button variant="secondary" onClick={() => setShowFilters(!showFilters)} icon={<Filter set="bold" primaryColor="currentColor" size={20} />}>
                             Filter
                         </Button>
@@ -544,141 +649,170 @@ export default function SiswaPage() {
                         />
                     </Card>
                 ) : (
-                    <div className="space-y-4">
-                        {sortedGroups.map((group) => {
-                            const isExpanded = expandedClasses.has(group.name)
+                    <div className="space-y-6">
+                        {levelOrder.map((level) => {
+                            const isLevelExpanded = expandedLevels.has(level)
+                            const levelStudentsCount = levelGroups[level].reduce((sum, g) => sum + g.students.length, 0)
+                            const bgColors = level === 'SMP' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800' 
+                                            : level === 'SMA' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 border-purple-200 dark:border-purple-800'
+                                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                            
                             return (
-                                <Card key={group.name} className="overflow-hidden p-0 transition-all duration-200">
-                                    <button
-                                        onClick={() => toggleClass(group.name)}
-                                        className="w-full flex items-center justify-between p-4 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-800/80 transition-colors"
+                                <div key={level} className="space-y-3">
+                                    {/* Level Card */}
+                                    <button 
+                                        onClick={() => toggleLevel(level)}
+                                        className={`w-full flex items-center justify-between p-4 rounded-2xl border ${bgColors} transition-all hover:brightness-95`}
                                     >
-                                        <div className="flex items-center gap-4">
-                                            <div className="text-text-secondary transition-transform duration-200" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-                                                <ChevronRight set="bold" primaryColor="currentColor" size={20} />
-                                            </div>
-                                            <div className="text-left">
-                                                <div className="flex items-center gap-2">
-                                                    <h3 className="text-lg font-bold text-slate-800 dark:text-white">{group.name}</h3>
-                                                    {group.school_level && group.school_level !== 'Belum Masuk Kelas' && (
-                                                        <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-sm bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400 border border-violet-200 dark:border-violet-800">
-                                                            {group.school_level}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
                                         <div className="flex items-center gap-3">
-                                            <span className="px-3 py-1 bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 rounded-full text-xs font-bold">
-                                                {group.students.length} Siswa
-                                            </span>
+                                            <div className="text-current transition-transform duration-200" style={{ transform: isLevelExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                                                <ChevronRight set="bold" primaryColor="currentColor" size={24} />
+                                            </div>
+                                            <h2 className="text-xl font-black tracking-tight">{level}</h2>
+                                        </div>
+                                        <div className="flex items-center gap-2 bg-white/50 dark:bg-black/20 px-4 py-1.5 rounded-full">
+                                            <Users set="bold" primaryColor="currentColor" size={16} />
+                                            <span className="font-bold text-sm">{levelStudentsCount} Siswa</span>
                                         </div>
                                     </button>
 
-                                    {isExpanded && (
-                                        <div className="border-t border-secondary/10 dark:border-white/5">
-                                            <div className="overflow-x-auto">
-                                                <table className="w-full">
-                                                    <thead className="bg-slate-50 dark:bg-slate-800/50">
-                                                        <tr>
-                                                            <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">Nama</th>
-                                                            <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">L/P</th>
-                                                            <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">NIS</th>
-                                                            <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">Angkatan</th>
-                                                            <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">Username Login (NIS)</th>
-                                                            <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">Status Password</th>
-                                                            <th className="px-6 py-3 text-right text-xs font-bold text-text-secondary uppercase tracking-wider">Aksi</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-secondary/10 dark:divide-white/5 bg-white dark:bg-slate-800/20">
-                                                        {group.students.map((student) => (
-                                                            <tr key={student.id} className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${student.user.is_locked ? 'opacity-60 bg-red-50/20 dark:bg-red-900/10' : ''}`}>
-                                                                <td className="px-6 py-3">
-                                                                    <div className="flex items-center gap-3">
-                                                                        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold shadow-sm text-xs relative">
-                                                                            {student.user.full_name?.[0] || '?'}
-                                                                            {student.user.is_locked && (
-                                                                                <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full border-2 border-white dark:border-slate-800 flex items-center justify-center">
-                                                                                    <span className="text-[8px]">🔒</span>
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                        <div className="flex flex-col">
-                                                                            <span className={`text-sm font-bold ${student.user.is_locked ? 'text-red-700 dark:text-red-400 line-through decoration-red-500/50' : 'text-slate-700 dark:text-slate-200'}`}>
-                                                                                {student.user.full_name || '-'}
-                                                                            </span>
-                                                                            {student.user.is_locked && (
-                                                                                <span className="text-[10px] font-bold text-red-600 dark:text-red-400 mt-0.5">TERKUNCI</span>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                </td>
-                                                                <td className="px-6 py-3">
-                                                                    {student.gender ? (
-                                                                        <span className={`px-2 py-0.5 text-[10px] font-bold rounded-sm border ${student.gender === 'L'
-                                                                            ? 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20'
-                                                                            : 'bg-pink-50 text-pink-600 border-pink-200 dark:bg-pink-500/10 dark:text-pink-400 dark:border-pink-500/20'
-                                                                            }`}>
-                                                                            {student.gender === 'L' ? 'L' : 'P'}
-                                                                        </span>
-                                                                    ) : (
-                                                                        <span className="text-text-secondary dark:text-zinc-500 text-xs">-</span>
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-6 py-3 text-text-secondary dark:text-zinc-400 font-mono text-xs">{student.nis || '-'}</td>
-                                                                <td className="px-6 py-3">
-                                                                    {student.angkatan ? (
-                                                                        <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300 text-xs font-medium">
-                                                                            <GraduationCap set="light" primaryColor="currentColor" size={12} />
-                                                                            {student.angkatan}
-                                                                        </span>
-                                                                    ) : (
-                                                                        <span className="text-text-secondary dark:text-zinc-500 text-xs">-</span>
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-6 py-3 text-text-secondary dark:text-zinc-400 font-mono text-xs">{student.user.username}</td>
-                                                                <td className="px-6 py-3">
-                                                                    {student.user.must_change_password ? (
-                                                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 shadow-sm">
-                                                                            <span className="w-1 h-1 rounded-full bg-amber-500 mr-1.5 animate-pulse"></span>
-                                                                            Belum Diganti
-                                                                        </span>
-                                                                    ) : (
-                                                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50 shadow-sm">
-                                                                            <span className="w-1 h-1 rounded-full bg-emerald-500 mr-1.5"></span>
-                                                                            Sudah Diganti
-                                                                        </span>
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-6 py-3 text-right">
-                                                                    <div className="flex items-center justify-end gap-1.5">
-                                                                        <button
-                                                                            onClick={() => handleToggleLock(student.id, student.user.is_locked)}
-                                                                            className={`p-1.5 rounded-md transition-colors ${student.user.is_locked ? 'text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10' : 'text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10'}`}
-                                                                            title={student.user.is_locked ? "Buka Akses Siswa" : "Blokir Akses Siswa"}
-                                                                            disabled={saving}
-                                                                        >
-                                                                            <span className="text-base">{student.user.is_locked ? '🔓' : '🔒'}</span>
-                                                                        </button>
-                                                                        <Link href={`/dashboard/admin/siswa/${student.id}/rapor`} className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors" title="Rapor">
-                                                                            <Paper set="bold" primaryColor="currentColor" size={16} />
-                                                                        </Link>
-                                                                        <button onClick={() => openEdit(student)} className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors" title="Edit">
-                                                                            <Pencil set="bold" primaryColor="currentColor" size={16} />
-                                                                        </button>
-                                                                        <button onClick={() => handleDelete(student.id)} className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors" title="Hapus">
-                                                                            <Trash2 set="bold" primaryColor="currentColor" size={16} />
-                                                                        </button>
-                                                                    </div>
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
+                                    {/* Classes in this level */}
+                                    {isLevelExpanded && (
+                                        <div className="space-y-3 pl-4 border-l-2 border-slate-100 dark:border-slate-800 ml-4 mt-2">
+                                            {levelGroups[level].map((group) => {
+                                                const isExpanded = expandedClasses.has(group.name)
+                                                return (
+                                                    <Card key={group.name} className="overflow-hidden p-0 transition-all duration-200 shadow-sm border-secondary/20">
+                                                        <button
+                                                            onClick={() => toggleClass(group.name)}
+                                                            className="w-full flex items-center justify-between p-4 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-800/80 transition-colors"
+                                                        >
+                                                            <div className="flex items-center gap-4">
+                                                                <div className="text-text-secondary transition-transform duration-200" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                                                                    <ChevronRight set="bold" primaryColor="currentColor" size={20} />
+                                                                </div>
+                                                                <div className="text-left">
+                                                                    <h3 className="text-base font-bold text-slate-800 dark:text-white">{group.name}</h3>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-3">
+                                                                <span className="px-3 py-1 bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 rounded-full text-xs font-bold shadow-sm">
+                                                                    {group.students.length} Siswa
+                                                                </span>
+                                                            </div>
+                                                        </button>
+
+                                                        {isExpanded && (
+                                                            <div className="border-t border-secondary/10 dark:border-white/5 bg-slate-50/50 dark:bg-slate-800/10">
+                                                                <div className="overflow-x-auto">
+                                                                    <table className="w-full">
+                                                                        <thead className="bg-white dark:bg-slate-800/50 border-b border-secondary/10 dark:border-white/5">
+                                                                            <tr>
+                                                                                <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider w-12">No</th>
+                                                                                <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">Nama</th>
+                                                                                <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">L/P</th>
+                                                                                <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">NIS</th>
+                                                                                <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">Angkatan</th>
+                                                                                <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">Username Login</th>
+                                                                                <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">Status Password</th>
+                                                                                <th className="px-6 py-3 text-right text-xs font-bold text-text-secondary uppercase tracking-wider">Aksi</th>
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody className="divide-y divide-secondary/5 dark:divide-white/5">
+                                                                            {[...group.students].sort((a, b) => (a.user.full_name || '').localeCompare(b.user.full_name || '', 'id')).map((student, index) => (
+                                                                                <tr key={student.id} className={`hover:bg-white dark:hover:bg-slate-800 transition-colors ${student.user.is_locked ? 'opacity-60 bg-red-50/20 dark:bg-red-900/10' : ''}`}>
+                                                                                    <td className="px-6 py-3 text-xs font-bold text-text-secondary">{index + 1}</td>
+                                                                                    <td className="px-6 py-3">
+                                                                                        <div className="flex items-center gap-3">
+                                                                                            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold shadow-sm text-xs relative flex-shrink-0">
+                                                                                                {student.user.full_name?.[0] || '?'}
+                                                                                                {student.user.is_locked && (
+                                                                                                    <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full border-2 border-white dark:border-slate-800 flex items-center justify-center">
+                                                                                                        <span className="text-[8px]">🔒</span>
+                                                                                                    </div>
+                                                                                                )}
+                                                                                            </div>
+                                                                                            <div className="flex flex-col">
+                                                                                                <span className={`text-sm font-bold ${student.user.is_locked ? 'text-red-700 dark:text-red-400 line-through decoration-red-500/50' : 'text-slate-700 dark:text-slate-200'}`}>
+                                                                                                    {student.user.full_name || '-'}
+                                                                                                </span>
+                                                                                                {student.user.is_locked && (
+                                                                                                    <span className="text-[10px] font-bold text-red-600 dark:text-red-400 mt-0.5">TERKUNCI</span>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </td>
+                                                                                    <td className="px-6 py-3">
+                                                                                        {student.gender ? (
+                                                                                            <span className={`px-2 py-0.5 text-[10px] font-bold rounded-sm border ${student.gender === 'L'
+                                                                                                ? 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20'
+                                                                                                : 'bg-pink-50 text-pink-600 border-pink-200 dark:bg-pink-500/10 dark:text-pink-400 dark:border-pink-500/20'
+                                                                                                }`}>
+                                                                                                {student.gender === 'L' ? 'L' : 'P'}
+                                                                                            </span>
+                                                                                        ) : (
+                                                                                            <span className="text-text-secondary dark:text-zinc-500 text-xs">-</span>
+                                                                                        )}
+                                                                                    </td>
+                                                                                    <td className="px-6 py-3 text-text-secondary dark:text-zinc-400 font-mono text-xs">{student.nis || '-'}</td>
+                                                                                    <td className="px-6 py-3">
+                                                                                        {student.angkatan ? (
+                                                                                            <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300 text-xs font-medium">
+                                                                                                <GraduationCap set="light" primaryColor="currentColor" size={12} />
+                                                                                                {student.angkatan}
+                                                                                            </span>
+                                                                                        ) : (
+                                                                                            <span className="text-text-secondary dark:text-zinc-500 text-xs">-</span>
+                                                                                        )}
+                                                                                    </td>
+                                                                                    <td className="px-6 py-3 text-text-secondary dark:text-zinc-400 font-mono text-xs">{student.user.username}</td>
+                                                                                    <td className="px-6 py-3">
+                                                                                        {student.user.must_change_password ? (
+                                                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 shadow-sm">
+                                                                                                <span className="w-1 h-1 rounded-full bg-amber-500 mr-1.5 animate-pulse"></span>
+                                                                                                Belum Diganti
+                                                                                            </span>
+                                                                                        ) : (
+                                                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50 shadow-sm">
+                                                                                                <span className="w-1 h-1 rounded-full bg-emerald-500 mr-1.5"></span>
+                                                                                                Sudah Diganti
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </td>
+                                                                                    <td className="px-6 py-3 text-right">
+                                                                                        <div className="flex items-center justify-end gap-1.5">
+                                                                                            <button
+                                                                                                onClick={() => handleToggleLock(student.id, student.user.is_locked)}
+                                                                                                className={`p-1.5 rounded-md transition-colors ${student.user.is_locked ? 'text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10' : 'text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10'}`}
+                                                                                                title={student.user.is_locked ? "Buka Akses Siswa" : "Blokir Akses Siswa"}
+                                                                                                disabled={saving}
+                                                                                            >
+                                                                                                <span className="text-base">{student.user.is_locked ? '🔓' : '🔒'}</span>
+                                                                                            </button>
+                                                                                            <Link href={`/dashboard/admin/siswa/${student.id}/rapor`} className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors" title="Rapor">
+                                                                                                <Paper set="bold" primaryColor="currentColor" size={16} />
+                                                                                            </Link>
+                                                                                            <button onClick={() => openEdit(student)} className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors" title="Edit">
+                                                                                                <Pencil set="bold" primaryColor="currentColor" size={16} />
+                                                                                            </button>
+                                                                                            <button onClick={() => handleDelete(student.id)} className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors" title="Hapus">
+                                                                                                <Trash2 set="bold" primaryColor="currentColor" size={16} />
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </td>
+                                                                                </tr>
+                                                                            ))}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </Card>
+                                                )
+                                            })}
                                         </div>
                                     )}
-                                </Card>
+                                </div>
                             )
                         })}
                     </div>
@@ -787,7 +921,11 @@ export default function SiswaPage() {
                         <div className="relative">
                             <select
                                 value={formData.class_id}
-                                onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
+                                onChange={(e) => {
+                                    const selectedClass = classes.find(c => c.id === e.target.value)
+                                    const autoLevel = selectedClass?.school_level || inferSchoolLevel(selectedClass?.grade_level) || formData.school_level
+                                    setFormData({ ...formData, class_id: e.target.value, school_level: autoLevel })
+                                }}
                                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none"
                             >
                                 <option value="">Pilih Kelas</option>

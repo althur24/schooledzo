@@ -3,8 +3,9 @@
 import { useEffect, useState, useRef } from 'react'
 import { Modal, Button, EmptyState, PageHeader } from '@/components/ui'
 import Card from '@/components/ui/Card'
-import { UserCheck, UserPlus, Upload, FileDown, CheckCircle2, XCircle } from 'lucide-react'
+import { UserCheck, UserPlus, Upload, FileDown, CheckCircle2, XCircle, Search, Lock } from 'lucide-react'
 import Papa from 'papaparse'
+import * as XLSX from 'xlsx'
 import { parseSpreadsheet } from '@/lib/parseSpreadsheet'
 
 interface Teacher {
@@ -15,11 +16,17 @@ interface Teacher {
         id: string
         username: string
         full_name: string | null
+        must_change_password?: boolean
     }
+    teaching_assignments?: {
+        id: string
+    }[]
 }
 
 export default function GuruPage() {
     const [teachers, setTeachers] = useState<Teacher[]>([])
+    const [searchQuery, setSearchQuery] = useState('')
+    const [filterGender, setFilterGender] = useState('')
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
     const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null)
@@ -33,6 +40,10 @@ export default function GuruPage() {
     const [bulkSaving, setBulkSaving] = useState(false)
     const [bulkResults, setBulkResults] = useState<{ success: number, failed: number, errors: any[] } | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
+
+    // Delete confirmation state
+    const [deleteTarget, setDeleteTarget] = useState<Teacher | null>(null)
+    const [deleting, setDeleting] = useState(false)
 
     const fetchTeachers = async () => {
         try {
@@ -78,10 +89,20 @@ export default function GuruPage() {
         }
     }
 
-    const handleDelete = async (id: string) => {
-        if (!confirm('Yakin ingin menghapus guru ini?')) return
-        await fetch(`/api/teachers/${id}`, { method: 'DELETE' })
-        fetchTeachers()
+    const handleDelete = async (teacher: Teacher) => {
+        setDeleteTarget(teacher)
+    }
+
+    const confirmDelete = async () => {
+        if (!deleteTarget) return
+        setDeleting(true)
+        try {
+            await fetch(`/api/teachers/${deleteTarget.id}`, { method: 'DELETE' })
+            fetchTeachers()
+        } finally {
+            setDeleting(false)
+            setDeleteTarget(null)
+        }
     }
 
     const openEdit = (teacher: Teacher) => {
@@ -118,6 +139,26 @@ export default function GuruPage() {
         document.body.appendChild(link)
         link.click()
         document.body.removeChild(link)
+    }
+
+    const downloadExcel = () => {
+        if (filteredTeachers.length === 0) return
+        const data = filteredTeachers.map((t, i) => ({
+            'No': i + 1,
+            'Nama Lengkap': t.user.full_name || '-',
+            'Jenis Kelamin': t.gender === 'L' ? 'Laki-laki' : t.gender === 'P' ? 'Perempuan' : '-',
+            'Username': t.user.username,
+            'NIP': t.nip || '-',
+            'Jumlah Penugasan': t.teaching_assignments?.length || 0,
+            'Status Password': t.user.must_change_password ? 'Belum Diganti' : 'Sudah Diganti'
+        }))
+        const ws = XLSX.utils.json_to_sheet(data)
+        // Auto-fit column widths
+        ws['!cols'] = Object.keys(data[0] || {}).map(k => ({ wch: Math.max(k.length, 15) }))
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, 'Data Guru')
+        const today = new Date().toISOString().split('T')[0]
+        XLSX.writeFile(wb, `Data_Guru_${today}.xlsx`)
     }
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -172,15 +213,32 @@ export default function GuruPage() {
         }
     }
 
+    const filteredTeachers = teachers.filter(teacher => {
+        if (filterGender && teacher.gender !== filterGender) return false
+        
+        if (!searchQuery) return true
+        const query = searchQuery.toLowerCase()
+        return teacher.user.full_name?.toLowerCase().includes(query) ||
+               teacher.user.username.toLowerCase().includes(query) ||
+               teacher.nip?.toLowerCase().includes(query)
+    }).sort((a, b) => {
+        const nameA = (a.user.full_name || a.user.username).toLowerCase()
+        const nameB = (b.user.full_name || b.user.username).toLowerCase()
+        return nameA.localeCompare(nameB, 'id')
+    })
+
     return (
         <div className="space-y-6">
             <PageHeader
-                title="Akun Guru"
+                title={`Akun Guru${!loading ? ` (${teachers.length})` : ''}`}
                 subtitle="Kelola data guru dan akses login"
                 backHref="/dashboard/admin"
                 icon={<UserCheck className="w-6 h-6 text-blue-500" />}
                 action={
                     <div className="flex gap-2">
+                        <Button variant="secondary" onClick={downloadExcel} icon={<FileDown className="w-5 h-5" />}>
+                            Download Excel
+                        </Button>
                         <Button variant="secondary" onClick={() => { setBulkResults(null); setShowBulkModal(true); }} icon={<Upload className="w-5 h-5" />}>
                             Upload Massal
                         </Button>
@@ -190,6 +248,39 @@ export default function GuruPage() {
                     </div>
                 }
             />
+
+            {/* Search Bar & Filters */}
+            <div className="flex flex-col sm:flex-row items-center gap-4">
+                <div className="relative flex-1 w-full">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary">
+                        <Search className="w-5 h-5 text-slate-400" />
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Cari berdasarkan nama, NIP, atau username..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-12 pr-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-sm shadow-sm"
+                    />
+                </div>
+                <div className="w-full sm:w-auto flex items-center gap-3">
+                    <select
+                        value={filterGender}
+                        onChange={(e) => setFilterGender(e.target.value)}
+                        className="px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    >
+                        <option value="">Semua L/P</option>
+                        <option value="L">Laki-laki</option>
+                        <option value="P">Perempuan</option>
+                    </select>
+                </div>
+            </div>
+            
+            {(searchQuery || filterGender) && (
+                <div className="text-sm text-text-secondary">
+                    Menampilkan <span className="font-bold text-text-main dark:text-white">{filteredTeachers.length}</span> dari {teachers.length} guru
+                </div>
+            )}
 
             <Card className="overflow-hidden p-0">
                 {loading ? (
@@ -205,21 +296,33 @@ export default function GuruPage() {
                             action={<Button onClick={openAdd}>Tambah Guru</Button>}
                         />
                     </div>
+                ) : filteredTeachers.length === 0 ? (
+                    <div className="p-12 text-center">
+                        <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Search className="w-8 h-8 text-slate-400" />
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">Guru tidak ditemukan</h3>
+                        <p className="text-slate-500 dark:text-slate-400">Tidak ada guru yang cocok dengan kata kunci "{searchQuery}"</p>
+                    </div>
                 ) : (
                     <div className="overflow-x-auto">
                         <table className="w-full">
                             <thead className="bg-secondary/10 dark:bg-white/5 border-b border-secondary/20">
                                 <tr>
+                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider w-16">No</th>
                                     <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Nama</th>
                                     <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">L/P</th>
                                     <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Username</th>
                                     <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">NIP</th>
+                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Status Password</th>
+                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Penugasan</th>
                                     <th className="px-6 py-4 text-right text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-secondary/20 dark:divide-white/5">
-                                {teachers.map((teacher) => (
+                                {filteredTeachers.map((teacher, index) => (
                                     <tr key={teacher.id} className="hover:bg-secondary/5 transition-colors">
+                                        <td className="px-6 py-4 text-sm font-bold text-text-secondary">{index + 1}</td>
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-10 h-10 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-center text-white font-bold shadow-sm text-sm">
@@ -242,6 +345,28 @@ export default function GuruPage() {
                                         </td>
                                         <td className="px-6 py-4 text-text-secondary dark:text-zinc-300 font-mono text-sm">{teacher.user.username}</td>
                                         <td className="px-6 py-4 text-text-secondary dark:text-zinc-300">{teacher.nip || '-'}</td>
+                                        <td className="px-6 py-4">
+                                            {teacher.user.must_change_password ? (
+                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200/50 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20">
+                                                    <Lock className="w-3.5 h-3.5" />
+                                                    Belum Diganti
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/50 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20">
+                                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                                    Sudah Diganti
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {teacher.teaching_assignments && teacher.teaching_assignments.length > 0 ? (
+                                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20">
+                                                    {teacher.teaching_assignments.length} Kelas
+                                                </span>
+                                            ) : (
+                                                <span className="text-text-secondary dark:text-zinc-500 text-xs">-</span>
+                                            )}
+                                        </td>
                                         <td className="px-6 py-4 text-right">
                                             <div className="flex items-center justify-end gap-2">
                                                 <button onClick={() => openEdit(teacher)} className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 flex items-center justify-center transition-colors">
@@ -249,7 +374,7 @@ export default function GuruPage() {
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                                     </svg>
                                                 </button>
-                                                <button onClick={() => handleDelete(teacher.id)} className="w-8 h-8 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 flex items-center justify-center transition-colors">
+                                                <button onClick={() => handleDelete(teacher)} className="w-8 h-8 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 flex items-center justify-center transition-colors">
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                                     </svg>
@@ -462,6 +587,32 @@ export default function GuruPage() {
                         </div>
                     </div>
                 )}
+            </Modal>
+
+            {/* Delete Confirmation Modal */}
+            <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Hapus Guru">
+                <div className="space-y-4">
+                    <div className="p-4 bg-red-50 dark:bg-red-900/10 rounded-xl border border-red-100 dark:border-red-900/30">
+                        <p className="text-sm text-red-800 dark:text-red-300">
+                            Apakah Anda yakin ingin menghapus guru <strong>{deleteTarget?.user.full_name || deleteTarget?.user.username}</strong>?
+                        </p>
+                        <p className="text-xs text-red-600 dark:text-red-400 mt-2">
+                            Semua data terkait guru ini (penugasan kelas, jadwal, dll) akan ikut terhapus. Tindakan ini tidak dapat dibatalkan.
+                        </p>
+                    </div>
+                    <div className="flex gap-3">
+                        <Button variant="secondary" className="flex-1" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+                            Batal
+                        </Button>
+                        <button
+                            onClick={confirmDelete}
+                            disabled={deleting}
+                            className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-xl transition-colors disabled:opacity-60"
+                        >
+                            {deleting ? 'Menghapus...' : 'Ya, Hapus'}
+                        </button>
+                    </div>
+                </div>
             </Modal>
         </div>
     )

@@ -14,7 +14,8 @@ export async function GET(request: NextRequest) {
             .from('teachers')
             .select(`
         *,
-        user:users(id, username, full_name, role)
+        user:users(id, username, full_name, role, must_change_password),
+        teaching_assignments(id)
       `)
             .order('created_at', { ascending: false })
 
@@ -69,7 +70,8 @@ export async function POST(request: NextRequest) {
                 password_hash,
                 full_name,
                 role: 'GURU',
-                school_id: schoolId
+                school_id: schoolId,
+                must_change_password: true
             })
             .select()
             .single()
