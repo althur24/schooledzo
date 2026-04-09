@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { hashPassword } from '@/lib/auth'
-import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getSchoolContextOrError, isErrorResponse, getSchoolCode } from '@/lib/schoolContext'
 
 // GET all students
 export async function GET(request: NextRequest) {
@@ -135,8 +135,13 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Password harus diisi' }, { status: 400 })
         }
 
-        // Check if username (which is now NIS) already exists (globally unique)
-        const username = nis.trim()
+        const schoolCode = await getSchoolCode(schoolId || '')
+        if (!schoolCode) {
+            return NextResponse.json({ error: 'Data sekolah tidak valid atau kode sekolah tidak ditemukan' }, { status: 400 })
+        }
+
+        // Check if username (which is now NIS.schoolCode) already exists (globally unique)
+        const username = `${nis.trim()}.${schoolCode}`
         const { data: existingUser } = await supabase
             .from('users')
             .select('id')
@@ -144,7 +149,7 @@ export async function POST(request: NextRequest) {
             .single()
 
         if (existingUser) {
-            return NextResponse.json({ error: 'NIS (Username) sudah digunakan oleh akun lain' }, { status: 400 })
+            return NextResponse.json({ error: 'NIS sudah digunakan oleh akun lain di sekolah ini' }, { status: 400 })
         }
 
         // Check if .wali username would collide

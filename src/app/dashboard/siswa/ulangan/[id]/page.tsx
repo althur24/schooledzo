@@ -388,6 +388,26 @@ export default function TakeExamPage() {
             }
         }
 
+        // Method 2: Window blur/focus (works for PWA standalone + Alt+Tab)
+        const handleWindowBlur = async () => {
+            if (document.hidden) return // Already handled by visibilitychange
+            if (violationCooldownRef.current || isFullscreenTransition.current) return
+            violationCooldownRef.current = true
+            setTimeout(() => { violationCooldownRef.current = false }, 5000)
+
+            pendingViolationRef.current = true
+            await logViolation('TAB_SWITCH')
+        }
+        
+        const handleWindowFocus = () => {
+            if (document.hidden) return
+            if (pendingViolationRef.current) {
+                pendingViolationRef.current = false
+                setShowViolationWarning(true)
+                setTimeout(() => setShowViolationWarning(false), 4000)
+            }
+        }
+
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
             e.preventDefault()
             e.returnValue = 'Anda sedang dalam ulangan. Keluar akan dihitung sebagai pelanggaran!'
@@ -420,6 +440,8 @@ export default function TakeExamPage() {
         }
 
         document.addEventListener('visibilitychange', handleVisibilityChange)
+        window.addEventListener('blur', handleWindowBlur)
+        window.addEventListener('focus', handleWindowFocus)
         window.addEventListener('beforeunload', handleBeforeUnload)
         document.addEventListener('contextmenu', handleContextMenu)
         document.addEventListener('copy', handleCopy)
@@ -428,6 +450,8 @@ export default function TakeExamPage() {
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange)
+            window.removeEventListener('blur', handleWindowBlur)
+            window.removeEventListener('focus', handleWindowFocus)
             window.removeEventListener('beforeunload', handleBeforeUnload)
             document.removeEventListener('contextmenu', handleContextMenu)
             document.removeEventListener('copy', handleCopy)

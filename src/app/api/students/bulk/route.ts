@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { hashPassword } from '@/lib/auth'
-import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getSchoolContextOrError, isErrorResponse, getSchoolCode } from '@/lib/schoolContext'
 
 export async function POST(request: NextRequest) {
     try {
@@ -51,12 +51,18 @@ export async function POST(request: NextRequest) {
 
         const results = []
 
+        const schoolCode = await getSchoolCode(schoolId || '')
+        if (!schoolCode) {
+            return NextResponse.json({ error: 'Data sekolah tidak valid' }, { status: 400 })
+        }
+
         // BATCH OPTIMIZATION: Pre-fetch all existing usernames in ONE query
         // NIS is used as username if no explicit username provided
         const resolvedUsernames = payload.map((item: any) => {
             const explicitUsername = item.username ? String(item.username).trim() : ''
             const nis = item.nis ? String(item.nis).trim() : ''
-            return explicitUsername || nis  // fallback to NIS
+            const baseUsername = explicitUsername || nis // fallback to NIS
+            return baseUsername ? `${baseUsername}.${schoolCode}` : ''
         }).filter(Boolean)
 
         const { data: existingUsers } = await supabase
@@ -81,7 +87,8 @@ export async function POST(request: NextRequest) {
             const { full_name, gender, nis, angkatan, kelas, username, password } = item
 
             // Resolve username: explicit username > NIS
-            const resolvedUsername = (username ? String(username).trim() : '') || (nis ? String(nis).trim() : '')
+            const baseUsername = (username ? String(username).trim() : '') || (nis ? String(nis).trim() : '')
+            const resolvedUsername = baseUsername ? `${baseUsername}.${schoolCode}` : ''
 
             if (!full_name) {
                 results.push({ item, success: false, error: 'Nama Lengkap harus diisi' })

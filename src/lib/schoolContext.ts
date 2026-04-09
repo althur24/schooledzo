@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateSession } from './auth'
 import { AuthUser } from './types'
+import { supabaseAdmin } from './supabase'
 
 /**
  * Multi-tenant school context helper
@@ -60,6 +61,11 @@ export async function getSchoolContextOrError(
 /**
  * Check if a school context result is an error response
  */
+export async function getSchoolCode(schoolId: string): Promise<string | null> {
+    const { data } = await supabaseAdmin.from('schools').select('code').eq('id', schoolId).single()
+    return data?.code || null
+}
+
 export function isErrorResponse(
     result: SchoolContext | NextResponse
 ): result is NextResponse {

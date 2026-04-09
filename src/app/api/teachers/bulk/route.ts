@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { hashPassword } from '@/lib/auth'
-import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getSchoolContextOrError, isErrorResponse, getSchoolCode } from '@/lib/schoolContext'
 
 export async function POST(request: NextRequest) {
     try {
@@ -20,12 +20,17 @@ export async function POST(request: NextRequest) {
 
         const results = []
 
+        const schoolCode = await getSchoolCode(schoolId || '')
+        if (!schoolCode) {
+            return NextResponse.json({ error: 'Data sekolah tidak valid' }, { status: 400 })
+        }
+
         // BATCH OPTIMIZATION: Pre-fetch all existing usernames in ONE query
-        const usernames = payload.filter((item: any) => item.username).map((item: any) => String(item.username))
+        const suffixedUsernames = payload.filter((item: any) => item.username).map((item: any) => `${String(item.username).trim()}.${schoolCode}`)
         const { data: existingUsers } = await supabase
             .from('users')
             .select('username')
-            .in('username', usernames)
+            .in('username', suffixedUsernames)
         const existingUsernames = new Set(existingUsers?.map(u => u.username) || [])
 
         // PARALLEL OPTIMIZATION: Hash ALL passwords at once (~150ms total instead of N × 150ms)
@@ -46,8 +51,10 @@ export async function POST(request: NextRequest) {
             }
 
             try {
+                const suffixedUsername = `${String(username).trim()}.${schoolCode}`
+
                 // Check existing username from pre-fetched set (0ms vs 700ms)
-                if (existingUsernames.has(String(username))) {
+                if (existingUsernames.has(suffixedUsername)) {
                     results.push({ item, success: false, error: 'Username sudah digunakan' })
                     continue
                 }
@@ -59,7 +66,7 @@ export async function POST(request: NextRequest) {
                 const { data: newUser, error: userError } = await supabase
                     .from('users')
                     .insert({
-                        username,
+                        username: suffixedUsername,
                         password_hash,
                         full_name,
                         role: 'GURU',

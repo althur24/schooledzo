@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { hashPassword } from '@/lib/auth'
-import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getSchoolContextOrError, isErrorResponse, getSchoolCode } from '@/lib/schoolContext'
 
 // GET student by ID
 export async function GET(
@@ -73,9 +73,14 @@ export async function PUT(
 
         const currentUsername = currentUser?.username || ''
 
+        const schoolCode = await getSchoolCode(schoolId || '')
+        if (!schoolCode) {
+            return NextResponse.json({ error: 'Data sekolah tidak valid' }, { status: 400 })
+        }
+
         // If NIS is being changed, check for username collisions
         const isNisChanging = nis !== undefined && nis !== student.nis
-        const newUsername = isNisChanging ? nis.trim() : currentUsername
+        const newUsername = isNisChanging ? `${nis.trim()}.${schoolCode}` : currentUsername
 
         if (isNisChanging && newUsername) {
             const { data: existingUser } = await supabase

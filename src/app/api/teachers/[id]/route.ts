@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { hashPassword } from '@/lib/auth'
-import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getSchoolContextOrError, isErrorResponse, getSchoolCode } from '@/lib/schoolContext'
 
 // PUT update teacher
 export async function PUT(
@@ -32,9 +32,34 @@ export async function PUT(
             return NextResponse.json({ error: 'Guru tidak ditemukan' }, { status: 404 })
         }
 
+        const schoolCode = await getSchoolCode(schoolId || '')
+        if (!schoolCode) {
+            return NextResponse.json({ error: 'Data sekolah tidak valid' }, { status: 400 })
+        }
+
         // Update user
         const userUpdate: Record<string, any> = {}
-        if (username) userUpdate.username = username
+        if (username) {
+            const trimmed = username.trim()
+            // Guard: prevent double-suffix if frontend sends already-suffixed username
+            const resolvedUsername = trimmed.endsWith(`.${schoolCode}`)
+                ? trimmed
+                : `${trimmed}.${schoolCode}`
+
+            // Collision check: ensure the new username isn't taken by another user
+            const { data: existingUser } = await supabase
+                .from('users')
+                .select('id')
+                .eq('username', resolvedUsername)
+                .neq('id', teacher.user_id) // Exclude current teacher's user
+                .single()
+
+            if (existingUser) {
+                return NextResponse.json({ error: 'Username sudah digunakan oleh akun lain' }, { status: 400 })
+            }
+
+            userUpdate.username = resolvedUsername
+        }
         if (full_name) userUpdate.full_name = full_name
         if (password) {
             userUpdate.password_hash = await hashPassword(password)

@@ -24,6 +24,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         router.push('/login')
     }
 
+    // Redirect to login if session expired (user is null after loading completes)
+    useEffect(() => {
+        if (!loading && !user) {
+            router.replace('/login?expired=true')
+        }
+    }, [user, loading, router])
+
     // Enforce password change
     useEffect(() => {
         if (!loading && user?.must_change_password && pathname !== '/dashboard/change-password') {

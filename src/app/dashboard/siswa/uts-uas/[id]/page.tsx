@@ -290,6 +290,17 @@ export default function TakeOfficialExamPage() {
             }
         }
 
+        // Method 2: Window blur/focus (works for PWA standalone + Alt+Tab)
+        const handleWindowBlur = () => {
+            if (document.hidden) return // Already handled by visibilitychange
+            triggerViolation('TAB_SWITCH')
+        }
+        
+        const handleWindowFocus = () => {
+            if (document.hidden) return // Ignore if still hidden
+            showReturnWarning()
+        }
+
         const handleBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = 'Anda sedang dalam ujian!' }
         const handleContextMenu = (e: MouseEvent) => e.preventDefault()
         const handleCopy = (e: ClipboardEvent) => e.preventDefault()
@@ -299,6 +310,8 @@ export default function TakeOfficialExamPage() {
         }
 
         document.addEventListener('visibilitychange', handleVisibility)
+        window.addEventListener('blur', handleWindowBlur)
+        window.addEventListener('focus', handleWindowFocus)
         window.addEventListener('beforeunload', handleBeforeUnload)
         document.addEventListener('contextmenu', handleContextMenu)
         document.addEventListener('copy', handleCopy)
@@ -306,6 +319,8 @@ export default function TakeOfficialExamPage() {
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibility)
+            window.removeEventListener('blur', handleWindowBlur)
+            window.removeEventListener('focus', handleWindowFocus)
             window.removeEventListener('beforeunload', handleBeforeUnload)
             document.removeEventListener('contextmenu', handleContextMenu)
             document.removeEventListener('copy', handleCopy)

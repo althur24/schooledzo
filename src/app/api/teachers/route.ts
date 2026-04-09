@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { hashPassword } from '@/lib/auth'
-import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getSchoolContextOrError, isErrorResponse, getSchoolCode } from '@/lib/schoolContext'
 
 // GET all teachers
 export async function GET(request: NextRequest) {
@@ -49,11 +49,18 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Username dan password harus diisi' }, { status: 400 })
         }
 
+        const schoolCode = await getSchoolCode(schoolId || '')
+        if (!schoolCode) {
+            return NextResponse.json({ error: 'Data sekolah tidak valid' }, { status: 400 })
+        }
+
+        const suffixedUsername = `${username.trim()}.${schoolCode}`
+
         // Check if username already exists (globally unique)
         const { data: existingUser } = await supabase
             .from('users')
             .select('id')
-            .eq('username', username)
+            .eq('username', suffixedUsername)
             .single()
 
         if (existingUser) {
@@ -66,7 +73,7 @@ export async function POST(request: NextRequest) {
         const { data: newUser, error: userError } = await supabase
             .from('users')
             .insert({
-                username,
+                username: suffixedUsername,
                 password_hash,
                 full_name,
                 role: 'GURU',
