@@ -35,6 +35,7 @@ interface ExamQuestion {
     status?: string
     teacher_hots_claim?: boolean
     text_direction?: 'ltr' | 'rtl'
+    admin_review?: any
 }
 
 interface Exam {
@@ -62,9 +63,23 @@ export default function EditExamPage() {
     const params = useParams()
     const searchParams = useSearchParams()
     const examId = params.id as string
+    const highlightId = searchParams.get('highlight')
 
     const [exam, setExam] = useState<Exam | null>(null)
     const [questions, setQuestions] = useState<ExamQuestion[]>([])
+
+    // Auto-scroll for deep-linked notifications
+    useEffect(() => {
+        if (highlightId && questions.length > 0) {
+            const el = document.getElementById(`question-${highlightId}`)
+            if (el) {
+                setTimeout(() => {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                }, 500)
+            }
+        }
+    }, [highlightId, questions])
+
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [mode, setMode] = useState<Mode>('list')
@@ -975,7 +990,7 @@ export default function EditExamPage() {
                         })
 
                         const renderQuestionCard = (q: typeof questions[0], idx: number, isInGroup: boolean) => (
-                            <div key={q.id || idx} className={`${isInGroup ? 'p-5' : ''}`}>
+                            <div key={q.id || idx} id={`question-${q.id}`} className={`${isInGroup ? 'p-5' : ''} ${highlightId === q.id ? 'ring-2 ring-red-500 rounded-xl animate-pulse-once transition-all duration-1000' : ''}`}>
                                 <div className="flex items-start gap-5">
                                     {isBulkSelectMode && (
                                         <input
@@ -1007,6 +1022,22 @@ export default function EditExamPage() {
                                             {q.status === 'returned' && <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">❌ Returned</span>}
                                             {aiReviewEnabled && q.status === 'ai_reviewing' && <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 animate-pulse">🤖</span>}
                                         </div>
+
+                                        {q.status === 'returned' && q.admin_review && (
+                                            <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg">
+                                                <p className="text-xs font-bold text-red-600 dark:text-red-400 mb-1">📋 Catatan Admin:</p>
+                                                <p className="text-sm text-red-700 dark:text-red-300">
+                                                    {q.admin_review.notes || 'Silakan periksa dan perbaiki soal Anda.'}
+                                                </p>
+                                                {q.admin_review.return_reasons && q.admin_review.return_reasons.length > 0 && (
+                                                    <ul className="mt-1 text-xs text-red-600 dark:text-red-400 list-disc list-inside">
+                                                        {q.admin_review.return_reasons.map((r: string, i: number) => (
+                                                            <li key={i}>{r}</li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                        )}
 
                                         {/* Show passage only for standalone (non-grouped) questions */}
                                         {!isInGroup && (q.passage_text || q.passage_audio_url) && (

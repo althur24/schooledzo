@@ -170,7 +170,7 @@ export async function triggerHOTSAnalysis(input: TriggerHOTSInput): Promise<void
                     type: 'HOTS_REVIEW',
                     title: '🤖 Analisis AI selesai — soal perlu review admin',
                     message: `Soal ${sourceLabel} Anda telah dianalisis AI dan diteruskan ke admin untuk review. Alasan: ${routing.reasons?.join(', ') || 'Perlu verifikasi manual'}`,
-                    link: input.questionSource === 'bank' ? '/dashboard/guru/bank-soal' : input.questionSource === 'quiz' ? '/dashboard/guru/kuis' : input.questionSource === 'official_exam' ? '/dashboard/admin/uts-uas' : '/dashboard/guru/ulangan'
+                    link: input.questionSource === 'bank' ? '/dashboard/guru/bank-soal' : input.questionSource === 'quiz' ? `/dashboard/guru/kuis/${input.quizId}?highlight=${input.questionId}` : input.questionSource === 'official_exam' ? '/dashboard/admin/uts-uas' : `/dashboard/guru/ulangan/${input.examId}?highlight=${input.questionId}`
                 })
             }
 

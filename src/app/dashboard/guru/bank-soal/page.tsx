@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import SmartText from '@/components/SmartText'
@@ -70,6 +71,7 @@ interface Passage {
 
 export default function BankSoalPage() {
     const { user } = useAuth()
+    const searchParams = useSearchParams()
     const [questions, setQuestions] = useState<QuestionBankItem[]>([])
     const [subjects, setSubjects] = useState<Subject[]>([])
     const [loading, setLoading] = useState(true)
@@ -182,6 +184,11 @@ export default function BankSoalPage() {
             if (d) setAiReviewEnabled(d.ai_review_enabled !== false)
         }).catch(() => { })
     }, [])
+
+    useEffect(() => {
+        const statusParam = searchParams.get('status')
+        if (statusParam) setSelectedStatus(statusParam)
+    }, [searchParams])
 
     const fetchData = async () => {
         try {

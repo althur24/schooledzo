@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
-import { triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
+import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 
 // GET questions for exam
 export async function GET(
@@ -23,6 +23,24 @@ export async function GET(
         if (error) throw error
 
         let questions = data || []
+
+        // Enrich returned questions with admin review data
+        if (user.role === 'GURU') {
+            const returnedIds = questions.filter((q: any) => q.status === 'returned').map((q: any) => q.id)
+            if (returnedIds.length > 0) {
+                const { data: adminReviews } = await supabase
+                    .from('admin_reviews').select('*')
+                    .eq('question_source', 'exam').in('question_id', returnedIds)
+                    .order('created_at', { ascending: false })
+                const reviewMap = new Map()
+                adminReviews?.forEach((r: any) => {
+                    if (!reviewMap.has(r.question_id)) reviewMap.set(r.question_id, r)
+                })
+                questions = questions.map((q: any) => ({
+                    ...q, admin_review: reviewMap.get(q.id) || null
+                }))
+            }
+        }
 
         // C2 Security Fix: Strip correct_answer for students unless exam is already submitted
         if (user.role === 'SISWA') {
@@ -191,6 +209,14 @@ export async function PUT(
         if (teacher_hots_claim !== undefined) updateData.teacher_hots_claim = teacher_hots_claim
         if (text_direction !== undefined) updateData.text_direction = text_direction
 
+        // Reset status & re-trigger HOTS (same logic as bank soal PUT)
+        const aiEnabled = await isAIReviewEnabled(schoolId)
+        if (aiEnabled) {
+            updateData.status = 'ai_reviewing'
+        } else {
+            updateData.status = 'approved'
+        }
+
         const { data, error } = await supabase
             .from('exam_questions')
             .update(updateData)
@@ -200,6 +226,22 @@ export async function PUT(
             .single()
 
         if (error) throw error
+
+        // Re-trigger HOTS analysis (fire-and-forget)
+        if (data && aiEnabled) {
+            const { data: exam } = await supabase.from('exams')
+                .select('teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(school_level))')
+                .eq('id', id).single()
+            const ta = exam?.teaching_assignment as any
+            triggerHOTSAnalysis({
+                questionId: data.id, questionSource: 'exam',
+                questionText: data.question_text, questionType: data.question_type,
+                options: data.options, correctAnswer: data.correct_answer,
+                teacherDifficulty: data.difficulty, teacherHotsClaim: data.teacher_hots_claim || false,
+                subjectName: ta?.subject?.name || '', gradeBand: ta?.class?.school_level || 'SMP',
+                examId: id
+            }).catch(err => console.error('HOTS re-analysis error:', err))
+        }
 
         return NextResponse.json(data)
     } catch (error) {

@@ -13,6 +13,7 @@ type NotificationType =
     | 'REMEDIAL'
     | 'UJIAN_RESMI'
     | 'EXAM_REMINDER'
+    | 'HOTS_REVIEW'
 
 interface CreateNotificationParams {
     userIds: string[]
@@ -70,6 +71,8 @@ export function getNotificationIcon(type: NotificationType): string {
             return '🏫'
         case 'EXAM_REMINDER':
             return '⏰'
+        case 'HOTS_REVIEW':
+            return '🔬'
         default:
             return '🔔'
     }

@@ -286,6 +286,7 @@ export async function POST(request: NextRequest) {
         // 3. Notify the teacher about the decision
         try {
             let teacherUserId: string | null = null
+            let parentId: string | null = null
 
             if (question_source === 'bank') {
                 const { data: q } = await supabase
@@ -296,13 +297,14 @@ export async function POST(request: NextRequest) {
                 teacherUserId = (q as any)?.teacher?.user_id || null
             } else {
                 const sourceTable = question_source === 'quiz' ? 'quiz_questions' : 'exam_questions'
-                const parentField = question_source === 'quiz' ? 'quiz:quizzes(teaching_assignment:teaching_assignments(teacher:teachers(user_id)))' : 'exam:exams(teaching_assignment:teaching_assignments(teacher:teachers(user_id)))'
+                const parentField = question_source === 'quiz' ? 'quiz:quizzes(id,teaching_assignment:teaching_assignments(teacher:teachers(user_id)))' : 'exam:exams(id,teaching_assignment:teaching_assignments(teacher:teachers(user_id)))'
                 const { data: q } = await supabase
                     .from(sourceTable)
                     .select(parentField)
                     .eq('id', question_id)
                     .single()
                 const parent = question_source === 'quiz' ? (q as any)?.quiz : (q as any)?.exam
+                parentId = parent?.id || null
                 const ta = parent?.teaching_assignment
                 const taObj = Array.isArray(ta) ? ta[0] : ta
                 const teacher = taObj?.teacher
@@ -326,9 +328,13 @@ export async function POST(request: NextRequest) {
                             ? 'Soal Anda telah melewati review dan disetujui.'
                             : 'Silakan periksa dan perbaiki soal Anda.'
 
-                    let link = '/dashboard/guru/bank-soal'
-                    if (question_source === 'quiz') link = '/dashboard/guru/kuis'
-                    if (question_source === 'exam') link = '/dashboard/guru/ulangan'
+                    let link = decision === 'return' ? '/dashboard/guru/bank-soal?status=returned' : '/dashboard/guru/bank-soal'
+                    if (question_source === 'quiz') {
+                        link = parentId ? `/dashboard/guru/kuis/${parentId}?highlight=${question_id}` : '/dashboard/guru/kuis'
+                    }
+                    if (question_source === 'exam') {
+                        link = parentId ? `/dashboard/guru/ulangan/${parentId}?highlight=${question_id}` : '/dashboard/guru/ulangan'
+                    }
 
                     await supabase.from('notifications').insert({
                         user_id: teacherUserId,

@@ -41,6 +41,8 @@ export default function GuruKuisPage() {
     const [pendingGradingCounts, setPendingGradingCounts] = useState<Record<string, number>>({})
     const [studentCounts, setStudentCounts] = useState<Record<string, number>>({})
     const [loading, setLoading] = useState(true)
+    const [returnedQuizzes, setReturnedQuizzes] = useState<{quizId: string, title: string, returnedCount: number}[]>([])
+    const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
     const [showCreate, setShowCreate] = useState(false)
     const [creating, setCreating] = useState(false)
     const [form, setForm] = useState({
@@ -71,11 +73,22 @@ export default function GuruKuisPage() {
         }
 
         try {
-            const [quizzesRes, myAssignmentsRes, yearsRes] = await Promise.all([
+            const [quizzesRes, myAssignmentsRes, yearsRes, returnedRes, settingsRes] = await Promise.all([
                 fetch('/api/quizzes'),
                 fetch('/api/my-teaching-assignments'),
-                fetch('/api/academic-years')
+                fetch('/api/academic-years'),
+                fetch('/api/quizzes/returned-counts'),
+                fetch('/api/school-settings')
             ])
+
+            if (settingsRes.ok) {
+                const settings = await settingsRes.json()
+                setAiReviewEnabled(settings?.ai_review_enabled !== false)
+            }
+            if (returnedRes.ok) {
+                const returned = await returnedRes.json()
+                setReturnedQuizzes(Array.isArray(returned) ? returned : [])
+            }
 
             // Handle quiz response
             let quizzesData = []
@@ -273,6 +286,29 @@ export default function GuruKuisPage() {
                     </Button>
                 }
             />
+
+            {aiReviewEnabled && returnedQuizzes.length > 0 && (
+                <Card className="p-4 bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-700">
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="text-red-500">🔬</span>
+                        <h3 className="font-bold text-red-700 dark:text-red-300 text-sm">
+                            Soal Perlu Diperbaiki ({returnedQuizzes.reduce((acc, curr) => acc + curr.returnedCount, 0)})
+                        </h3>
+                    </div>
+                    <div className="space-y-2">
+                        {returnedQuizzes.map(rq => (
+                            <Link key={rq.quizId} href={`/dashboard/guru/kuis/${rq.quizId}`}>
+                                <div className="flex items-center justify-between px-3 py-2 bg-white dark:bg-surface-dark rounded-lg hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors border border-red-100 dark:border-red-900/30">
+                                    <span className="text-sm font-semibold text-text-main dark:text-white">{rq.title}</span>
+                                    <span className="text-xs font-bold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30 border border-red-200 dark:border-red-800 px-2.5 py-1 rounded-full">
+                                        {rq.returnedCount} soal dikembalikan
+                                    </span>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+                </Card>
+            )}
 
             {loading ? (
                 <div className="flex justify-center py-12">
