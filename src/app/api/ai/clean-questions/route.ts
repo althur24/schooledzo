@@ -1,42 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { parseGeminiJson } from '@/lib/parse-gemini-json'
+import { callGemini } from '@/lib/geminiClient'
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-
-// POST - Clean and parse messy pasted questions using Gemini
-export async function POST(request: NextRequest) {
-    try {
-        const ctx = await getSchoolContextOrError(request)
-        if (isErrorResponse(ctx)) return ctx
-        const { user, schoolId } = ctx
-
-        if (user.role !== 'GURU' && user.role !== 'ADMIN') {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-        }
-
-        if (!GEMINI_API_KEY) {
-            return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 })
-        }
-
-        const { text } = await request.json()
-
-        if (!text || !text.trim()) {
-            return NextResponse.json({ error: 'Teks soal diperlukan' }, { status: 400 })
-        }
-
-        // Call Gemini API
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [
-                        {
-                            parts: [
-                                {
-                                    text: `Kamu adalah asisten yang membantu guru merapikan soal ujian/kuis.
+const PROMPT_TEMPLATE = `Kamu adalah asisten yang membantu guru merapikan soal ujian/kuis.
 
 Guru akan memberikan teks soal yang di-copy-paste dari website atau dokumen. Teksnya mungkin berantakan: spasi ganda, nomor soal ikut tercopy, pilihan jawaban campur dalam satu baris, format rusak, dsb.
 
@@ -57,10 +24,10 @@ PENTING — KONTEN KHUSUS:
 📐 MATEMATIKA:
 - Semua ekspresi matematika HARUS dibungkus dengan tanda dolar: $...$ untuk inline, $$...$$ untuk display/block
 - Contoh: "Tentukan nilai x jika $2x^2 + 3x - 5 = 0$"
-- Contoh: "Hitung $\\log_2(x-1) + \\log_2(x+3) = 3$"
-- Contoh: "Nilai dari $\\int_0^1 (3x^2 - 4x + 2) \\, dx$ adalah ..."
-- Contoh: "Jika $\\frac{a}{b} = \\frac{3}{4}$, maka ..."
-- Gunakan LaTeX untuk simbol: $\\sqrt{x}$, $x^2$, $\\pi$, $\\infty$, $\\leq$, $\\geq$, $\\neq$, $\\times$, $\\div$, $\\pm$
+- Contoh: "Hitung $\\\\log_2(x-1) + \\\\log_2(x+3) = 3$"
+- Contoh: "Nilai dari $\\\\int_0^1 (3x^2 - 4x + 2) \\\\, dx$ adalah ..."
+- Contoh: "Jika $\\\\frac{a}{b} = \\\\frac{3}{4}$, maka ..."
+- Gunakan LaTeX untuk simbol: $\\\\sqrt{x}$, $x^2$, $\\\\pi$, $\\\\infty$, $\\\\leq$, $\\\\geq$, $\\\\neq$, $\\\\times$, $\\\\div$, $\\\\pm$
 - JANGAN tulis simbol matematika mentah tanpa $...$ delimiter
 
 🕌 BAHASA ARAB:
@@ -93,46 +60,44 @@ Format JSON:
 
 Berikut teks soal yang perlu dirapikan:
 
-${text}`
-                                }
-                            ]
-                        }
-                    ],
-                    generationConfig: {
-                        temperature: 0.1,
-                        maxOutputTokens: 8192,
-                        responseMimeType: 'application/json',
-                    }
-                })
-            }
-        )
+`
 
-        if (!response.ok) {
-            const errorText = await response.text()
-            console.error('Gemini API error:', errorText)
-            return NextResponse.json({ error: 'Gemini API error' }, { status: 500 })
+// POST - Clean and parse messy pasted questions using Gemini
+export async function POST(request: NextRequest) {
+    try {
+        const ctx = await getSchoolContextOrError(request)
+        if (isErrorResponse(ctx)) return ctx
+        const { user, schoolId } = ctx
+
+        if (user.role !== 'GURU' && user.role !== 'ADMIN') {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const result = await response.json()
-        const textContent = result.candidates?.[0]?.content?.parts?.[0]?.text
+        const { text } = await request.json()
 
-        if (!textContent) {
-            return NextResponse.json({ error: 'No response from Gemini' }, { status: 500 })
+        if (!text || !text.trim()) {
+            return NextResponse.json({ error: 'Teks soal diperlukan' }, { status: 400 })
+        }
+
+        const result = await callGemini({ prompt: PROMPT_TEMPLATE + text })
+
+        if (!result.ok) {
+            return NextResponse.json({ error: result.error }, { status: 500 })
         }
 
         try {
-            const parsed = parseGeminiJson(textContent)
+            const parsed = parseGeminiJson(result.data!)
             return NextResponse.json(parsed)
         } catch (parseError: any) {
-            console.error('JSON parse error:', parseError?.message, 'Raw:', textContent.substring(0, 300))
+            console.error('JSON parse error:', parseError?.message, 'Raw:', result.data?.substring(0, 300))
             return NextResponse.json({
                 error: 'Gagal memproses respons AI',
-                raw: textContent
+                raw: result.data
             }, { status: 500 })
         }
 
     } catch (error: any) {
-        console.error('Error in clean-questions:', error?.message || error, error?.stack)
+        console.error('Error in clean-questions:', error?.message || error)
         return NextResponse.json({ error: 'Server error: ' + (error?.message || 'Unknown') }, { status: 500 })
     }
 }

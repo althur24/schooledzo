@@ -77,10 +77,11 @@ export async function triggerHOTSAnalysis(input: TriggerHOTSInput): Promise<void
 
         if (!result.success || !result.data) {
             console.error(`HOTS analysis failed for ${input.questionSource}/${input.questionId}:`, result.error)
-            // Revert to draft on failure
+            // Set to admin_review so admin can manually handle
+            // (previously set to 'draft' which made questions invisible)
             await supabase
                 .from(tableName)
-                .update({ status: 'draft' })
+                .update({ status: 'admin_review' })
                 .eq('id', input.questionId)
             return
         }
@@ -251,26 +252,20 @@ export async function triggerHOTSAnalysis(input: TriggerHOTSInput): Promise<void
 
     } catch (error) {
         console.error(`HOTS analysis error for ${input.questionSource}/${input.questionId}:`, error)
-        // Revert to approved on error (don't block question usage)
+        // On error, set to admin_review so admin can manually handle it
+        // (previously set to 'approved' which silently bypassed review)
+        const fallbackStatus = 'admin_review'
         await supabase
             .from(tableName)
-            .update({ status: 'approved' })
+            .update({ status: fallbackStatus })
             .eq('id', input.questionId)
-
-        // Check for auto-publish even on error back-off
-        if (input.questionSource === 'quiz' || input.questionSource === 'exam') {
-            import('./autoPublish').then(({ checkAndAutoPublish }) => {
-                checkAndAutoPublish(input.questionSource as 'quiz' | 'exam', input.quizId || input.examId || '').catch(console.error)
-            }).catch(console.error)
-        } else if (input.questionSource === 'official_exam') {
-            // Official exams don't auto-publish; admin controls activation manually
-        }
+        console.log(`[HOTS] Fallback: set ${input.questionSource}/${input.questionId} to ${fallbackStatus}`)
     }
 }
 
 /**
  * Trigger HOTS analysis for multiple questions (fire-and-forget).
- * Processes each question individually and in parallel (max 3 concurrent).
+ * Processes SEQUENTIALLY with delay to avoid Gemini 429 rate limits.
  */
 export function triggerBulkHOTSAnalysis(questions: TriggerHOTSInput[]): void {
     // Fire and forget — don't await
@@ -280,10 +275,16 @@ export function triggerBulkHOTSAnalysis(questions: TriggerHOTSInput[]): void {
 }
 
 async function processBulk(questions: TriggerHOTSInput[]): Promise<void> {
-    // Process in batches of 3 to avoid overloading the API
-    const batchSize = 3
-    for (let i = 0; i < questions.length; i += batchSize) {
-        const batch = questions.slice(i, i + batchSize)
-        await Promise.allSettled(batch.map(q => triggerHOTSAnalysis(q)))
+    // Process ONE AT A TIME with delay to avoid rate limits
+    for (let i = 0; i < questions.length; i++) {
+        if (i > 0) {
+            // Wait 1.5s between questions to stay under rate limit
+            await new Promise(r => setTimeout(r, 1500))
+        }
+        try {
+            await triggerHOTSAnalysis(questions[i])
+        } catch (err) {
+            console.error(`Bulk HOTS: question ${i + 1}/${questions.length} failed:`, err)
+        }
     }
 }

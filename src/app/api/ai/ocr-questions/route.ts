@@ -1,50 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { parseGeminiJson } from '@/lib/parse-gemini-json'
+import { callGemini } from '@/lib/geminiClient'
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-
-// POST - Extract questions from image using Gemini Vision
-export async function POST(request: NextRequest) {
-    try {
-        const ctx = await getSchoolContextOrError(request)
-        if (isErrorResponse(ctx)) return ctx
-        const { user, schoolId } = ctx
-
-        if (user.role !== 'GURU' && user.role !== 'ADMIN') {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-        }
-
-        if (!GEMINI_API_KEY) {
-            return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 })
-        }
-
-        const formData = await request.formData()
-        const image = formData.get('image') as File
-
-        if (!image) {
-            return NextResponse.json({ error: 'Image diperlukan' }, { status: 400 })
-        }
-
-        // Convert image to base64
-        const bytes = await image.arrayBuffer()
-        const base64 = Buffer.from(bytes).toString('base64')
-        const mimeType = image.type || 'image/jpeg'
-
-        // Call Gemini Vision API
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    contents: [
-                        {
-                            parts: [
-                                {
-                                    text: `Analisis gambar soal ujian/kuis ini dan ekstrak semua soal yang ada.
+const OCR_PROMPT = `Analisis gambar soal ujian/kuis ini dan ekstrak semua soal yang ada.
 
 Untuk setiap soal, tentukan:
 1. Teks soal lengkap (TANPA nomor soal di depan)
@@ -70,51 +29,50 @@ PENTING untuk options:
 - Contoh SALAH: ["A. Jakarta", "B. Bandung"]
 - Contoh BENAR: ["Jakarta", "Bandung"]`
 
-                                },
-                                {
-                                    inline_data: {
-                                        mime_type: mimeType,
-                                        data: base64
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    generationConfig: {
-                        temperature: 0.1,
-                        maxOutputTokens: 8192,
-                        responseMimeType: 'application/json',
-                    }
-                })
-            }
-        )
+// POST - Extract questions from image using Gemini Vision
+export async function POST(request: NextRequest) {
+    try {
+        const ctx = await getSchoolContextOrError(request)
+        if (isErrorResponse(ctx)) return ctx
+        const { user, schoolId } = ctx
 
-        if (!response.ok) {
-            const errorText = await response.text()
-            console.error('Gemini API error:', errorText)
-            return NextResponse.json({ error: 'Gemini API error' }, { status: 500 })
+        if (user.role !== 'GURU' && user.role !== 'ADMIN') {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const result = await response.json()
-        const textContent = result.candidates?.[0]?.content?.parts?.[0]?.text
+        const formData = await request.formData()
+        const image = formData.get('image') as File
 
-        if (!textContent) {
-            return NextResponse.json({ error: 'No response from Gemini' }, { status: 500 })
+        if (!image) {
+            return NextResponse.json({ error: 'Image diperlukan' }, { status: 400 })
+        }
+
+        const bytes = await image.arrayBuffer()
+        const base64 = Buffer.from(bytes).toString('base64')
+        const mimeType = image.type || 'image/jpeg'
+
+        const result = await callGemini({
+            prompt: OCR_PROMPT,
+            inlineData: { mimeType, base64 }
+        })
+
+        if (!result.ok) {
+            return NextResponse.json({ error: result.error }, { status: 500 })
         }
 
         try {
-            const parsed = parseGeminiJson(textContent)
+            const parsed = parseGeminiJson(result.data!)
             return NextResponse.json(parsed)
         } catch (parseError: any) {
-            console.error('JSON parse error:', parseError?.message, 'Raw:', textContent.substring(0, 300))
+            console.error('JSON parse error:', parseError?.message, 'Raw:', result.data?.substring(0, 300))
             return NextResponse.json({
-                error: 'Failed to parse response',
-                raw: textContent
+                error: 'Gagal memproses respons AI',
+                raw: result.data
             }, { status: 500 })
         }
 
-    } catch (error) {
-        console.error('Error in OCR:', error)
-        return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    } catch (error: any) {
+        console.error('Error in OCR:', error?.message || error)
+        return NextResponse.json({ error: 'Server error: ' + (error?.message || 'Unknown') }, { status: 500 })
     }
 }

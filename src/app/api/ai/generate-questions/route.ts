@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { parseGeminiJson } from '@/lib/parse-gemini-json'
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY
+import { callGemini } from '@/lib/geminiClient'
 
 // POST - Generate questions from material using Gemini
 export async function POST(request: NextRequest) {
@@ -15,10 +14,6 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        if (!GEMINI_API_KEY) {
-            return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 })
-        }
-
         const { material, count, type, difficulty } = await request.json()
 
         if (!material || material.trim().length < 50) {
@@ -26,8 +21,8 @@ export async function POST(request: NextRequest) {
         }
 
         const questionCount = count || 5
-        const questionType = type || 'MIXED' // MULTIPLE_CHOICE, ESSAY, MIXED
-        const difficultyLevel = difficulty || 'MEDIUM' // EASY, MEDIUM, HARD
+        const questionType = type || 'MIXED'
+        const difficultyLevel = difficulty || 'MEDIUM'
 
         let typeInstruction = ''
         if (questionType === 'MULTIPLE_CHOICE') {
@@ -47,20 +42,7 @@ export async function POST(request: NextRequest) {
             difficultyInstruction = 'Buat soal dengan tingkat kesulitan SEDANG.'
         }
 
-        // Call Gemini API
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    contents: [
-                        {
-                            parts: [
-                                {
-                                    text: `Kamu adalah guru profesional yang HANYA membuat soal berdasarkan materi yang diberikan.
+        const prompt = `Kamu adalah guru profesional yang HANYA membuat soal berdasarkan materi yang diberikan.
 
 ATURAN KETAT — WAJIB DIIKUTI:
 1. Kamu HANYA boleh membuat soal dari informasi yang ADA di dalam materi di bawah ini.
@@ -98,7 +80,7 @@ PENTING untuk options:
 - Contoh BENAR: ["Jakarta", "Bandung"]
 
 KONTEN KHUSUS:
-📐 Jika materi mengandung MATEMATIKA: bungkus semua ekspresi matematika dalam $...$ (inline) atau $$...$$ (display). Contoh: "$\\log_2(x)$", "$\\int_0^1 f(x) \\, dx$", "$x^2 + 3x - 5 = 0$". Gunakan LaTeX: $\\sqrt{}$, $\\frac{}{}$, $\\pi$, dll.
+📐 Jika materi mengandung MATEMATIKA: bungkus semua ekspresi matematika dalam $...$ (inline) atau $$...$$ (display). Contoh: "$\\\\log_2(x)$", "$\\\\int_0^1 f(x) \\\\, dx$", "$x^2 + 3x - 5 = 0$". Gunakan LaTeX: $\\\\sqrt{}$, $\\\\frac{}{}$, $\\\\pi$, dll.
 🕌 Jika materi mengandung BAHASA ARAB: pertahankan teks Arab apa adanya termasuk harakat. Jangan transliterasi ke huruf latin.
 
 Pastikan soal:
@@ -107,45 +89,25 @@ Pastikan soal:
 3. Jelas dan tidak ambigu
 4. Untuk pilihan ganda, pengecoh harus masuk akal tapi tetap berasal dari konteks materi`
 
-                                }
-                            ]
-                        }
-                    ],
-                    generationConfig: {
-                        temperature: 0.3,
-                        maxOutputTokens: 8192,
-                        responseMimeType: 'application/json',
-                    }
-                })
-            }
-        )
+        const result = await callGemini({ prompt, temperature: 0.3 })
 
-        if (!response.ok) {
-            const errorText = await response.text()
-            console.error('Gemini API error:', errorText)
-            return NextResponse.json({ error: 'Gemini API error' }, { status: 500 })
-        }
-
-        const result = await response.json()
-        const textContent = result.candidates?.[0]?.content?.parts?.[0]?.text
-
-        if (!textContent) {
-            return NextResponse.json({ error: 'No response from Gemini' }, { status: 500 })
+        if (!result.ok) {
+            return NextResponse.json({ error: result.error }, { status: 500 })
         }
 
         try {
-            const parsed = parseGeminiJson(textContent)
+            const parsed = parseGeminiJson(result.data!)
             return NextResponse.json(parsed)
         } catch (parseError: any) {
-            console.error('JSON parse error:', parseError?.message, 'Raw:', textContent.substring(0, 300))
+            console.error('JSON parse error:', parseError?.message, 'Raw:', result.data?.substring(0, 300))
             return NextResponse.json({
-                error: 'Failed to parse response',
-                raw: textContent
+                error: 'Gagal memproses respons AI',
+                raw: result.data
             }, { status: 500 })
         }
 
-    } catch (error) {
-        console.error('Error generating questions:', error)
-        return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    } catch (error: any) {
+        console.error('Error generating questions:', error?.message || error)
+        return NextResponse.json({ error: 'Server error: ' + (error?.message || 'Unknown') }, { status: 500 })
     }
 }

@@ -28,7 +28,7 @@ export async function checkAndAutoPublish(
 
         // If not pending publish, no need to do anything
         if (!parent.pending_publish) {
-            console.log(`[autoPublish] Parent is not pending_publish. Skipping.`)
+            console.log(`[autoPublish] Parent is not pending_publish (value: ${JSON.stringify(parent.pending_publish)}). is_active=${parent.is_active}. Skipping.`)
             return false
         }
 

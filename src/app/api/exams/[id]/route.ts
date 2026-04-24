@@ -84,6 +84,18 @@ export async function PUT(
                         finalIsActive = false
                         isPendingPublish = true
                         isUnderReview = true
+
+                        // Escalate stuck questions (draft/ai_reviewing) to admin_review
+                        // so they appear on the admin review page
+                        const stuckQuestions = questions.filter(q => 
+                            q.status === 'draft' || q.status === 'ai_reviewing'
+                        )
+                        if (stuckQuestions.length > 0) {
+                            await supabase.from('exam_questions')
+                                .update({ status: 'admin_review' })
+                                .in('id', stuckQuestions.map(q => q.id))
+                            console.log(`[PUBLISH] Escalated ${stuckQuestions.length} stuck exam questions to admin_review`)
+                        }
                     }
                 }
             }

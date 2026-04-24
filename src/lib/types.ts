@@ -127,6 +127,7 @@ export interface Subject {
     id: string
     name: string
     created_at: string
+    teaching_assignments?: { count: number }[]
 }
 
 export interface TeachingAssignment {

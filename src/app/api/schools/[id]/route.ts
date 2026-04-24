@@ -69,7 +69,17 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { name, code, address, phone, email, school_level, is_active, max_students, max_teachers } = body
+        const { name, code, address, phone, email, school_level, is_active, max_students, max_teachers, normalize_usernames } = body
+
+        // Fetch old school code to see if it changed
+        const { data: oldSchool } = await supabase
+            .from('schools')
+            .select('code')
+            .eq('id', id)
+            .single()
+            
+        const codeChanged = code !== undefined && oldSchool && oldSchool.code !== code
+        const oldCode = oldSchool?.code
 
         const updateData: Record<string, unknown> = {}
         if (name !== undefined) updateData.name = name
@@ -98,7 +108,76 @@ export async function PUT(
             throw error
         }
 
-        return NextResponse.json(data)
+        let updatedUsernamesCount = 0
+        const shouldNormalize = (codeChanged && oldCode) || normalize_usernames
+        if (shouldNormalize && oldCode) {
+            // Fetch ALL users for this school (paginated to bypass Supabase 1000-row limit)
+            let allUsers: { id: string; username: string }[] = []
+            let page = 0
+            const PAGE_SIZE = 1000
+            let hasMore = true
+
+            while (hasMore) {
+                const { data: batch } = await supabase
+                    .from('users')
+                    .select('id, username')
+                    .eq('school_id', id)
+                    .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+
+                const rows = batch || []
+                allUsers = allUsers.concat(rows)
+                hasMore = rows.length === PAGE_SIZE
+                page++
+                if (page >= 10) break // safety: max 10k users
+            }
+
+            for (const u of allUsers) {
+                const username = u.username
+                const lowerUsername = username.toLowerCase()
+                const lowerOldCode = oldCode.toLowerCase()
+                const lowerNewCode = code.toLowerCase()
+
+                let newUsername = username
+
+                // Check for .wali suffix first
+                const isWali = lowerUsername.endsWith('.wali')
+                // Strip .wali for processing
+                const baseWithoutWali = isWali ? username.slice(0, -5) : username // -5 = '.wali'
+                const lowerBaseWithoutWali = baseWithoutWali.toLowerCase()
+
+                // Try to find and strip ALL school code suffixes (case-insensitive, iterative)
+                // This handles double suffixes like 110401.PIIS.piis → 110401
+                let coreUsername = baseWithoutWali
+                let lowerCore = coreUsername.toLowerCase()
+                let stripped = true
+                while (stripped) {
+                    stripped = false
+                    if (lowerCore.endsWith(`.${lowerOldCode}`)) {
+                        coreUsername = coreUsername.slice(0, -(lowerOldCode.length + 1))
+                        lowerCore = coreUsername.toLowerCase()
+                        stripped = true
+                    } else if (lowerCore.endsWith(`.${lowerNewCode}`)) {
+                        coreUsername = coreUsername.slice(0, -(lowerNewCode.length + 1))
+                        lowerCore = coreUsername.toLowerCase()
+                        stripped = true
+                    }
+                }
+
+                // Rebuild username with new code
+                if (isWali) {
+                    newUsername = `${coreUsername}.${code}.wali`
+                } else {
+                    newUsername = `${coreUsername}.${code}`
+                }
+
+                if (newUsername !== username) {
+                    await supabase.from('users').update({ username: newUsername }).eq('id', u.id)
+                    updatedUsernamesCount++
+                }
+            }
+        }
+
+        return NextResponse.json({ ...data, updated_usernames: updatedUsernamesCount })
     } catch (error) {
         console.error('Error updating school:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

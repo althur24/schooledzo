@@ -143,19 +143,28 @@ export default function ReviewSoalPage() {
         const failedIds: string[] = []
 
         try {
-            await Promise.all(toApprove.map(async (item) => {
-                const res = await fetch('/api/admin/review-queue', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        question_id: item.id,
-                        question_source: item.question_source,
-                        decision: 'approve',
-                        notes: notes[item.id] || ''
+            // SEQUENTIAL processing to avoid race condition:
+            // Each approval calls checkAndAutoPublish server-side.
+            // With parallel requests, PostgreSQL MVCC may prevent any single check
+            // from seeing ALL approvals committed, causing auto-publish to never trigger.
+            // Sequential ensures the LAST approval's check sees all previous ones committed.
+            for (const item of toApprove) {
+                try {
+                    const res = await fetch('/api/admin/review-queue', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            question_id: item.id,
+                            question_source: item.question_source,
+                            decision: 'approve',
+                            notes: notes[item.id] || ''
+                        })
                     })
-                })
-                if (!res.ok) failedIds.push(item.id)
-            }))
+                    if (!res.ok) failedIds.push(item.id)
+                } catch {
+                    failedIds.push(item.id)
+                }
+            }
         } catch (error) {
             console.error('Bulk approve error', error)
             alert('Kesalahan tak terduga saat memproses bulk approve.')

@@ -175,6 +175,17 @@ export default function EditExamPage() {
         fetchExam()
     }, [fetchExam])
 
+    // Auto-poll when questions are being AI-reviewed
+    useEffect(() => {
+        if (!aiReviewEnabled) return
+        const hasPending = questions.some(q => q.status === 'ai_reviewing' || q.status === 'draft')
+        if (!hasPending) return
+        const interval = setInterval(() => {
+            fetchExam()
+        }, 5000)
+        return () => clearInterval(interval)
+    }, [aiReviewEnabled, questions, fetchExam])
+
     useEffect(() => {
         fetch('/api/school-settings').then(r => r.ok ? r.json() : null).then(d => {
             if (d) setAiReviewEnabled(d.ai_review_enabled !== false)
@@ -914,6 +925,53 @@ export default function EditExamPage() {
                         </div>
                     )}
 
+                    {/* AI Review Progress Banner */}
+                    {aiReviewEnabled && questions.length > 0 && (() => {
+                        const approved = questions.filter(q => q.status === 'approved').length
+                        const reviewing = questions.filter(q => q.status === 'ai_reviewing' || q.status === 'draft').length
+                        const needReview = questions.filter(q => q.status === 'admin_review').length
+                        const returned = questions.filter(q => q.status === 'returned').length
+                        const total = questions.length
+                        const allApproved = approved === total
+                        
+                        if (allApproved) return null
+
+                        const progress = Math.round((approved / total) * 100)
+
+                        return (
+                            <div className="mb-4 p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700">
+                                <div className="flex items-center gap-3 mb-3">
+                                    {reviewing > 0 && (
+                                        <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full flex-shrink-0" />
+                                    )}
+                                    <div className="flex-1">
+                                        <h4 className="font-bold text-blue-800 dark:text-blue-300 text-sm">
+                                            {reviewing > 0 ? `🤖 ${reviewing} soal baru sedang dianalisis AI...` : '📋 Status Review Soal'}
+                                        </h4>
+                                        <p className="text-xs text-blue-600/70 dark:text-blue-400/70 mt-0.5">
+                                            {reviewing > 0 
+                                                ? `${approved} dari ${total} soal sudah approved. Mohon tunggu, status otomatis diperbarui.`
+                                                : 'Semua soal harus di-approve sebelum bisa di-publish.'}
+                                        </p>
+                                    </div>
+                                </div>
+                                {/* Progress bar */}
+                                <div className="w-full h-2 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden mb-2">
+                                    <div 
+                                        className="h-full bg-gradient-to-r from-green-400 to-emerald-500 rounded-full transition-all duration-500"
+                                        style={{ width: `${progress}%` }}
+                                    />
+                                </div>
+                                <div className="flex flex-wrap gap-3 text-xs">
+                                    <span className="text-green-600 dark:text-green-400 font-medium">✅ {approved} Approved</span>
+                                    {reviewing > 0 && <span className="text-blue-600 dark:text-blue-400 font-medium animate-pulse">🤖 {reviewing} Sedang dianalisis</span>}
+                                    {needReview > 0 && <span className="text-amber-600 dark:text-amber-400 font-medium">⏳ {needReview} Menunggu review admin</span>}
+                                    {returned > 0 && <span className="text-red-600 dark:text-red-400 font-medium">↩️ {returned} Dikembalikan</span>}
+                                </div>
+                            </div>
+                        )
+                    })()}
+
                     {/* Bulk Selection Toolbar */}
                     {questions.length > 0 && !exam?.is_active && !exam?.pending_publish && (
                         <div className="flex items-center justify-between bg-white dark:bg-surface-dark rounded-xl p-3 border border-secondary/20">
@@ -1017,10 +1075,11 @@ export default function EditExamPage() {
                                                     📖 Passage
                                                 </span>
                                             )}
-                                            {q.status === 'approved' && <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">✅</span>}
-                                            {aiReviewEnabled && q.status === 'admin_review' && <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">⚠️ Review</span>}
-                                            {q.status === 'returned' && <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">❌ Returned</span>}
-                                            {aiReviewEnabled && q.status === 'ai_reviewing' && <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 animate-pulse">🤖</span>}
+                                            {q.status === 'approved' && <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 flex items-center gap-1"><TickSquare set="bold" primaryColor="currentColor" size={10} /> Approved</span>}
+                                            {aiReviewEnabled && q.status === 'admin_review' && <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 flex items-center gap-1"><InfoCircle set="bold" primaryColor="currentColor" size={10} /> Menunggu Review</span>}
+                                            {q.status === 'returned' && <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 flex items-center gap-1"><CloseSquare set="bold" primaryColor="currentColor" size={10} /> Dikembalikan</span>}
+                                            {aiReviewEnabled && q.status === 'ai_reviewing' && <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 animate-pulse flex items-center gap-1"><Discovery set="bold" primaryColor="currentColor" size={10} /> AI Analyzing...</span>}
+                                            {aiReviewEnabled && q.status === 'draft' && <span className="px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 animate-pulse flex items-center gap-1"><Discovery set="bold" primaryColor="currentColor" size={10} /> Menunggu AI...</span>}
                                         </div>
 
                                         {q.status === 'returned' && q.admin_review && (

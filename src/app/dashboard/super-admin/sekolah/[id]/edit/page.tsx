@@ -11,6 +11,7 @@ export default function EditSekolahPage() {
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState('')
     const [success, setSuccess] = useState('')
+    const [originalCode, setOriginalCode] = useState('')
     const [logoUrl, setLogoUrl] = useState<string | null>(null)
     const [logoUploading, setLogoUploading] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
@@ -34,7 +35,7 @@ export default function EditSekolahPage() {
                     const data = await res.json()
                     setForm({
                         name: data.name || '',
-                        code: data.code || '',
+                        code: (data.code || '').toLowerCase().replace(/[^a-z0-9-]/g, '-'),
                         address: data.address || '',
                         phone: data.phone || '',
                         email: data.email || '',
@@ -43,6 +44,7 @@ export default function EditSekolahPage() {
                         max_teachers: data.max_teachers || 50,
                         is_active: data.is_active ?? true,
                     })
+                    setOriginalCode((data.code || '').toLowerCase().replace(/[^a-z0-9-]/g, '-'))
                     setLogoUrl(data.logo_url || null)
                 } else {
                     router.push('/dashboard/super-admin/sekolah')
@@ -56,8 +58,17 @@ export default function EditSekolahPage() {
         fetchSchool()
     }, [schoolId, router])
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault()
+    const handleSubmit = async () => {
+        if (!form.name || !form.code || saving) return
+
+        // Jika kode berubah, tampilkan konfirmasi native browser
+        if (form.code !== originalCode) {
+            const confirmed = window.confirm(
+                `⚠️ PERINGATAN: Anda mengubah kode sekolah dari "${originalCode}" menjadi "${form.code}".\n\nDampak:\n• Semua username guru, siswa, dan orang tua akan otomatis diubah.\n• Pengguna harus login menggunakan username baru.\n\nLanjutkan?`
+            )
+            if (!confirmed) return
+        }
+
         setError('')
         setSuccess('')
         setSaving(true)
@@ -74,8 +85,12 @@ export default function EditSekolahPage() {
             if (!res.ok) {
                 setError(data.error || 'Gagal menyimpan perubahan')
             } else {
-                setSuccess('Perubahan berhasil disimpan!')
-                setTimeout(() => router.push(`/dashboard/super-admin/sekolah/${schoolId}`), 1000)
+                if (data.updated_usernames !== undefined && form.code !== originalCode) {
+                    setSuccess(`Perubahan berhasil disimpan! ${data.updated_usernames} username akun telah otomatis disesuaikan.`)
+                } else {
+                    setSuccess('Perubahan berhasil disimpan!')
+                }
+                setTimeout(() => router.push(`/dashboard/super-admin/sekolah/${schoolId}`), 2000)
             }
         } catch {
             setError('Terjadi kesalahan server')
@@ -159,7 +174,7 @@ export default function EditSekolahPage() {
             )}
 
             {/* Form */}
-            <form onSubmit={handleSubmit} className="bg-white dark:bg-surface-dark rounded-2xl border border-[#E8F0E6] dark:border-primary/10 p-6 space-y-5">
+            <div className="bg-white dark:bg-surface-dark rounded-2xl border border-[#E8F0E6] dark:border-primary/10 p-6 space-y-5">
                 {/* Status Toggle */}
                 <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 dark:bg-white/5">
                     <div>
@@ -305,9 +320,9 @@ export default function EditSekolahPage() {
                     </div>
                 </div>
 
-                {/* Submit */}
                 <button
-                    type="submit"
+                    type="button"
+                    onClick={handleSubmit}
                     disabled={saving || !form.name || !form.code}
                     className="w-full py-3 px-6 bg-primary hover:bg-primary-dark text-white font-bold rounded-xl shadow-lg shadow-primary/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
@@ -323,7 +338,7 @@ export default function EditSekolahPage() {
                         '💾 Simpan Perubahan'
                     )}
                 </button>
-            </form>
+            </div>
         </div>
     )
 }

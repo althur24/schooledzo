@@ -201,7 +201,7 @@ export async function PUT(
         // Update student fields
         if (nis !== undefined) studentUpdate.nis = nis
         if (class_id !== undefined) studentUpdate.class_id = class_id
-        if (gender !== undefined) studentUpdate.gender = gender
+        if (gender !== undefined) studentUpdate.gender = gender === 'L' || gender === 'P' ? gender : null
         if (angkatan !== undefined) studentUpdate.angkatan = angkatan
         if (entry_year !== undefined) studentUpdate.entry_year = entry_year
         if (school_level !== undefined) studentUpdate.school_level = school_level

@@ -90,6 +90,9 @@ export async function POST(
 
         const body = await request.json()
 
+        // Check AI review status ONCE before any insert
+        const aiEnabled = await isAIReviewEnabled(schoolId)
+
         // Handle bulk insert
         if (Array.isArray(body)) {
             const questions = body.map((q: any, idx: number) => ({
@@ -106,8 +109,8 @@ export async function POST(
                 passage_audio_url: q.passage_audio_url || null,
                 teacher_hots_claim: q.teacher_hots_claim || false,
                 text_direction: q.text_direction || 'ltr',
-                // If question came from bank soal and is already approved, inherit that status
-                ...(q.bank_status === 'approved' ? { status: 'approved' } : {})
+                // Set initial status: approved from bank, 'draft' for AI review, 'approved' if AI off
+                status: q.bank_status === 'approved' ? 'approved' : (aiEnabled ? 'draft' : 'approved')
             }))
 
             const { data, error } = await supabase
@@ -119,41 +122,34 @@ export async function POST(
 
             // Trigger HOTS analysis only for questions NOT already approved from bank soal
             console.log(`[HOTS-DEBUG] Inserted ${data?.length} questions. Body bank_status values:`, body.map((q: any) => q.bank_status))
-            if (data && data.length > 0) {
+            if (data && data.length > 0 && aiEnabled) {
                 // Track which indices came from bank soal (already analyzed)
                 const bankIndices = new Set(body.map((q: any, i: number) => q.bank_status === 'approved' ? i : -1).filter((i: number) => i >= 0))
                 const questionsNeedingAnalysis = data.filter((_: any, i: number) => !bankIndices.has(i))
                 console.log(`[HOTS-DEBUG] bankIndices: ${JSON.stringify([...bankIndices])}, needsAnalysis: ${questionsNeedingAnalysis.length}`)
                 if (questionsNeedingAnalysis.length > 0) {
-                    const aiEnabled = await isAIReviewEnabled(schoolId)
-                    if (aiEnabled) {
-                        const { data: quiz } = await supabase
-                            .from('quizzes')
-                            .select('teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(school_level))')
-                            .eq('id', id).single()
-                        const ta = quiz?.teaching_assignment as any
-                        const subjectName = ta?.subject?.name || ''
-                        const gradeBand = ta?.class?.school_level || 'SMP'
-                        const hotsInputs: TriggerHOTSInput[] = questionsNeedingAnalysis.map((q: any) => ({
-                            questionId: q.id,
-                            questionSource: 'quiz' as const,
-                            questionText: q.question_text,
-                            questionType: q.question_type,
-                            options: q.options,
-                            correctAnswer: q.correct_answer,
-                            teacherDifficulty: q.difficulty,
-                            teacherHotsClaim: q.teacher_hots_claim || false,
-                            subjectName,
-                            gradeBand,
-                            quizId: id
-                        }))
-                        console.log(`[HOTS] Triggering analysis for ${hotsInputs.length} quiz questions`)
-                        triggerBulkHOTSAnalysis(hotsInputs)
-                    } else {
-                        // AI Review OFF — direct approve
-                        const ids = questionsNeedingAnalysis.map((q: any) => q.id)
-                        await supabase.from('quiz_questions').update({ status: 'approved' }).in('id', ids)
-                    }
+                    const { data: quiz } = await supabase
+                        .from('quizzes')
+                        .select('teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(school_level))')
+                        .eq('id', id).single()
+                    const ta = quiz?.teaching_assignment as any
+                    const subjectName = ta?.subject?.name || ''
+                    const gradeBand = ta?.class?.school_level || 'SMP'
+                    const hotsInputs: TriggerHOTSInput[] = questionsNeedingAnalysis.map((q: any) => ({
+                        questionId: q.id,
+                        questionSource: 'quiz' as const,
+                        questionText: q.question_text,
+                        questionType: q.question_type,
+                        options: q.options,
+                        correctAnswer: q.correct_answer,
+                        teacherDifficulty: q.difficulty,
+                        teacherHotsClaim: q.teacher_hots_claim || false,
+                        subjectName,
+                        gradeBand,
+                        quizId: id
+                    }))
+                    console.log(`[HOTS] Triggering analysis for ${hotsInputs.length} quiz questions`)
+                    triggerBulkHOTSAnalysis(hotsInputs)
                 }
             }
 
@@ -178,7 +174,9 @@ export async function POST(
                 passage_text: passage_text || null,
                 passage_audio_url: passage_audio_url || null,
                 teacher_hots_claim: teacher_hots_claim || false,
-                text_direction: body.text_direction || 'ltr'
+                text_direction: body.text_direction || 'ltr',
+                // Set initial status based on AI review setting
+                status: aiEnabled ? 'draft' : 'approved'
             })
             .select()
             .single()
@@ -186,31 +184,25 @@ export async function POST(
         if (error) throw error
 
         // Trigger HOTS analysis for single question (fire-and-forget)
-        if (data) {
-            const aiEnabled = await isAIReviewEnabled(schoolId)
-            if (aiEnabled) {
-                const { data: quiz } = await supabase
-                    .from('quizzes')
-                    .select('teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(school_level))')
-                    .eq('id', id).single()
-                const ta = quiz?.teaching_assignment as any
-                triggerHOTSAnalysis({
-                    questionId: data.id,
-                    questionSource: 'quiz',
-                    questionText: data.question_text,
-                    questionType: data.question_type,
-                    options: data.options,
-                    correctAnswer: data.correct_answer,
-                    teacherDifficulty: data.difficulty,
-                    teacherHotsClaim: data.teacher_hots_claim || false,
-                    subjectName: ta?.subject?.name || '',
-                    gradeBand: ta?.class?.school_level || 'SMP',
-                    quizId: id
-                }).catch(err => console.error('HOTS trigger error:', err))
-            } else {
-                // AI Review OFF — direct approve
-                await supabase.from('quiz_questions').update({ status: 'approved' }).eq('id', data.id)
-            }
+        if (data && aiEnabled) {
+            const { data: quiz } = await supabase
+                .from('quizzes')
+                .select('teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(school_level))')
+                .eq('id', id).single()
+            const ta = quiz?.teaching_assignment as any
+            triggerHOTSAnalysis({
+                questionId: data.id,
+                questionSource: 'quiz',
+                questionText: data.question_text,
+                questionType: data.question_type,
+                options: data.options,
+                correctAnswer: data.correct_answer,
+                teacherDifficulty: data.difficulty,
+                teacherHotsClaim: data.teacher_hots_claim || false,
+                subjectName: ta?.subject?.name || '',
+                gradeBand: ta?.class?.school_level || 'SMP',
+                quizId: id
+            }).catch(err => console.error('HOTS trigger error:', err))
         }
 
         return NextResponse.json(data)

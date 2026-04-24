@@ -39,6 +39,7 @@ export default function AdminDashboard() {
     const [school, setSchool] = useState<SchoolInfo | null>(null)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
     const [aiToggleLoading, setAiToggleLoading] = useState(false)
+    const [pendingReviewCount, setPendingReviewCount] = useState(0)
 
     useEffect(() => {
         if (user && user.role !== 'ADMIN') {
@@ -89,6 +90,22 @@ export default function AdminDashboard() {
             fetchData()
             fetchSchool()
         }
+    }, [user])
+
+    // Fetch pending review count
+    useEffect(() => {
+        const fetchPendingReview = async () => {
+            try {
+                const res = await fetch('/api/admin/review-queue?page=1&limit=1&status=admin_review')
+                if (res.ok) {
+                    const data = await res.json()
+                    setPendingReviewCount(data.total || 0)
+                }
+            } catch (err) {
+                console.error('Error fetching review count:', err)
+            }
+        }
+        if (user && user.role === 'ADMIN') fetchPendingReview()
     }, [user])
 
     // Fetch school settings (AI review toggle)
@@ -188,9 +205,10 @@ export default function AdminDashboard() {
         },
         {
             title: 'Review Soal',
-            description: 'Review kualitas soal HOTS',
+            description: pendingReviewCount > 0 ? `${pendingReviewCount} soal menunggu review` : 'Review kualitas soal HOTS',
             icon: ShieldDone,
             href: '/dashboard/admin/review-soal',
+            badge: pendingReviewCount,
         },
         {
             title: 'Pengumuman',
@@ -222,6 +240,33 @@ export default function AdminDashboard() {
                     </p>
                 </div>
             </div>
+
+            {/* Pending Review Alert */}
+            {aiReviewEnabled && pendingReviewCount > 0 && (
+                <Link href="/dashboard/admin/review-soal">
+                    <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-700 rounded-2xl p-5 flex items-center justify-between hover:shadow-md transition-all group cursor-pointer">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-xl bg-amber-100 dark:bg-amber-800/30 flex items-center justify-center text-2xl animate-pulse">
+                                ⚠️
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-amber-800 dark:text-amber-300 text-lg">
+                                    {pendingReviewCount} Soal Menunggu Review
+                                </h3>
+                                <p className="text-sm text-amber-600 dark:text-amber-400">
+                                    Ada soal dari guru yang perlu ditinjau dan disetujui
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-bold text-sm group-hover:translate-x-1 transition-transform">
+                            Review Sekarang
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                        </div>
+                    </div>
+                </Link>
+            )}
 
             {/* School Profile Card */}
             {school && (
@@ -298,10 +343,10 @@ export default function AdminDashboard() {
                             key={i}
                             href={item.href}
                         >
-                            <Card className="h-full border border-slate-200 hover:border-emerald-500 hover:shadow-md active:scale-95 transition-all group cursor-pointer bg-white dark:bg-surface-dark">
+                            <Card className={`h-full border hover:shadow-md active:scale-95 transition-all group cursor-pointer bg-white dark:bg-surface-dark ${(item as any).badge > 0 ? 'border-amber-300 dark:border-amber-600 ring-2 ring-amber-200 dark:ring-amber-800/50' : 'border-slate-200 hover:border-emerald-500'}`}>
                                 <div className="flex items-start gap-4">
                                     {/* Duotone Icon Container with unique colors per function */}
-                                    <div className={`flex-shrink-0 w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300 shadow-sm ${item.href.includes('tahun-ajaran') ? 'bg-indigo-50 dark:bg-indigo-900/10 group-hover:bg-indigo-500 text-indigo-500 dark:text-indigo-400 group-hover:text-white' :
+                                    <div className={`relative flex-shrink-0 w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300 shadow-sm ${item.href.includes('tahun-ajaran') ? 'bg-indigo-50 dark:bg-indigo-900/10 group-hover:bg-indigo-500 text-indigo-500 dark:text-indigo-400 group-hover:text-white' :
                                         item.href.includes('/kelas') ? 'bg-cyan-50 dark:bg-cyan-900/10 group-hover:bg-cyan-500 text-cyan-500 dark:text-cyan-400 group-hover:text-white' :
                                             item.href.includes('mapel') ? 'bg-blue-50 dark:bg-blue-900/10 group-hover:bg-blue-500 text-blue-500 dark:text-blue-400 group-hover:text-white' :
                                                 item.href.includes('/guru') ? 'bg-emerald-50 dark:bg-emerald-900/10 group-hover:bg-emerald-500 text-emerald-500 dark:text-emerald-400 group-hover:text-white' :
@@ -315,12 +360,17 @@ export default function AdminDashboard() {
                                             set="bold"
                                             primaryColor="currentColor"
                                             size={28} />
+                                        {(item as any).badge > 0 && (
+                                            <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] flex items-center justify-center px-1 text-[11px] font-bold text-white bg-red-500 rounded-full shadow-md animate-pulse">
+                                                {(item as any).badge}
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <h3 className="text-lg font-bold text-slate-800 dark:text-white group-hover:text-emerald-600 transition-colors mb-1">
                                             {item.title}
                                         </h3>
-                                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                                        <p className={`text-sm ${(item as any).badge > 0 ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-slate-500 dark:text-slate-400'}`}>
                                             {item.description}
                                         </p>
                                     </div>

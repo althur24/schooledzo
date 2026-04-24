@@ -90,8 +90,8 @@ export async function POST(request: NextRequest) {
             .from('teachers')
             .insert({
                 user_id: newUser.id,
-                nip,
-                gender,
+                nip: nip || null,
+                gender: gender === 'L' || gender === 'P' ? gender : null,
                 school_id: schoolId
             })
             .select(`
@@ -106,8 +106,8 @@ export async function POST(request: NextRequest) {
         }
 
         return NextResponse.json(teacher)
-    } catch (error) {
+    } catch (error: any) {
         console.error('Error creating teacher:', error)
-        return NextResponse.json({ error: 'Server error' }, { status: 500 })
+        return NextResponse.json({ error: error?.message || 'Server error' }, { status: 500 })
     }
 }

@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
         // Admin or SUPER_ADMIN: return all subjects (scoped to school)
         let query = supabase
             .from('subjects')
-            .select('*')
+            .select('*, teaching_assignments(count)')
             .order('name')
 
         if (schoolId) query = query.eq('school_id', schoolId)

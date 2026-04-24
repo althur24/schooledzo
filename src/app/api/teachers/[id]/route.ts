@@ -77,8 +77,8 @@ export async function PUT(
 
         // Update teacher
         const teacherUpdate: Record<string, string | null> = {}
-        if (nip !== undefined) teacherUpdate.nip = nip
-        if (gender !== undefined) teacherUpdate.gender = gender
+        if (nip !== undefined) teacherUpdate.nip = nip || null
+        if (gender !== undefined) teacherUpdate.gender = gender === 'L' || gender === 'P' ? gender : null
 
         if (Object.keys(teacherUpdate).length > 0) {
             const { error: teacherError } = await supabase

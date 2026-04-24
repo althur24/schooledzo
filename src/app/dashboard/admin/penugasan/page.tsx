@@ -54,6 +54,7 @@ export default function PenugasanPage() {
     } | undefined>(undefined)
     const [expandedTeachers, setExpandedTeachers] = useState<Set<string>>(new Set())
     const [deleting, setDeleting] = useState<string | null>(null)
+    const [searchTeacher, setSearchTeacher] = useState('')
     const [showUnassignedModal, setShowUnassignedModal] = useState(false)
     const [activeTab, setActiveTab] = useState<'mengajar' | 'wali'>('mengajar')
     const [waliKelasMap, setWaliKelasMap] = useState<Record<string, string>>({})
@@ -490,6 +491,20 @@ export default function PenugasanPage() {
                     </div>
                 )}
 
+                {/* Search Bar */}
+                <div className="relative">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Cari nama guru..."
+                        value={searchTeacher}
+                        onChange={(e) => setSearchTeacher(e.target.value)}
+                        className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 text-sm shadow-sm"
+                    />
+                </div>
+
                 {/* Teacher Cards */}
                 <Card className="overflow-hidden p-0">
                     {loading ? (
@@ -514,7 +529,10 @@ export default function PenugasanPage() {
                         </div>
                     ) : (
                         <div className="divide-y divide-secondary/10">
-                            {teacherGroups.map((group) => {
+                            {teacherGroups.filter(group => {
+                                if (!searchTeacher.trim()) return true
+                                return group.teacher.name.toLowerCase().includes(searchTeacher.toLowerCase())
+                            }).map((group) => {
                                 const isExpanded = expandedTeachers.has(group.teacher.id)
                                 const hasAssignments = group.total_classes > 0
 
@@ -787,6 +805,7 @@ export default function PenugasanPage() {
                                                             <option value="">— Belum ada wali kelas —</option>
                                                             {teachers
                                                                 .filter(t => !assignedElsewhere.has(t.id) || t.id === currentWali)
+                                                                .sort((a, b) => (a.user.full_name || a.user.username).localeCompare(b.user.full_name || b.user.username))
                                                                 .map((t) => (
                                                                     <option key={t.id} value={t.id}>
                                                                         {t.user.full_name || t.user.username} {t.nip ? `(${t.nip})` : ''}

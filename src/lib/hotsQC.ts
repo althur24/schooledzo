@@ -479,69 +479,41 @@ export async function analyzeQuestion(input: HOTSAnalysisInput): Promise<{
     data?: HOTSAnalysisResult
     error?: string
 }> {
-    if (!GEMINI_API_KEY) {
-        return { success: false, error: 'Gemini API key not configured' }
-    }
-
     if (!input.question_text || input.question_text.trim().length < 10) {
         return { success: false, error: 'Question text too short for analysis' }
     }
 
-    try {
-        const prompt = buildPrompt(input)
+    const prompt = buildPrompt(input)
 
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: {
-                        temperature: 0.2,
-                        topP: 0.8,
-                        maxOutputTokens: 2000,
-                        responseMimeType: 'application/json',
-                    }
-                })
-            }
-        )
+    // Use centralized Gemini client (handles queueing, retry, rate limiting)
+    const { callGemini } = await import('@/lib/geminiClient')
+    const result = await callGemini({
+        prompt,
+        temperature: 0.2,
+        maxOutputTokens: 2000
+    })
 
-        if (!response.ok) {
-            const errorText = await response.text()
-            console.error('Gemini API error:', errorText)
-            return { success: false, error: 'Gemini API error' }
-        }
-
-        const result = await response.json()
-        const textContent = result.candidates?.[0]?.content?.parts?.[0]?.text
-
-        if (!textContent) {
-            return { success: false, error: 'No response from Gemini' }
-        }
-
-        // Parse JSON response
-        let parsed: any
-        try {
-            parsed = parseGeminiJson(textContent)
-        } catch {
-            console.error('Failed to parse HOTS response:', textContent.substring(0, 300))
-            return { success: false, error: 'Failed to parse AI response' }
-        }
-
-        // Validate
-        const validation = validateResult(parsed)
-        if (!validation.valid) {
-            console.warn('HOTS validation warnings:', validation.errors)
-            // Don't fail - apply defaults for missing/invalid fields
-        }
-
-        // Apply defaults and return
-        const analysisResult = applyDefaults(parsed)
-        return { success: true, data: analysisResult }
-
-    } catch (error: any) {
-        console.error('HOTS analysis error:', error?.message || error)
-        return { success: false, error: error?.message || 'Unknown error' }
+    if (!result.ok) {
+        return { success: false, error: result.error }
     }
+
+    // Parse JSON response
+    let parsed: any
+    try {
+        parsed = parseGeminiJson(result.data!)
+    } catch {
+        console.error('Failed to parse HOTS response:', result.data?.substring(0, 300))
+        return { success: false, error: 'Failed to parse AI response' }
+    }
+
+    // Validate
+    const validation = validateResult(parsed)
+    if (!validation.valid) {
+        console.warn('HOTS validation warnings:', validation.errors)
+    }
+
+    // Apply defaults and return
+    const analysisResult = applyDefaults(parsed)
+    return { success: true, data: analysisResult }
 }
+
