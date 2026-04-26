@@ -96,7 +96,7 @@ export async function PUT(
                         // Re-fetch after fix
                         const { data: refreshed } = await supabase
                             .from('exam_questions')
-                            .select('id, status')
+                            .select('id, status, updated_at')
                             .eq('exam_id', id)
                         if (refreshed) {
                             questions.length = 0
