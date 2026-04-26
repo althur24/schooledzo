@@ -126,9 +126,39 @@ export default function ReviewSoalPage() {
         }
     }
 
+    const handleReanalyze = async (item: QueueItem) => {
+        setActionLoading(item.id)
+        try {
+            const res = await fetch('/api/admin/review-queue/reanalyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    question_id: item.id,
+                    question_source: item.question_source
+                })
+            })
+            if (!res.ok) {
+                const err = await res.json()
+                throw new Error(err.error || 'Gagal menganalisis ulang')
+            }
+            alert('Analisis ulang berhasil dijadwalkan / selesai.')
+            fetchQueue()
+        } catch (error: any) {
+            alert('Gagal menganalisis ulang: ' + error.message)
+        } finally {
+            setActionLoading(null)
+        }
+    }
+
     const handleBulkApprove = async (teacherId: string, questions: QueueItem[]) => {
-        const toApprove = questions.filter(q => q.status === 'admin_review' || q.status === 'ai_reviewing')
-        if (toApprove.length === 0) return
+        const toApprove = questions.filter(q => 
+            (q.status === 'admin_review' || q.status === 'ai_reviewing') &&
+            q.ai_review && q.ai_review.model_version !== 'FAILED'
+        )
+        if (toApprove.length === 0) {
+            alert('Tidak ada soal yang valid untuk disetujui (semua butuh re-analyze AI).')
+            return
+        }
 
         if (!confirm(`Apakah Anda yakin ingin menyetujui sekaligus ${toApprove.length} soal terpilih?`)) {
             return
@@ -609,8 +639,9 @@ export default function ReviewSoalPage() {
                                                             <div className="flex flex-wrap md:flex-col gap-2 justify-center md:w-32 flex-shrink-0">
                                                                 <Button
                                                                     onClick={() => handleAction(item, 'approve')}
-                                                                    disabled={actionLoading === item.id || item.status === 'approved'}
-                                                                    className="!bg-emerald-600 hover:!bg-emerald-700 !text-white text-xs flex-1 md:flex-none justify-center transition-all shadow-sm"
+                                                                    disabled={actionLoading === item.id || item.status === 'approved' || !item.ai_review || item.ai_review.model_version === 'FAILED'}
+                                                                    title={(!item.ai_review || item.ai_review.model_version === 'FAILED') ? 'Tunggu atau ulangi analisis AI sebelum menyetujui' : ''}
+                                                                    className="!bg-emerald-600 hover:!bg-emerald-700 !text-white text-xs flex-1 md:flex-none justify-center transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                                                                 >
                                                                     <CheckCircle set="bold" primaryColor="currentColor" size={14} />
                                                                     Approve
@@ -630,6 +661,17 @@ export default function ReviewSoalPage() {
                                                                     <RotateCcw set="bold" primaryColor="currentColor" size={14} />
                                                                     Return
                                                                 </Button>
+                                                                {(!item.ai_review || item.ai_review.model_version === 'FAILED' || item.status === 'ai_reviewing') && (
+                                                                    <Button
+                                                                        variant="secondary"
+                                                                        onClick={() => handleReanalyze(item)}
+                                                                        disabled={actionLoading === item.id}
+                                                                        className="!bg-blue-500 hover:!bg-blue-600 !text-white text-xs flex-1 md:flex-none justify-center transition-all shadow-sm"
+                                                                    >
+                                                                        <Brain set="bold" primaryColor="currentColor" size={14} />
+                                                                        Re-analyze AI
+                                                                    </Button>
+                                                                )}
 
                                                             </div>
                                                         </div>

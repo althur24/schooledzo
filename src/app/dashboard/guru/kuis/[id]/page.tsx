@@ -122,7 +122,7 @@ export default function EditQuizPage() {
     const [showPublishConfirm, setShowPublishConfirm] = useState(false)
     const [showPreview, setShowPreview] = useState(false)
     const [publishing, setPublishing] = useState(false)
-    const [showSuccessModal, setShowSuccessModal] = useState(false)
+    const [showSuccessModal, setShowSuccessModal] = useState<false | 'published' | 'pending'>(false)
     const [alertInfo, setAlertInfo] = useState<{ type: 'info' | 'warning' | 'error' | 'success', title: string, message: string } | null>(null)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
 
@@ -171,6 +171,9 @@ export default function EditQuizPage() {
     const confirmPublish = async () => {
         setPublishing(true)
         try {
+            // Fresh-fetch latest question statuses before attempting publish
+            await fetchQuiz()
+
             const res = await fetch(`/api/quizzes/${quizId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -178,22 +181,25 @@ export default function EditQuizPage() {
             })
 
             if (res.ok) {
-                const data = await res.json()
+                const resData = await res.json()
                 setShowPublishConfirm(false)
-
-                if (data._status === 'under_review') {
-                    setAlertInfo({ type: 'info', title: '🔍 Kuis Dalam Review', message: 'Kuis berhasil disimpan! Ada soal yang masih dalam proses review (oleh AI atau Admin). Kuis akan otomatis terpublish ke siswa setelah semua soal disetujui.' })
-                } else {
-                    setShowSuccessModal(true)
-                }
-
+                setShowSuccessModal(resData?.pending_publish ? 'pending' : 'published')
                 fetchQuiz()
             } else {
-                throw new Error('Gagal mempublish kuis')
+                let errData
+                try {
+                    errData = await res.json()
+                } catch {
+                    // ignore
+                }
+                // Re-fetch to sync UI with actual DB state
+                await fetchQuiz()
+                throw new Error(errData?.error || 'Gagal mempublish kuis')
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error publishing:', error)
-            setAlertInfo({ type: 'error', title: 'Gagal Publish', message: 'Terjadi kesalahan saat mempublish kuis. Coba lagi.' })
+            setAlertInfo({ type: 'error', title: 'Gagal Publish', message: error.message || 'Terjadi kesalahan saat mempublish kuis. Coba lagi.' })
+            setShowPublishConfirm(false)
         } finally {
             setPublishing(false)
         }
@@ -486,8 +492,9 @@ export default function EditQuizPage() {
                         {!quiz.is_active && !quiz.pending_publish && (
                             <Button
                                 onClick={handlePublishClick}
-                                disabled={questions.length === 0}
-                                className="bg-gradient-to-r from-green-500 to-emerald-600 text-white flex items-center gap-2"
+                                disabled={questions.length === 0 || (aiReviewEnabled && questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned'))}
+                                title={aiReviewEnabled && questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned') ? 'Tunggu proses AI selesai atau perbaiki soal yang dikembalikan sebelum publish' : ''}
+                                className="bg-gradient-to-r from-green-500 to-emerald-600 text-white flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <Upload set="bold" primaryColor="currentColor" size={20} />
                                 Publish Kuis
@@ -508,6 +515,36 @@ export default function EditQuizPage() {
                     </div>
                 }
             />
+
+            {/* Returned Questions Banner */}
+            {questions.some(q => q.status === 'returned') && (
+                <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center text-red-500 shrink-0">
+                            <Danger set="bold" primaryColor="currentColor" size={24} />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-red-600 dark:text-red-400">Ada {questions.filter(q => q.status === 'returned').length} soal yang dikembalikan admin</h3>
+                            <p className="text-sm text-red-500 dark:text-red-300">
+                                Silakan perbaiki soal sesuai catatan admin agar kuis bisa dipublikasikan.
+                            </p>
+                        </div>
+                    </div>
+                    <Button
+                        size="sm"
+                        onClick={() => {
+                            const firstReturned = questions.find(q => q.status === 'returned');
+                            if (firstReturned?.id) {
+                                const el = document.getElementById(`question-${firstReturned.id}`);
+                                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }
+                        }}
+                        className="!bg-red-600 hover:!bg-red-700 text-white shadow-sm shrink-0 whitespace-nowrap"
+                    >
+                        Lihat Soal Dikembalikan
+                    </Button>
+                </div>
+            )}
 
             {/* Points Warning */}
             {totalPoints !== 100 && questions.length > 0 && (
@@ -1913,17 +1950,31 @@ export default function EditQuizPage() {
             {/* Success Publish Modal */}
             <Modal
                 title="Status Publikasi"
-                open={showSuccessModal}
+                open={!!showSuccessModal}
                 onClose={() => setShowSuccessModal(false)}
             >
                 <div className="text-center py-6">
-                    <div className="w-16 h-16 bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <TickSquare set="bold" primaryColor="currentColor" size={32} />
-                    </div>
-                    <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Kuis Berhasil Dipublish!</h3>
-                    <p className="text-sm text-text-secondary dark:text-zinc-400 mb-6">
-                        Siswa sekarang dapat melihat dan mengerjakan kuis ini melalui dashboard mereka.
-                    </p>
+                    {showSuccessModal === 'published' ? (
+                        <>
+                            <div className="w-16 h-16 bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <TickSquare set="bold" primaryColor="currentColor" size={32} />
+                            </div>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Kuis Berhasil Dipublish!</h3>
+                            <p className="text-sm text-text-secondary dark:text-zinc-400 mb-6">
+                                Siswa sekarang dapat melihat dan mengerjakan kuis ini melalui dashboard mereka.
+                            </p>
+                        </>
+                    ) : (
+                        <>
+                            <div className="w-16 h-16 bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <TickSquare set="bold" primaryColor="currentColor" size={32} />
+                            </div>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Kuis Dikirim ke Review Admin</h3>
+                            <p className="text-sm text-text-secondary dark:text-zinc-400 mb-6">
+                                Ada soal yang memerlukan persetujuan admin. Kuis akan otomatis dipublikasikan ke siswa setelah admin menyetujui semua soal.
+                            </p>
+                        </>
+                    )}
                     <div className="flex gap-3">
                         <Button variant="secondary" onClick={() => setShowSuccessModal(false)} className="flex-1 justify-center">
                             Tutup

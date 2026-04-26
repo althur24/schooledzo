@@ -16,9 +16,9 @@ const MODELS = [
 
 // --- Config ---
 const MAX_CONCURRENT = 5
-const MAX_RETRIES = 2           // Retries per model
-const BASE_BACKOFF_MS = 3000
-const QUEUE_TIMEOUT_MS = 60000
+const MAX_RETRIES = 3           // Retries per model
+const BASE_BACKOFF_MS = 5000
+const QUEUE_TIMEOUT_MS = 90000
 
 // --- State ---
 let activeCount = 0

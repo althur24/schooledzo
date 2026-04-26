@@ -130,7 +130,7 @@ export default function EditExamPage() {
     const [showPublishConfirm, setShowPublishConfirm] = useState(false)
     const [showPreview, setShowPreview] = useState(false)
     const [publishing, setPublishing] = useState(false)
-    const [showSuccessModal, setShowSuccessModal] = useState(false)
+    const [showSuccessModal, setShowSuccessModal] = useState<false | 'published' | 'pending'>(false)
     const [alertInfo, setAlertInfo] = useState<{ type: 'info' | 'warning' | 'error' | 'success', title: string, message: string } | null>(null)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
 
@@ -271,28 +271,34 @@ export default function EditExamPage() {
     const confirmPublish = async () => {
         setPublishing(true)
         try {
+            // Fresh-fetch latest question statuses before attempting publish
+            await fetchExam()
+
             const res = await fetch(`/api/exams/${examId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ is_active: true })
             })
             if (res.ok) {
-                const data = await res.json()
+                const resData = await res.json()
                 setShowPublishConfirm(false)
-
-                if (data._status === 'under_review') {
-                    setAlertInfo({ type: 'info', title: '🔍 Ulangan Dalam Review', message: 'Ulangan berhasil disimpan! Ada soal yang masih dalam proses review. Ulangan akan otomatis terpublish ke siswa setelah semua soal disetujui.' })
-                } else {
-                    setShowSuccessModal(true)
-                }
-
+                setShowSuccessModal(resData?.pending_publish ? 'pending' : 'published')
                 fetchExam()
             } else {
-                throw new Error('Gagal mempublish ulangan')
+                let errData
+                try {
+                    errData = await res.json()
+                } catch {
+                    // ignore
+                }
+                // Re-fetch to sync UI with actual DB state
+                await fetchExam()
+                throw new Error(errData?.error || 'Gagal mempublish ulangan')
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error publishing:', error)
-            setAlertInfo({ type: 'error', title: 'Gagal Publish', message: 'Terjadi kesalahan saat mempublish ulangan. Coba lagi.' })
+            setAlertInfo({ type: 'error', title: 'Gagal Publish', message: error.message || 'Terjadi kesalahan saat mempublish ulangan. Coba lagi.' })
+            setShowPublishConfirm(false)
         } finally {
             setPublishing(false)
         }
@@ -742,10 +748,12 @@ export default function EditExamPage() {
                         }>
                             Pengaturan
                         </Button>
-                        {!exam.is_active && (
+                        {!exam.is_active && !exam.pending_publish && (
                             <Button
                                 onClick={handlePublishClick}
-                                disabled={questions.length === 0}
+                                disabled={questions.length === 0 || (aiReviewEnabled && questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned'))}
+                                title={aiReviewEnabled && questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned') ? 'Tunggu proses AI selesai atau perbaiki soal yang dikembalikan sebelum publish' : ''}
+                                className="disabled:opacity-50 disabled:cursor-not-allowed"
                                 icon={
                                     <Upload set="bold" primaryColor="currentColor" size={20} />
                                 }
@@ -781,6 +789,36 @@ export default function EditExamPage() {
             {/* ===== TAB: SOAL ===== */}
             {activeTab === 'soal' && (
                 <div className="space-y-4">
+                    {/* Returned Questions Banner */}
+                    {questions.some(q => q.status === 'returned') && (
+                        <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center text-red-500 shrink-0">
+                                    <Danger set="bold" primaryColor="currentColor" size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-red-600 dark:text-red-400">Ada {questions.filter(q => q.status === 'returned').length} soal yang dikembalikan admin</h3>
+                                    <p className="text-sm text-red-500 dark:text-red-300">
+                                        Silakan perbaiki soal sesuai catatan admin agar ulangan bisa dipublikasikan.
+                                    </p>
+                                </div>
+                            </div>
+                            <Button
+                                size="sm"
+                                onClick={() => {
+                                    const firstReturned = questions.find(q => q.status === 'returned');
+                                    if (firstReturned?.id) {
+                                        const el = document.getElementById(`question-${firstReturned.id}`);
+                                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    }
+                                }}
+                                className="!bg-red-600 hover:!bg-red-700 text-white shadow-sm shrink-0 whitespace-nowrap"
+                            >
+                                Lihat Soal Dikembalikan
+                            </Button>
+                        </div>
+                    )}
+
                     {/* Points Warning */}
             {totalPoints !== 100 && questions.length > 0 && (
                 <div className={`px-4 py-3 rounded-xl flex items-center justify-between ${totalPoints > 100 ? 'bg-red-500/10 border border-red-200 dark:border-red-500/30' : 'bg-amber-500/10 border border-amber-200 dark:border-amber-500/30'}`}>
@@ -2467,17 +2505,31 @@ export default function EditExamPage() {
             {/* Success Publish Modal */}
             <Modal
                 title="Status Publikasi"
-                open={showSuccessModal}
+                open={!!showSuccessModal}
                 onClose={() => setShowSuccessModal(false)}
             >
                 <div className="text-center py-6">
-                    <div className="w-16 h-16 bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <TickSquare set="bold" primaryColor="currentColor" size={32} />
-                    </div>
-                    <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Ulangan Berhasil Dipublish!</h3>
-                    <p className="text-sm text-text-secondary dark:text-zinc-400 mb-6">
-                        Siswa sekarang dapat melihat dan mengerjakan ulangan ini melalui dashboard mereka.
-                    </p>
+                    {showSuccessModal === 'published' ? (
+                        <>
+                            <div className="w-16 h-16 bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <TickSquare set="bold" primaryColor="currentColor" size={32} />
+                            </div>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Ulangan Berhasil Dipublish!</h3>
+                            <p className="text-sm text-text-secondary dark:text-zinc-400 mb-6">
+                                Siswa sekarang dapat melihat dan mengerjakan ulangan ini melalui dashboard mereka.
+                            </p>
+                        </>
+                    ) : (
+                        <>
+                            <div className="w-16 h-16 bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <TickSquare set="bold" primaryColor="currentColor" size={32} />
+                            </div>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Ulangan Dikirim ke Review Admin</h3>
+                            <p className="text-sm text-text-secondary dark:text-zinc-400 mb-6">
+                                Ada soal yang memerlukan persetujuan admin. Ulangan akan otomatis dipublikasikan ke siswa setelah admin menyetujui semua soal.
+                            </p>
+                        </>
+                    )}
                     <div className="flex gap-3">
                         <Button variant="secondary" onClick={() => setShowSuccessModal(false)} className="flex-1 justify-center">
                             Tutup

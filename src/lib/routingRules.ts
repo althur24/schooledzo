@@ -146,11 +146,11 @@ export function determineRouting(input: RoutingInput): RoutingDecision {
     }
 
     // Edge case: no explicit issues but doesn't fully meet auto-approve criteria
-    // Still auto-approve but with note
+    // Send to admin review for manual verification
     return {
-        action: 'auto_approve',
-        reasons: ['Tidak ada masalah signifikan terdeteksi'],
-        priority: 0
+        action: 'admin_review',
+        reasons: ['Tidak sepenuhnya memenuhi kriteria auto-approve — perlu verifikasi manual'],
+        priority: 60
     }
 }
 

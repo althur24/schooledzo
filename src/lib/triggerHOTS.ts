@@ -61,6 +61,9 @@ export async function triggerHOTSAnalysis(input: TriggerHOTSInput): Promise<void
             .update({ status: 'ai_reviewing' })
             .eq('id', input.questionId)
 
+        // Clear any previous failed ai_review record
+        await supabase.from('ai_reviews').delete().eq('question_id', input.questionId)
+
         // 2. Run AI analysis
         const analysisInput: HOTSAnalysisInput = {
             question_text: input.questionText,
@@ -77,13 +80,7 @@ export async function triggerHOTSAnalysis(input: TriggerHOTSInput): Promise<void
 
         if (!result.success || !result.data) {
             console.error(`HOTS analysis failed for ${input.questionSource}/${input.questionId}:`, result.error)
-            // Set to admin_review so admin can manually handle
-            // (previously set to 'draft' which made questions invisible)
-            await supabase
-                .from(tableName)
-                .update({ status: 'admin_review' })
-                .eq('id', input.questionId)
-            return
+            throw new Error(result.error || 'AI analysis failed')
         }
 
         const aiData = result.data
@@ -253,14 +250,34 @@ export async function triggerHOTSAnalysis(input: TriggerHOTSInput): Promise<void
     } catch (error) {
         console.error(`HOTS analysis error for ${input.questionSource}/${input.questionId}:`, error)
         // On error, set to admin_review so admin can manually handle it
-        // (previously set to 'approved' which silently bypassed review)
         const fallbackStatus = 'admin_review'
         await supabase
             .from(tableName)
             .update({ status: fallbackStatus })
             .eq('id', input.questionId)
-        console.log(`[HOTS] Fallback: set ${input.questionSource}/${input.questionId} to ${fallbackStatus}`)
+            
+        // Insert a "failed" ai_review record so admin knows AI was attempted
+        await supabase.from('ai_reviews').insert({
+            question_source: input.questionSource,
+            question_id: input.questionId,
+            primary_bloom_level: 0,
+            hots_flag: false,
+            hots_strength: 'S0',
+            model_version: 'FAILED',
+            full_json_report: { 
+                error: error instanceof Error ? error.message : 'AI analysis failed',
+                failed_at: new Date().toISOString(),
+                needs_reanalysis: true 
+            }
+        })
+            
+        console.log(`[HOTS] Fallback: set ${input.questionSource}/${input.questionId} to ${fallbackStatus} with FAILED ai_review`)
+        throw error // Rethrow to allow retry
     }
+}
+
+export async function triggerBulkHOTSAnalysisAsync(questions: TriggerHOTSInput[]): Promise<void> {
+    await processBulk(questions)
 }
 
 /**
@@ -275,16 +292,33 @@ export function triggerBulkHOTSAnalysis(questions: TriggerHOTSInput[]): void {
 }
 
 async function processBulk(questions: TriggerHOTSInput[]): Promise<void> {
-    // Process ONE AT A TIME with delay to avoid rate limits
+    const failed: TriggerHOTSInput[] = []
+
+    // Pass 1: Process all questions ONE AT A TIME with delay to avoid rate limits
     for (let i = 0; i < questions.length; i++) {
         if (i > 0) {
-            // Wait 1.5s between questions to stay under rate limit
-            await new Promise(r => setTimeout(r, 1500))
+            // Wait 2.5s between questions to stay under rate limit
+            await new Promise(r => setTimeout(r, 2500))
         }
         try {
             await triggerHOTSAnalysis(questions[i])
         } catch (err) {
-            console.error(`Bulk HOTS: question ${i + 1}/${questions.length} failed:`, err)
+            console.error(`Bulk HOTS pass 1: question ${i + 1}/${questions.length} failed:`, err)
+            failed.push(questions[i])
+        }
+    }
+
+    // Pass 2: Retry failed questions after a longer delay
+    if (failed.length > 0) {
+        console.log(`[HOTS] Retrying ${failed.length} failed questions after 10s cooldown...`)
+        await new Promise(r => setTimeout(r, 10000))
+        for (let i = 0; i < failed.length; i++) {
+            if (i > 0) await new Promise(r => setTimeout(r, 3000))
+            try {
+                await triggerHOTSAnalysis(failed[i])
+            } catch (err) {
+                console.error(`Bulk HOTS pass 2: question ${i + 1}/${failed.length} still failed:`, err)
+            }
         }
     }
 }

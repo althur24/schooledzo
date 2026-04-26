@@ -287,6 +287,7 @@ export async function POST(request: NextRequest) {
         try {
             let teacherUserId: string | null = null
             let parentId: string | null = null
+            let parentTitle: string | null = null
 
             if (question_source === 'bank') {
                 const { data: q } = await supabase
@@ -297,7 +298,7 @@ export async function POST(request: NextRequest) {
                 teacherUserId = (q as any)?.teacher?.user_id || null
             } else {
                 const sourceTable = question_source === 'quiz' ? 'quiz_questions' : 'exam_questions'
-                const parentField = question_source === 'quiz' ? 'quiz:quizzes(id,teaching_assignment:teaching_assignments(teacher:teachers(user_id)))' : 'exam:exams(id,teaching_assignment:teaching_assignments(teacher:teachers(user_id)))'
+                const parentField = question_source === 'quiz' ? 'quiz:quizzes(id,title,teaching_assignment:teaching_assignments(teacher:teachers(user_id)))' : 'exam:exams(id,title,teaching_assignment:teaching_assignments(teacher:teachers(user_id)))'
                 const { data: q } = await supabase
                     .from(sourceTable)
                     .select(parentField)
@@ -305,6 +306,7 @@ export async function POST(request: NextRequest) {
                     .single()
                 const parent = question_source === 'quiz' ? (q as any)?.quiz : (q as any)?.exam
                 parentId = parent?.id || null
+                parentTitle = parent?.title || null
                 const ta = parent?.teaching_assignment
                 const taObj = Array.isArray(ta) ? ta[0] : ta
                 const teacher = taObj?.teacher
@@ -319,9 +321,17 @@ export async function POST(request: NextRequest) {
                 const shouldSend = !(decision === 'approve' && (question_source === 'quiz' || question_source === 'exam'))
 
                 if (shouldSend) {
-                    const notifTitle = decision === 'approve'
+                    let notifTitle = decision === 'approve'
                         ? '✅ Soal Anda telah disetujui admin'
                         : '↩️ Soal Anda dikembalikan oleh admin'
+                    
+                    if (parentTitle && (question_source === 'quiz' || question_source === 'exam')) {
+                        const typeName = question_source === 'quiz' ? 'Kuis' : 'Ulangan'
+                        notifTitle = decision === 'approve'
+                            ? `✅ Soal disetujui — ${typeName}: ${parentTitle}`
+                            : `↩️ Soal dikembalikan — ${typeName}: ${parentTitle}`
+                    }
+
                     const notifMessage = notes
                         ? `Catatan admin: ${notes}`
                         : decision === 'approve'
@@ -369,6 +379,35 @@ export async function POST(request: NextRequest) {
                 }
             } catch (autoPublishError) {
                 console.error('Error checking auto-publish:', autoPublishError)
+                // Don't fail the main action
+            }
+        }
+
+        // 5. If returned, reset pending_publish so guru can re-publish after fixing
+        if (decision === 'return' && (question_source === 'quiz' || question_source === 'exam')) {
+            try {
+                const sourceTable = question_source === 'quiz' ? 'quiz_questions' : 'exam_questions'
+                const parentField = question_source === 'quiz' ? 'quiz_id' : 'exam_id'
+                const parentTable = question_source === 'quiz' ? 'quizzes' : 'exams'
+
+                const { data: questionData } = await supabase
+                    .from(sourceTable)
+                    .select(parentField)
+                    .eq('id', question_id)
+                    .single()
+
+                const parentId = (questionData as any)?.[parentField]
+                if (parentId) {
+                    // Reset pending_publish so the Publish button reappears for the teacher
+                    await supabase
+                        .from(parentTable)
+                        .update({ pending_publish: false })
+                        .eq('id', parentId)
+                        .eq('pending_publish', true) // Only reset if currently pending
+                    console.log(`[review-queue] Reset pending_publish for ${question_source}/${parentId} after return`)
+                }
+            } catch (resetError) {
+                console.error('Error resetting pending_publish:', resetError)
                 // Don't fail the main action
             }
         }

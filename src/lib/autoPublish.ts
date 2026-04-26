@@ -67,6 +67,7 @@ export async function checkAndAutoPublish(
 
         // 4. All approved and pending_publish -> Auto Publish!
         console.log(`[autoPublish] All questions approved! Publishing ${source}...`)
+        console.log(`[autoPublish] Current parent state: is_active=${parent.is_active}, pending_publish=${parent.pending_publish}`)
 
         const { data: updatedDoc, error: updateError } = await supabase
             .from(table)
@@ -84,12 +85,18 @@ export async function checkAndAutoPublish(
             return false
         }
 
+        console.log(`[autoPublish] Update result: updatedDoc=${JSON.stringify(updatedDoc)}`)
+
         // If no row was updated, it means another concurrent request already published it!
         // This silently succeeds without sending duplicate notifications.
         if (!updatedDoc || updatedDoc.length === 0) {
             console.log(`[autoPublish] ${source} already published by concurrent request. Skipping notification.`)
             return true
         }
+
+        // Verify the update actually took effect
+        const { data: verifyDoc } = await supabase.from(table).select('is_active, pending_publish').eq('id', parentId).single()
+        console.log(`[autoPublish] VERIFY after update: is_active=${verifyDoc?.is_active}, pending_publish=${verifyDoc?.pending_publish}`)
 
         // 5. Send notifications
         await sendPublishNotifications(source, parent)

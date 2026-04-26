@@ -55,9 +55,9 @@ export async function PUT(
         const body = await request.json()
         const { title, description, start_time, duration_minutes, is_randomized, is_active, max_violations, show_results_immediately, results_released } = body
 
+
         let finalIsActive = is_active
-        let isPendingPublish = false
-        let isUnderReview = false
+        let finalPendingPublish = false
 
         // If trying to publish, check question statuses first
         if (is_active === true) {
@@ -65,7 +65,7 @@ export async function PUT(
 
             const { data: questions } = await supabase
                 .from('exam_questions')
-                .select('id, status')
+                .select('id, status, updated_at')
                 .eq('exam_id', id)
 
             if (questions && questions.length > 0) {
@@ -78,24 +78,63 @@ export async function PUT(
                             .in('id', nonApproved.map(q => q.id))
                     }
                 } else {
-                    // AI Review ON — block publish if questions not all approved
-                    const allApproved = questions.every(q => q.status === 'approved')
-                    if (!allApproved) {
-                        finalIsActive = false
-                        isPendingPublish = true
-                        isUnderReview = true
+                    // AI Review ON — auto-recover stuck questions (> 3 minutes in ai_reviewing/draft)
+                    const THREE_MINUTES = 3 * 60 * 1000
+                    const now = Date.now()
+                    const stuckQuestions = questions.filter(q => {
+                        if (q.status !== 'ai_reviewing' && q.status !== 'draft') return false
+                        const updatedAt = q.updated_at ? new Date(q.updated_at).getTime() : 0
+                        return (now - updatedAt) > THREE_MINUTES
+                    })
 
-                        // Escalate stuck questions (draft/ai_reviewing) to admin_review
-                        // so they appear on the admin review page
-                        const stuckQuestions = questions.filter(q => 
-                            q.status === 'draft' || q.status === 'ai_reviewing'
-                        )
-                        if (stuckQuestions.length > 0) {
-                            await supabase.from('exam_questions')
-                                .update({ status: 'admin_review' })
-                                .in('id', stuckQuestions.map(q => q.id))
-                            console.log(`[PUBLISH] Escalated ${stuckQuestions.length} stuck exam questions to admin_review`)
+                    if (stuckQuestions.length > 0) {
+                        console.log(`[exam-publish] Auto-recovering ${stuckQuestions.length} stuck questions to admin_review`)
+                        await supabase.from('exam_questions')
+                            .update({ status: 'admin_review', updated_at: new Date().toISOString() })
+                            .in('id', stuckQuestions.map(q => q.id))
+                        
+                        // Re-fetch after fix
+                        const { data: refreshed } = await supabase
+                            .from('exam_questions')
+                            .select('id, status')
+                            .eq('exam_id', id)
+                        if (refreshed) {
+                            questions.length = 0
+                            questions.push(...refreshed)
                         }
+                    }
+
+                    // Check statuses after potential auto-recovery
+                    const statuses = {
+                        draft: questions.filter(q => q.status === 'draft').length,
+                        ai_reviewing: questions.filter(q => q.status === 'ai_reviewing').length,
+                        admin_review: questions.filter(q => q.status === 'admin_review').length,
+                        returned: questions.filter(q => q.status === 'returned').length,
+                        approved: questions.filter(q => q.status === 'approved').length,
+                    }
+                    
+                    const stillProcessing = statuses.draft + statuses.ai_reviewing
+                    const returned = statuses.returned
+                    const needsReview = statuses.admin_review
+                    
+                    if (stillProcessing > 0 || returned > 0) {
+                        const parts: string[] = []
+                        if (stillProcessing > 0)
+                            parts.push(`${stillProcessing} soal masih diproses AI`)
+                        if (returned > 0)
+                            parts.push(`${returned} soal dikembalikan admin`)
+                        
+                        return NextResponse.json({
+                            error: `Gagal mempublikasikan: ${parts.join(', ')}. Perbaiki atau tunggu proses AI selesai sebelum mempublikasikan.`,
+                            _status: 'blocked',
+                            statusBreakdown: statuses
+                        }, { status: 400 })
+                    }
+                    
+                    if (needsReview > 0) {
+                        // Publish requested, but needs admin review.
+                        finalIsActive = false
+                        finalPendingPublish = true
                     }
                 }
             }
@@ -108,13 +147,13 @@ export async function PUT(
         if (start_time !== undefined) updateData.start_time = start_time
         if (duration_minutes !== undefined) updateData.duration_minutes = duration_minutes
         if (is_randomized !== undefined) updateData.is_randomized = is_randomized
-        if (finalIsActive !== undefined) updateData.is_active = finalIsActive
+        if (is_active !== undefined) updateData.is_active = finalIsActive
         if (show_results_immediately !== undefined) updateData.show_results_immediately = show_results_immediately
         if (results_released !== undefined) updateData.results_released = results_released
 
-        // Update pending_publish status if we tried to publish
+        // Set pending_publish correctly when explicitly publishing
         if (is_active !== undefined) {
-            updateData.pending_publish = isPendingPublish
+            updateData.pending_publish = finalPendingPublish
         }
 
         if (max_violations !== undefined) updateData.max_violations = max_violations
@@ -134,8 +173,8 @@ export async function PUT(
 
         if (error) throw error
 
-        // If exam was just activated (NOT under review), send notifications
-        if (is_active === true && !isUnderReview && data?.teaching_assignment?.class_id) {
+        // If exam was just activated (truly active), send notifications
+        if (finalIsActive === true && data?.teaching_assignment?.class_id) {
             try {
                 // Get the active academic year
                 const { data: activeYear } = await supabase
@@ -170,10 +209,6 @@ export async function PUT(
                 console.error('Error sending exam notifications:', notifError)
             }
         }
-        if (isUnderReview) {
-            return NextResponse.json({ ...data, _status: 'under_review' })
-        }
-
         return NextResponse.json(data)
     } catch (error) {
         console.error('Error updating exam:', error)

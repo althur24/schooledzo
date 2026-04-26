@@ -81,7 +81,48 @@ export function safeJsonParse(rawText: string): any {
         }
     }
 
-    return JSON.parse(result)
+    try {
+        return JSON.parse(result)
+    } catch (firstError) {
+        // Attempt truncated JSON recovery:
+        // Close any open strings, arrays, and objects
+        let repaired = result
+        
+        // If we're inside an unclosed string, close it
+        let inStr = false
+        for (let j = 0; j < repaired.length; j++) {
+            if (repaired[j] === '"' && (j === 0 || repaired[j-1] !== '\\')) {
+                inStr = !inStr
+            }
+        }
+        if (inStr) repaired += '"'
+        
+        // Count open brackets/braces and close them
+        let openBraces = 0, openBrackets = 0
+        let inStr2 = false
+        for (let j = 0; j < repaired.length; j++) {
+            const c = repaired[j]
+            if (c === '"' && (j === 0 || repaired[j-1] !== '\\')) { inStr2 = !inStr2; continue }
+            if (inStr2) continue
+            if (c === '{') openBraces++
+            else if (c === '}') openBraces--
+            else if (c === '[') openBrackets++
+            else if (c === ']') openBrackets--
+        }
+        
+        // Remove trailing comma before closing
+        repaired = repaired.replace(/,\s*$/, '')
+        
+        for (let j = 0; j < openBrackets; j++) repaired += ']'
+        for (let j = 0; j < openBraces; j++) repaired += '}'
+        
+        try {
+            console.warn('[parseGeminiJson] Recovered truncated JSON via bracket repair')
+            return JSON.parse(repaired)
+        } catch {
+            throw firstError // Throw original error if recovery also fails
+        }
+    }
 }
 
 /**

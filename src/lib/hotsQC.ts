@@ -490,7 +490,7 @@ export async function analyzeQuestion(input: HOTSAnalysisInput): Promise<{
     const result = await callGemini({
         prompt,
         temperature: 0.2,
-        maxOutputTokens: 2000
+        maxOutputTokens: 4096
     })
 
     if (!result.ok) {
@@ -501,9 +501,10 @@ export async function analyzeQuestion(input: HOTSAnalysisInput): Promise<{
     let parsed: any
     try {
         parsed = parseGeminiJson(result.data!)
-    } catch {
-        console.error('Failed to parse HOTS response:', result.data?.substring(0, 300))
-        return { success: false, error: 'Failed to parse AI response' }
+    } catch (parseError: any) {
+        console.error(`Failed to parse HOTS response (length=${result.data?.length}):`, result.data?.substring(0, 300))
+        console.error('Parse error detail:', parseError?.message)
+        return { success: false, error: `Failed to parse AI response: ${parseError?.message}` }
     }
 
     // Validate

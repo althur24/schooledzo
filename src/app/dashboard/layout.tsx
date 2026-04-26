@@ -1,6 +1,6 @@
 'use client'
 
-import { ReactNode, useEffect } from 'react'
+import { ReactNode, useEffect, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import Link from 'next/link'
@@ -18,15 +18,17 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     const router = useRouter()
     const pathname = usePathname()
     const { user, logout, loading } = useAuth()
+    const isIntentionalLogout = useRef(false)
 
     const handleLogout = async () => {
+        isIntentionalLogout.current = true
         await logout()
         router.push('/login')
     }
 
     // Redirect to login if session expired (user is null after loading completes)
     useEffect(() => {
-        if (!loading && !user) {
+        if (!loading && !user && !isIntentionalLogout.current) {
             router.replace('/login?expired=true')
         }
     }, [user, loading, router])
