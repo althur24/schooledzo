@@ -114,7 +114,8 @@ export async function GET(request: NextRequest) {
         const { data: submissions } = await supabase
             .from('official_exam_submissions')
             .select(`
-                id, student_id, is_submitted, violation_count, started_at, submitted_at,
+                id, student_id, is_submitted, is_graded, violation_count, started_at, submitted_at,
+                total_score, max_score,
                 answers:official_exam_answers(count)
             `)
             .eq('exam_id', examId)
@@ -185,6 +186,7 @@ export async function GET(request: NextRequest) {
 
             return {
                 student_id: student.id,
+                submission_id: sub?.id || null,
                 student_name: Array.isArray(student.user) ? student.user[0]?.full_name : (student.user as any)?.full_name || 'Tanpa Nama',
                 nis: student.nis || '-',
                 class_name: Array.isArray(student.class) ? student.class[0]?.name : (student.class as any)?.name || '-',
@@ -194,7 +196,10 @@ export async function GET(request: NextRequest) {
                 violation_count: sub?.violation_count || 0,
                 started_at: sub?.started_at || null,
                 submitted_at: sub?.submitted_at || null,
-                time_remaining_seconds: timeRemainingSec
+                time_remaining_seconds: timeRemainingSec,
+                total_score: sub?.total_score ?? null,
+                max_score: sub?.max_score ?? null,
+                is_graded: sub?.is_graded ?? false
             }
         })
 

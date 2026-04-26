@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import { Plus, ChevronDown } from 'react-iconly'
-import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BookOpen, BarChart3 } from 'lucide-react'
+import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BookOpen, BarChart3, Activity } from 'lucide-react'
 
 interface OfficialExam {
     id: string
@@ -336,6 +336,14 @@ export default function AdminUtsUasPage() {
                                     </div>
 
                                     <div className="flex gap-2 mt-auto pt-3">
+                                        {status.label === 'Berlangsung' && (
+                                            <Link href={`/dashboard/admin/uts-uas/${exam.id}/monitor`} className="flex-1">
+                                                <Button variant="outline" size="sm" className="w-full justify-center text-red-600 border-red-200 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-900/20 whitespace-nowrap gap-1.5">
+                                                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+                                                    Monitor Live
+                                                </Button>
+                                            </Link>
+                                        )}
                                         {status.label === 'Selesai' && (
                                             <Link href={`/dashboard/admin/uts-uas/${exam.id}#hasil`} className="flex-1">
                                                 <Button variant="outline" size="sm" className="w-full justify-center text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:border-emerald-900/50 dark:hover:bg-emerald-900/20">

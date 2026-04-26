@@ -674,19 +674,19 @@ export default function TakeExamPage() {
             )}
 
             {/* Header */}
-            <div className="bg-surface-light dark:bg-surface-dark border-b border-gray-200 dark:border-gray-700 p-4">
-                <div className="max-w-4xl mx-auto flex items-center justify-between">
+            <div className="bg-surface-light dark:bg-surface-dark border-b border-gray-200 dark:border-gray-700 p-3 md:p-4">
+                <div className="max-w-4xl mx-auto flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                     <div>
-                        <h1 className="text-lg font-bold text-text-main dark:text-white">{exam.title}</h1>
+                        <h1 className="text-base md:text-lg font-bold text-text-main dark:text-white">{exam.title}</h1>
                         <p className="text-sm text-text-secondary">{exam.teaching_assignment?.subject?.name}</p>
                     </div>
-                    <div className="flex items-center gap-6">
+                    <div className="flex items-center justify-between md:justify-end gap-3 md:gap-6">
                         {/* Violation counter */}
                         <div className={`px-3 py-1 rounded-lg flex items-center gap-1.5 ${violationCount > 0 ? 'bg-red-500/20 text-red-500 dark:text-red-400' : 'bg-gray-100 dark:bg-gray-800 text-text-secondary'}`}>
                             <Danger set="bold" primaryColor="currentColor" size={16} /> {violationCount}/{maxViolations}
                         </div>
                         {/* Timer */}
-                        <div className={`px-4 py-2 rounded-lg font-mono text-lg font-bold flex items-center gap-2 relative ${timeLeft <= 300 ? 'bg-red-500 text-white animate-pulse' : timeLeft <= 600 ? 'bg-amber-500 text-white' : 'bg-primary/20 text-primary dark:text-primary-light'}`}>
+                        <div className={`px-3 py-1.5 md:px-4 md:py-2 rounded-lg font-mono text-sm md:text-lg font-bold flex items-center gap-2 relative ${timeLeft <= 300 ? 'bg-red-500 text-white animate-pulse' : timeLeft <= 600 ? 'bg-amber-500 text-white' : 'bg-primary/20 text-primary dark:text-primary-light'}`}>
                             <TimeCircle set="bold" primaryColor="currentColor" size={20} /> {formatTime(timeLeft)}
                         </div>
                     </div>
@@ -736,9 +736,9 @@ export default function TakeExamPage() {
                 const isLastItem = currentIndex >= displayItems.length - 1
 
                 return (
-                    <div className="flex-1 flex max-w-4xl mx-auto w-full">
-                        {/* Question navigation sidebar */}
-                        <div className="w-20 bg-surface-light dark:bg-surface-dark border-r border-gray-200 dark:border-gray-700 p-3 overflow-y-auto">
+                    <div className="flex-1 flex flex-col md:flex-row max-w-4xl mx-auto w-full">
+                        {/* Question navigation sidebar (Desktop) */}
+                        <div className="hidden md:block w-20 bg-surface-light dark:bg-surface-dark border-r border-gray-200 dark:border-gray-700 p-3 overflow-y-auto">
                             <p className="text-xs text-text-secondary mb-3 text-center">Navigasi</p>
                             <div className="grid grid-cols-2 gap-2">
                                 {displayItems.map((item, idx) => {
@@ -762,13 +762,38 @@ export default function TakeExamPage() {
                             <p className="text-xs text-text-secondary mt-4 text-center">{answeredCount}/{questions.length}</p>
                         </div>
 
+                        {/* Mobile horizontal navigation strip */}
+                        <div className="md:hidden bg-surface-light dark:bg-surface-dark border-b border-gray-200 dark:border-gray-700 px-3 py-2">
+                            <div className="flex items-center gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                                {displayItems.map((item, idx) => {
+                                    const nums = item.questionNumbers
+                                    const label = nums.length > 1 ? `${nums[0]}-${nums[nums.length - 1]}` : `${nums[0]}`
+                                    const allAnswered = item.type === 'audio_group'
+                                        ? item.questions.every(q => !!answers[q.id])
+                                        : !!answers[item.question.id]
+                                    const isAudio = item.type === 'audio_group'
+                                    return (
+                                        <button
+                                            key={idx}
+                                            onClick={() => setCurrentIndex(idx)}
+                                            className={`flex-shrink-0 w-auto min-w-[2rem] h-8 px-2 rounded-lg text-xs font-bold transition-all ${currentIndex === idx ? (isAudio ? 'bg-violet-500 text-white' : 'bg-primary text-white') : allAnswered ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-500/30' : isAudio ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 hover:bg-violet-200' : 'bg-gray-100 dark:bg-gray-700 text-text-secondary dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-600'}`}
+                                        >
+                                            {isAudio ? `🎧${label}` : label}
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                            <p className="text-xs text-text-secondary mt-1 text-center">{answeredCount}/{questions.length}</p>
+                        </div>
+
                         {/* Question area */}
-                        <div className="flex-1 p-6">
-                            {currentItem?.type === 'audio_group' ? (
-                                /* Audio group: show audio + all questions */
-                                <div className="bg-white dark:bg-surface-dark border border-violet-300 dark:border-violet-700 rounded-xl overflow-hidden min-h-[400px]">
-                                    {/* Audio header */}
-                                    <div className="p-5 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-700">
+                        <div className="flex-1 flex flex-col overflow-hidden">
+                            <div className="flex-1 overflow-y-auto w-full p-3 md:p-6">
+                                {currentItem?.type === 'audio_group' ? (
+                                    /* Audio group: show audio + all questions */
+                                    <div className="bg-white dark:bg-surface-dark border border-violet-300 dark:border-violet-700 rounded-xl overflow-hidden min-h-0 md:min-h-[400px]">
+                                        {/* Audio header */}
+                                        <div className="p-3 md:p-5 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-700">
                                         <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-2">🎧 Listening</p>
                                         <audio controls controlsList="nodownload" className="w-full mb-2" src={currentItem.audioUrl} />
                                         {currentItem.passageText && (
@@ -781,20 +806,20 @@ export default function TakeExamPage() {
                                     {/* Questions */}
                                     <div className="divide-y divide-violet-100 dark:divide-violet-800">
                                         {currentItem.questions.map((q, qIdx) => (
-                                            <div key={q.id} className="p-6">
+                                            <div key={q.id} className="p-3 md:p-6">
                                                 <div className="flex items-center gap-3 mb-4">
-                                                    <span className="w-10 h-10 rounded-full bg-violet-500/20 text-violet-600 dark:text-violet-400 flex items-center justify-center font-bold">{currentItem.questionNumbers[qIdx]}</span>
+                                                    <span className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-violet-500/20 text-violet-600 dark:text-violet-400 flex items-center justify-center font-bold">{currentItem.questionNumbers[qIdx]}</span>
                                                     <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
                                                         {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
                                                     </span>
                                                     <span className="text-xs text-text-secondary">({q.points} poin)</span>
                                                 </div>
                                                 <div dir={q.text_direction || 'ltr'}>
-                                                    <SmartText text={q.question_text} className="text-text-main dark:text-white text-lg mb-4 whitespace-pre-wrap" />
+                                                    <SmartText text={q.question_text} className="text-text-main dark:text-white text-base md:text-lg mb-4 whitespace-pre-wrap" />
                                                 </div>
                                                 {q.image_url && (
                                                     <div className="mb-4">
-                                                        <img src={q.image_url} alt="Gambar soal" className="max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />
+                                                        <img src={q.image_url} alt="Gambar soal" className="max-h-48 md:max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />
                                                     </div>
                                                 )}
                                                 {q.question_type === 'MULTIPLE_CHOICE' && q.options && (
@@ -803,8 +828,8 @@ export default function TakeExamPage() {
                                                             const letter = String.fromCharCode(65 + optIdx)
                                                             const isSelected = answers[q.id] === letter
                                                             return (
-                                                                <button key={optIdx} onClick={() => saveAnswer(q.id, letter)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'} flex items-center`}>
-                                                                    <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${q.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`} dir="ltr">{letter}</span>
+                                                                <button key={optIdx} onClick={() => saveAnswer(q.id, letter)} className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'} flex items-center`}>
+                                                                    <span className={`inline-flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-lg ${q.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`} dir="ltr">{letter}</span>
                                                                     <div className="flex-1" dir={q.text_direction || 'ltr'}><SmartText text={opt} as="span" className={q.text_direction === 'rtl' ? 'text-right block' : ''} /></div>
                                                                 </button>
                                                             )
@@ -819,17 +844,16 @@ export default function TakeExamPage() {
                                     </div>
                                 </div>
                             ) : currentItem?.type === 'standalone' ? (
-                                /* Standalone question */
-                                <div className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-6 min-h-[400px]">
+                                <div className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-6 min-h-0 md:min-h-[400px]">
                                     <div className="flex items-center gap-3 mb-4">
-                                        <span className="w-10 h-10 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold">{currentItem.questionNumbers[0]}</span>
+                                        <span className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold">{currentItem.questionNumbers[0]}</span>
                                         <span className={`px-2 py-0.5 text-xs rounded ${currentItem.question.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
                                             {currentItem.question.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
                                         </span>
                                         <span className="text-xs text-text-secondary">({currentItem.question.points} poin)</span>
                                     </div>
                                     <div dir={currentItem.question.text_direction || 'ltr'}>
-                                        <SmartText text={currentItem.question.question_text} className="text-text-main dark:text-white text-lg mb-4 whitespace-pre-wrap" />
+                                        <SmartText text={currentItem.question.question_text} className="text-text-main dark:text-white text-base md:text-lg mb-4 whitespace-pre-wrap" />
                                     </div>
                                     {/* Text-only passage */}
                                     {currentItem.question.passage_text && !currentItem.question.passage_audio_url && (
@@ -840,7 +864,7 @@ export default function TakeExamPage() {
                                     )}
                                     {currentItem.question.image_url && (
                                         <div className="mb-6">
-                                            <img src={currentItem.question.image_url} alt="Gambar soal" className="max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />
+                                            <img src={currentItem.question.image_url} alt="Gambar soal" className="max-h-48 md:max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />
                                         </div>
                                     )}
                                     {currentItem.question.question_type === 'MULTIPLE_CHOICE' && currentItem.question.options && (
@@ -849,8 +873,8 @@ export default function TakeExamPage() {
                                                 const letter = String.fromCharCode(65 + optIdx)
                                                 const isSelected = answers[currentItem.question.id] === letter
                                                 return (
-                                                    <button key={optIdx} onClick={() => saveAnswer(currentItem.question.id, letter)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}>
-                                                        <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${currentItem.question.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`} dir="ltr">{letter}</span>
+                                                    <button key={optIdx} onClick={() => saveAnswer(currentItem.question.id, letter)} className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}>
+                                                        <span className={`inline-flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-lg ${currentItem.question.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`} dir="ltr">{letter}</span>
                                                         <div className="flex-1" dir={currentItem.question.text_direction || 'ltr'}><SmartText text={opt} as="span" className={currentItem.question.text_direction === 'rtl' ? 'text-right block' : ''} /></div>
                                                     </button>
                                                 )
@@ -863,12 +887,14 @@ export default function TakeExamPage() {
                                 </div>
                             ) : null}
 
+                            </div>
+                            
                             {/* Navigation buttons */}
-                            <div className="flex items-center justify-between mt-6">
+                            <div className="flex-shrink-0 flex items-center justify-between mt-6 md:mt-6 bg-surface-light dark:bg-surface-dark border-t md:border-t-0 border-gray-200 dark:border-gray-700 pt-4 md:pt-0 pb-2 md:pb-0 px-2 md:px-0 sticky bottom-0">
                                 <button
                                     onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
                                     disabled={currentIndex === 0}
-                                    className="px-6 py-3 bg-gray-200 dark:bg-slate-700 text-text-main dark:text-white rounded-xl hover:bg-gray-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="px-4 py-2.5 md:px-6 md:py-3 bg-gray-200 dark:bg-slate-700 text-text-main dark:text-white text-sm md:text-base rounded-xl hover:bg-gray-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     ← Sebelumnya
                                 </button>
@@ -876,7 +902,7 @@ export default function TakeExamPage() {
                                 {isLastItem ? (
                                     <button
                                         onClick={() => setShowConfirmSubmit(true)}
-                                        className="px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                                        className="px-5 py-2.5 md:px-8 md:py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white text-sm md:text-base rounded-xl font-medium hover:opacity-90 transition-opacity"
                                     >
                                         <span className="flex items-center gap-2">
                                             <TickSquare set="bold" primaryColor="currentColor" size={20} /> Kumpulkan Ulangan
@@ -885,7 +911,7 @@ export default function TakeExamPage() {
                                 ) : (
                                     <button
                                         onClick={() => setCurrentIndex(prev => Math.min(displayItems.length - 1, prev + 1))}
-                                        className="px-6 py-3 bg-primary text-white rounded-xl hover:bg-primary-dark transition-colors"
+                                        className="px-4 py-2.5 md:px-6 md:py-3 bg-primary text-white text-sm md:text-base rounded-xl hover:bg-primary-dark transition-colors"
                                     >
                                         Selanjutnya →
                                     </button>

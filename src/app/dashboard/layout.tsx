@@ -68,16 +68,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
     // Detect if student is actively taking an exam or quiz (hide all navigation)
     const isExamMode = (() => {
-        // Match /dashboard/siswa/ulangan/[id] or /dashboard/siswa/kuis/[id]
+        // Match /dashboard/siswa/ulangan/[id] or /dashboard/siswa/kuis/[id] or /dashboard/siswa/uts-uas/[id]
         // But NOT /hasil pages
-        const examPattern = /^\/dashboard\/siswa\/(ulangan|kuis)\/[^/]+$/
+        const examPattern = /^\/dashboard\/siswa\/(ulangan|kuis|uts-uas)\/[^/]+$/
         return examPattern.test(pathname)
     })()
 
     if (isExamMode) {
         return (
             <div className="min-h-screen bg-background-light dark:bg-background-dark transition-colors duration-300">
-                <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 overflow-y-auto animate-in fade-in duration-500" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                <main className="w-full overflow-y-auto animate-in fade-in duration-500" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                     <style>{`main::-webkit-scrollbar { display: none; }`}</style>
                     {children}
                 </main>

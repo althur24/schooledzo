@@ -1,16 +1,18 @@
 'use client'
 
 import { useEffect, useState, use } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Card } from '@/components/ui'
 import { 
     Loader2, ArrowLeft, GraduationCap, Users, 
-    CheckCircle, AlertTriangle, Clock, PlayCircle, RefreshCw
+    CheckCircle, AlertTriangle, Clock, PlayCircle, RefreshCw,
+    RotateCcw, ChevronDown as ChevronDownIcon
 } from 'lucide-react'
 
 interface StudentProgress {
     student_id: string
+    submission_id: string | null
     student_name: string
     nis: string
     class_name: string
@@ -48,7 +50,7 @@ interface MonitorData {
     }
 }
 
-export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id: string }> }) {
+export default function AdminUtsUasMonitorPage({ params }: { params: Promise<{ id: string }> }) {
     const { id: examId } = use(params)
     const router = useRouter()
 
@@ -57,7 +59,18 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
     const [refreshing, setRefreshing] = useState(false)
     const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
     const [classFilter, setClassFilter] = useState('')
+    const [statusFilter, setStatusFilter] = useState('')
     const [error, setError] = useState<string | null>(null)
+
+    // Reset
+    const [resettingId, setResettingId] = useState<string | null>(null)
+    const [resetMenuId, setResetMenuId] = useState<string | null>(null)
+    const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+
+    const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+        setToast({ message, type })
+        setTimeout(() => setToast(null), 3000)
+    }
 
     // Client-side countdown ticker (ticks every second between server refreshes)
     const [tickOffset, setTickOffset] = useState(0)
@@ -103,6 +116,43 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
         return () => clearInterval(ticker)
     }, [])
 
+    // Reset attempt handler
+    const handleResetAttempt = async (submissionId: string, studentName: string, mode: 'soft' | 'hard') => {
+        const confirmMsg = mode === 'soft'
+            ? `Soft Reset: Izinkan "${studentName}" melanjutkan ujian?\n\nTimer tetap berjalan dan pelanggaran di-reset. Jawaban yang sudah tersimpan tetap ada.`
+            : `Hard Reset: Mulai ulang ujian untuk "${studentName}"?\n\nSiswa akan mendapat durasi penuh baru, TETAPI SEMUA JAWABAN AKAN DIHAPUS.`;
+        if (!confirm(confirmMsg)) { setResetMenuId(null); return }
+        setResettingId(submissionId)
+        setResetMenuId(null)
+        try {
+            const res = await fetch('/api/official-exam-submissions', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ submission_id: submissionId, reset_attempt: mode })
+            })
+            if (res.ok) {
+                showToast(mode === 'hard' ? `Hard Reset untuk ${studentName} berhasil` : `Soft Reset untuk ${studentName} berhasil`, 'success')
+                fetchMonitorData(true)
+            } else {
+                const err = await res.json()
+                showToast(err.error || 'Gagal mereset attempt', 'error')
+            }
+        } catch {
+            showToast('Gagal mereset attempt', 'error')
+        } finally { setResettingId(null) }
+    }
+
+    // Close reset dropdown on outside click
+    useEffect(() => {
+        if (!resetMenuId) return
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement
+            if (!target.closest('[data-reset-menu]')) setResetMenuId(null)
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [resetMenuId])
+
     if (loading) {
         return <div className="flex justify-center py-20"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>
     }
@@ -116,8 +166,8 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
                 <div className="p-4 bg-orange-50 border-b border-orange-100 dark:bg-orange-900/10 dark:border-orange-900/20 px-8 flex flex-col items-center justify-center text-center">
                     <p className="font-bold text-orange-800 dark:text-orange-400 mb-2">Ujian Belum Dimulai</p>
                     <p className="text-sm text-orange-700 dark:text-orange-500 mb-4">Waktu mulai: {new Date(data.exam.start_time).toLocaleString('id-ID')}</p>
-                    <button onClick={() => router.push('/dashboard/guru/ulangan')} className="text-primary hover:underline font-bold">
-                        Kembali ke Daftar Ulangan
+                    <button onClick={() => router.push(`/dashboard/admin/uts-uas/${examId}`)} className="text-primary hover:underline font-bold">
+                        Kembali ke Detail Ujian
                     </button>
                 </div>
             );
@@ -128,8 +178,8 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
                 <AlertTriangle className="w-12 h-12 text-red-500 mx-auto" />
                 <h2 className="text-xl font-bold text-text-main dark:text-white">Gagal Memuat Monitor</h2>
                 <p className="text-text-secondary">{error || 'Data ujian tidak ditemukan atau Anda tidak memiliki akses.'}</p>
-                <button onClick={() => router.push('/dashboard/guru/ulangan')} className="text-primary hover:underline font-bold">
-                    Kembali ke Daftar Ulangan
+                <button onClick={() => router.push(`/dashboard/admin/uts-uas/${examId}`)} className="text-primary hover:underline font-bold">
+                    Kembali ke Detail Ujian
                 </button>
             </div>
         )
@@ -139,6 +189,7 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
     
     // Sort logic: 'working' first, then 'submitted', then 'not_started'
     // Within 'working', sort by highest answered count
+    // Within 'submitted', sort by submitted_at ASC (earliest first)
     const sortedStudents = [...students].sort((a, b) => {
         const order = { 'working': 1, 'submitted': 2, 'not_started': 3 }
         if (order[a.status] !== order[b.status]) {
@@ -147,12 +198,19 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
         if (a.status === 'working') {
             return b.answered_count - a.answered_count
         }
+        if (a.status === 'submitted') {
+            const timeA = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
+            const timeB = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
+            return timeA - timeB;
+        }
         return a.student_name.localeCompare(b.student_name)
     })
 
-    const filteredStudents = classFilter 
-        ? sortedStudents.filter(s => s.class_name === classFilter) // we only have class_name here currently, so match by exact name context
-        : sortedStudents
+    const filteredStudents = sortedStudents.filter(s => {
+        if (classFilter && s.class_name !== classFilter) return false;
+        if (statusFilter && s.status !== statusFilter) return false;
+        return true;
+    })
 
     // Timer display logic
     const formatTimeRemaining = (seconds: number) => {
@@ -169,9 +227,9 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
             <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                 <div>
                     <Link
-                        href={'/dashboard/guru/ulangan'}
+                        href={`/dashboard/admin/uts-uas/${examId}`}
                         className="inline-flex items-center justify-center p-3 mb-4 rounded-xl bg-white dark:bg-surface-dark border border-secondary/20 hover:border-primary text-text-secondary hover:text-primary transition-all shadow-sm"
-                        title="Kembali ke Daftar Ulangan"
+                        title="Kembali ke Detail Ujian"
                     >
                         <ArrowLeft className="w-5 h-5" />
                     </Link>
@@ -180,12 +238,14 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
                             {exam.exam_type}
                         </span>
                         <h1 className="text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
-                        <span className="flex items-center gap-1.5 px-3 py-1 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse shadow-lg shadow-red-500/20">
-                            <span className="w-2 h-2 rounded-full bg-white relative">
-                                <span className="absolute inset-0 rounded-full bg-white animate-ping"></span>
+                        {exam.is_active && (
+                            <span className="flex items-center gap-1.5 px-3 py-1 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse shadow-lg shadow-red-500/20">
+                                <span className="w-2 h-2 rounded-full bg-white relative">
+                                    <span className="absolute inset-0 rounded-full bg-white animate-ping"></span>
+                                </span>
+                                LIVE
                             </span>
-                            LIVE
-                        </span>
+                        )}
                     </div>
                     <p className="text-sm text-text-secondary mt-1">
                         {exam.subject_name} • {exam.total_questions} Soal • {exam.duration_minutes} Menit
@@ -244,26 +304,45 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
 
             {/* Main Table */}
             <Card padding="p-0" className="overflow-hidden bg-white dark:bg-surface-dark border shadow-sm">
-                <div className="p-4 border-b border-secondary/10 flex flex-col sm:flex-row justify-between items-center gap-4 bg-secondary/5">
+                <div className="p-4 border-b border-secondary/10 flex flex-col md:flex-row md:justify-between md:items-center gap-4 bg-secondary/5">
                     <h2 className="text-lg font-bold text-text-main dark:text-white flex items-center gap-2">
                         <GraduationCap className="w-5 h-5 text-primary" /> Progress Siswa
                     </h2>
                     
-                    <div className="flex bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl overflow-hidden focus-within:ring-2 ring-primary/50 transition-all">
-                        <div className="px-3 py-2 border-r border-secondary/20 bg-secondary/5 font-medium text-text-secondary text-sm">
-                            Saring Kelas:
+                    <div className="flex flex-col sm:flex-row gap-3">
+                        {/* Class Filter */}
+                        <div className="flex bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl overflow-hidden focus-within:ring-2 ring-primary/50 transition-all flex-1 sm:flex-none">
+                            <div className="px-3 py-2 border-r border-secondary/20 bg-secondary/5 font-medium text-text-secondary text-sm flex items-center">
+                                Kelas:
+                            </div>
+                            <select
+                                value={classFilter}
+                                onChange={(e) => setClassFilter(e.target.value)}
+                                className="w-full sm:w-auto px-3 py-2 bg-transparent text-text-main dark:text-white focus:outline-none text-sm font-bold min-w-[120px] cursor-pointer"
+                            >
+                                <option value="">Semua Kelas</option>
+                                {Array.from(new Set(students.map(s => s.class_name))).filter(Boolean).sort().map(className => (
+                                    <option key={className} value={className}>{className}</option>
+                                ))}
+                            </select>
                         </div>
-                        <select
-                            value={classFilter}
-                            onChange={(e) => setClassFilter(e.target.value)}
-                            className="px-3 py-2 bg-transparent text-text-main dark:text-white focus:outline-none text-sm font-bold min-w-[120px] cursor-pointer"
-                        >
-                            <option value="">Semua Kelas</option>
-                            {/* Unique classes from students array */}
-                            {Array.from(new Set(students.map(s => s.class_name))).filter(Boolean).sort().map(className => (
-                                <option key={className} value={className}>{className}</option>
-                            ))}
-                        </select>
+                        
+                        {/* Status Filter */}
+                        <div className="flex bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl overflow-hidden focus-within:ring-2 ring-primary/50 transition-all flex-1 sm:flex-none">
+                            <div className="px-3 py-2 border-r border-secondary/20 bg-secondary/5 font-medium text-text-secondary text-sm flex items-center">
+                                Status:
+                            </div>
+                            <select
+                                value={statusFilter}
+                                onChange={(e) => setStatusFilter(e.target.value)}
+                                className="w-full sm:w-auto px-3 py-2 bg-transparent text-text-main dark:text-white focus:outline-none text-sm font-bold min-w-[120px] cursor-pointer"
+                            >
+                                <option value="">Semua Status</option>
+                                <option value="working">Mengerjakan</option>
+                                <option value="submitted">Selesai</option>
+                                <option value="not_started">Belum Mulai</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
@@ -279,12 +358,13 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
                                 <th className="p-4 text-center">Nilai</th>
                                 <th className="p-4 text-center">Pelanggaran</th>
                                 <th className="p-4 text-right">Sisa Waktu</th>
+                                <th className="p-4 text-center">Aksi</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-black/5 dark:divide-white/5">
                             {filteredStudents.length === 0 ? (
                                 <tr>
-                                    <td colSpan={8} className="p-12 text-center text-text-secondary font-medium">
+                                    <td colSpan={9} className="p-12 text-center text-text-secondary font-medium">
                                         Tidak ada siswa yang sesuai filter.
                                     </td>
                                 </tr>
@@ -347,22 +427,25 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
                                         </td>
 
                                         <td className="p-4 text-center">
-                                                {student.status === 'submitted' && student.total_score !== null && student.max_score ? (() => {
-                                                    const pct = Math.round((student.total_score / student.max_score) * 100)
-                                                    return (
-                                                        <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${
-                                                            pct >= 75 ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400'
-                                                            : pct >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'
+                                            {student.status === 'submitted' && student.total_score !== null && student.max_score ? (() => {
+                                                const pctGrade = Math.round((student.total_score / student.max_score) * 100)
+                                                return (
+                                                    <span 
+                                                        className={`px-2.5 py-1 text-xs font-bold rounded-full ${
+                                                            pctGrade >= 75 ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400'
+                                                            : pctGrade >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'
                                                             : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'
-                                                        }`}>
-                                                            {pct}
-                                                            {!student.is_graded && <span className="ml-1 text-[10px] opacity-60">*</span>}
-                                                        </span>
-                                                    )
-                                                })() : (
-                                                    <span className="text-text-secondary font-medium">-</span>
-                                                )}
-                                            </td>
+                                                        }`}
+                                                        title={!student.is_graded ? "Nilai belum final (ada soal essay yang belum dikoreksi)" : "Nilai final"}
+                                                    >
+                                                        {pctGrade}
+                                                        {!student.is_graded && <span className="ml-1 text-[10px] opacity-60">*</span>}
+                                                    </span>
+                                                )
+                                            })() : (
+                                                <span className="text-text-secondary font-medium">-</span>
+                                            )}
+                                        </td>
 
                                         <td className="p-4 text-center">
                                             {student.violation_count > 0 ? (
@@ -391,6 +474,53 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
                                                 )
                                             })()}
                                         </td>
+
+                                        {/* Aksi: Reset */}
+                                        <td className="p-4 text-center">
+                                            {student.submission_id && student.status === 'submitted' ? (
+                                                <div className="relative inline-block text-left" data-reset-menu>
+                                                    <button
+                                                        onClick={() => setResetMenuId(resetMenuId === student.submission_id ? null : student.submission_id)}
+                                                        disabled={resettingId === student.submission_id}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400 rounded-lg hover:bg-orange-200 dark:hover:bg-orange-500/30 transition-colors text-xs font-bold disabled:opacity-50"
+                                                    >
+                                                        {resettingId === student.submission_id ? (
+                                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                        ) : (
+                                                            <RotateCcw className="w-3.5 h-3.5" />
+                                                        )}
+                                                        Reset
+                                                        <ChevronDownIcon className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    {resetMenuId === student.submission_id && (
+                                                        <div className="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-xl bg-white dark:bg-surface-dark shadow-xl ring-1 ring-black ring-opacity-5 border border-secondary/20 overflow-hidden">
+                                                            <div className="p-1.5">
+                                                                <button
+                                                                    onClick={() => handleResetAttempt(student.submission_id!, student.student_name, 'soft')}
+                                                                    className="w-full text-left px-3 py-2.5 hover:bg-secondary/10 rounded-lg transition-colors flex flex-col mb-1"
+                                                                >
+                                                                    <span className="font-bold text-text-main dark:text-white flex items-center gap-1.5 text-xs">
+                                                                        <RotateCcw className="w-3.5 h-3.5 text-blue-500" /> Soft Reset
+                                                                    </span>
+                                                                    <span className="text-text-secondary mt-0.5 text-[10px] leading-tight">Lanjutkan, timer tetap &amp; jawaban aman</span>
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleResetAttempt(student.submission_id!, student.student_name, 'hard')}
+                                                                    className="w-full text-left px-3 py-2.5 hover:bg-red-500/10 rounded-lg transition-colors flex flex-col"
+                                                                >
+                                                                    <span className="font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5 text-xs">
+                                                                        <RotateCcw className="w-3.5 h-3.5" /> Hard Reset
+                                                                    </span>
+                                                                    <span className="text-red-600/70 dark:text-red-400/80 mt-0.5 text-[10px] leading-tight">Mulai ulang (jawaban dihapus, timer penuh)</span>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <span className="text-text-secondary">-</span>
+                                            )}
+                                        </td>
                                     </tr>
                                 )
                             })}
@@ -398,6 +528,15 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
                     </table>
                 </div>
             </Card>
+
+            {/* Toast */}
+            {toast && (
+                <div className={`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-2xl text-sm font-bold text-white transition-all animate-in slide-in-from-bottom-4 ${
+                    toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+                }`}>
+                    {toast.message}
+                </div>
+            )}
         </div>
     )
 }

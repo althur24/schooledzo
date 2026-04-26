@@ -2,6 +2,7 @@
 
 import { useEffect, useState, use, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { Button, Modal, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
@@ -9,8 +10,8 @@ import SmartText from '@/components/SmartText'
 import { Edit, Discovery, Folder, Plus, Delete, Document } from 'react-iconly'
 import {
     Loader2, ArrowLeft, Trash2, Save, Eye, EyeOff,
-    Settings, FileText, BarChart3, Sparkles,
-    ChevronUp, ChevronDown as ChevronDownIcon, CheckCircle, Download, RotateCcw
+    Settings, FileText, BarChart3, Sparkles, Activity,
+    ChevronUp, CheckCircle, Download
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
@@ -40,7 +41,7 @@ interface Question {
     text_direction?: 'ltr' | 'rtl'
 }
 
-type TabType = 'soal' | 'pengaturan' | 'hasil'
+type TabType = 'soal' | 'pengaturan' | 'hasil' | 'monitor'
 type SoalMode = 'list' | 'manual' | 'clean' | 'bank'
 
 export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -114,8 +115,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     const [submissions, setSubmissions] = useState<any[]>([])
     const [resultsLoading, setResultsLoading] = useState(false)
     const [resultsClassFilter, setResultsClassFilter] = useState('')
-    const [resettingId, setResettingId] = useState<string | null>(null)
-    const [resetMenuId, setResetMenuId] = useState<string | null>(null)
+    const [selectedSubmission, setSelectedSubmission] = useState<any | null>(null)
 
     // AI Review setting
     const [aiReviewEnabled, setAiReviewEnabled] = useState(false)
@@ -123,6 +123,21 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     // Helpers
     const totalPoints = questions.reduce((sum, q) => sum + (q.points || 0), 0)
     const getDefaultPoints = () => Math.floor(100 / (questions.length + 1))
+
+    const getScoreColor = (score: number, max: number) => {
+        const percentage = max > 0 ? (score / max) * 100 : 0
+        if (percentage >= 75) return 'text-green-600 bg-green-500/10'
+        if (percentage >= 50) return 'text-amber-600 bg-amber-500/10'
+        return 'text-red-600 bg-red-500/10'
+    }
+
+    const formatDuration = (start: string, end: string | null) => {
+        if (!end) return '-'
+        const diff = new Date(end).getTime() - new Date(start).getTime()
+        const mins = Math.floor(diff / 60000)
+        const secs = Math.floor((diff % 60000) / 1000)
+        return `${mins}m ${secs}s`
+    }
 
     const fetchExam = useCallback(async () => {
         try {
@@ -181,50 +196,6 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
         if (activeTab === 'hasil') fetchResults()
     }, [activeTab, resultsClassFilter])
 
-    const handleResetAttempt = async (submissionId: string, studentName: string, mode: 'soft' | 'hard') => {
-        const confirmMsg = mode === 'soft'
-            ? `Soft Reset: Izinkan "${studentName}" melanjutkan ujian?\n\nTimer tetap berjalan dan pelanggaran di-reset. Jawaban yang sudah tersimpan tetap ada.`
-            : `Hard Reset: Mulai ulang ujian untuk "${studentName}"?\n\nSiswa akan mendapat durasi penuh baru, TETAPI SEMUA JAWABAN AKAN DIHAPUS.`;
-            
-        if (!confirm(confirmMsg)) {
-            setResetMenuId(null)
-            return
-        }
-        
-        setResettingId(submissionId)
-        setResetMenuId(null)
-        try {
-            const res = await fetch('/api/official-exam-submissions', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ submission_id: submissionId, reset_attempt: mode })
-            })
-            if (res.ok) {
-                showToast(mode === 'hard' ? `Hard Reset untuk ${studentName} berhasil` : `Soft Reset untuk ${studentName} berhasil`, 'success')
-                fetchResults()
-            } else {
-                const err = await res.json()
-                showToast(err.error || 'Gagal mereset attempt', 'error')
-            }
-        } catch {
-            showToast('Gagal mereset attempt', 'error')
-        } finally {
-            setResettingId(null)
-        }
-    }
-
-    // Close dropdown on outside click
-    useEffect(() => {
-        if (!resetMenuId) return
-        const handleClickOutside = (e: MouseEvent) => {
-            const target = e.target as HTMLElement
-            if (!target.closest('[data-reset-menu]')) {
-                setResetMenuId(null)
-            }
-        }
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [resetMenuId])
 
     const handleDownloadExcel = () => {
         if (!exam || submissions.length === 0) return
@@ -243,9 +214,8 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                 'Nama Siswa': sub.student?.user?.full_name || '-',
                 'NIS': sub.student?.nis || '-',
                 'Kelas': allClasses.find(c => c.id === sub.student?.class_id)?.name || '-',
-                'Skor': sub.total_score || 0,
-                'Max Skor': sub.max_score || 0,
-                'Persentase': `${percentage}%`,
+                'Skor': `${sub.total_score || 0}/${sub.max_score || 0}`,
+                'Nilai': percentage,
                 'Pelanggaran': sub.violation_count || 0,
                 'Status': status,
                 'Waktu Submit': sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'
@@ -546,12 +516,27 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
             )}
 
             {/* Tabs */}
-            <div className="flex gap-1 bg-secondary/5 p-1 rounded-xl border border-secondary/10">
-                {([{ key: 'soal' as TabType, label: 'Soal', icon: FileText }, { key: 'pengaturan' as TabType, label: 'Pengaturan', icon: Settings }, { key: 'hasil' as TabType, label: 'Hasil', icon: BarChart3 }]).map(tab => (
-                    <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === tab.key ? 'bg-white dark:bg-surface-dark text-primary shadow-sm' : 'text-text-secondary hover:text-text-main'}`}>
-                        <tab.icon className="w-4 h-4" /> {tab.label}
-                    </button>
-                ))}
+            <div className="flex gap-1 bg-secondary/5 p-1 rounded-xl border border-secondary/10 overflow-x-auto custom-scrollbar">
+                {([{ key: 'soal' as TabType, label: 'Soal', icon: FileText }, { key: 'pengaturan' as TabType, label: 'Pengaturan', icon: Settings }, { key: 'hasil' as TabType, label: 'Hasil', icon: BarChart3 }, { key: 'monitor' as TabType, label: 'Monitor Live', icon: Activity }]).map(tab => {
+                    const isMonitorDisabled = tab.key === 'monitor' && !exam.is_active;
+                    return (
+                        <button 
+                            key={tab.key} 
+                            disabled={isMonitorDisabled}
+                            title={isMonitorDisabled ? 'Aktifkan ujian dulu untuk menggunakan Monitor' : undefined}
+                            onClick={() => {
+                                if (tab.key === 'monitor') {
+                                    router.push(`/dashboard/admin/uts-uas/${examId}/monitor`);
+                                    return;
+                                }
+                                setActiveTab(tab.key);
+                            }} 
+                            className={`flex-1 min-w-max flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all ${isMonitorDisabled ? 'opacity-40 cursor-not-allowed' : ''} ${activeTab === tab.key ? 'bg-white dark:bg-surface-dark text-primary shadow-sm' : 'text-text-secondary hover:text-text-main'}`}
+                        >
+                            <tab.icon className="w-4 h-4" /> {tab.label}
+                        </button>
+                    )
+                })}
             </div>
 
             {/* ===== TAB: SOAL ===== */}
@@ -803,107 +788,143 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                             <p className="text-text-secondary">Belum ada submission untuk ujian ini.</p>
                         </Card>
                     ) : (
-                        <Card padding="p-0" className="overflow-hidden">
-                            <table className="w-full">
-                                <thead className="bg-secondary/5">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white">No</th>
-                                        <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white">Nama Siswa</th>
-                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Skor</th>
-                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Pelanggaran</th>
-                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Status</th>
-                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Waktu Submit</th>
-                                        <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Aksi</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-secondary/10">
-                                    {[...submissions].sort((a, b) => (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '')).map((sub: any, idx: number) => {
-                                        const percentage = sub.max_score > 0 ? Math.round((sub.total_score / sub.max_score) * 100) : 0
-                                        return (
-                                            <tr key={sub.id} className="hover:bg-secondary/5">
-                                                <td className="px-4 py-3 text-sm text-text-secondary">{idx + 1}</td>
-                                                <td className="px-4 py-3 text-sm font-medium text-text-main dark:text-white">
-                                                    {sub.student?.user?.full_name || '-'}
-                                                    <span className="text-xs text-text-secondary ml-2">{sub.student?.nis}</span>
-                                                </td>
-                                                <td className="px-4 py-3 text-center">
-                                                    <span className={`font-bold text-sm ${percentage >= 75 ? 'text-green-600' : percentage >= 50 ? 'text-amber-600' : 'text-red-600'}`}>
-                                                        {sub.total_score}/{sub.max_score} ({percentage}%)
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-3 text-center">
-                                                    <span className={`text-xs font-medium ${sub.violation_count > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                                                        {sub.violation_count}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-3 text-center">
-                                                    {sub.is_submitted ? (
-                                                        sub.is_graded ? (
-                                                            <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 font-bold">Selesai</span>
+                        <Card padding="p-0" className="overflow-visible">
+                            <div className="overflow-x-auto rounded-xl">
+                                <table className="w-full">
+                                    <thead className="bg-secondary/5">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white whitespace-nowrap">No</th>
+                                            <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white min-w-[200px]">Nama Siswa</th>
+                                            <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white whitespace-nowrap">Skor</th>
+                                            <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white whitespace-nowrap">Nilai</th>
+                                            <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white whitespace-nowrap">Durasi</th>
+                                            <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white whitespace-nowrap">Pelanggaran</th>
+                                            <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white whitespace-nowrap">Status</th>
+                                            <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white min-w-[120px]">Waktu Submit</th>
+                                            <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white min-w-[160px]">Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-secondary/10">
+                                        {[...submissions].sort((a, b) => (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '')).map((sub: any, idx: number) => {
+                                            const percentage = sub.max_score > 0 ? Math.round((sub.total_score / sub.max_score) * 100) : 0
+                                            return (
+                                                <tr key={sub.id} className="hover:bg-secondary/5">
+                                                    <td className="px-4 py-3 text-sm text-text-secondary">{idx + 1}</td>
+                                                    <td className="px-4 py-3 text-sm font-medium text-text-main dark:text-white">
+                                                        {sub.student?.user?.full_name || '-'}
+                                                        <span className="text-xs text-text-secondary ml-2">{sub.student?.nis}</span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center font-medium text-sm">
+                                                        {sub.is_submitted ? `${sub.total_score}/${sub.max_score}` : '-'}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        {sub.is_submitted ? (
+                                                            <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${percentage >= 75 ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400' : percentage >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400' : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'}`}>
+                                                                {percentage}
+                                                            </span>
                                                         ) : (
-                                                            <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400 font-bold">Perlu Koreksi</span>
-                                                        )
-                                                    ) : (
-                                                        <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 font-bold">Mengerjakan</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3 text-center text-xs text-text-secondary">
-                                                    {sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}
-                                                </td>
-                                                <td className="px-4 py-3 text-center">
-                                                    {sub.is_submitted && exam?.is_active ? (
-                                                        <div className="relative inline-block text-left" data-reset-menu>
-                                                            <button
-                                                                onClick={() => setResetMenuId(resetMenuId === sub.id ? null : sub.id)}
-                                                                disabled={resettingId === sub.id}
-                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400 rounded-lg hover:bg-orange-200 dark:hover:bg-orange-500/30 transition-colors text-xs font-bold disabled:opacity-50"
-                                                            >
-                                                                {resettingId === sub.id ? (
-                                                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                                ) : (
-                                                                    <RotateCcw className="w-3.5 h-3.5" />
-                                                                )}
-                                                                Izinkan Ulang
-                                                                <ChevronDownIcon className="w-3.5 h-3.5 ml-1" />
-                                                            </button>
-                                                            {resetMenuId === sub.id && (
-                                                                <div className="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-xl bg-white dark:bg-surface-dark shadow-xl ring-1 ring-black ring-opacity-5 border border-secondary/20 focus:outline-none overflow-hidden">
-                                                                    <div className="p-1.5">
-                                                                        <button
-                                                                            onClick={() => handleResetAttempt(sub.id, sub.student?.user?.full_name || 'Siswa', 'soft')}
-                                                                            className="w-full text-left px-3 py-2.5 hover:bg-secondary/10 rounded-lg transition-colors flex flex-col mb-1"
-                                                                        >
-                                                                            <span className="font-bold text-text-main dark:text-white flex items-center gap-1.5 text-xs">
-                                                                                <RotateCcw className="w-3.5 h-3.5 text-blue-500" /> Soft Reset
-                                                                            </span>
-                                                                            <span className="text-text-secondary mt-0.5 text-[10px] leading-tight">Lanjutkan, timer tetap berjalan & jawaban aman</span>
-                                                                        </button>
-                                                                        <button
-                                                                            onClick={() => handleResetAttempt(sub.id, sub.student?.user?.full_name || 'Siswa', 'hard')}
-                                                                            className="w-full text-left px-3 py-2.5 hover:bg-red-500/10 rounded-lg transition-colors flex flex-col"
-                                                                        >
-                                                                            <span className="font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5 text-xs">
-                                                                                <RotateCcw className="w-3.5 h-3.5" /> Hard Reset
-                                                                            </span>
-                                                                            <span className="text-red-600/70 dark:text-red-400/80 mt-0.5 text-[10px] leading-tight">Mulai dari awal (Jawaban dihapus, timer penuh)</span>
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    ) : (
-                                                        <span className="text-text-secondary text-xs">—</span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        )
-                                    })}
-                                </tbody>
-                            </table>
+                                                            <span className="text-text-secondary text-sm">-</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center text-xs text-text-secondary">
+                                                        {sub.submitted_at ? formatDuration(sub.started_at, sub.submitted_at) : '-'}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <span className={`text-xs font-medium ${sub.violation_count > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                                            {sub.violation_count}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        {sub.is_submitted ? (
+                                                            sub.is_graded ? (
+                                                                <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 font-bold whitespace-nowrap">Selesai</span>
+                                                            ) : (
+                                                                <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400 font-bold whitespace-nowrap">Perlu Koreksi</span>
+                                                            )
+                                                        ) : (
+                                                            <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 font-bold whitespace-nowrap">Mengerjakan</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center text-xs text-text-secondary">
+                                                        {sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        {sub.is_submitted ? (
+                                                            <div className="flex items-center justify-center gap-2">
+                                                                <Link href={`/dashboard/admin/uts-uas/${examId}/hasil/${sub.id}`}>
+                                                                    <Button size="sm" variant={sub.is_graded ? 'ghost' : 'primary'} className={!sub.is_graded ? 'bg-gradient-to-r from-blue-600 to-cyan-600' : ''}>
+                                                                        {sub.is_graded ? 'Lihat' : 'Koreksi'}
+                                                                    </Button>
+                                                                </Link>
+                                                                <button
+                                                                    onClick={() => setSelectedSubmission(sub)}
+                                                                    className="px-3 py-1.5 bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-400 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-500/30 transition-colors text-sm font-medium"
+                                                                >
+                                                                    Detail
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-text-secondary text-xs">—</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            )
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
                         </Card>
                     )}
                 </div>
             )}
+
+            {/* Submission Detail Modal */}
+            <Modal open={!!selectedSubmission} onClose={() => setSelectedSubmission(null)} title="Detail Submission" maxWidth="lg">
+                {selectedSubmission && (
+                    <div className="space-y-4">
+                        <div className="bg-secondary/10 rounded-xl p-4">
+                            <p className="text-sm text-text-secondary dark:text-zinc-400">Siswa</p>
+                            <p className="text-lg font-bold text-text-main dark:text-white">{selectedSubmission.student?.user?.full_name}</p>
+                            <p className="text-sm text-text-secondary dark:text-zinc-500">NIS: {selectedSubmission.student?.nis}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-secondary/10 rounded-xl p-4 text-center">
+                                <p className="text-sm text-text-secondary dark:text-zinc-400">Nilai</p>
+                                <p className={`text-2xl font-bold ${getScoreColor(selectedSubmission.total_score, selectedSubmission.max_score).split(' ')[0]}`}>
+                                    {selectedSubmission.total_score}/{selectedSubmission.max_score}
+                                </p>
+                            </div>
+                            <div className="bg-secondary/10 rounded-xl p-4 text-center">
+                                <p className="text-sm text-text-secondary dark:text-zinc-400">Pelanggaran</p>
+                                <p className={`text-2xl font-bold ${selectedSubmission.violation_count > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                                    {selectedSubmission.violation_count || 0}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="bg-secondary/10 rounded-xl p-4">
+                            <p className="text-sm text-text-secondary dark:text-zinc-400 mb-2">Waktu</p>
+                            <div className="text-sm text-text-main dark:text-zinc-300 space-y-1">
+                                <p>Mulai: {new Date(selectedSubmission.started_at).toLocaleString('id-ID')}</p>
+                                <p>Selesai: {selectedSubmission.submitted_at ? new Date(selectedSubmission.submitted_at).toLocaleString('id-ID') : '-'}</p>
+                                <p>Durasi: {selectedSubmission.submitted_at ? formatDuration(selectedSubmission.started_at, selectedSubmission.submitted_at) : '-'}</p>
+                            </div>
+                        </div>
+                        {selectedSubmission.violations_log && selectedSubmission.violations_log.length > 0 && (
+                            <div className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl p-4">
+                                <p className="text-sm text-red-600 dark:text-red-400 font-medium mb-2">⚠️ Log Pelanggaran</p>
+                                <div className="space-y-1 text-sm max-h-48 overflow-y-auto pr-2">
+                                    {selectedSubmission.violations_log.map((v: any, idx: number) => (
+                                        <div key={idx} className="flex justify-between text-text-main dark:text-zinc-300 border-b border-red-500/10 last:border-0 pb-1 last:pb-0">
+                                            <span>{v.type}</span>
+                                            <span className="text-text-secondary dark:text-zinc-500">{new Date(v.timestamp).toLocaleTimeString('id-ID')}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </Modal>
 
             {/* Manual Mode - Inline Card */}
             {soalMode === 'manual' && (

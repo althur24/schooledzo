@@ -471,27 +471,27 @@ export default function KerjakanKuisPage() {
     }
 
     return (
-        <div className="space-y-6 pb-20">
+        <div className="space-y-6 pb-20 px-4 md:px-8">
             {/* Header Sticky */}
             {isOffline && (
                 <div className="bg-red-500 text-white text-xs font-bold text-center py-1.5 animate-pulse w-full">
                     ⚠️ Koneksi terputus — jawaban disimpan lokal & akan otomatis dikirim saat online
                 </div>
             )}
-            <div className="sticky top-0 z-10 bg-surface-light/90 dark:bg-surface-dark/90 backdrop-blur border-b border-gray-200 dark:border-gray-700 pb-4 pt-2 -mx-4 px-4 md:-mx-8 md:px-8">
+            <div className="sticky top-0 z-10 bg-surface-light/90 dark:bg-surface-dark/90 backdrop-blur border-b border-gray-200 dark:border-gray-700 pb-3 pt-2 md:pb-4 md:pt-2 -mx-4 px-4 md:-mx-8 md:px-8">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-xl font-bold text-text-main dark:text-white truncate max-w-xs md:max-w-md">{quiz.title}</h1>
+                        <h1 className="text-base md:text-xl font-bold text-text-main dark:text-white truncate max-w-[200px] md:max-w-md">{quiz.title}</h1>
                         <p className="text-xs text-text-secondary">Total: {quiz.questions.length} Soal</p>
                     </div>
-                    <div className={`px-4 py-2 rounded-xl font-mono text-xl font-bold shadow-lg relative ${(timeLeft || 0) < 60000 ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 dark:bg-surface-dark text-primary dark:text-primary-light'}`}>
+                    <div className={`px-3 py-1.5 md:px-4 md:py-2 rounded-xl font-mono text-base md:text-xl font-bold shadow-lg relative ${(timeLeft || 0) < 60000 ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 dark:bg-surface-dark text-primary dark:text-primary-light'}`}>
                         {timeLeft !== null ? formatTime(timeLeft) : '--:--:--'}
                     </div>
                 </div>
             </div>
 
             {/* Question List */}
-            <div className="space-y-8 max-w-3xl mx-auto">
+            <div className="space-y-5 md:space-y-8 max-w-3xl mx-auto">
                 {(() => {
                     // Group audio passage questions together, keep text-only passages as individual items
                     type DisplayItem =
@@ -532,7 +532,7 @@ export default function KerjakanKuisPage() {
                             return (
                                 <div key={`audio-group-${itemIdx}`} className="bg-surface-light dark:bg-surface-dark border border-violet-300 dark:border-violet-700 rounded-xl overflow-hidden">
                                     {/* Audio + Passage Header */}
-                                    <div className="p-5 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-700">
+                                    <div className="p-3 md:p-5 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-700">
                                         <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-2 flex items-center gap-1">🎧 Listening</p>
                                         <audio controls controlsList="nodownload" className="w-full mb-2" src={item.audioUrl} />
                                         {item.passageText && (
@@ -547,44 +547,41 @@ export default function KerjakanKuisPage() {
                                         {item.questions.map(({ q }) => {
                                             questionNumber++
                                             return (
-                                                <div key={q.id} className="p-6">
-                                                    <div className="flex items-start gap-4 mb-4">
-                                                        <span className="w-8 h-8 flex-shrink-0 bg-violet-500 text-white rounded-full flex items-center justify-center font-bold">
+                                                <div key={q.id} className="p-3 md:p-6">
+                                                    <div className="flex items-center gap-3 mb-3">
+                                                        <span className="w-7 h-7 md:w-8 md:h-8 flex-shrink-0 bg-violet-500/20 text-violet-600 dark:text-violet-400 rounded-full flex items-center justify-center font-bold text-xs md:text-sm">
                                                             {questionNumber}
                                                         </span>
-                                                        <div className="flex-1" dir={q.text_direction || 'ltr'}>
-                                                            <SmartText text={q.question_text} className="text-text-main dark:text-white text-lg leading-relaxed whitespace-pre-wrap" />
-                                                        </div>
-                                                        <span className="text-xs text-text-secondary font-medium px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">
-                                                            {q.points} Poin
+                                                        <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
+                                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
                                                         </span>
+                                                        <span className="text-[10px] md:text-xs text-text-secondary">({q.points} poin)</span>
+                                                    </div>
+                                                    <div dir={q.text_direction || 'ltr'}>
+                                                        <SmartText text={q.question_text} className="text-text-main dark:text-white text-sm md:text-base mb-3 whitespace-pre-wrap" />
                                                     </div>
                                                     {q.image_url && (
-                                                        <div className="pl-12 mb-4">
-                                                            <img src={q.image_url} alt="Gambar soal" className="max-h-64 rounded-lg border border-gray-200 dark:border-gray-600" />
+                                                        <div className="mb-3">
+                                                            <img src={q.image_url} alt="Gambar soal" className="max-h-40 md:max-h-64 rounded-lg border border-gray-200 dark:border-gray-600" />
                                                         </div>
                                                     )}
-                                                    <div className="pl-12">
-                                                        {q.question_type === 'MULTIPLE_CHOICE' && q.options ? (
-                                                            <div className="space-y-3">
-                                                                {q.options.map((opt, optIdx) => {
-                                                                    const letter = String.fromCharCode(65 + optIdx)
-                                                                    const isSelected = answers[q.id] === letter
-                                                                    return (
-                                                                        <label key={optIdx} className={`flex items-center gap-3 p-4 rounded-xl cursor-pointer transition-all border ${isSelected ? 'bg-primary/10 border-primary text-primary-dark dark:text-primary-light' : 'bg-gray-50 dark:bg-gray-800/50 border-transparent hover:bg-gray-100 dark:hover:bg-gray-800 text-text-secondary dark:text-slate-300'}`}>
-                                                                            <div className={`w-6 h-6 rounded-full border flex items-center justify-center flex-shrink-0 ${isSelected ? 'border-primary bg-primary text-white' : 'border-gray-400 dark:border-slate-500'}`}>
-                                                                                {isSelected && <TickSquare set="bold" primaryColor="currentColor" size={16} />}
-                                                                            </div>
-                                                                            <input type="radio" name={`q-${q.id}`} value={letter} checked={isSelected} onChange={() => { const newAnswers = { ...answers, [q.id]: letter }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className="hidden" />
-                                                                            <span className="font-medium flex-1" dir={q.text_direction || 'ltr'}><span className="mr-2 font-bold opacity-70" dir="ltr">{letter}.</span><SmartText text={opt} as="span" /></span>
-                                                                        </label>
-                                                                    )
-                                                                })}
-                                                            </div>
-                                                        ) : (
-                                                            <textarea dir={q.text_direction || 'ltr'} value={answers[q.id] || ''} onChange={(e) => { const newAnswers = { ...answers, [q.id]: e.target.value }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className={`w-full h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} placeholder="Tulis jawaban Anda di sini..." />
-                                                        )}
-                                                    </div>
+                                                    {q.question_type === 'MULTIPLE_CHOICE' && q.options ? (
+                                                        <div className="space-y-2">
+                                                            {q.options.map((opt, optIdx) => {
+                                                                const letter = String.fromCharCode(65 + optIdx)
+                                                                const isSelected = answers[q.id] === letter
+                                                                return (
+                                                                    <button key={optIdx} onClick={() => { const newAnswers = { ...answers, [q.id]: letter }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
+                                                                        className={`w-full text-left px-3 py-2 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-violet-500/10 border-violet-500 text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary hover:border-gray-400'}`}>
+                                                                        <span className={`inline-flex items-center justify-center w-6 h-6 md:w-7 md:h-7 rounded-lg ${q.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold text-xs flex-shrink-0 ${isSelected ? 'bg-violet-500 text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary'}`} dir="ltr">{letter}</span>
+                                                                        <div className="flex-1 text-sm md:text-base" dir={q.text_direction || 'ltr'}><SmartText text={opt} as="span" /></div>
+                                                                    </button>
+                                                                )
+                                                            })}
+                                                        </div>
+                                                    ) : (
+                                                        <textarea dir={q.text_direction || 'ltr'} value={answers[q.id] || ''} onChange={(e) => { const newAnswers = { ...answers, [q.id]: e.target.value }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className={`w-full h-24 md:h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 text-sm md:text-base ${q.text_direction === 'rtl' ? 'text-right' : ''}`} placeholder="Tulis jawaban Anda di sini..." />
+                                                    )}
                                                 </div>
                                             )
                                         })}
@@ -596,51 +593,48 @@ export default function KerjakanKuisPage() {
                             const q = item.question
                             questionNumber++
                             return (
-                                <div key={q.id} className="bg-surface-light dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-6">
+                                <div key={q.id} className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-3 md:p-6">
                                     {/* Text-only passage (no audio) */}
                                     {q.passage_text && !q.passage_audio_url && (
-                                        <div className="mb-4 p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl">
+                                        <div className="mb-3 p-3 md:p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl">
                                             <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-2">📖 Bacaan:</p>
                                             <SmartText text={q.passage_text} className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed" />
                                         </div>
                                     )}
-                                    <div className="flex items-start gap-4 mb-4">
-                                        <span className="w-8 h-8 flex-shrink-0 bg-primary text-white rounded-full flex items-center justify-center font-bold">
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <span className="w-7 h-7 md:w-8 md:h-8 flex-shrink-0 bg-primary/20 text-primary rounded-full flex items-center justify-center font-bold text-xs md:text-sm">
                                             {questionNumber}
                                         </span>
-                                        <div className="flex-1" dir={q.text_direction || 'ltr'}>
-                                            <SmartText text={q.question_text} className={`text-text-main dark:text-white text-lg leading-relaxed whitespace-pre-wrap ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
-                                        </div>
-                                        <span className="text-xs text-text-secondary font-medium px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">
-                                            {q.points} Poin
+                                        <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
+                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
                                         </span>
+                                        <span className="text-[10px] md:text-xs text-text-secondary">({q.points} poin)</span>
+                                    </div>
+                                    <div dir={q.text_direction || 'ltr'}>
+                                        <SmartText text={q.question_text} className={`text-text-main dark:text-white text-sm md:text-base mb-3 whitespace-pre-wrap ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
                                     </div>
                                     {q.image_url && (
-                                        <div className="pl-12 mb-4">
-                                            <img src={q.image_url} alt="Gambar soal" className="max-h-64 rounded-lg border border-gray-200 dark:border-gray-600" />
+                                        <div className="mb-3">
+                                            <img src={q.image_url} alt="Gambar soal" className="max-h-40 md:max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />
                                         </div>
                                     )}
-                                    <div className="pl-12">
-                                        {q.question_type === 'MULTIPLE_CHOICE' && q.options ? (
-                                            <div className="space-y-3">
-                                                {q.options.map((opt, optIdx) => {
-                                                    const letter = String.fromCharCode(65 + optIdx)
-                                                    const isSelected = answers[q.id] === letter
-                                                    return (
-                                                        <label key={optIdx} className={`flex items-center gap-3 p-4 rounded-xl cursor-pointer transition-all border ${isSelected ? 'bg-primary/10 border-primary text-primary-dark dark:text-primary-light' : 'bg-gray-50 dark:bg-gray-800/50 border-transparent hover:bg-gray-100 dark:hover:bg-gray-800 text-text-secondary dark:text-slate-300'}`}>
-                                                            <div className={`w-6 h-6 rounded-full border flex items-center justify-center flex-shrink-0 ${isSelected ? 'border-primary bg-primary text-white' : 'border-gray-400 dark:border-slate-500'}`}>
-                                                                {isSelected && <TickSquare set="bold" primaryColor="currentColor" size={16} />}
-                                                            </div>
-                                                            <input type="radio" name={`q-${q.id}`} value={letter} checked={isSelected} onChange={() => { const newAnswers = { ...answers, [q.id]: letter }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className="hidden" />
-                                                            <span className={`font-medium flex-1 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} dir={q.text_direction || 'ltr'}><span className="mr-2 font-bold opacity-70" dir="ltr">{letter}.</span><SmartText text={opt} as="span" /></span>
-                                                        </label>
-                                                    )
-                                                })}
-                                            </div>
-                                        ) : (
-                                            <textarea dir={q.text_direction || 'ltr'} value={answers[q.id] || ''} onChange={(e) => { const newAnswers = { ...answers, [q.id]: e.target.value }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className={`w-full h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} placeholder="Tulis jawaban Anda di sini..." />
-                                        )}
-                                    </div>
+                                    {q.question_type === 'MULTIPLE_CHOICE' && q.options ? (
+                                        <div className="space-y-2">
+                                            {q.options.map((opt, optIdx) => {
+                                                const letter = String.fromCharCode(65 + optIdx)
+                                                const isSelected = answers[q.id] === letter
+                                                return (
+                                                    <button key={optIdx} onClick={() => { const newAnswers = { ...answers, [q.id]: letter }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
+                                                        className={`w-full text-left px-3 py-2 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary hover:border-gray-400'}`}>
+                                                        <span className={`inline-flex items-center justify-center w-6 h-6 md:w-7 md:h-7 rounded-lg ${q.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold text-xs flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary'}`} dir="ltr">{letter}</span>
+                                                        <div className={`flex-1 text-sm md:text-base ${q.text_direction === 'rtl' ? 'text-right' : ''}`} dir={q.text_direction || 'ltr'}><SmartText text={opt} as="span" /></div>
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <textarea dir={q.text_direction || 'ltr'} value={answers[q.id] || ''} onChange={(e) => { const newAnswers = { ...answers, [q.id]: e.target.value }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className={`w-full h-24 md:h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 text-sm md:text-base ${q.text_direction === 'rtl' ? 'text-right' : ''}`} placeholder="Tulis jawaban Anda di sini..." />
+                                    )}
                                 </div>
                             )
                         }
@@ -649,15 +643,15 @@ export default function KerjakanKuisPage() {
             </div>
 
             {/* Submit Action */}
-            <div className="fixed bottom-0 left-0 right-0 bg-surface-light/90 dark:bg-surface-dark/90 backdrop-blur border-t border-gray-200 dark:border-gray-700 p-4 z-10">
+            <div className="fixed bottom-0 left-0 right-0 bg-surface-light/90 dark:bg-surface-dark/90 backdrop-blur border-t border-gray-200 dark:border-gray-700 p-3 md:p-4 z-10">
                 <div className="max-w-3xl mx-auto flex items-center justify-between">
-                    <p className="text-sm text-text-secondary">
+                    <p className="text-xs md:text-sm text-text-secondary">
                         Terjawab: <span className="text-text-main dark:text-white font-bold">{Object.keys(answers).length}</span> / {quiz.questions.length}
                     </p>
                     <button
                         onClick={() => handleSubmit(false)}
                         disabled={submitting}
-                        className="px-8 py-3 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary-dark transition-all disabled:opacity-50"
+                        className="px-5 py-2.5 md:px-8 md:py-3 text-sm md:text-base bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary-dark transition-all disabled:opacity-50"
                     >
                         {submitting ? 'Mengirim...' : 'Kumpulkan Jawaban'}
                     </button>
