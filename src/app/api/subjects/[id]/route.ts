@@ -17,11 +17,14 @@ export async function PUT(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { name } = await request.json()
+        const { name, level } = await request.json()
+        
+        const updateData: any = { name }
+        if (level !== undefined) updateData.level = level
 
         let updateQuery = supabase
             .from('subjects')
-            .update({ name })
+            .update(updateData)
             .eq('id', id)
         if (schoolId) updateQuery = updateQuery.eq('school_id', schoolId)
         const { data, error } = await updateQuery

@@ -20,7 +20,7 @@ export default function MapelPage() {
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
     const [editingSubject, setEditingSubject] = useState<Subject | null>(null)
-    const [formData, setFormData] = useState({ name: '' })
+    const [formData, setFormData] = useState({ name: '', level: 'UMUM' })
     const [saving, setSaving] = useState(false)
 
     // Bulk Upload States
@@ -30,8 +30,9 @@ export default function MapelPage() {
     const [bulkError, setBulkError] = useState('')
     const fileInputRef = useRef<HTMLInputElement>(null)
 
-    // Search
+    // Search & Filter
     const [searchQuery, setSearchQuery] = useState('')
+    const [levelFilter, setLevelFilter] = useState<string>('ALL')
 
     // Detail Modal
     const [detailSubject, setDetailSubject] = useState<Subject | null>(null)
@@ -73,13 +74,16 @@ export default function MapelPage() {
     }, [])
 
     useEffect(() => {
+        let filtered = subjects
         if (searchQuery.trim()) {
             const query = searchQuery.toLowerCase()
-            setFilteredSubjects(subjects.filter(s => s.name.toLowerCase().includes(query)))
-        } else {
-            setFilteredSubjects(subjects)
+            filtered = filtered.filter(s => s.name.toLowerCase().includes(query))
         }
-    }, [subjects, searchQuery])
+        if (levelFilter !== 'ALL') {
+            filtered = filtered.filter(s => (s.level || 'UMUM') === levelFilter)
+        }
+        setFilteredSubjects(filtered)
+    }, [subjects, searchQuery, levelFilter])
 
     const openDetail = async (subject: Subject) => {
         setDetailSubject(subject)
@@ -146,7 +150,7 @@ export default function MapelPage() {
             if (res.ok) {
                 setShowModal(false)
                 setEditingSubject(null)
-                setFormData({ name: '' })
+                setFormData({ name: '', level: 'UMUM' })
                 fetchSubjects()
             } else {
                 const err = await res.json()
@@ -165,30 +169,34 @@ export default function MapelPage() {
 
     const openEdit = (subject: Subject) => {
         setEditingSubject(subject)
-        setFormData({ name: subject.name })
+        setFormData({ name: subject.name, level: subject.level || 'UMUM' })
         setShowModal(true)
     }
 
     const openAdd = () => {
         setEditingSubject(null)
-        setFormData({ name: '' })
+        setFormData({ name: '', level: 'UMUM' })
         setShowModal(true)
     }
 
     const downloadTemplate = () => {
-        const headers = ['Nama Mapel']
+        const headers = ['Nama Mapel', 'Jenjang']
         const mapelStandar = [
-            'Matematika',
-            'Bahasa Indonesia',
-            'Bahasa Inggris',
-            'IPA',
-            'IPS',
-            'PKn',
-            'Pendidikan Agama',
-            'Seni Budaya',
-            'PJOK',
-            'Prakarya',
-            'Informatika'
+            'Matematika,UMUM',
+            'Bahasa Indonesia,UMUM',
+            'Bahasa Inggris,UMUM',
+            'Pendidikan Agama,UMUM',
+            'Seni Budaya,UMUM',
+            'PJOK,UMUM',
+            'IPA Terpadu,SMP',
+            'IPS Terpadu,SMP',
+            'Prakarya,SMP',
+            'Fisika,SMA',
+            'Kimia,SMA',
+            'Biologi,SMA',
+            'Ekonomi,SMA',
+            'Sosiologi,SMA',
+            'Geografi,SMA'
         ]
         
         const csvContent = headers.join(',') + '\n' + mapelStandar.join('\n')
@@ -215,7 +223,8 @@ export default function MapelPage() {
             const parsedData = await parseSpreadsheet(file)
             
             const payload = parsedData.map((row: any) => ({
-                name: row['Nama Mapel'] || row['nama mapel'] || row['Name'] || ''
+                name: row['Nama Mapel'] || row['nama mapel'] || row['Name'] || '',
+                level: row['Jenjang'] || row['jenjang'] || row['Level'] || 'UMUM'
             })).filter(row => row.name.trim())
 
             if (payload.length === 0) {
@@ -279,18 +288,30 @@ export default function MapelPage() {
                 }
             />
 
-            {/* Search Bar */}
-            <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary">
-                    <SearchIcon className="w-5 h-5 text-slate-400" />
+            {/* Search Bar & Filter */}
+            <div className="flex flex-col md:flex-row gap-3">
+                <div className="relative flex-1">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary">
+                        <SearchIcon className="w-5 h-5 text-slate-400" />
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Cari mata pelajaran..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm shadow-sm"
+                    />
                 </div>
-                <input
-                    type="text"
-                    placeholder="Cari mata pelajaran..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm shadow-sm"
-                />
+                <select
+                    value={levelFilter}
+                    onChange={(e) => setLevelFilter(e.target.value)}
+                    className="px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-emerald-500 text-sm font-medium text-slate-700 dark:text-slate-200 w-full md:w-48 shadow-sm"
+                >
+                    <option value="ALL">Semua Jenjang</option>
+                    <option value="UMUM">UMUM</option>
+                    <option value="SMP">SMP</option>
+                    <option value="SMA">SMA</option>
+                </select>
             </div>
 
             {/* Counter */}
@@ -328,7 +349,16 @@ export default function MapelPage() {
                                             {subject.name[0]}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <h3 className="font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">{subject.name}</h3>
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors truncate">{subject.name}</h3>
+                                                <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md flex-shrink-0 ${
+                                                    (!subject.level || subject.level === 'UMUM') ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' :
+                                                    subject.level === 'SMP' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                                                    'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                                                }`}>
+                                                    {subject.level || 'UMUM'}
+                                                </span>
+                                            </div>
                                             <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 dark:text-slate-400 font-medium">
                                                 <Users set="bold" primaryColor="currentColor" size={12} />
                                                 <span>{uniqueTeacherCount} Guru Mengajar</span>
@@ -439,6 +469,26 @@ export default function MapelPage() {
                             placeholder="Contoh: Matematika"
                             required
                         />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jenjang Sekolah</label>
+                        <div className="grid grid-cols-3 gap-3">
+                            {(['UMUM', 'SMP', 'SMA'] as const).map(lvl => (
+                                <button
+                                    type="button"
+                                    key={lvl}
+                                    onClick={() => setFormData({ ...formData, level: lvl })}
+                                    className={`py-2 px-3 rounded-xl border text-sm font-medium transition-all ${
+                                        formData.level === lvl 
+                                            ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400' 
+                                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400'
+                                    }`}
+                                >
+                                    {lvl}
+                                </button>
+                            ))}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">UMUM = Mapel dasar yang diajarkan di SMP maupun SMA.</p>
                     </div>
                     <div className="flex gap-3 pt-2">
                         <Button type="button" variant="secondary" onClick={() => setShowModal(false)} className="flex-1">

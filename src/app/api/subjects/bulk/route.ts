@@ -40,6 +40,7 @@ export async function POST(request: NextRequest) {
         for (let i = 0; i < payload.length; i++) {
             const item = payload[i]
             const rawName = item['Nama Mapel'] || item['nama mapel'] || item.name || ''
+            const rawLevel = item['Jenjang'] || item['jenjang'] || item.level || ''
             
             if (!rawName || typeof rawName !== 'string' || !rawName.trim()) {
                 results.push({ item, success: false, error: 'Nama Mapel kosong' })
@@ -56,11 +57,17 @@ export async function POST(request: NextRequest) {
                 continue
             }
 
+            let level = typeof rawLevel === 'string' ? rawLevel.trim().toUpperCase() : ''
+            if (!['UMUM', 'SMP', 'SMA'].includes(level)) {
+                level = 'UMUM'
+            }
+
             try {
                 const { error: insertError } = await supabase
                     .from('subjects')
                     .insert({
                         name: normalizedName,
+                        level: level,
                         school_id: schoolId
                     })
 

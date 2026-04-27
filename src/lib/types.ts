@@ -126,6 +126,7 @@ export interface StudentEnrollment {
 export interface Subject {
     id: string
     name: string
+    level?: 'UMUM' | 'SMP' | 'SMA' | null
     created_at: string
     teaching_assignments?: { count: number }[]
 }

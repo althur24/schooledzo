@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
             if (teacher) {
                 const { data: assignments, error } = await supabase
                     .from('teaching_assignments')
-                    .select('subject:subjects(id, name)')
+                    .select('subject:subjects(id, name, level)')
                     .eq('teacher_id', teacher.id)
 
                 if (error) throw error
@@ -65,13 +65,13 @@ export async function POST(request: NextRequest) {
 
         if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-        const { name } = await request.json()
+        const { name, level } = await request.json()
 
         if (!name) return NextResponse.json({ error: 'Nama mata pelajaran harus diisi' }, { status: 400 })
 
         const { data, error } = await supabase
             .from('subjects')
-            .insert({ name, school_id: schoolId })
+            .insert({ name, level: level || 'UMUM', school_id: schoolId })
             .select()
             .single()
 
@@ -91,12 +91,13 @@ export async function PUT(request: NextRequest) {
         if (isErrorResponse(ctx)) return ctx
         const { schoolId } = ctx
 
-        const { id, name, kkm } = await request.json()
+        const { id, name, kkm, level } = await request.json()
         if (!id) return NextResponse.json({ error: 'ID mata pelajaran harus diisi' }, { status: 400 })
 
         const updateData: any = {}
         if (name !== undefined) updateData.name = name
         if (kkm !== undefined) updateData.kkm = kkm
+        if (level !== undefined) updateData.level = level
 
         let query = supabase
             .from('subjects')

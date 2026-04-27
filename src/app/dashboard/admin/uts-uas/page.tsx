@@ -323,9 +323,18 @@ export default function AdminUtsUasPage() {
                                                 </span>
                                             </div>
                                         </div>
-                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                            <span>Jadwal</span>
-                                            <span className="font-medium">{formatDateTime(exam.start_time)}</span>
+                                        <div className="flex flex-col gap-1.5 pt-1 text-xs text-text-secondary">
+                                            <div className="flex items-center justify-between">
+                                                <span>Waktu Mulai</span>
+                                                <span className="font-bold text-text-main dark:text-white">{formatDateTime(exam.start_time)}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span>Waktu Selesai</span>
+                                                <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                                    <Clock className="w-3.5 h-3.5" />
+                                                    {formatDateTime(new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
+                                                </span>
+                                            </div>
                                         </div>
                                         {counts && (
                                             <div className="flex items-center justify-between text-xs">
@@ -475,7 +484,7 @@ export default function AdminUtsUasPage() {
                     </div>
 
                     {/* Time & Duration */}
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-3 gap-4">
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
                             <input
@@ -486,7 +495,7 @@ export default function AdminUtsUasPage() {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (mnt)</label>
                             <input
                                 type="number"
                                 value={form.duration_minutes}
@@ -494,6 +503,12 @@ export default function AdminUtsUasPage() {
                                 className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
                                 min={5} max={300}
                             />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Selesai</label>
+                            <div className="w-full px-4 py-3 bg-secondary/10 border border-secondary/10 rounded-xl text-text-main dark:text-zinc-300 font-medium flex items-center h-[50px]">
+                                {form.start_time ? new Date(new Date(form.start_time).getTime() + form.duration_minutes * 60000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-'}
+                            </div>
                         </div>
                     </div>
 
