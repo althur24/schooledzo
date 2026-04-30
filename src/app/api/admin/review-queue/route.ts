@@ -52,7 +52,8 @@ export async function GET(request: NextRequest) {
 
             // Apply school scoping filter
             if (inFilter) {
-                query = query.in(inFilter.field, inFilter.values.length > 0 ? inFilter.values : ['__none__'])
+                if (inFilter.values.length === 0) return []
+                query = query.in(inFilter.field, inFilter.values)
             }
 
             const { data, count, error } = await query
@@ -133,7 +134,7 @@ export async function GET(request: NextRequest) {
                 const { data: schoolQuizzes } = await supabase
                     .from('quizzes')
                     .select('id')
-                    .in('teaching_assignment_id', schoolTAIds.length > 0 ? schoolTAIds : ['__none__'])
+                    .in('teaching_assignment_id', schoolTAIds.length > 0 ? schoolTAIds : [])
                 quizIdFilter = schoolQuizzes?.map(q => q.id) || []
             }
             const quizData = await fetchBySource(
@@ -150,7 +151,7 @@ export async function GET(request: NextRequest) {
                 const { data: schoolExams } = await supabase
                     .from('exams')
                     .select('id')
-                    .in('teaching_assignment_id', schoolTAIds.length > 0 ? schoolTAIds : ['__none__'])
+                    .in('teaching_assignment_id', schoolTAIds.length > 0 ? schoolTAIds : [])
                 examIdFilter = schoolExams?.map(e => e.id) || []
             }
             const examData = await fetchBySource(

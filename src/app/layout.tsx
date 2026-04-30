@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { AuthProvider } from "@/contexts/AuthContext";
 import "./globals.css";
 
@@ -6,7 +6,6 @@ export const metadata: Metadata = {
   title: "Edzo - Education Zone",
   description: "Next-Generation Learning Management System",
   manifest: "/manifest.json",
-  themeColor: "#ffffff",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -24,6 +23,9 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  themeColor: "#ffffff",
+};
 export default function RootLayout({
   children,
 }: Readonly<{
