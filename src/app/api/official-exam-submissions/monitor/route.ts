@@ -133,28 +133,81 @@ export async function GET(request: NextRequest) {
             })
         }
 
-        // Fetch answer counts explicitly to be safe
+        // Fetch answer counts per submission using batched queries to avoid 1000-row limit
         const submissionIds = submissions?.map(s => s.id) || []
         const answerCounts = new Map()
         if (submissionIds.length > 0) {
-            // Using RPC or separate aggregate queries. Since we can't easily group by in standard Supabase JS without RPC, 
-            // we'll fetch just the submission_id for all answers and count in memory (fine for typical exam sizes).
-            const { data: allAnswers } = await supabase
-                .from('official_exam_answers')
-                .select('submission_id')
-                .in('submission_id', submissionIds)
-                
-            if (allAnswers) {
-                allAnswers.forEach(ans => {
-                    const count = answerCounts.get(ans.submission_id) || 0
-                    answerCounts.set(ans.submission_id, count + 1)
-                })
-            }
+            // Query count for each submission individually using Promise.all
+            // This is more reliable than fetching all rows (which hits Supabase 1000-row limit)
+            const countPromises = submissionIds.map(async (subId) => {
+                const { count } = await supabase
+                    .from('official_exam_answers')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('submission_id', subId)
+                return { subId, count: count || 0 }
+            })
+            const counts = await Promise.all(countPromises)
+            counts.forEach(({ subId, count }) => answerCounts.set(subId, count))
         }
 
         const now = new Date()
         const nowTime = now.getTime()
         const durationMs = exam.duration_minutes * 60 * 1000
+
+        // Server-side auto-submit: detect and submit expired but unsubmitted entries
+        const expiredSubmissionIds: string[] = []
+        if (submissions) {
+            for (const sub of submissions) {
+                if (!sub.is_submitted) {
+                    const startedTime = new Date(sub.started_at).getTime()
+                    const endTarget = startedTime + durationMs
+                    if (nowTime > endTarget) {
+                        expiredSubmissionIds.push(sub.id)
+                    }
+                }
+            }
+        }
+
+        // Auto-submit all expired submissions
+        if (expiredSubmissionIds.length > 0) {
+            // Check if exam has essays
+            const { data: examQuestions } = await supabase
+                .from('official_exam_questions')
+                .select('question_type')
+                .eq('exam_id', examId)
+            const hasEssays = examQuestions?.some(q => q.question_type === 'ESSAY') || false
+
+            for (const subId of expiredSubmissionIds) {
+                // Calculate score from existing answers
+                const { data: existingAnswers } = await supabase
+                    .from('official_exam_answers')
+                    .select('points_earned')
+                    .eq('submission_id', subId)
+                const totalScore = existingAnswers?.reduce((sum, a) => sum + (a.points_earned || 0), 0) || 0
+
+                const sub = submissions!.find(s => s.id === subId)
+                const startedTime = new Date(sub?.started_at || '').getTime()
+                const expectedSubmittedAt = new Date(startedTime + durationMs).toISOString()
+
+                await supabase
+                    .from('official_exam_submissions')
+                    .update({
+                        is_submitted: true,
+                        submitted_at: expectedSubmittedAt,
+                        total_score: totalScore,
+                        is_graded: !hasEssays
+                    })
+                    .eq('id', subId)
+
+                // Update local data so the response reflects the change
+                if (sub) {
+                    sub.is_submitted = true
+                    sub.submitted_at = expectedSubmittedAt
+                    sub.total_score = totalScore
+                    sub.is_graded = !hasEssays
+                }
+            }
+        }
 
         let notStartedCount = 0
         let workingCount = 0
