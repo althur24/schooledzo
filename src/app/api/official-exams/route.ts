@@ -71,13 +71,9 @@ export async function GET(request: NextRequest) {
             } else {
                 result = []
             }
-            // Show active exams AND upcoming scheduled exams to students
-            result = result.filter((exam: any) => {
-                if (exam.is_active) return true
-                // Also show upcoming exams (not yet active, but scheduled in the future)
-                const endTime = new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60 * 1000)
-                return endTime > new Date()
-            })
+            // Only show PUBLISHED (is_active) exams to students
+            // Unpublished (draft) exams must never be visible to students
+            result = result.filter((exam: any) => exam.is_active)
         } else if (user.role === 'GURU') {
             // Get teacher's teaching assignments (subject_id + class_id combos)
             const { data: teacher } = await supabase
