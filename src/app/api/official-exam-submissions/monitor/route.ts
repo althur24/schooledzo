@@ -178,6 +178,9 @@ export async function GET(request: NextRequest) {
             const hasEssays = examQuestions?.some(q => q.question_type === 'ESSAY') || false
 
             for (const subId of expiredSubmissionIds) {
+                const sub = submissions!.find(s => s.id === subId)
+                if (!sub) continue // Safety check
+
                 // Calculate score from existing answers
                 const { data: existingAnswers } = await supabase
                     .from('official_exam_answers')
@@ -185,8 +188,7 @@ export async function GET(request: NextRequest) {
                     .eq('submission_id', subId)
                 const totalScore = existingAnswers?.reduce((sum, a) => sum + (a.points_earned || 0), 0) || 0
 
-                const sub = submissions!.find(s => s.id === subId)
-                const startedTime = new Date(sub?.started_at || '').getTime()
+                const startedTime = new Date(sub.started_at).getTime()
                 const expectedSubmittedAt = new Date(startedTime + durationMs).toISOString()
 
                 await supabase
@@ -200,12 +202,10 @@ export async function GET(request: NextRequest) {
                     .eq('id', subId)
 
                 // Update local data so the response reflects the change
-                if (sub) {
-                    sub.is_submitted = true
-                    sub.submitted_at = expectedSubmittedAt
-                    sub.total_score = totalScore
-                    sub.is_graded = !hasEssays
-                }
+                sub.is_submitted = true
+                sub.submitted_at = expectedSubmittedAt
+                sub.total_score = totalScore
+                sub.is_graded = !hasEssays
             }
         }
 
