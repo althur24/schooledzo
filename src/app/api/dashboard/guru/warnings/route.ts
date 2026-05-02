@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 
-const KKM = 75
+const DEFAULT_KKM = 75
 
 export async function GET(request: NextRequest) {
     try {
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
             .select(`
                 id, 
                 class_id, 
-                subject:subjects(id, name), 
+                subject:subjects(id, name, kkm), 
                 class:classes(id, name),
                 academic_year:academic_years(is_active)
             `)
@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
             .from('teaching_assignments')
             .select(`
                 id, class_id,
-                subject:subjects(id, name),
+                subject:subjects(id, name, kkm),
                 academic_year:academic_years(is_active)
             `)
             .in('class_id', allRelevantClassIds)
@@ -189,7 +189,8 @@ export async function GET(request: NextRequest) {
                 const scores = getScoresForTAAndStudent(ta.id, student.id)
                 if (scores.length > 0) {
                     const avg = scores.reduce((a, b) => a + b, 0) / scores.length
-                    if (avg < KKM) {
+                    const subjectKkm = unwrap(ta.subject)?.kkm || DEFAULT_KKM
+                    if (avg < subjectKkm) {
                         teachingWarnings.push({
                             student_id: student.id,
                             student_name: unwrap(student.user)?.full_name || 'Tanpa Nama',
@@ -197,7 +198,8 @@ export async function GET(request: NextRequest) {
                             subject_name: unwrap(ta.subject)?.name || 'Tanpa Mapel',
                             avg_score: Math.round(avg),
                             score_count: scores.length,
-                            teaching_assignment_id: ta.id
+                            teaching_assignment_id: ta.id,
+                            kkm: subjectKkm
                         })
                     }
                 }
@@ -215,14 +217,16 @@ export async function GET(request: NextRequest) {
                     const scores = getScoresForTAAndStudent(ta.id, student.id)
                     if (scores.length > 0) {
                         const avg = scores.reduce((a, b) => a + b, 0) / scores.length
-                        if (avg < KKM) {
+                        const subjectKkm = unwrap(ta.subject)?.kkm || DEFAULT_KKM
+                        if (avg < subjectKkm) {
                             homeroomWarnings.push({
                                 student_id: student.id,
                                 student_name: unwrap(student.user)?.full_name || 'Tanpa Nama',
                                 class_name: hrClass.name,
                                 subject_name: unwrap(ta.subject)?.name || 'Tanpa Mapel',
                                 avg_score: Math.round(avg),
-                                score_count: scores.length
+                                score_count: scores.length,
+                                kkm: subjectKkm
                             })
                         }
                     }
@@ -273,7 +277,7 @@ export async function GET(request: NextRequest) {
         const myClasses = Array.from(classMap.values()).sort((a, b) => a.class_name.localeCompare(b.class_name))
 
         return NextResponse.json({
-            kkm: KKM,
+            kkm: DEFAULT_KKM,
             teachingWarnings,
             homeroomWarnings,
             myClasses

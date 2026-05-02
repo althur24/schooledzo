@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import { Plus, ChevronDown } from 'react-iconly'
-import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BookOpen, BarChart3, Activity } from 'lucide-react'
+import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BookOpen, BarChart3, Activity, Copy, RefreshCw } from 'lucide-react'
 
 interface OfficialExam {
     id: string
@@ -21,8 +21,11 @@ interface OfficialExam {
     target_class_ids: string[]
     question_count: number
     created_at: string
-    subject: { id: string; name: string }
+    subject: { id: string; name: string; kkm?: number }
     academic_year: { id: string; name: string; is_active: boolean }
+    is_remedial?: boolean
+    remedial_for_id?: string | null
+    allowed_student_ids?: string[] | null
 }
 
 interface Subject {
@@ -48,6 +51,21 @@ export default function AdminUtsUasPage() {
     const [filterType, setFilterType] = useState<string>('')
     const [filterSubject, setFilterSubject] = useState<string>('')
     const [submissionCounts, setSubmissionCounts] = useState<Record<string, { submitted: number; total: number }>>({})
+
+    // Duplicate & Remedial states
+    const [showDuplicate, setShowDuplicate] = useState(false)
+    const [duplicateExam, setDuplicateExam] = useState<OfficialExam | null>(null)
+    const [duplicateMode, setDuplicateMode] = useState<'BIASA' | 'REMEDIAL'>('BIASA')
+    const [duplicating, setDuplicating] = useState(false)
+    const [remedialStudents, setRemedialStudents] = useState<any[]>([])
+    const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
+    const [remedialLoading, setRemedialLoading] = useState(false)
+    const [duplicateForm, setDuplicateForm] = useState({
+        title: '',
+        start_time: '',
+        duration_minutes: 90,
+        target_class_ids: [] as string[]
+    })
 
     // Toast & confirm dialog
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
@@ -163,6 +181,96 @@ export default function AdminUtsUasPage() {
                 setConfirmDialog(null)
             }
         })
+    }
+
+    const handleOpenDuplicate = async (exam: OfficialExam, mode: 'BIASA' | 'REMEDIAL') => {
+        setDuplicateExam(exam)
+        setDuplicateMode(mode)
+        setRemedialStudents([])
+        setSelectedStudentIds([])
+        
+        const pad = (n: number) => n.toString().padStart(2, '0')
+        const now = new Date()
+        now.setDate(now.getDate() + 1)
+        now.setHours(8, 0, 0, 0)
+        
+        const defaultTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
+
+        setDuplicateForm({
+            title: mode === 'REMEDIAL' ? `Remedial ${exam.title}` : `Copy of ${exam.title}`,
+            start_time: defaultTime,
+            duration_minutes: exam.duration_minutes,
+            target_class_ids: exam.target_class_ids
+        })
+
+        if (mode === 'REMEDIAL') {
+            setRemedialLoading(true)
+            setShowDuplicate(true)
+            try {
+                const res = await fetch(`/api/official-exam-submissions?exam_id=${exam.id}`)
+                if (res.ok) {
+                    const submissions = await res.json()
+                    const kkm = exam.subject?.kkm || 75
+                    const studentsList = submissions.map((sub: any) => {
+                        const pct = (sub.total_score || 0) / (sub.max_score || 1) * 100
+                        return {
+                            id: sub.student?.id,
+                            name: sub.student?.user?.full_name,
+                            nis: sub.student?.nis,
+                            score: sub.total_score,
+                            max_score: sub.max_score,
+                            pct,
+                            needsRemedial: pct < kkm
+                        }
+                    })
+                    setRemedialStudents(studentsList)
+                    setSelectedStudentIds(studentsList.filter((s: any) => s.needsRemedial).map((s: any) => s.id))
+                }
+            } catch (err) {
+                console.error("Failed to fetch remedial students", err)
+            } finally {
+                setRemedialLoading(false)
+            }
+        } else {
+            setShowDuplicate(true)
+        }
+    }
+
+    const handleDuplicate = async () => {
+        if (!duplicateExam) return
+        setDuplicating(true)
+        try {
+            const localDate = new Date(duplicateForm.start_time)
+            const payload = {
+                source_exam_id: duplicateExam.id,
+                title: duplicateForm.title,
+                start_time: localDate.toISOString(),
+                duration_minutes: duplicateForm.duration_minutes,
+                target_class_ids: duplicateForm.target_class_ids,
+                is_remedial: duplicateMode === 'REMEDIAL',
+                allowed_student_ids: duplicateMode === 'REMEDIAL' ? selectedStudentIds : null
+            }
+
+            const res = await fetch('/api/official-exams/duplicate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+
+            if (res.ok) {
+                const newExam = await res.json()
+                setShowDuplicate(false)
+                showToast(duplicateMode === 'REMEDIAL' ? 'Ujian remedial berhasil dibuat' : 'Ujian berhasil diduplikasi', 'success')
+                router.push(`/dashboard/admin/uts-uas/${newExam.id}`)
+            } else {
+                const err = await res.json()
+                showToast(err.error || 'Gagal menduplikasi ujian', 'error')
+            }
+        } catch (e) {
+            showToast('Terjadi kesalahan', 'error')
+        } finally {
+            setDuplicating(false)
+        }
     }
 
     const toggleClassSelection = (classId: string) => {
@@ -291,6 +399,11 @@ export default function AdminUtsUasPage() {
                                                     }`}>
                                                     {exam.exam_type}
                                                 </span>
+                                                {exam.is_remedial && (
+                                                    <span className="px-2.5 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full">
+                                                        REMEDIAL
+                                                    </span>
+                                                )}
                                             </div>
                                             <h3 className="font-bold text-text-main dark:text-white text-lg group-hover:text-primary transition-colors line-clamp-2">{exam.title}</h3>
                                         </div>
@@ -365,6 +478,24 @@ export default function AdminUtsUasPage() {
                                                 <Edit3 className="w-4 h-4 mr-1" /> Detail
                                             </Button>
                                         </Link>
+                                        <Button
+                                            variant="outline" size="sm"
+                                            onClick={() => handleOpenDuplicate(exam, 'BIASA')}
+                                            title="Duplikasi Ujian"
+                                            className="text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-blue-200 dark:border-blue-900/30"
+                                        >
+                                            <Copy className="w-4 h-4" />
+                                        </Button>
+                                        {status.label === 'Selesai' && !exam.is_remedial && (
+                                            <Button
+                                                variant="outline" size="sm"
+                                                onClick={() => handleOpenDuplicate(exam, 'REMEDIAL')}
+                                                title="Buat Remedial"
+                                                className="text-orange-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 border-orange-200 dark:border-orange-900/30"
+                                            >
+                                                <RefreshCw className="w-4 h-4" />
+                                            </Button>
+                                        )}
                                         <Button
                                             variant="outline" size="sm"
                                             onClick={() => handleDelete(exam.id)}
@@ -560,6 +691,119 @@ export default function AdminUtsUasPage() {
                         </Button>
                     </div>
                 </div>
+            </Modal>
+
+            {/* Duplicate & Remedial Modal */}
+            <Modal open={showDuplicate} onClose={() => setShowDuplicate(false)} title={duplicateMode === 'REMEDIAL' ? "Buat Ujian Remedial" : "Duplikasi Ujian"}>
+                {duplicateExam && (
+                    <div className="space-y-5">
+                        <div className="flex items-center gap-3 p-3 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 rounded-xl">
+                            <Copy className="w-5 h-5 flex-shrink-0" />
+                            <div className="text-sm">
+                                <div>Sumber: <span className="font-bold">{duplicateExam.title}</span></div>
+                                <div className="text-xs opacity-80">{duplicateExam.question_count} soal akan disalin otomatis</div>
+                            </div>
+                        </div>
+
+                        {/* Title */}
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ujian Baru</label>
+                            <input
+                                type="text"
+                                value={duplicateForm.title}
+                                onChange={(e) => setDuplicateForm({ ...duplicateForm, title: e.target.value })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Judul ujian..."
+                            />
+                        </div>
+
+                        {/* Schedule */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
+                                <input
+                                    type="datetime-local"
+                                    value={duplicateForm.start_time}
+                                    onChange={(e) => setDuplicateForm({ ...duplicateForm, start_time: e.target.value })}
+                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (Menit)</label>
+                                <input
+                                    type="number"
+                                    value={duplicateForm.duration_minutes}
+                                    onChange={(e) => setDuplicateForm({ ...duplicateForm, duration_minutes: parseInt(e.target.value) || 90 })}
+                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                    min={5} max={300}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Remedial Student Selection */}
+                        {duplicateMode === 'REMEDIAL' && (
+                            <div className="pt-2 border-t border-secondary/20">
+                                <div className="flex items-center justify-between mb-3">
+                                    <label className="block text-sm font-bold text-text-main dark:text-white">Pilih Siswa Remedial</label>
+                                    <div className="text-xs text-text-secondary">
+                                        <span className="font-bold text-primary">{selectedStudentIds.length}</span> dari {remedialStudents.length} siswa
+                                    </div>
+                                </div>
+                                
+                                {remedialLoading ? (
+                                    <div className="flex items-center justify-center py-6">
+                                        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                                    </div>
+                                ) : remedialStudents.length === 0 ? (
+                                    <div className="p-4 bg-secondary/5 rounded-xl text-center text-sm text-text-secondary">
+                                        Belum ada data pengumpulan untuk ujian ini.
+                                    </div>
+                                ) : (
+                                    <div className="max-h-60 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                                        {remedialStudents.map(student => (
+                                            <label key={student.id} className="flex items-center gap-3 p-3 rounded-xl border border-secondary/20 hover:border-primary/30 cursor-pointer transition-colors bg-white dark:bg-surface-dark">
+                                                <input 
+                                                    type="checkbox"
+                                                    checked={selectedStudentIds.includes(student.id)}
+                                                    onChange={(e) => {
+                                                        if (e.target.checked) setSelectedStudentIds(prev => [...prev, student.id])
+                                                        else setSelectedStudentIds(prev => prev.filter(id => id !== student.id))
+                                                    }}
+                                                    className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="font-bold text-sm text-text-main dark:text-white truncate">{student.name}</div>
+                                                    <div className="text-xs text-text-secondary">NIS: {student.nis}</div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className={`font-bold text-sm ${student.needsRemedial ? 'text-red-500' : 'text-emerald-500'}`}>
+                                                        {student.score} / {student.max_score}
+                                                    </div>
+                                                    <div className="text-[10px] text-text-secondary">Nilai: {student.pct.toFixed(1)}</div>
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
+                                <div className="mt-2 text-xs text-text-secondary p-2 bg-primary/5 text-primary rounded-lg">
+                                    <span className="font-bold">Info:</span> Siswa yang dipilih akan melihat soal ini di dashboard mereka. Sistem akan secara otomatis mengambil nilai tertinggi antara ujian asli dan remedial.
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex gap-3 pt-4 border-t border-secondary/10">
+                            <Button variant="secondary" onClick={() => setShowDuplicate(false)} className="flex-1">Batal</Button>
+                            <Button
+                                onClick={handleDuplicate}
+                                loading={duplicating}
+                                disabled={!duplicateForm.title || !duplicateForm.start_time || (duplicateMode === 'REMEDIAL' && selectedStudentIds.length === 0)}
+                                className="flex-1"
+                            >
+                                Duplikasi & Buat Ujian
+                            </Button>
+                        </div>
+                    </div>
+                )}
             </Modal>
 
             {/* Toast */}

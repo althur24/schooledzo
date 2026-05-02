@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
             .from('official_exams')
             .select(`
                 *,
-                subject:subjects(id, name),
+                subject:subjects(id, name, kkm),
                 academic_year:academic_years(id, name, is_active),
                 official_exam_questions(id)
             `)
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
             // Get student's class_id
             const { data: student } = await supabase
                 .from('students')
-                .select('class_id')
+                .select('id, class_id')
                 .eq('user_id', user.id)
                 .single()
 
@@ -73,7 +73,15 @@ export async function GET(request: NextRequest) {
             }
             // Only show PUBLISHED (is_active) exams to students
             // Unpublished (draft) exams must never be visible to students
-            result = result.filter((exam: any) => exam.is_active)
+            result = result.filter((exam: any) => {
+                if (!exam.is_active) return false
+                
+                // Remedial visibility rule
+                if (exam.is_remedial && exam.allowed_student_ids && exam.allowed_student_ids.length > 0) {
+                    return student ? exam.allowed_student_ids.includes(student.id) : false
+                }
+                return true
+            })
         } else if (user.role === 'GURU') {
             // Get teacher's teaching assignments (subject_id + class_id combos)
             const { data: teacher } = await supabase
@@ -186,7 +194,7 @@ export async function POST(request: NextRequest) {
             })
             .select(`
                 *,
-                subject:subjects(id, name),
+                subject:subjects(id, name, kkm),
                 academic_year:academic_years(id, name)
             `)
             .single()

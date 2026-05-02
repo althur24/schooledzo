@@ -20,7 +20,7 @@ export default function MapelPage() {
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
     const [editingSubject, setEditingSubject] = useState<Subject | null>(null)
-    const [formData, setFormData] = useState({ name: '', level: 'UMUM' })
+    const [formData, setFormData] = useState({ name: '', level: 'UMUM', kkm: 75 })
     const [saving, setSaving] = useState(false)
 
     // Bulk Upload States
@@ -150,7 +150,7 @@ export default function MapelPage() {
             if (res.ok) {
                 setShowModal(false)
                 setEditingSubject(null)
-                setFormData({ name: '', level: 'UMUM' })
+                setFormData({ name: '', level: 'UMUM', kkm: 75 })
                 fetchSubjects()
             } else {
                 const err = await res.json()
@@ -169,13 +169,13 @@ export default function MapelPage() {
 
     const openEdit = (subject: Subject) => {
         setEditingSubject(subject)
-        setFormData({ name: subject.name, level: subject.level || 'UMUM' })
+        setFormData({ name: subject.name, level: subject.level || 'UMUM', kkm: subject.kkm ?? 75 })
         setShowModal(true)
     }
 
     const openAdd = () => {
         setEditingSubject(null)
-        setFormData({ name: '', level: 'UMUM' })
+        setFormData({ name: '', level: 'UMUM', kkm: 75 })
         setShowModal(true)
     }
 
@@ -489,6 +489,19 @@ export default function MapelPage() {
                             ))}
                         </div>
                         <p className="text-xs text-slate-500 mt-2">UMUM = Mapel dasar yang diajarkan di SMP maupun SMA.</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">KKM (Kriteria Ketuntasan Minimal)</label>
+                        <input
+                            type="number"
+                            value={formData.kkm}
+                            onChange={(e) => setFormData({ ...formData, kkm: parseInt(e.target.value) || 0 })}
+                            className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder-slate-400 transition-all"
+                            placeholder="75"
+                            min={0}
+                            max={100}
+                        />
+                        <p className="text-xs text-slate-500 mt-2">Nilai minimum yang harus dicapai siswa. Default: 75.</p>
                     </div>
                     <div className="flex gap-3 pt-2">
                         <Button type="button" variant="secondary" onClick={() => setShowModal(false)} className="flex-1">

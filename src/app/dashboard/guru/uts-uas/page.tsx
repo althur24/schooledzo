@@ -17,6 +17,7 @@ interface OfficialExam {
     question_count: number
     target_class_ids: string[]
     subject: { id: string; name: string }
+    is_remedial?: boolean
 }
 
 export default function GuruUtsUasPage() {
@@ -121,6 +122,11 @@ export default function GuruUtsUasPage() {
                                                 <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'}`}>
                                                     {exam.exam_type}
                                                 </span>
+                                                {exam.is_remedial && (
+                                                    <span className="px-2.5 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full">
+                                                        REMEDIAL
+                                                    </span>
+                                                )}
                                             </div>
                                             {isLive && (
                                                 <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-1 rounded border border-red-200 uppercase tracking-wider">

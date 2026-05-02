@@ -30,6 +30,9 @@ interface ExamDetail {
     subject: { id: string; name: string }
     target_classes: { id: string; name: string; school_level: string; grade_level: number }[]
     academic_year: { id: string; name: string }
+    is_remedial?: boolean
+    remedial_for_id?: string | null
+    allowed_student_ids?: string[] | null
 }
 
 interface Question {
@@ -483,6 +486,11 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     </button>
                     <div className="flex items-center gap-3">
                         <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'}`}>{exam.exam_type}</span>
+                        {exam.is_remedial && (
+                            <span className="px-3 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-sm font-bold rounded-full">
+                                REMEDIAL
+                            </span>
+                        )}
                         <h1 className="text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
                     </div>
                     <p className="text-sm text-text-secondary mt-1">{exam.subject?.name} • {exam.target_classes?.length || 0} kelas • {questions.length} soal ({totalPoints} poin)</p>

@@ -43,6 +43,7 @@ interface OfficialExam {
     max_violations: number
     question_count: number
     subject: { id: string; name: string }
+    is_remedial?: boolean
 }
 
 interface OfficialSubmission {
@@ -250,6 +251,11 @@ export default function SiswaUlanganPage() {
                                                                 {exam.exam_type === 'UTS' ? <BookOpen className="w-3 h-3 inline mr-1" /> : <GraduationCap className="w-3 h-3 inline mr-1" />}
                                                                 {exam.exam_type}
                                                             </span>
+                                                            {exam.is_remedial && (
+                                                                <span className="px-2.5 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm">
+                                                                    REMEDIAL
+                                                                </span>
+                                                            )}
                                                         </div>
                                                         <h3 className="font-bold text-text-main dark:text-white text-lg">{exam.title}</h3>
                                                     </div>

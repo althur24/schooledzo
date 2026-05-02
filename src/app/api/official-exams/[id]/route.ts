@@ -16,7 +16,7 @@ export async function GET(
             .from('official_exams')
             .select(`
                 *,
-                subject:subjects(id, name),
+                subject:subjects(id, name, kkm),
                 academic_year:academic_years(id, name, is_active),
                 creator:users!official_exams_created_by_fkey(full_name)
             `)
@@ -85,7 +85,7 @@ export async function PUT(
             .eq('id', id)
             .select(`
                 *,
-                subject:subjects(id, name),
+                subject:subjects(id, name, kkm),
                 academic_year:academic_years(id, name)
             `)
             .single()

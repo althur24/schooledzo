@@ -15,6 +15,7 @@ interface WarningItem {
     avg_score: number
     score_count: number
     teaching_assignment_id?: string
+    kkm?: number
 }
 
 interface MyClassItem {
@@ -163,6 +164,11 @@ export default function GuruDashboard() {
                     <span className="px-2 py-0.5 bg-black/5 dark:bg-white/5 rounded text-[10px] font-bold text-text-secondary truncate">
                         {warning.subject_name}
                     </span>
+                    {warning.kkm && (
+                        <span className="px-2 py-0.5 bg-red-50 dark:bg-red-900/20 rounded text-[10px] font-bold text-red-500">
+                            KKM: {warning.kkm}
+                        </span>
+                    )}
                 </div>
             </div>
 

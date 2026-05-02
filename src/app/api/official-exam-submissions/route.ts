@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
                 exam:official_exams(
                     id, title, exam_type, duration_minutes, is_active, subject_id,
                     show_results_immediately, results_released,
-                    subject:subjects(id, name)
+                    subject:subjects(id, name, kkm)
                 )
             `)
             .order('created_at', { ascending: false })
@@ -96,6 +96,61 @@ export async function GET(request: NextRequest) {
             result = result.filter((sub: any) => sub.student?.class_id === classId)
         }
 
+        // If filtering by examId and the user is ADMIN/GURU, fetch remedial submissions and merge by highest score
+        if (examId && (user.role === 'GURU' || user.role === 'ADMIN')) {
+            const { data: remedials } = await supabase
+                .from('official_exams')
+                .select('id')
+                .eq('remedial_for_id', examId)
+
+            if (remedials && remedials.length > 0) {
+                const remedialIds = remedials.map(r => r.id)
+                const { data: remedialSubmissions } = await supabase
+                    .from('official_exam_submissions')
+                    .select(`
+                        *,
+                        student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name)),
+                        exam:official_exams(
+                            id, title, exam_type, duration_minutes, is_active, subject_id,
+                            show_results_immediately, results_released,
+                            subject:subjects(id, name, kkm)
+                        )
+                    `)
+                    .in('exam_id', remedialIds)
+
+                if (remedialSubmissions && remedialSubmissions.length > 0) {
+                    const studentHighestSubmissions = new Map<string, any>()
+
+                    // Add all original submissions first
+                    result.forEach((sub: any) => {
+                        studentHighestSubmissions.set(sub.student?.id, sub)
+                    })
+
+                    // Overwrite if remedial score is higher or equal
+                    remedialSubmissions.forEach((sub: any) => {
+                        const studentId = sub.student?.id
+                        if (!studentId) return
+
+                        const existing = studentHighestSubmissions.get(studentId)
+                        const currentScore = ((sub.total_score || 0) / (sub.max_score || 1))
+                        const existingScore = existing ? ((existing.total_score || 0) / (existing.max_score || 1)) : -1
+
+                        if (currentScore >= existingScore) {
+                            studentHighestSubmissions.set(studentId, sub)
+                        }
+                    })
+
+                    result = Array.from(studentHighestSubmissions.values())
+                    // Sort by submitted_at again just in case (using created_at as backup if needed)
+                    result.sort((a: any, b: any) => {
+                        const dateA = a.submitted_at ? new Date(a.submitted_at).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);
+                        const dateB = b.submitted_at ? new Date(b.submitted_at).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
+                        return dateB - dateA;
+                    });
+                }
+            }
+        }
+
         // Apply visibility rules for SISWA
         if (user.role === 'SISWA') {
             result = result.map((sub: any) => {
@@ -167,6 +222,13 @@ export async function POST(request: NextRequest) {
         // Check if student's class is in target_class_ids
         if (!exam.target_class_ids?.includes(student.class_id)) {
             return NextResponse.json({ error: 'Anda tidak terdaftar dalam ujian ini' }, { status: 403 })
+        }
+
+        // C3 Hotfix: Remedial guard
+        if (exam.is_remedial && exam.allowed_student_ids && exam.allowed_student_ids.length > 0) {
+            if (!exam.allowed_student_ids.includes(student.id)) {
+                return NextResponse.json({ error: 'Anda tidak terdaftar untuk ujian remedial ini' }, { status: 403 })
+            }
         }
 
         // Check start time

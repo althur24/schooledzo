@@ -65,13 +65,13 @@ export async function POST(request: NextRequest) {
 
         if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-        const { name, level } = await request.json()
+        const { name, level, kkm } = await request.json()
 
         if (!name) return NextResponse.json({ error: 'Nama mata pelajaran harus diisi' }, { status: 400 })
 
         const { data, error } = await supabase
             .from('subjects')
-            .insert({ name, level: level || 'UMUM', school_id: schoolId })
+            .insert({ name, level: level || 'UMUM', kkm: kkm ?? 75, school_id: schoolId })
             .select()
             .single()
 
