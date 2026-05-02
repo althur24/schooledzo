@@ -256,27 +256,33 @@ export default function TakeOfficialExamPage() {
     }, [submission, timeLeft > 0])
 
     // Tab lock — multi-layered violation detection for PWA + browser
+    // Strategy: DEFER violations until user returns. This prevents false positives
+    // from screen sleep/off which also triggers visibilitychange.
     const pendingViolationRef = useRef(false)
     const violationCooldownRef = useRef(false)
     const isFullscreenTransition = useRef(false)
+    const hiddenAtRef = useRef<number>(0)
+    const SLEEP_THRESHOLD_MS = 30000 // 30 seconds — beyond this, assume sleep/screen-off
 
-    const triggerViolation = useCallback(async (type: string) => {
-        // Prevent rapid-fire duplicate violations & fullscreen transition false positives
+    const handleReturnFromHidden = useCallback(async () => {
+        const hiddenDuration = Date.now() - hiddenAtRef.current
+        hiddenAtRef.current = 0
+
+        if (hiddenDuration > SLEEP_THRESHOLD_MS || hiddenDuration <= 0) {
+            // Hidden for >30s = likely sleep/screen-off, NOT a tab switch — skip violation
+            return
+        }
+
+        // Short switch = real tab switch — log the violation now
         if (violationCooldownRef.current || isFullscreenTransition.current) return
         violationCooldownRef.current = true
         setTimeout(() => { violationCooldownRef.current = false }, 5000)
 
-        pendingViolationRef.current = true
-        await logViolation(type)
+        await logViolation('TAB_SWITCH')
+        // Show warning after logging
+        setShowViolationWarning(true)
+        setTimeout(() => setShowViolationWarning(false), 4000)
     }, [submission, forceSubmitted])
-
-    const showReturnWarning = useCallback(() => {
-        if (pendingViolationRef.current) {
-            pendingViolationRef.current = false
-            setShowViolationWarning(true)
-            setTimeout(() => setShowViolationWarning(false), 4000)
-        }
-    }, [])
 
     useEffect(() => {
         if (!submission || submission.is_submitted) return
@@ -284,21 +290,24 @@ export default function TakeOfficialExamPage() {
         // Method 1: Page Visibility API (works for browser tab switches)
         const handleVisibility = () => {
             if (document.hidden) {
-                triggerViolation('TAB_SWITCH')
+                // Only record timestamp — don't send violation yet
+                hiddenAtRef.current = Date.now()
             } else {
-                showReturnWarning()
+                // Page became visible again — now decide if it was a real violation
+                handleReturnFromHidden()
             }
         }
 
         // Method 2: Window blur/focus (works for PWA standalone + Alt+Tab)
         const handleWindowBlur = () => {
             if (document.hidden) return // Already handled by visibilitychange
-            triggerViolation('TAB_SWITCH')
+            // Record timestamp for blur without visibility change
+            if (hiddenAtRef.current === 0) hiddenAtRef.current = Date.now()
         }
         
         const handleWindowFocus = () => {
             if (document.hidden) return // Ignore if still hidden
-            showReturnWarning()
+            if (hiddenAtRef.current > 0) handleReturnFromHidden()
         }
 
         const handleBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = 'Anda sedang dalam ujian!' }
@@ -326,7 +335,7 @@ export default function TakeOfficialExamPage() {
             document.removeEventListener('copy', handleCopy)
             document.removeEventListener('keydown', handleKeyDown)
         }
-    }, [submission, triggerViolation, showReturnWarning])
+    }, [submission, handleReturnFromHidden])
 
     const logViolation = async (type: string) => {
         if (!submission || submission.is_submitted || forceSubmitted) return

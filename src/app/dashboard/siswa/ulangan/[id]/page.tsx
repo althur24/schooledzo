@@ -364,25 +364,37 @@ export default function TakeExamPage() {
     }, [submission, timeLeft > 0])
 
     // Tab lock: detect visibility change
+    // Strategy: DEFER violations until user returns. This prevents false positives
+    // from screen sleep/off which also triggers visibilitychange.
     const pendingViolationRef = useRef(false)
     const violationCooldownRef = useRef(false)
     const isFullscreenTransition = useRef(false)
+    const hiddenAtRef = useRef<number>(0)
+    const SLEEP_THRESHOLD_MS = 30000 // 30 seconds — beyond this, assume sleep/screen-off
 
     useEffect(() => {
         if (!submission || submission.is_submitted) return
 
         const handleVisibilityChange = async () => {
             if (document.hidden) {
-                // User switched tab or minimized
+                // Only record timestamp — don't send violation yet
+                hiddenAtRef.current = Date.now()
+            } else {
+                // Page became visible — now decide if it was a real violation
+                const hiddenDuration = Date.now() - hiddenAtRef.current
+                hiddenAtRef.current = 0
+
+                if (hiddenDuration > SLEEP_THRESHOLD_MS || hiddenDuration <= 0) {
+                    // Hidden for >30s = likely sleep/screen-off — skip violation
+                    return
+                }
+
+                // Short switch = real tab switch — log violation now
                 if (violationCooldownRef.current || isFullscreenTransition.current) return
                 violationCooldownRef.current = true
                 setTimeout(() => { violationCooldownRef.current = false }, 5000)
 
-                pendingViolationRef.current = true
                 await logViolation('TAB_SWITCH')
-            } else if (pendingViolationRef.current) {
-                // Determine show return warning upon return
-                pendingViolationRef.current = false
                 setShowViolationWarning(true)
                 setTimeout(() => setShowViolationWarning(false), 4000)
             }
@@ -391,21 +403,29 @@ export default function TakeExamPage() {
         // Method 2: Window blur/focus (works for PWA standalone + Alt+Tab)
         const handleWindowBlur = async () => {
             if (document.hidden) return // Already handled by visibilitychange
+            // Only record timestamp for blur without visibility change
+            if (hiddenAtRef.current === 0) hiddenAtRef.current = Date.now()
+        }
+        
+        const handleWindowFocus = async () => {
+            if (document.hidden) return
+            if (hiddenAtRef.current <= 0) return
+
+            const hiddenDuration = Date.now() - hiddenAtRef.current
+            hiddenAtRef.current = 0
+
+            if (hiddenDuration > SLEEP_THRESHOLD_MS || hiddenDuration <= 0) {
+                // Long absence = sleep/screen-off — skip
+                return
+            }
+
             if (violationCooldownRef.current || isFullscreenTransition.current) return
             violationCooldownRef.current = true
             setTimeout(() => { violationCooldownRef.current = false }, 5000)
 
-            pendingViolationRef.current = true
             await logViolation('TAB_SWITCH')
-        }
-        
-        const handleWindowFocus = () => {
-            if (document.hidden) return
-            if (pendingViolationRef.current) {
-                pendingViolationRef.current = false
-                setShowViolationWarning(true)
-                setTimeout(() => setShowViolationWarning(false), 4000)
-            }
+            setShowViolationWarning(true)
+            setTimeout(() => setShowViolationWarning(false), 4000)
         }
 
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
