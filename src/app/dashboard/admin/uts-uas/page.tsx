@@ -457,9 +457,9 @@ export default function AdminUtsUasPage() {
                                         )}
                                     </div>
 
-                                    <div className="flex gap-2 mt-auto pt-3">
+                                    <div className="flex flex-wrap gap-2 mt-auto pt-3">
                                         {status.label === 'Berlangsung' && (
-                                            <Link href={`/dashboard/admin/uts-uas/${exam.id}/monitor`} className="flex-1">
+                                            <Link href={`/dashboard/admin/uts-uas/${exam.id}/monitor`} className="flex-1 min-w-[120px]">
                                                 <Button variant="outline" size="sm" className="w-full justify-center text-red-600 border-red-200 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-900/20 whitespace-nowrap gap-1.5">
                                                     <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
                                                     Monitor Live
@@ -467,13 +467,13 @@ export default function AdminUtsUasPage() {
                                             </Link>
                                         )}
                                         {status.label === 'Selesai' && (
-                                            <Link href={`/dashboard/admin/uts-uas/${exam.id}#hasil`} className="flex-1">
+                                            <Link href={`/dashboard/admin/uts-uas/${exam.id}#hasil`} className="flex-1 min-w-[80px]">
                                                 <Button variant="outline" size="sm" className="w-full justify-center text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:border-emerald-900/50 dark:hover:bg-emerald-900/20">
                                                     <BarChart3 className="w-4 h-4 mr-1" /> Hasil
                                                 </Button>
                                             </Link>
                                         )}
-                                        <Link href={`/dashboard/admin/uts-uas/${exam.id}`} className="flex-1">
+                                        <Link href={`/dashboard/admin/uts-uas/${exam.id}`} className="flex-1 min-w-[80px]">
                                             <Button variant="outline" size="sm" className="w-full justify-center border-primary/20 text-primary hover:bg-primary/5">
                                                 <Edit3 className="w-4 h-4 mr-1" /> Detail
                                             </Button>
