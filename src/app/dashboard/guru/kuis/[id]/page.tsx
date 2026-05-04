@@ -298,7 +298,9 @@ export default function EditQuizPage() {
                     points: editForm.points,
                     image_url: editForm.image_url,
                     teacher_hots_claim: editForm.teacher_hots_claim || false,
-                    text_direction: editForm.text_direction || 'ltr'
+                    text_direction: editForm.text_direction || 'ltr',
+                    passage_text: editForm.passage_text || null,
+                    passage_audio_url: (editForm as any).passage_audio_url || null
                 })
             })
             setEditingQuestionId(null)
@@ -1001,7 +1003,7 @@ export default function EditQuizPage() {
             {/* Edit Question Modal */}
             {editingQuestionId && editForm && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+                    <Card className="w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
                         <div className="flex items-center justify-between mb-6">
                             <h2 className="text-xl font-bold text-text-main dark:text-white flex items-center gap-2"><Edit set="bold" primaryColor="currentColor" size={24} /> Edit Soal</h2>
                             <Button
@@ -1090,17 +1092,23 @@ export default function EditQuizPage() {
 
                             {/* Passage Text / Audio (if exists) */}
                             {(editForm.passage_text || (editForm as any).passage_audio_url) && (
-                                <div className="p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-lg">
+                                <div className="p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-lg space-y-2">
                                     {(editForm as any).passage_audio_url && (
                                         <>
-                                            <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-1">🎧 Audio (read-only):</p>
+                                            <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-1">🎧 Audio:</p>
                                             <audio controls controlsList="nodownload" className="w-full mb-2" src={(editForm as any).passage_audio_url} />
                                         </>
                                     )}
-                                    {editForm.passage_text && (
+                                    {editForm.passage_text !== undefined && (
                                         <>
-                                            <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1 flex items-center gap-1"><Document set="bold" primaryColor="currentColor" size={12} /> Bacaan (read-only):</p>
-                                            <p className="text-sm text-text-main dark:text-white line-clamp-3">{editForm.passage_text}</p>
+                                            <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1">📖 Bacaan:</p>
+                                            <textarea
+                                                value={editForm.passage_text || ''}
+                                                onChange={(e) => setEditForm({ ...editForm, passage_text: e.target.value || null })}
+                                                className="w-full px-3 py-2 bg-white dark:bg-zinc-800 border border-teal-300 dark:border-teal-700 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 min-h-[80px]"
+                                                placeholder="Edit teks bacaan..."
+                                                rows={4}
+                                            />
                                         </>
                                     )}
                                 </div>

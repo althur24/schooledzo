@@ -1238,7 +1238,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
             )}
 
             {/* Edit Question Modal */}
-            <Modal open={!!editingQuestionId} onClose={() => { setEditingQuestionId(null); setEditQuestionForm(null) }} title="✏️ Edit Soal">
+            <Modal open={!!editingQuestionId} onClose={() => { setEditingQuestionId(null); setEditQuestionForm(null) }} title="✏️ Edit Soal" maxWidth="2xl">
                 {editQuestionForm && (
                     <div className="space-y-4">
                         <div className="flex items-center gap-4">
