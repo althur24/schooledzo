@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import SmartText from '@/components/SmartText'
+import PassageBlock from '@/components/PassageBlock'
 import { TimeCircle, TickSquare, CloseSquare } from 'react-iconly'
 import { Eye, X } from 'lucide-react'
 
@@ -134,10 +135,7 @@ export default function PreviewModal({
                                             <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-2">🎧 Listening</p>
                                             <audio controls controlsList="nodownload" className="w-full mb-2" src={item.audioUrl} />
                                             {item.passageText && (
-                                                <>
-                                                    <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1 mt-3">📖 Bacaan:</p>
-                                                    <SmartText text={item.passageText} className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed" />
-                                                </>
+                                                <PassageBlock text={item.passageText} />
                                             )}
                                         </div>
                                         <div className="divide-y divide-violet-100 dark:divide-violet-800">
@@ -191,9 +189,8 @@ export default function PreviewModal({
                                 return (
                                     <div key={qId} className="bg-surface-light dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-6">
                                         {q.passage_text && !q.passage_audio_url && (
-                                            <div className="mb-4 p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl">
-                                                <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-2">📖 Bacaan:</p>
-                                                <SmartText text={q.passage_text} className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed" />
+                                            <div className="mb-4">
+                                                <PassageBlock text={q.passage_text} />
                                             </div>
                                         )}
                                         <div className="flex items-start gap-4 mb-4">

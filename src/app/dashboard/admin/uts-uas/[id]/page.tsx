@@ -364,7 +364,9 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     points: editQuestionForm.points,
                     teacher_hots_claim: editQuestionForm.teacher_hots_claim || false,
                     image_url: editQuestionForm.image_url || null,
-                    text_direction: editQuestionForm.text_direction || 'ltr'
+                    text_direction: editQuestionForm.text_direction || 'ltr',
+                    passage_text: editQuestionForm.passage_text || null,
+                    passage_audio_url: (editQuestionForm as any).passage_audio_url || null
                 })
             })
             setEditingQuestionId(null); setEditQuestionForm(null); fetchQuestions()
@@ -1302,6 +1304,30 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                 )}
                             </div>
                         </div>
+
+                        {/* Passage Text / Audio (if exists) */}
+                        {(editQuestionForm.passage_text || (editQuestionForm as any).passage_audio_url) && (
+                            <div className="p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-lg space-y-2">
+                                {(editQuestionForm as any).passage_audio_url && (
+                                    <>
+                                        <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-1">🎧 Audio:</p>
+                                        <audio controls controlsList="nodownload" className="w-full mb-2" src={(editQuestionForm as any).passage_audio_url} />
+                                    </>
+                                )}
+                                {editQuestionForm.passage_text !== undefined && (
+                                    <>
+                                        <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1">📖 Bacaan:</p>
+                                        <textarea
+                                            value={editQuestionForm.passage_text || ''}
+                                            onChange={(e) => setEditQuestionForm({ ...editQuestionForm, passage_text: e.target.value || null })}
+                                            className="w-full px-3 py-2 bg-white dark:bg-zinc-800 border border-teal-300 dark:border-teal-700 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 min-h-[80px]"
+                                            placeholder="Edit teks bacaan..."
+                                            rows={4}
+                                        />
+                                    </>
+                                )}
+                            </div>
+                        )}
                         {editQuestionForm.question_type === 'MULTIPLE_CHOICE' && editQuestionForm.options && (
                             <>
                                 <div className="grid grid-cols-2 gap-3">

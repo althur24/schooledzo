@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { PageHeader } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
+import PassageBlock from '@/components/PassageBlock'
 import { Star, TickSquare, CloseSquare, Paper } from 'react-iconly'
 
 interface QuizResult {
@@ -238,17 +239,7 @@ export default function HasilKuisPage() {
                                             </>
                                         )}
                                         {group.passage_text && (
-                                            <>
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    <span className="text-indigo-600 dark:text-indigo-400">
-                                                        <Paper set="bold" primaryColor="currentColor" size={18} />
-                                                    </span>
-                                                    <span className="text-sm font-bold text-indigo-700 dark:text-indigo-300">📖 Bacaan</span>
-                                                </div>
-                                                <div className="text-sm text-text-main dark:text-zinc-300 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-2">
-                                                    <SmartText text={group.passage_text} />
-                                                </div>
-                                            </>
+                                            <PassageBlock text={group.passage_text} />
                                         )}
                                     </div>
                                     <div className="space-y-6 pt-2">

@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import SmartText from '@/components/SmartText'
+import PassageBlock from '@/components/PassageBlock'
 import { Danger, TimeCircle, TickSquare } from 'react-iconly'
 
 interface QuizQuestion {
@@ -536,10 +537,7 @@ export default function KerjakanKuisPage() {
                                         <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-2 flex items-center gap-1">🎧 Listening</p>
                                         <audio controls controlsList="nodownload" className="w-full mb-2" src={item.audioUrl} />
                                         {item.passageText && (
-                                            <>
-                                                <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1 mt-3">📖 Bacaan:</p>
-                                                <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed">{item.passageText}</p>
-                                            </>
+                                            <PassageBlock text={item.passageText} />
                                         )}
                                     </div>
                                     {/* Questions in group */}
@@ -596,9 +594,8 @@ export default function KerjakanKuisPage() {
                                 <div key={q.id} className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-3 md:p-6">
                                     {/* Text-only passage (no audio) */}
                                     {q.passage_text && !q.passage_audio_url && (
-                                        <div className="mb-3 p-3 md:p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl">
-                                            <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-2">📖 Bacaan:</p>
-                                            <SmartText text={q.passage_text} className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed" />
+                                        <div className="mb-3">
+                                            <PassageBlock text={q.passage_text} />
                                         </div>
                                     )}
                                     <div className="flex items-center gap-3 mb-3">

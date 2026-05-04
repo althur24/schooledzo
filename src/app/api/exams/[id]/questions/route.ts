@@ -187,7 +187,7 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { question_id, question_text, question_type, options, correct_answer, difficulty, points, image_url, passage_audio_url, teacher_hots_claim, text_direction } = body
+        const { question_id, question_text, question_type, options, correct_answer, difficulty, points, image_url, passage_text, passage_audio_url, teacher_hots_claim, text_direction } = body
 
         if (!question_id) {
             return NextResponse.json({ error: 'question_id required' }, { status: 400 })
@@ -201,6 +201,7 @@ export async function PUT(
         if (difficulty !== undefined) updateData.difficulty = difficulty
         if (points !== undefined) updateData.points = points
         if (image_url !== undefined) updateData.image_url = image_url
+        if (passage_text !== undefined) updateData.passage_text = passage_text
         if (passage_audio_url !== undefined) updateData.passage_audio_url = passage_audio_url
         if (teacher_hots_claim !== undefined) updateData.teacher_hots_claim = teacher_hots_claim
         if (text_direction !== undefined) updateData.text_direction = text_direction
