@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Document, Danger, Scan, TimeCircle, TickSquare } from 'react-iconly'
 import SmartText from '@/components/SmartText'
+import PassageBlock from '@/components/PassageBlock'
 
 interface ExamQuestion {
     id: string
@@ -817,10 +818,7 @@ export default function TakeExamPage() {
                                         <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-2">🎧 Listening</p>
                                         <audio controls controlsList="nodownload" className="w-full mb-2" src={currentItem.audioUrl} />
                                         {currentItem.passageText && (
-                                            <>
-                                                <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1 mt-3">📖 Bacaan:</p>
-                                                <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed">{currentItem.passageText}</p>
-                                            </>
+                                            <PassageBlock text={currentItem.passageText} />
                                         )}
                                     </div>
                                     {/* Questions */}
@@ -872,16 +870,13 @@ export default function TakeExamPage() {
                                         </span>
                                         <span className="text-xs text-text-secondary">({currentItem.question.points} poin)</span>
                                     </div>
+                                    {/* Text-only passage — show BEFORE question */}
+                                    {currentItem.question.passage_text && !currentItem.question.passage_audio_url && (
+                                        <PassageBlock text={currentItem.question.passage_text} />
+                                    )}
                                     <div dir={currentItem.question.text_direction || 'ltr'}>
                                         <SmartText text={currentItem.question.question_text} className="text-text-main dark:text-white text-base md:text-lg mb-4 whitespace-pre-wrap" />
                                     </div>
-                                    {/* Text-only passage */}
-                                    {currentItem.question.passage_text && !currentItem.question.passage_audio_url && (
-                                        <div className="mb-6 p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl">
-                                            <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-2">📖 Bacaan:</p>
-                                            <SmartText text={currentItem.question.passage_text} className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed" />
-                                        </div>
-                                    )}
                                     {currentItem.question.image_url && (
                                         <div className="mb-6">
                                             <img src={currentItem.question.image_url} alt="Gambar soal" className="max-h-48 md:max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />

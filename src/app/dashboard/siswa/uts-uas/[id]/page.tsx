@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Document, Danger, Scan, TimeCircle, TickSquare } from 'react-iconly'
 import SmartText from '@/components/SmartText'
+import PassageBlock from '@/components/PassageBlock'
 import { GraduationCap } from 'lucide-react'
 
 interface ExamQuestion {
@@ -582,10 +583,7 @@ export default function TakeOfficialExamPage() {
                             </div>
 
                             {currentQuestion.passage_text && (
-                                <div className="mb-6 p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl">
-                                    <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-2">📖 Bacaan:</p>
-                                    <SmartText text={currentQuestion.passage_text} className="text-sm text-text-main dark:text-white whitespace-pre-wrap leading-relaxed" />
-                                </div>
+                                <PassageBlock text={currentQuestion.passage_text} />
                             )}
 
                             <div dir={currentQuestion.text_direction || 'ltr'}>
