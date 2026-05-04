@@ -159,7 +159,7 @@ export async function callGemini(req: GeminiRequest): Promise<GeminiResponse> {
         contents: [{ parts }],
         generationConfig: {
             temperature: req.temperature ?? 0.1,
-            maxOutputTokens: req.maxOutputTokens ?? 16384,
+            maxOutputTokens: req.maxOutputTokens ?? 50000,
             responseMimeType: 'application/json',
         },
     })
