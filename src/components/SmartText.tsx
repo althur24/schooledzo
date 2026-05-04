@@ -178,8 +178,22 @@ export default function SmartText({ text, className = '', as: Tag = 'p' }: Smart
         // However, we must be careful not to break LaTeX that might contain * or _
         // So we only replace if it's clearly not inside a LaTeX block
 
-        // First, convert literal \n to <br> and real newlines to <br>
-        html = html.replace(/\\n/g, '<br />').replace(/\n/g, '<br />')
+        // Convert newlines to <br> SAFELY — only outside of HTML tags
+        // KaTeX outputs SVG <path> elements with newlines in their 'd' attribute.
+        // Replacing ALL newlines (including inside SVG) corrupts the rendering.
+        // Solution: only replace newlines that are NOT inside an HTML tag attribute.
+        html = html.replace(/\\n/g, '\n') // normalize literal \n to real newlines first
+        html = html.replace(/\n/g, (match, offset) => {
+            // Check if this newline is inside an HTML tag (between < and >)
+            const before = html.substring(Math.max(0, offset - 500), offset)
+            const lastOpen = before.lastIndexOf('<')
+            const lastClose = before.lastIndexOf('>')
+            if (lastOpen > lastClose) {
+                // We're inside a tag — don't replace
+                return '\n'
+            }
+            return '<br />'
+        })
 
         // Basic Markdown Bold: **text** -> <b>text</b>
         html = html.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')

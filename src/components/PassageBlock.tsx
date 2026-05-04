@@ -16,11 +16,21 @@ interface PassageBlockProps {
  * - Clear visual hierarchy so students know which paragraph is which
  */
 export default function PassageBlock({ text, className = '', showParagraphNumbers = true }: PassageBlockProps) {
-    // Split passage into paragraphs (double newline or multiple newlines)
-    const paragraphs = text
+    // Smart paragraph splitting:
+    // 1. Try double newline first (standard paragraph break)
+    // 2. Fallback to single newline if double newline yields only 1 paragraph
+    let paragraphs = text
         .split(/\n\s*\n/)
         .map(p => p.trim())
         .filter(p => p.length > 0)
+
+    // If only 1 paragraph but text contains single newlines, split on those instead
+    if (paragraphs.length <= 1 && text.includes('\n')) {
+        paragraphs = text
+            .split(/\n/)
+            .map(p => p.trim())
+            .filter(p => p.length > 0)
+    }
 
     const isMultiParagraph = paragraphs.length > 1
 

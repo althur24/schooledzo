@@ -17,6 +17,7 @@ Tugasmu:
 7. Tentukan tingkat kesulitan: "EASY", "MEDIUM", atau "HARD"
 8. JIKA ADA TEKS BACAAN (Passage) untuk beberapa soal (Contoh: "Teks untuk soal no 1-3"):
    - Masukkan teks tersebut ke field "passage_text" untuk SETIAP soal yang relevan.
+   - Dalam passage_text, pisahkan setiap paragraf dengan DUA newline (\\n\\n), BUKAN satu newline.
    - Jangan masukkan teks bacaan ke dalam "question_text".
 
 PENTING — KONTEN KHUSUS:

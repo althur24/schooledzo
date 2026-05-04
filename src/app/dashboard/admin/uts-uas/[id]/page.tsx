@@ -1100,10 +1100,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                             >✕ Hapus</button>
                                                         )}
                                                     </div>
-                                                    <div className="relative">
-                                                        <div className={`absolute ${manualForm.text_direction === 'rtl' ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary`}>{letter}</div>
-                                                        <input dir={manualForm.text_direction || 'ltr'} type="text" value={manualForm.options?.[idx] || ''} onChange={(e) => { const o = [...(manualForm.options || ['','','',''])]; o[idx] = e.target.value; setManualForm({ ...manualForm, options: o }) }} className={`w-full ${manualForm.text_direction === 'rtl' ? 'pr-12 pl-4 text-right' : 'pl-12 pr-4'} py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm`} placeholder={`Jawaban ${letter}`} />
-                                                    </div>
+                                                    <MathTextarea value={manualForm.options?.[idx] || ''} onChange={(val: string) => { const o = [...(manualForm.options || ['','','',''])]; o[idx] = val; setManualForm({ ...manualForm, options: o }) }} placeholder={`Jawaban ${letter}`} rows={1} />
                                                 </div>
                                             )})}
                                         </div>
@@ -1352,10 +1349,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                     >✕ Hapus</button>
                                                 )}
                                             </div>
-                                            <div className="relative">
-                                                <div className={`absolute ${editQuestionForm.text_direction === 'rtl' ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary`}>{letter}</div>
-                                                <input dir={editQuestionForm.text_direction || 'ltr'} type="text" value={editQuestionForm.options?.[idx] || ''} onChange={(e) => { const o = [...(editQuestionForm.options || [])]; o[idx] = e.target.value; setEditQuestionForm({ ...editQuestionForm, options: o }) }} className={`w-full ${editQuestionForm.text_direction === 'rtl' ? 'pr-10 pl-4 text-right' : 'pl-10 pr-4'} py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm`} placeholder={`Opsi ${letter}`} />
-                                            </div>
+                                            <MathTextarea value={editQuestionForm.options?.[idx] || ''} onChange={(val: string) => { const o = [...(editQuestionForm.options || [])]; o[idx] = val; setEditQuestionForm({ ...editQuestionForm, options: o }) }} placeholder={`Opsi ${letter}`} rows={1} />
                                         </div>
                                     )})}
                                 </div>

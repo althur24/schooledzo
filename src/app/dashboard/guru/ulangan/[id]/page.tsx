@@ -1352,12 +1352,11 @@ export default function EditExamPage() {
                                 <div>
                                     <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Teks Soal</label>
                                     <div dir={editQuestionForm.text_direction || 'ltr'}>
-                                        <textarea
+                                        <MathTextarea
                                             value={editQuestionForm.question_text}
-                                            onChange={(e) => setEditQuestionForm({ ...editQuestionForm, question_text: e.target.value })}
-                                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/30 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                                            rows={4}
+                                            onChange={(val: string) => setEditQuestionForm({ ...editQuestionForm, question_text: val })}
                                             placeholder="Masukkan teks soal..."
+                                            rows={4}
                                         />
                                     </div>
                                 </div>
@@ -1408,46 +1407,48 @@ export default function EditExamPage() {
                                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pilihan Jawaban</label>
                                         <div className="space-y-2">
                                             {editQuestionForm.options.map((opt, optIdx) => (
-                                                <div key={optIdx} className="flex items-center gap-2">
-                                                    <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${editQuestionForm.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300'}`}>
-                                                        {String.fromCharCode(65 + optIdx)}
-                                                    </span>
-                                                    <input
-                                                        dir={editQuestionForm.text_direction || 'ltr'}
-                                                        type="text"
-                                                        value={opt}
-                                                        onChange={(e) => {
-                                                            const newOptions = [...editQuestionForm.options!]
-                                                            newOptions[optIdx] = e.target.value
-                                                            setEditQuestionForm({ ...editQuestionForm, options: newOptions })
-                                                        }}
-                                                        className={`flex-1 px-4 py-2 bg-secondary/5 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary ${editQuestionForm.text_direction === 'rtl' ? 'text-right' : ''}`}
-                                                        placeholder={`Pilihan ${String.fromCharCode(65 + optIdx)}`}
-                                                    />
-                                                    <button
-                                                        onClick={() => setEditQuestionForm({ ...editQuestionForm, correct_answer: String.fromCharCode(65 + optIdx) })}
-                                                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${editQuestionForm.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300 hover:bg-green-500/20'}`}
-                                                    >
-                                                        {editQuestionForm.correct_answer === String.fromCharCode(65 + optIdx) ? '✓ Benar' : 'Set Benar'}
-                                                    </button>
-                                                    {editQuestionForm.options!.length > 2 && (
+                                                <div key={optIdx} className="space-y-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${editQuestionForm.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300'}`}>
+                                                            {String.fromCharCode(65 + optIdx)}
+                                                        </span>
+                                                        <div className="flex-1">
+                                                            <MathTextarea
+                                                                value={opt}
+                                                                onChange={(val: string) => {
+                                                                    const newOptions = [...editQuestionForm.options!]
+                                                                    newOptions[optIdx] = val
+                                                                    setEditQuestionForm({ ...editQuestionForm, options: newOptions })
+                                                                }}
+                                                                placeholder={`Pilihan ${String.fromCharCode(65 + optIdx)}`}
+                                                                rows={1}
+                                                            />
+                                                        </div>
                                                         <button
-                                                            onClick={() => {
-                                                                const newOptions = [...editQuestionForm.options!]
-                                                                newOptions.splice(optIdx, 1)
-                                                                let newCorrectAnswer = editQuestionForm.correct_answer
-                                                                if (newCorrectAnswer) {
-                                                                    const charCode = newCorrectAnswer.charCodeAt(0) - 65
-                                                                    if (charCode === optIdx) newCorrectAnswer = ''
-                                                                    else if (charCode > optIdx) newCorrectAnswer = String.fromCharCode(charCode + 65 - 1)
-                                                                }
-                                                                setEditQuestionForm({ ...editQuestionForm, options: newOptions, correct_answer: newCorrectAnswer })
-                                                            }}
-                                                            className="px-3 py-2 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
+                                                            onClick={() => setEditQuestionForm({ ...editQuestionForm, correct_answer: String.fromCharCode(65 + optIdx) })}
+                                                            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex-shrink-0 ${editQuestionForm.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300 hover:bg-green-500/20'}`}
                                                         >
-                                                            ✕
+                                                            {editQuestionForm.correct_answer === String.fromCharCode(65 + optIdx) ? '✓ Benar' : 'Set Benar'}
                                                         </button>
-                                                    )}
+                                                        {editQuestionForm.options!.length > 2 && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    const newOptions = [...editQuestionForm.options!]
+                                                                    newOptions.splice(optIdx, 1)
+                                                                    let newCorrectAnswer = editQuestionForm.correct_answer
+                                                                    if (newCorrectAnswer) {
+                                                                        const charCode = newCorrectAnswer.charCodeAt(0) - 65
+                                                                        if (charCode === optIdx) newCorrectAnswer = ''
+                                                                        else if (charCode > optIdx) newCorrectAnswer = String.fromCharCode(charCode + 65 - 1)
+                                                                    }
+                                                                    setEditQuestionForm({ ...editQuestionForm, options: newOptions, correct_answer: newCorrectAnswer })
+                                                                }}
+                                                                className="px-3 py-2 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors flex-shrink-0"
+                                                            >
+                                                                ✕
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             ))}
                                             {editQuestionForm.options.length < 6 && (
