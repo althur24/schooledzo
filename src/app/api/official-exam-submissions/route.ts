@@ -96,6 +96,59 @@ export async function GET(request: NextRequest) {
             result = result.filter((sub: any) => sub.student?.class_id === classId)
         }
 
+        // Server-side auto-submit: detect and submit expired but unsubmitted entries
+        // This catches submissions where the student's browser closed before auto-submit could fire
+        if (user.role === 'GURU' || user.role === 'ADMIN') {
+            const now = Date.now()
+            const expiredSubs = result.filter((sub: any) => {
+                if (sub.is_submitted) return false
+                const examObj = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
+                if (!examObj?.duration_minutes || !sub.started_at) return false
+                const startedAt = new Date(sub.started_at).getTime()
+                const endTime = startedAt + examObj.duration_minutes * 60 * 1000
+                return now > endTime
+            })
+
+            if (expiredSubs.length > 0) {
+                for (const sub of expiredSubs) {
+                    const examObj = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
+                    const durationMs = examObj.duration_minutes * 60 * 1000
+                    const startedAt = new Date(sub.started_at).getTime()
+                    const expectedSubmittedAt = new Date(startedAt + durationMs).toISOString()
+
+                    // Calculate score from existing answers
+                    const { data: existingAnswers } = await supabase
+                        .from('official_exam_answers')
+                        .select('points_earned')
+                        .eq('submission_id', sub.id)
+                    const totalScore = existingAnswers?.reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) || 0
+
+                    // Check if exam has essays
+                    const { data: examQuestions } = await supabase
+                        .from('official_exam_questions')
+                        .select('question_type')
+                        .eq('exam_id', sub.exam_id)
+                    const hasEssays = examQuestions?.some((q: any) => q.question_type === 'ESSAY') || false
+
+                    await supabase
+                        .from('official_exam_submissions')
+                        .update({
+                            is_submitted: true,
+                            submitted_at: expectedSubmittedAt,
+                            total_score: totalScore,
+                            is_graded: !hasEssays
+                        })
+                        .eq('id', sub.id)
+
+                    // Update local data so the response reflects the change
+                    sub.is_submitted = true
+                    sub.submitted_at = expectedSubmittedAt
+                    sub.total_score = totalScore
+                    sub.is_graded = !hasEssays
+                }
+            }
+        }
+
         // If filtering by examId and the user is ADMIN/GURU, fetch remedial submissions and merge by highest score
         if (examId && (user.role === 'GURU' || user.role === 'ADMIN')) {
             const { data: remedials } = await supabase
