@@ -229,7 +229,7 @@ export default function SiswaUlanganPage() {
                                 <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
                                     <GraduationCap className="w-5 h-5" />
                                 </div>
-                                <h2 className="text-lg font-bold text-text-main dark:text-white">UTS / UAS</h2>
+                                <h2 className="text-base md:text-lg font-bold text-text-main dark:text-white">UTS / UAS</h2>
                             </div>
                             <div className="grid gap-4 md:grid-cols-2">
                                 {officialExams.map((exam) => {
@@ -238,7 +238,7 @@ export default function SiswaUlanganPage() {
                                     const canStart = status === 'available' || status === 'in_progress'
 
                                     return (
-                                        <div key={exam.id} className="bg-white dark:bg-surface-dark border-2 border-indigo-300 dark:border-indigo-500/40 rounded-xl p-5 hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-500/10 transition-all">
+                                        <div key={exam.id} className="bg-white dark:bg-surface-dark border-2 border-indigo-300 dark:border-indigo-500/40 rounded-xl p-4 md:p-5 hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-500/10 transition-all">
                                             <div className="flex flex-col h-full gap-4">
                                                 <div className="flex items-start justify-between">
                                                     <div className="flex-1">
@@ -257,7 +257,7 @@ export default function SiswaUlanganPage() {
                                                                 </span>
                                                             )}
                                                         </div>
-                                                        <h3 className="font-bold text-text-main dark:text-white text-lg">{exam.title}</h3>
+                                                        <h3 className="font-bold text-text-main dark:text-white text-base md:text-lg">{exam.title}</h3>
                                                     </div>
                                                 </div>
 
@@ -335,7 +335,7 @@ export default function SiswaUlanganPage() {
                                     <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
                                         <div className="text-red-500 dark:text-red-400 flex"><TimeCircle set="bold" primaryColor="currentColor" size={20} /></div>
                                     </div>
-                                    <h2 className="text-lg font-bold text-text-main dark:text-white">Ulangan Harian</h2>
+                                    <h2 className="text-base md:text-lg font-bold text-text-main dark:text-white">Ulangan Harian</h2>
                                 </div>
                             )}
                             <div className="grid gap-4 md:grid-cols-2">
@@ -345,7 +345,7 @@ export default function SiswaUlanganPage() {
                                     const canStart = status === 'available' || status === 'in_progress'
 
                                     return (
-                                        <div key={exam.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all cursor-pointer">
+                                        <div key={exam.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-4 md:p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all cursor-pointer">
                                             <div className="flex flex-col h-full gap-4">
                                                 <div className="flex items-start justify-between">
                                                     <div className="flex-1">
@@ -355,7 +355,7 @@ export default function SiswaUlanganPage() {
                                                                 {label}
                                                             </span>
                                                         </div>
-                                                        <h3 className="font-bold text-text-main dark:text-white text-lg">{exam.title}</h3>
+                                                        <h3 className="font-bold text-text-main dark:text-white text-base md:text-lg">{exam.title}</h3>
                                                     </div>
                                                 </div>
 

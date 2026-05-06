@@ -490,11 +490,11 @@ export default function SiswaDashboard() {
     }
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-500">
+        <div className="space-y-5 md:space-y-8 animate-in fade-in duration-500">
             {/* Header Area */}
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl lg:text-4xl font-black text-text-main dark:text-white tracking-tight">
+                    <h1 className="text-2xl md:text-3xl lg:text-4xl font-black text-text-main dark:text-white tracking-tight">
                         Halo, <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-blue-500">{user?.full_name?.split(' ')[0] || 'Siswa'}</span> 👋
                     </h1>
                     <p className="text-text-secondary dark:text-zinc-400 mt-2 font-medium">
@@ -525,7 +525,7 @@ export default function SiswaDashboard() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 md:gap-8">
                 {/* Left Column: Upcoming Deadlines */}
                 <div className="xl:col-span-7 space-y-6">
                     <div className="flex items-center justify-between border-b-2 border-amber-500/20 pb-4">
@@ -533,7 +533,7 @@ export default function SiswaDashboard() {
                             <div className="p-2 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl text-white shadow-lg shadow-amber-500/20">
                                 <Danger set="bold" size={24} />
                             </div>
-                            <h2 className="text-2xl font-bold text-text-main dark:text-white tracking-tight">Belum Dikerjakan</h2>
+                            <h2 className="text-xl md:text-2xl font-bold text-text-main dark:text-white tracking-tight">Belum Dikerjakan</h2>
                         </div>
                         {!loading && upcomingDeadlines.length > 0 && (
                             <div className="bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 text-xs font-bold px-3 py-1.5 rounded-full border border-amber-200 dark:border-amber-800 animate-pulse">
@@ -564,7 +564,7 @@ export default function SiswaDashboard() {
                                             <div className={`absolute top-0 right-0 w-32 h-32 ${styles.glow} rounded-bl-full -z-10 transition-transform group-hover:scale-110`}></div>
 
                                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 flex-1">
-                                                <div className="max-w-[70%]">
+                                                <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 mb-2">
                                                         <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wider ${styles.badge}`}>
                                                             {item.type}
@@ -626,7 +626,7 @@ export default function SiswaDashboard() {
                             <div className="p-2 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-xl text-white shadow-lg shadow-blue-500/20">
                                 <Calendar set="bold" size={24} />
                             </div>
-                            <h2 className="text-2xl font-bold text-text-main dark:text-white tracking-tight">Pelajaran Hari Ini</h2>
+                            <h2 className="text-xl md:text-2xl font-bold text-text-main dark:text-white tracking-tight">Pelajaran Hari Ini</h2>
                         </div>
                     </div>
 
@@ -713,7 +713,7 @@ export default function SiswaDashboard() {
                             <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl text-white shadow-lg shadow-purple-500/20">
                                 <Megaphone className="w-6 h-6" />
                             </div>
-                            <h2 className="text-2xl font-bold text-text-main dark:text-white tracking-tight">Pengumuman</h2>
+                            <h2 className="text-xl md:text-2xl font-bold text-text-main dark:text-white tracking-tight">Pengumuman</h2>
                         </div>
                         <div className="bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 text-xs font-bold px-3 py-1.5 rounded-full border border-purple-200 dark:border-purple-800">
                             {announcements.length} Pengumuman

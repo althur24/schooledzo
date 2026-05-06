@@ -287,11 +287,11 @@ export default function SiswaMateriPage() {
                             <ArrowLeft set="bold" primaryColor="currentColor" size={24} />
                         </a>
                         <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-3 mb-2">
                                 <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
                                     <div className="text-blue-600 dark:text-blue-400 flex"><Document set="bold" primaryColor="currentColor" size="small" /></div>
                                 </div>
-                                <h1 className="text-2xl font-bold text-text-main dark:text-white">Materi Pembelajaran</h1>
+                                <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">Materi Pembelajaran</h1>
                             </div>
                             <p className="text-text-secondary dark:text-[#A8BC9F] ml-12">Pilih mata pelajaran untuk melihat materi</p>
                         </div>
@@ -305,17 +305,16 @@ export default function SiswaMateriPage() {
                 </div>
 
                 {/* Search Bar - Disabled if offline since mostly small dataset */}
-                <Card className="p-6 bg-gradient-to-r from-secondary/10 to-primary/5 border-secondary/20">
-                    <label className="block text-sm font-bold text-text-main dark:text-white mb-3">🔍 Cari Mata Pelajaran</label>
+                <Card className="p-4 md:p-6 bg-gradient-to-r from-secondary/10 to-primary/5 border-secondary/20">
                     <div className="relative">
                         <input
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Ketik nama mata pelajaran (contoh: Biologi)..."
-                            className="w-full px-5 py-4 pl-12 bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl text-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary shadow-sm"
+                            className="w-full px-4 py-3 pl-10 md:px-5 md:py-4 md:pl-12 bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl text-base md:text-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary shadow-sm"
                         />
-                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary">
+                        <div className="absolute left-3 md:left-4 top-1/2 -translate-y-1/2 text-text-secondary">
                             <Search set="light" primaryColor="currentColor" size={24} />
                         </div>
                     </div>
@@ -328,7 +327,7 @@ export default function SiswaMateriPage() {
                         description={isOffline ? 'Anda sedang offline dan tidak ada materi yang disimpan ke perangkat ini.' : (searchQuery ? 'Tidak ada mata pelajaran yang cocok.' : 'Belum ada materi pelajaran yang tersedia.')}
                     />
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                         {filteredSubjects.map((group) => (
                             <Card
                                 key={group.subjectName}
@@ -338,7 +337,7 @@ export default function SiswaMateriPage() {
                                     <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-primary-dark flex items-center justify-center text-white mb-4 shadow-lg shadow-primary/20 group-hover:scale-110 transition-transform">
                                         <Document set="bold" primaryColor="currentColor" size={32} />
                                     </div>
-                                    <h3 className="text-xl font-bold text-text-main dark:text-white mb-2 group-hover:text-primary transition-colors">
+                                    <h3 className="text-lg md:text-xl font-bold text-text-main dark:text-white mb-2 group-hover:text-primary transition-colors">
                                         {group.subjectName}
                                     </h3>
                                     <p className="text-sm text-text-secondary dark:text-[#A8BC9F] flex items-center gap-2">
@@ -379,9 +378,9 @@ export default function SiswaMateriPage() {
 
     // View 2: Material List for Selected Subject
     return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between gap-4 bg-white dark:bg-surface-dark p-6 rounded-3xl shadow-soft">
-                <div className="flex items-center gap-4">
+        <div className="space-y-6 animate-in fade-in duration-500">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white dark:bg-surface-dark p-4 md:p-6 rounded-3xl shadow-soft">
+                <div className="flex items-center gap-4 w-full">
                     <button
                         onClick={() => setSelectedSubject(null)}
                         className="w-10 h-10 rounded-full bg-secondary/10 hover:bg-secondary/20 text-text-secondary dark:text-[#A8BC9F] flex items-center justify-center transition-colors scroll-smooth"
@@ -389,7 +388,8 @@ export default function SiswaMateriPage() {
                         <ArrowLeft set="bold" primaryColor="currentColor" size={24} />
                     </button>
                     <div>
-                        <h1 className="text-2xl font-bold text-text-main dark:text-white leading-tight">{selectedSubject.subjectName}</h1>
+                        <div className="text-primary font-bold text-sm mb-1 uppercase tracking-wider opacity-80">Mata Pelajaran</div>
+                        <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white leading-tight">{selectedSubject.subjectName}</h1>
                         <p className="text-text-secondary dark:text-[#A8BC9F] text-sm">Daftar Materi Pembelajaran</p>
                     </div>
                 </div>

@@ -199,26 +199,26 @@ export default function SiswaNilaiPage() {
                     <div>
                         <div className="flex items-center gap-2">
                             <div className="text-primary flex"><Chart set="bold" primaryColor="currentColor" size="large" /></div>
-                            <h1 className="text-2xl font-bold text-text-main dark:text-white">Nilai Saya</h1>
+                            <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">Nilai Saya</h1>
                         </div>
                         <p className="text-text-secondary dark:text-zinc-400">Pilih mata pelajaran untuk lihat detail nilai</p>
                     </div>
                 </div>
 
                 {groupedGrades.length === 0 ? (
-                    <div className="bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl p-12 text-center text-text-secondary dark:text-zinc-500 shadow-sm flex flex-col items-center gap-4">
+                    <div className="bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl p-6 md:p-12 text-center text-text-secondary dark:text-zinc-500 shadow-sm flex flex-col items-center gap-4">
                         <div className="text-secondary flex"><Chart set="bold" primaryColor="currentColor" size="xlarge" /></div>
                         Belum ada nilai yang tercatat.
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
                         {groupedGrades.map((subject) => {
                             const totalItems = (subject.kuis?.length ?? 0) + (subject.tugas?.length ?? 0) + (subject.ulangan?.length ?? 0) + (subject.utsUas?.length ?? 0)
                             return (
                                 <button
                                     key={subject.subjectName}
                                     onClick={() => { setSelectedSubject(subject); setActiveTab('kuis'); }}
-                                    className="group bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-2xl p-6 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all text-left relative overflow-hidden cursor-pointer"
+                                    className="group bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-2xl p-4 md:p-6 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all text-left relative overflow-hidden cursor-pointer"
                                 >
                                     <div className="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110"></div>
 
@@ -415,7 +415,7 @@ export default function SiswaNilaiPage() {
                     <ArrowLeft set="bold" primaryColor="currentColor" size={24} />
                 </button>
                 <div>
-                    <h1 className="text-2xl font-bold text-text-main dark:text-white">{selectedSubject.subjectName}</h1>
+                    <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{selectedSubject.subjectName}</h1>
                     <p className="text-text-secondary dark:text-zinc-400">Detail Nilai</p>
                 </div>
             </div>

@@ -139,8 +139,8 @@ export default function NotificationBell() {
 
                     {/* Notification panel */}
                     <div className={`
-                        fixed inset-x-3 top-16 z-50
-                        md:absolute md:inset-auto md:right-0 md:top-auto md:mt-2 md:w-80
+                        fixed inset-x-0 top-20 mx-3 z-50
+                        md:absolute md:inset-auto md:right-0 md:top-auto md:mt-2 md:mx-0 md:w-80
                         bg-white dark:bg-surface-dark border border-secondary/20 dark:border-white/10
                         rounded-2xl shadow-2xl overflow-hidden
                         animate-in fade-in slide-in-from-top-2 duration-200

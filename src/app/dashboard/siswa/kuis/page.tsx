@@ -105,7 +105,7 @@ export default function SiswaKuisPage() {
                         const questionCount = quiz.questions?.[0]?.count || 0
 
                         return (
-                            <div key={quiz.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all group cursor-pointer">
+                            <div key={quiz.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-4 md:p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all group cursor-pointer">
                                 <div className="flex flex-col h-full gap-4">
                                     <div className="flex items-start justify-between">
                                         <div className="flex-1">
@@ -124,7 +124,7 @@ export default function SiswaKuisPage() {
                                                     </span>
                                                 )}
                                             </div>
-                                            <h3 className="font-bold text-text-main dark:text-white text-lg group-hover:text-cyan-600 transition-colors">{quiz.title}</h3>
+                                            <h3 className="font-bold text-text-main dark:text-white text-base md:text-lg group-hover:text-cyan-600 transition-colors">{quiz.title}</h3>
                                         </div>
                                     </div>
 
@@ -154,13 +154,13 @@ export default function SiswaKuisPage() {
                                             <div className="flex items-center gap-3">
                                                 <div className="flex-1 p-2 bg-secondary/10 rounded-lg text-center">
                                                     <p className="text-xs text-text-secondary">Nilai</p>
-                                                    <p className="text-xl font-bold text-cyan-600 dark:text-cyan-400">
+                                                    <p className="text-lg md:text-xl font-bold text-cyan-600 dark:text-cyan-400">
                                                         {submission.total_score}/{submission.max_score}
                                                     </p>
                                                 </div>
                                                 <Link
                                                     href={`/dashboard/siswa/kuis/${quiz.id}/hasil`}
-                                                    className="flex-1 px-4 py-3 bg-secondary/20 text-text-main dark:text-white rounded-xl font-bold hover:bg-secondary/30 transition-colors text-center text-sm"
+                                                    className="flex-1 px-3 py-2 md:px-4 md:py-3 bg-secondary/20 text-text-main dark:text-white rounded-xl font-bold hover:bg-secondary/30 transition-colors text-center text-xs md:text-sm"
                                                 >
                                                     Lihat Hasil
                                                 </Link>
@@ -176,7 +176,7 @@ export default function SiswaKuisPage() {
                                                     return (
                                                         <Link
                                                             href={`/dashboard/siswa/kuis/${quiz.id}`}
-                                                            className="w-full block text-center px-6 py-3 bg-secondary/80 text-text-main dark:text-white rounded-xl font-bold hover:bg-secondary transition-all text-sm"
+                                                            className="w-full block text-center px-4 py-2 md:px-6 md:py-3 bg-secondary/80 text-text-main dark:text-white rounded-xl font-bold hover:bg-secondary transition-all text-xs md:text-sm"
                                                         >
                                                             Lihat Hasil
                                                         </Link>
@@ -185,7 +185,7 @@ export default function SiswaKuisPage() {
                                                 return (
                                                     <Link
                                                         href={`/dashboard/siswa/kuis/${quiz.id}`}
-                                                        className="w-full block text-center px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl font-bold shadow-lg shadow-orange-500/20 hover:shadow-orange-500/30 hover:scale-[1.02] transition-all"
+                                                        className="w-full block text-center px-4 py-2.5 md:px-6 md:py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl font-bold shadow-lg shadow-orange-500/20 hover:shadow-orange-500/30 hover:scale-[1.02] transition-all text-sm md:text-base"
                                                     >
                                                         Lanjutkan Kuis
                                                     </Link>
@@ -194,7 +194,7 @@ export default function SiswaKuisPage() {
                                         ) : (
                                             <Link
                                                 href={`/dashboard/siswa/kuis/${quiz.id}`}
-                                                className="w-full block text-center px-6 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-bold shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 hover:scale-[1.02] transition-all"
+                                                className="w-full block text-center px-4 py-2.5 md:px-6 md:py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-bold shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 hover:scale-[1.02] transition-all text-sm md:text-base"
                                             >
                                                 Mulai Kuis
                                             </Link>

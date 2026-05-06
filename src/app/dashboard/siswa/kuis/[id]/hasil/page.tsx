@@ -203,20 +203,20 @@ export default function HasilKuisPage() {
                 <div className="inline-block p-4 rounded-full bg-primary/10 border border-primary/20 mb-4 text-primary">
                     <Star set="bold" primaryColor="currentColor" size={60} />
                 </div>
-                <h2 className="text-2xl font-bold text-text-main dark:text-white">{quiz.title}</h2>
+                <h2 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{quiz.title}</h2>
                 <p className="text-text-secondary">Kuis Selesai Dikerjakan</p>
 
                 <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto mt-6">
                     <Card className="text-center">
                         <p className="text-sm text-text-secondary mb-1">Total Skor</p>
-                        <p className="text-3xl font-bold text-primary">
+                        <p className="text-2xl md:text-3xl font-bold text-primary">
                             {result.total_score}
                             <span className="text-sm text-text-secondary font-normal">/{result.max_score}</span>
                         </p>
                     </Card>
                     <Card className="text-center">
                         <p className="text-sm text-text-secondary mb-1">Status</p>
-                        <p className={`text-lg font-bold ${result.is_graded ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                        <p className={`text-base md:text-lg font-bold ${result.is_graded ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
                             {result.is_graded ? 'Selesai Dinilai' : 'Menunggu Koreksi'}
                         </p>
                     </Card>
@@ -224,7 +224,7 @@ export default function HasilKuisPage() {
             </div>
 
             <div className="border-t border-secondary/20 pt-8 mt-8">
-                <h3 className="text-xl font-bold text-text-main dark:text-white mb-6">Review Jawaban</h3>
+                <h3 className="text-lg md:text-xl font-bold text-text-main dark:text-white mb-6">Review Jawaban</h3>
                 <div className="space-y-4">
                     {questionGroups.map((group, groupIdx) => {
                         if (group.passage_text || group.passage_audio_url) {
@@ -263,7 +263,7 @@ export default function HasilKuisPage() {
             <div className="flex justify-center pt-8 pb-12">
                 <Link
                     href="/dashboard/siswa/kuis"
-                    className="px-8 py-3 bg-primary text-white rounded-xl hover:bg-primary-dark transition-colors font-semibold"
+                    className="px-6 py-2.5 md:px-8 md:py-3 text-sm md:text-base bg-primary text-white rounded-xl hover:bg-primary-dark transition-colors font-semibold"
                 >
                     Kembali ke Daftar Kuis
                 </Link>

@@ -133,7 +133,7 @@ export default function SiswaTugasPage() {
                         const overdue = isOverdue(assignment.due_date)
 
                         return (
-                            <div key={assignment.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all group cursor-pointer">
+                            <div key={assignment.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-4 md:p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all group cursor-pointer">
                                 <div className="flex flex-col h-full gap-4">
                                     <div className="flex items-start justify-between">
                                         <div className="flex-1">
@@ -147,7 +147,7 @@ export default function SiswaTugasPage() {
                                                     {assignment.teaching_assignment?.subject?.name}
                                                 </span>
                                             </div>
-                                            <h3 className="font-bold text-text-main dark:text-white text-lg group-hover:text-primary transition-colors">{assignment.title}</h3>
+                                            <h3 className="font-bold text-text-main dark:text-white text-base md:text-lg group-hover:text-primary transition-colors">{assignment.title}</h3>
                                         </div>
                                     </div>
 

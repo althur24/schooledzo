@@ -117,9 +117,9 @@ export default function ExamResultPage() {
             ) : (
                 <div className={`bg-gradient-to-r ${getGradeColor(percentage)} p-6 rounded-2xl text-white text-center shadow-lg`}>
                     <p className="text-lg opacity-90 mb-2 font-medium">{result.exam?.teaching_assignment?.subject?.name}</p>
-                    <p className="text-6xl font-bold mb-2">{result.total_score}<span className="text-3xl opacity-80">/{result.max_score}</span></p>
-                    <p className="text-2xl font-bold">{percentage}%</p>
-                    <p className="mt-4 text-lg font-medium bg-white/20 inline-block px-4 py-1 rounded-full backdrop-blur-sm">
+                    <p className="text-4xl md:text-6xl font-bold mb-2">{result.total_score}<span className="text-2xl md:text-3xl opacity-80">/{result.max_score}</span></p>
+                    <p className="text-xl md:text-2xl font-bold">{percentage}%</p>
+                    <p className="mt-4 text-base md:text-lg font-medium bg-white/20 inline-block px-4 py-1 rounded-full backdrop-blur-sm">
                         {percentage >= 80 ? '🎉 Excellent!' : percentage >= 60 ? '👍 Good Job!' : percentage >= 40 ? '💪 Keep Trying!' : '📚 Need More Study'}
                     </p>
                 </div>
@@ -131,22 +131,22 @@ export default function ExamResultPage() {
                     <div className="flex justify-center mb-2 text-primary">
                         <TimeCircle set="bold" primaryColor="currentColor" size={24} />
                     </div>
-                    <p className="text-2xl font-bold text-text-main dark:text-white">{formatDuration(result.started_at, result.submitted_at)}</p>
-                    <p className="text-sm text-text-secondary">Waktu Pengerjaan</p>
+                    <p className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{formatDuration(result.started_at, result.submitted_at)}</p>
+                    <p className="text-xs md:text-sm text-text-secondary">Waktu Pengerjaan</p>
                 </Card>
                 <Card className="text-center">
                     <div className="flex justify-center mb-2 text-primary">
                         <Calendar set="bold" primaryColor="currentColor" size={24} />
                     </div>
-                    <p className="text-2xl font-bold text-text-main dark:text-white">{result.exam?.duration_minutes} menit</p>
-                    <p className="text-sm text-text-secondary">Batas Waktu</p>
+                    <p className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{result.exam?.duration_minutes} menit</p>
+                    <p className="text-xs md:text-sm text-text-secondary">Batas Waktu</p>
                 </Card>
                 <Card className={`text-center ${result.violation_count > 0 ? 'border-red-500/50 bg-red-50 dark:bg-red-900/10' : ''}`}>
                     <div className={`flex justify-center mb-2 ${result.violation_count > 0 ? 'text-red-500' : 'text-green-500'}`}>
                         <Danger set="bold" primaryColor="currentColor" size={24} />
                     </div>
-                    <p className={`text-2xl font-bold ${result.violation_count > 0 ? 'text-red-500' : 'text-green-500'}`}>{result.violation_count}</p>
-                    <p className="text-sm text-text-secondary">Pelanggaran</p>
+                    <p className={`text-xl md:text-2xl font-bold ${result.violation_count > 0 ? 'text-red-500' : 'text-green-500'}`}>{result.violation_count}</p>
+                    <p className="text-xs md:text-sm text-text-secondary">Pelanggaran</p>
                 </Card>
             </div>
 

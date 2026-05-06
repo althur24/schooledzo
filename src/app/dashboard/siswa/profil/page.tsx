@@ -81,7 +81,7 @@ export default function ProfilSiswaPage() {
                 icon={<div className="text-violet-500"><User className="w-6 h-6" /></div>}
             />
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
 
                 {/* Info Card */}
                 <div className="lg:col-span-1 border-none shadow-none">
