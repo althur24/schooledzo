@@ -130,92 +130,117 @@ export default function NotificationBell() {
 
             {/* Dropdown */}
             {isOpen && (
-                <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-surface-dark border border-secondary/20 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
-                    {/* Header */}
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-secondary/20 dark:border-white/10">
-                        <h3 className="font-semibold text-text-main dark:text-white">Notifikasi</h3>
-                        {unreadCount > 0 && (
-                            <button
-                                onClick={markAllAsRead}
-                                disabled={loading}
-                                className="text-xs text-primary hover:text-primary/80 disabled:opacity-50"
-                            >
-                                Tandai semua dibaca
-                            </button>
-                        )}
-                    </div>
+                <>
+                    {/* Mobile backdrop */}
+                    <div
+                        className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 md:hidden"
+                        onClick={() => setIsOpen(false)}
+                    />
 
-                    {/* Notifications List */}
-                    <div className="max-h-80 overflow-y-auto">
-                        {notifications.length === 0 ? (
-                            <div className="p-8 text-center text-text-secondary">
-                                <div className="text-4xl mb-2">🔔</div>
-                                <p className="text-sm">Belum ada notifikasi</p>
+                    {/* Notification panel */}
+                    <div className={`
+                        fixed inset-x-3 top-16 z-50
+                        md:absolute md:inset-auto md:right-0 md:top-auto md:mt-2 md:w-80
+                        bg-white dark:bg-surface-dark border border-secondary/20 dark:border-white/10
+                        rounded-2xl shadow-2xl overflow-hidden
+                        animate-in fade-in slide-in-from-top-2 duration-200
+                    `}>
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-secondary/20 dark:border-white/10">
+                            <h3 className="font-semibold text-sm text-text-main dark:text-white">Notifikasi</h3>
+                            <div className="flex items-center gap-3">
+                                {unreadCount > 0 && (
+                                    <button
+                                        onClick={markAllAsRead}
+                                        disabled={loading}
+                                        className="text-xs text-primary hover:text-primary/80 disabled:opacity-50"
+                                    >
+                                        Tandai semua dibaca
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setIsOpen(false)}
+                                    className="md:hidden p-1 rounded-lg text-text-secondary hover:bg-secondary/10 transition-colors"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
                             </div>
-                        ) : (
-                            notifications.map((notification) => (
-                                notification.link ? (
-                                    <Link
-                                        key={notification.id}
-                                        href={notification.link}
-                                        onClick={() => handleNotificationClick(notification)}
-                                        className={`block px-4 py-3 hover:bg-secondary/10 dark:hover:bg-white/5 transition-colors border-b border-secondary/10 dark:border-white/5 ${!notification.is_read ? 'bg-primary/5' : ''}`}
-                                    >
-                                        <div className="flex gap-3">
-                                            <span className="text-xl flex-shrink-0">
-                                                {getNotificationIcon(notification.type as any)}
-                                            </span>
-                                            <div className="flex-1 min-w-0">
-                                                <p className={`text-sm ${!notification.is_read ? 'text-text-main dark:text-white font-medium' : 'text-text-secondary dark:text-zinc-300'}`}>
-                                                    {notification.title}
-                                                </p>
-                                                {notification.message && (
-                                                    <p className="text-xs text-text-secondary dark:text-zinc-400 truncate mt-0.5">
-                                                        {notification.message}
+                        </div>
+
+                        {/* Notifications List */}
+                        <div className="max-h-[60vh] md:max-h-80 overflow-y-auto">
+                            {notifications.length === 0 ? (
+                                <div className="p-8 text-center text-text-secondary">
+                                    <div className="text-4xl mb-2">🔔</div>
+                                    <p className="text-sm">Belum ada notifikasi</p>
+                                </div>
+                            ) : (
+                                notifications.map((notification) => (
+                                    notification.link ? (
+                                        <Link
+                                            key={notification.id}
+                                            href={notification.link}
+                                            onClick={() => handleNotificationClick(notification)}
+                                            className={`block px-4 py-3 hover:bg-secondary/10 dark:hover:bg-white/5 transition-colors border-b border-secondary/10 dark:border-white/5 ${!notification.is_read ? 'bg-primary/5' : ''}`}
+                                        >
+                                            <div className="flex gap-3">
+                                                <span className="text-lg flex-shrink-0">
+                                                    {getNotificationIcon(notification.type as any)}
+                                                </span>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className={`text-sm leading-snug ${!notification.is_read ? 'text-text-main dark:text-white font-medium' : 'text-text-secondary dark:text-zinc-300'}`}>
+                                                        {notification.title}
                                                     </p>
-                                                )}
-                                                <p className="text-xs text-text-secondary/70 dark:text-zinc-500 mt-1">
-                                                    {timeAgo(notification.created_at)}
-                                                </p>
-                                            </div>
-                                            {!notification.is_read && (
-                                                <span className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-2"></span>
-                                            )}
-                                        </div>
-                                    </Link>
-                                ) : (
-                                    <div
-                                        key={notification.id}
-                                        onClick={() => handleNotificationClick(notification)}
-                                        className={`px-4 py-3 cursor-pointer hover:bg-secondary/10 dark:hover:bg-white/5 transition-colors border-b border-secondary/10 dark:border-white/5 ${!notification.is_read ? 'bg-primary/5' : ''}`}
-                                    >
-                                        <div className="flex gap-3">
-                                            <span className="text-xl flex-shrink-0">
-                                                {getNotificationIcon(notification.type as any)}
-                                            </span>
-                                            <div className="flex-1 min-w-0">
-                                                <p className={`text-sm ${!notification.is_read ? 'text-text-main dark:text-white font-medium' : 'text-text-secondary dark:text-zinc-300'}`}>
-                                                    {notification.title}
-                                                </p>
-                                                {notification.message && (
-                                                    <p className="text-xs text-text-secondary dark:text-zinc-400 truncate mt-0.5">
-                                                        {notification.message}
+                                                    {notification.message && (
+                                                        <p className="text-xs text-text-secondary dark:text-zinc-400 truncate mt-0.5">
+                                                            {notification.message}
+                                                        </p>
+                                                    )}
+                                                    <p className="text-xs text-text-secondary/70 dark:text-zinc-500 mt-1">
+                                                        {timeAgo(notification.created_at)}
                                                     </p>
+                                                </div>
+                                                {!notification.is_read && (
+                                                    <span className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-2"></span>
                                                 )}
-                                                <p className="text-xs text-text-secondary/70 dark:text-zinc-500 mt-1">
-                                                    {timeAgo(notification.created_at)}
-                                                </p>
                                             </div>
-                                            {!notification.is_read && (
-                                                <span className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-2"></span>
-                                            )}
+                                        </Link>
+                                    ) : (
+                                        <div
+                                            key={notification.id}
+                                            onClick={() => handleNotificationClick(notification)}
+                                            className={`px-4 py-3 cursor-pointer hover:bg-secondary/10 dark:hover:bg-white/5 transition-colors border-b border-secondary/10 dark:border-white/5 ${!notification.is_read ? 'bg-primary/5' : ''}`}
+                                        >
+                                            <div className="flex gap-3">
+                                                <span className="text-lg flex-shrink-0">
+                                                    {getNotificationIcon(notification.type as any)}
+                                                </span>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className={`text-sm leading-snug ${!notification.is_read ? 'text-text-main dark:text-white font-medium' : 'text-text-secondary dark:text-zinc-300'}`}>
+                                                        {notification.title}
+                                                    </p>
+                                                    {notification.message && (
+                                                        <p className="text-xs text-text-secondary dark:text-zinc-400 truncate mt-0.5">
+                                                            {notification.message}
+                                                        </p>
+                                                    )}
+                                                    <p className="text-xs text-text-secondary/70 dark:text-zinc-500 mt-1">
+                                                        {timeAgo(notification.created_at)}
+                                                    </p>
+                                                </div>
+                                                {!notification.is_read && (
+                                                    <span className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-2"></span>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                )
-                            ))
-                        )}
+                                    )
+                                ))
+                            )}
+                        </div>
                     </div>
-                </div>
+                </>
             )}
         </div>
     )
