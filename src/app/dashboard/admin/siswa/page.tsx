@@ -843,7 +843,7 @@ export default function SiswaPage() {
                         />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">NIS</label>
                             <input
@@ -881,7 +881,7 @@ export default function SiswaPage() {
                             <div className="text-amber-600"><GraduationCap set="bold" primaryColor="currentColor" size={20} /></div>
                             <span className="text-sm font-bold text-amber-800 dark:text-amber-200">Informasi Angkatan</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-text-main dark:text-white mb-2">Angkatan</label>
                                 <div className="relative">

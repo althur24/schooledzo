@@ -190,7 +190,7 @@ export default function WaliKelasStudentDetail() {
                         </div>
                     </div>
                     <div className="text-right">
-                        <div className={`text-3xl font-extrabold ${getScoreColor(overallAvg)}`}>
+                        <div className={`text-2xl md:text-3xl font-extrabold ${getScoreColor(overallAvg)}`}>
                             {overallAvg !== null ? overallAvg : '-'}
                         </div>
                         <div className="text-xs text-text-secondary mt-0.5">Rata-rata</div>

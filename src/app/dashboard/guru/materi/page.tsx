@@ -724,7 +724,7 @@ export default function MateriPage() {
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Konten</label>
-                        <div className="grid grid-cols-4 gap-2">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                             {['TEXT', 'LINK', 'PDF', 'VIDEO'].map((type) => (
                                 <button
                                     key={type}

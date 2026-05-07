@@ -184,7 +184,7 @@ export default function GuruDashboard() {
             {/* Header Area */}
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl lg:text-4xl font-black text-text-main dark:text-white tracking-tight">
+                    <h1 className="text-2xl md:text-3xl lg:text-4xl font-black text-text-main dark:text-white tracking-tight">
                         Selamat Datang, <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-emerald-400">{user?.full_name?.split(' ')[0] || 'Guru'}</span>
                     </h1>
                     <p className="text-text-secondary dark:text-zinc-400 mt-2 font-medium">
@@ -202,7 +202,7 @@ export default function GuruDashboard() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 md:gap-8">
                 {/* Left Column: Schedule (Timeline Style) & Active Exams */}
                 <div className="xl:col-span-7 space-y-6">
 
@@ -224,7 +224,7 @@ export default function GuruDashboard() {
                             
                             <div className="grid gap-4">
                                 {activeOfficialExams.map(exam => (
-                                    <div key={exam.id} className="relative overflow-hidden group p-6 rounded-2xl bg-gradient-to-br from-red-500/5 to-orange-500/5 border border-red-500/20 shadow-sm transition-all hover:border-red-500/40 hover:shadow-md">
+                                    <div key={exam.id} className="relative overflow-hidden group p-4 md:p-6 rounded-2xl bg-gradient-to-br from-red-500/5 to-orange-500/5 border border-red-500/20 shadow-sm transition-all hover:border-red-500/40 hover:shadow-md">
                                         <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
                                         
                                         <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center relative z-10">
@@ -263,11 +263,11 @@ export default function GuruDashboard() {
                         <div className="p-2 bg-gradient-to-br from-blue-500 to-primary rounded-xl text-white shadow-lg shadow-primary/20">
                             <Clock set="bold" size={24} />
                         </div>
-                        <h2 className="text-2xl font-bold text-text-main dark:text-white tracking-tight">Jadwal Mengajar Hari Ini</h2>
+                        <h2 className="text-xl md:text-2xl font-bold text-text-main dark:text-white tracking-tight">Jadwal Mengajar Hari Ini</h2>
                     </div>
 
                     {!loading && todaySchedule.length === 0 ? (
-                        <div className="h-64 flex flex-col items-center justify-center text-center p-8 bg-gradient-to-br from-blue-50/50 to-transparent dark:from-blue-900/10 dark:to-transparent rounded-3xl border border-blue-100 dark:border-blue-900/30">
+                        <div className="h-64 flex flex-col items-center justify-center text-center p-4 md:p-8 bg-gradient-to-br from-blue-50/50 to-transparent dark:from-blue-900/10 dark:to-transparent rounded-3xl border border-blue-100 dark:border-blue-900/30">
                             <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900/30 text-blue-500 rounded-full flex items-center justify-center mb-4">
                                 <Clock set="bold" size={40} />
                             </div>
@@ -351,7 +351,7 @@ export default function GuruDashboard() {
                             <div className="p-2 bg-gradient-to-br from-red-500 to-orange-500 rounded-xl text-white shadow-lg shadow-red-500/20">
                                 <Danger set="bold" size={24} />
                             </div>
-                            <h2 className="text-2xl font-bold text-text-main dark:text-white tracking-tight">Peringatan</h2>
+                            <h2 className="text-xl md:text-2xl font-bold text-text-main dark:text-white tracking-tight">Peringatan</h2>
                         </div>
                         {warnings?.kkm && (
                             <div className="bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 text-xs font-bold px-3 py-1.5 rounded-full border border-red-200 dark:border-red-800">
@@ -400,7 +400,7 @@ export default function GuruDashboard() {
 
                     {/* Warning Content */}
                     {!loading && activeWarnings.length === 0 ? (
-                        <div className="h-52 flex flex-col items-center justify-center text-center p-8 bg-gradient-to-br from-emerald-50/50 to-transparent dark:from-emerald-900/10 dark:to-transparent rounded-3xl border border-emerald-100 dark:border-emerald-900/30">
+                        <div className="h-52 flex flex-col items-center justify-center text-center p-4 md:p-8 bg-gradient-to-br from-emerald-50/50 to-transparent dark:from-emerald-900/10 dark:to-transparent rounded-3xl border border-emerald-100 dark:border-emerald-900/30">
                             <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500 rounded-full flex items-center justify-center mb-4">
                                 <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
                             </div>
@@ -454,7 +454,7 @@ export default function GuruDashboard() {
                         <div className="p-2 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl text-white shadow-lg shadow-purple-500/20">
                             <Category set="bold" size={24} />
                         </div>
-                        <h2 className="text-2xl font-bold text-text-main dark:text-white tracking-tight">Kelas Saya</h2>
+                        <h2 className="text-xl md:text-2xl font-bold text-text-main dark:text-white tracking-tight">Kelas Saya</h2>
                         <span className="px-2.5 py-1 bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400 text-xs font-bold rounded-full">
                             {myClasses.length} Kelas
                         </span>
@@ -518,7 +518,7 @@ export default function GuruDashboard() {
                         </div>
 
                         {/* Modal Body */}
-                        <div className="p-6 max-h-[60vh] overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-700">
+                        <div className="p-4 md:p-6 max-h-[60vh] overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-700">
                             {loadingStudents ? (
                                 <div className="flex flex-col items-center justify-center py-8">
                                     <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>

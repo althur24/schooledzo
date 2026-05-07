@@ -141,19 +141,19 @@ export default function TugasHasilPage() {
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Card className="p-4 flex flex-col items-center justify-center text-center">
-                    <p className="text-3xl font-bold text-purple-500 mb-1">{submissions.length}</p>
+                    <p className="text-2xl md:text-3xl font-bold text-purple-500 mb-1">{submissions.length}</p>
                     <p className="text-xs text-text-secondary font-bold uppercase tracking-wider">Total Submit</p>
                 </Card>
                 <Card className="p-4 flex flex-col items-center justify-center text-center">
-                    <p className="text-3xl font-bold text-blue-500 mb-1">{stats.avg || '-'}</p>
+                    <p className="text-2xl md:text-3xl font-bold text-blue-500 mb-1">{stats.avg || '-'}</p>
                     <p className="text-xs text-text-secondary font-bold uppercase tracking-wider">Rata-rata</p>
                 </Card>
                 <Card className="p-4 flex flex-col items-center justify-center text-center">
-                    <p className="text-3xl font-bold text-green-500 mb-1">{stats.highest || '-'}</p>
+                    <p className="text-2xl md:text-3xl font-bold text-green-500 mb-1">{stats.highest || '-'}</p>
                     <p className="text-xs text-text-secondary font-bold uppercase tracking-wider">Tertinggi</p>
                 </Card>
                 <Card className="p-4 flex flex-col items-center justify-center text-center">
-                    <p className="text-3xl font-bold text-amber-500 mb-1">{submissions.length - stats.count}</p>
+                    <p className="text-2xl md:text-3xl font-bold text-amber-500 mb-1">{submissions.length - stats.count}</p>
                     <p className="text-xs text-text-secondary font-bold uppercase tracking-wider">Belum Dinilai</p>
                 </Card>
             </div>
@@ -260,7 +260,7 @@ export default function TugasHasilPage() {
                                     max="100"
                                     value={grading.score}
                                     onChange={(e) => setGrading({ ...grading, score: e.target.value })}
-                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-3xl font-bold text-center placeholder-text-secondary/30"
+                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-2xl md:text-3xl font-bold text-center placeholder-text-secondary/30"
                                     placeholder="0"
                                     autoFocus
                                 />

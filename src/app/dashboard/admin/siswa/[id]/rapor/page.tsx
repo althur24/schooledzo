@@ -260,7 +260,7 @@ export default function RaporPage({ params }: { params: Promise<{ id: string }> 
                 </div>
 
                 {/* 3. Summary Stats (Mini) */}
-                <div className="grid grid-cols-3 gap-4 mb-8 print:hidden">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8 print:hidden">
                     <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
                             <FileText className="w-5 h-5" />

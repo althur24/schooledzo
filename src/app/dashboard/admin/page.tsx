@@ -232,7 +232,7 @@ export default function AdminDashboard() {
                 <div className="absolute -right-20 -top-20 w-80 h-80 bg-emerald-500/20 rounded-full blur-3xl"></div>
 
                 <div className="relative">
-                    <h1 className="text-3xl font-bold text-white mb-2 leading-tight">
+                    <h1 className="text-2xl md:text-3xl font-bold text-white mb-2 leading-tight">
                         Selamat Datang Admin, {user?.full_name}! 👋
                     </h1>
                     <p className="text-slate-300 text-lg">

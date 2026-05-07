@@ -167,7 +167,7 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
                     <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600' : 'bg-purple-500/10 text-purple-600'}`}>
                         {exam.exam_type}
                     </span>
-                    <h1 className="text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
+                    <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
                 </div>
                 <p className="text-sm text-text-secondary mt-1">{exam.subject?.name} • Hasil Ujian</p>
             </div>
@@ -178,7 +178,7 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600"><Users className="w-5 h-5" /></div>
                         <div>
-                            <p className="text-2xl font-bold text-text-main dark:text-white">{totalSubmitted}</p>
+                            <p className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{totalSubmitted}</p>
                             <p className="text-xs text-text-secondary">Terkumpul</p>
                         </div>
                     </div>
@@ -187,7 +187,7 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600"><AlertTriangle className="w-5 h-5" /></div>
                         <div>
-                            <p className="text-2xl font-bold text-text-main dark:text-white">{pendingGrading}</p>
+                            <p className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{pendingGrading}</p>
                             <p className="text-xs text-text-secondary">Perlu Koreksi</p>
                         </div>
                     </div>
@@ -196,7 +196,7 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600"><BarChart3 className="w-5 h-5" /></div>
                         <div>
-                            <p className="text-2xl font-bold text-text-main dark:text-white">{Math.round(avgScore)}%</p>
+                            <p className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{Math.round(avgScore)}%</p>
                             <p className="text-xs text-text-secondary">Rata-rata Skor</p>
                         </div>
                     </div>

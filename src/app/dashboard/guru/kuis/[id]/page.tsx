@@ -1564,7 +1564,7 @@ export default function EditQuizPage() {
 
                                 {manualForm.question_type === 'MULTIPLE_CHOICE' && (
                                     <>
-                                        <div className="grid grid-cols-2 gap-3">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                             {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                                 <div key={letter} className="flex flex-col">
                                                     <div className="flex items-center justify-between mb-1">
@@ -1628,7 +1628,7 @@ export default function EditQuizPage() {
                                     </>
                                 )}
 
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tingkat Kesulitan <span className="text-red-500">*</span></label>
                                         <select

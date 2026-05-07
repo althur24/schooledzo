@@ -412,7 +412,7 @@ export default function GuruPage() {
                             required
                         />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">NIP</label>
                             <input

@@ -416,7 +416,7 @@ export default function NilaiPage() {
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder="Ketik nama kelas atau mata pelajaran..."
-                                className="w-full px-5 py-4 pl-12 bg-white dark:bg-surface-dark border border-secondary/20 rounded-full text-text-main dark:text-white text-lg focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary/50"
+                                className="w-full px-4 py-3 pl-11 md:px-5 md:py-4 md:pl-12 bg-white dark:bg-surface-dark border border-secondary/20 rounded-full text-text-main dark:text-white text-base md:text-lg focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary/50"
                             />
                             <div className="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary">
                                 <Search set="light" primaryColor="currentColor" size={24} />
@@ -438,13 +438,13 @@ export default function NilaiPage() {
                             {filteredTAs.map((ta) => (
                                 <Card
                                     key={ta.id}
-                                    padding="p-6"
+                                    padding="p-4 md:p-6"
                                     className="hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 transition-all duration-200 cursor-pointer group"
                                     onClick={() => { setSelectedTA(ta.id); setActiveTab('rekap'); setSearchQuery('') }}
                                 >
                                     <div className="flex items-start justify-between mb-4">
                                         <div className="flex-1">
-                                            <h3 className="text-2xl font-bold text-text-main dark:text-white mb-2 group-hover:text-primary transition-colors">
+                                            <h3 className="text-xl md:text-2xl font-bold text-text-main dark:text-white mb-2 group-hover:text-primary transition-colors">
                                                 {ta.class.name}
                                             </h3>
                                             <div className="flex items-center gap-2">
@@ -813,11 +813,11 @@ export default function NilaiPage() {
 
                             {/* Tab: Export */}
                             {activeTab === 'export' && (
-                                <Card padding="p-8" className="text-center flex flex-col items-center justify-center min-h-[400px]">
+                                <Card padding="p-4 md:p-8" className="text-center flex flex-col items-center justify-center min-h-[400px]">
                                     <div className="w-20 h-20 bg-blue-500/10 text-blue-600 rounded-full flex items-center justify-center mb-6 shadow-xl shadow-blue-500/10">
                                         <Download set="bold" primaryColor="currentColor" size={40} />
                                     </div>
-                                    <h3 className="text-2xl font-bold text-text-main dark:text-white mb-2">Export Nilai ke Excel</h3>
+                                    <h3 className="text-xl md:text-2xl font-bold text-text-main dark:text-white mb-2">Export Nilai ke Excel</h3>
                                     <p className="text-text-secondary mb-8 max-w-lg">
                                         Download rekap nilai dalam format buku nilai untuk kelas <span className="text-text-main dark:text-white font-bold">{selectedTAData?.class.name}</span> - <span className="text-text-main dark:text-white font-bold">{selectedTAData?.subject.name}</span>
                                     </p>

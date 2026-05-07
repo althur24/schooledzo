@@ -162,7 +162,7 @@ export default function GradingPage() {
                     backHref={`/dashboard/guru/kuis/${quizId}/hasil`}
                     action={
                         <div className="text-right">
-                            <span className="text-3xl font-bold text-primary">
+                            <span className="text-2xl md:text-3xl font-bold text-primary">
                                 {currentTotalScore}
                             </span>
                             <span className="text-sm text-text-secondary ml-1">/{submission.max_score}</span>

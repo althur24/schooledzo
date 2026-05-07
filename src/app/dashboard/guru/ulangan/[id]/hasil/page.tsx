@@ -123,19 +123,19 @@ export default function GuruExamHasilPage() {
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl p-4 text-center shadow-sm">
-                    <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.count}</p>
+                    <p className="text-2xl md:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.count}</p>
                     <p className="text-xs text-text-secondary dark:text-zinc-400">Mengumpulkan</p>
                 </div>
                 <div className="bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl p-4 text-center shadow-sm">
-                    <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.avg}%</p>
+                    <p className="text-2xl md:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.avg}%</p>
                     <p className="text-xs text-text-secondary dark:text-zinc-400">Rata-rata</p>
                 </div>
                 <div className="bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl p-4 text-center shadow-sm">
-                    <p className="text-3xl font-bold text-green-600 dark:text-green-400">{stats.highest}%</p>
+                    <p className="text-2xl md:text-3xl font-bold text-green-600 dark:text-green-400">{stats.highest}%</p>
                     <p className="text-xs text-text-secondary dark:text-zinc-400">Tertinggi</p>
                 </div>
                 <div className="bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl p-4 text-center shadow-sm">
-                    <p className="text-3xl font-bold text-red-600 dark:text-red-400">{stats.lowest}%</p>
+                    <p className="text-2xl md:text-3xl font-bold text-red-600 dark:text-red-400">{stats.lowest}%</p>
                     <p className="text-xs text-text-secondary dark:text-zinc-400">Terendah</p>
                 </div>
             </div>
@@ -254,16 +254,16 @@ export default function GuruExamHasilPage() {
                             <p className="text-sm text-text-secondary dark:text-zinc-500">NIS: {selectedSubmission.student?.nis}</p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-secondary/10 rounded-xl p-4 text-center">
                                 <p className="text-sm text-text-secondary dark:text-zinc-400">Nilai</p>
-                                <p className={`text-2xl font-bold ${getScoreColor(selectedSubmission.total_score, selectedSubmission.max_score).split(' ')[0]}`}>
+                                <p className={`text-xl md:text-2xl font-bold ${getScoreColor(selectedSubmission.total_score, selectedSubmission.max_score).split(' ')[0]}`}>
                                     {selectedSubmission.total_score}/{selectedSubmission.max_score}
                                 </p>
                             </div>
                             <div className="bg-secondary/10 rounded-xl p-4 text-center">
                                 <p className="text-sm text-text-secondary dark:text-zinc-400">Pelanggaran</p>
-                                <p className={`text-2xl font-bold ${selectedSubmission.violation_count > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                                <p className={`text-xl md:text-2xl font-bold ${selectedSubmission.violation_count > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
                                     {selectedSubmission.violation_count}
                                 </p>
                             </div>

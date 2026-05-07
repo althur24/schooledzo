@@ -1066,7 +1066,7 @@ export default function BankSoalPage() {
             >
                 <div className="space-y-5">
                     {/* Type Selection */}
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <label className={`flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-colors ${questionType === 'standalone' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-secondary/20 hover:border-blue-300'}`}>
                             <input
                                 type="radio"
@@ -1155,7 +1155,7 @@ export default function BankSoalPage() {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Mata Pelajaran</label>
                                     <select
@@ -1193,7 +1193,7 @@ export default function BankSoalPage() {
 
                             {questionForm.question_type === 'MULTIPLE_CHOICE' && (
                                 <>
-                                    <div className="grid grid-cols-2 gap-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         {(questionForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                             <div key={letter}>
                                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Opsi {letter}</label>
@@ -1265,7 +1265,7 @@ export default function BankSoalPage() {
                     {/* PASSAGE FORM */}
                     {questionType === 'passage' && (
                         <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Bacaan (opsional)</label>
                                     <input
@@ -1360,7 +1360,7 @@ export default function BankSoalPage() {
                                                 )}
                                             </div>
 
-                                            <div className="grid grid-cols-2 gap-2 mb-3">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
                                                 <select
                                                     value={pq.question_type}
                                                     onChange={(e) => {
@@ -1400,7 +1400,7 @@ export default function BankSoalPage() {
                                             />
 
                                             {pq.question_type === 'MULTIPLE_CHOICE' && (
-                                                <div className="grid grid-cols-2 gap-2">
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                                     {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
                                                         <div key={letter} className="flex items-center gap-2">
                                                             <input
@@ -1681,7 +1681,7 @@ export default function BankSoalPage() {
                                             </button>
                                         )}
                                     </div>
-                                    <div className="grid grid-cols-2 gap-3 mb-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                                         <select
                                             value={q.question_type}
                                             onChange={(e) => {
@@ -1720,7 +1720,7 @@ export default function BankSoalPage() {
                                         rows={2}
                                     />
                                     {q.question_type === 'MULTIPLE_CHOICE' && (
-                                        <div className="grid grid-cols-2 gap-2">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                             {q.options.map((opt, optIdx) => (
                                                 <div key={optIdx} className="flex items-center gap-1">
                                                     <input

@@ -472,7 +472,7 @@ export default function MapelPage() {
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jenjang Sekolah</label>
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-3 gap-2">
                             {(['UMUM', 'SMP', 'SMA'] as const).map(lvl => (
                                 <button
                                     type="button"

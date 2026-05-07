@@ -179,7 +179,7 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
                         <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600' : 'bg-purple-500/10 text-purple-600'}`}>
                             {exam.exam_type}
                         </span>
-                        <h1 className="text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
+                        <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
                         <span className="flex items-center gap-1.5 px-3 py-1 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse shadow-lg shadow-red-500/20">
                             <span className="w-2 h-2 rounded-full bg-white relative">
                                 <span className="absolute inset-0 rounded-full bg-white animate-ping"></span>
@@ -215,28 +215,28 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
                 <Card padding="p-4 flex items-center gap-4" className="bg-gradient-to-br from-secondary/5 to-transparent border border-black/5">
                     <div className="w-12 h-12 rounded-xl bg-secondary/10 flex items-center justify-center text-text-secondary"><Users className="w-6 h-6" /></div>
                     <div>
-                        <p className="text-2xl font-black text-text-main dark:text-white">{summary.total_target_students}</p>
+                        <p className="text-xl md:text-2xl font-black text-text-main dark:text-white">{summary.total_target_students}</p>
                         <p className="text-xs font-bold text-text-secondary">Total Siswa Target</p>
                     </div>
                 </Card>
                 <Card padding="p-4 flex items-center gap-4" className="bg-gradient-to-br from-blue-500/5 to-transparent border border-blue-500/20">
                     <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600"><PlayCircle className="w-6 h-6" /></div>
                     <div>
-                        <p className="text-2xl font-black text-blue-600 dark:text-blue-400">{summary.working}</p>
+                        <p className="text-xl md:text-2xl font-black text-blue-600 dark:text-blue-400">{summary.working}</p>
                         <p className="text-xs font-bold text-blue-600/70 dark:text-blue-400/70">Sedang Mengerjakan</p>
                     </div>
                 </Card>
                 <Card padding="p-4 flex items-center gap-4" className="bg-gradient-to-br from-green-500/5 to-transparent border border-green-500/20">
                     <div className="w-12 h-12 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600"><CheckCircle className="w-6 h-6" /></div>
                     <div>
-                        <p className="text-2xl font-black text-green-600 dark:text-green-400">{summary.submitted}</p>
+                        <p className="text-xl md:text-2xl font-black text-green-600 dark:text-green-400">{summary.submitted}</p>
                         <p className="text-xs font-bold text-green-600/70 dark:text-green-400/70">Sudah Selesai</p>
                     </div>
                 </Card>
                 <Card padding="p-4 flex items-center gap-4" className="bg-gradient-to-br from-zinc-500/5 to-transparent border border-zinc-500/20">
                     <div className="w-12 h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500"><Clock className="w-6 h-6" /></div>
                     <div>
-                        <p className="text-2xl font-black text-zinc-600 dark:text-zinc-400">{summary.not_started}</p>
+                        <p className="text-xl md:text-2xl font-black text-zinc-600 dark:text-zinc-400">{summary.not_started}</p>
                         <p className="text-xs font-bold text-zinc-500">Belum Mulai</p>
                     </div>
                 </Card>

@@ -517,7 +517,7 @@ export default function AdminUtsUasPage() {
                     {/* Exam Type */}
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Ujian</label>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {(['UTS', 'UAS'] as const).map(type => (
                                 <label key={type} className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all font-bold ${form.exam_type === type ? 'border-primary bg-primary/5 text-primary' : 'border-secondary/20 hover:border-primary/50 text-text-main dark:text-white'}`}>
                                     <input type="radio" name="exam_type" checked={form.exam_type === type} onChange={() => setForm({ ...form, exam_type: type })} className="hidden" />
@@ -615,7 +615,7 @@ export default function AdminUtsUasPage() {
                     </div>
 
                     {/* Time & Duration */}
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
                             <input
@@ -718,7 +718,7 @@ export default function AdminUtsUasPage() {
                         </div>
 
                         {/* Schedule */}
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
                                 <input

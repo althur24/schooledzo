@@ -674,7 +674,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
 
             {/* ===== TAB: PENGATURAN ===== */}
             {activeTab === 'pengaturan' && (
-                <Card padding="p-6" className="space-y-5">
+                <Card padding="p-4 md:p-6" className="space-y-5">
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ujian</label>
                         <input type="text" value={settingsForm.title} onChange={(e) => setSettingsForm({ ...settingsForm, title: e.target.value })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" />
@@ -683,7 +683,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Deskripsi</label>
                         <textarea value={settingsForm.description} onChange={(e) => setSettingsForm({ ...settingsForm, description: e.target.value })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" rows={3} />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
                             <input type="datetime-local" value={settingsForm.start_time} onChange={(e) => setSettingsForm({ ...settingsForm, start_time: e.target.value })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" />
@@ -729,7 +729,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     {/* Target classes */}
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas Target ({settingsForm.target_class_ids.length} terpilih)</label>
-                        <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
                             {allClasses.map(c => {
                                 const selected = settingsForm.target_class_ids.includes(c.id)
                                 return (
@@ -793,7 +793,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     {resultsLoading ? (
                         <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
                     ) : submissions.length === 0 ? (
-                        <Card padding="p-8" className="text-center">
+                        <Card padding="p-4 md:p-8" className="text-center">
                             <BarChart3 className="w-12 h-12 text-text-secondary/50 mx-auto mb-3" />
                             <p className="text-text-secondary">Belum ada submission untuk ujian ini.</p>
                         </Card>
@@ -897,7 +897,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                             <p className="text-lg font-bold text-text-main dark:text-white">{selectedSubmission.student?.user?.full_name}</p>
                             <p className="text-sm text-text-secondary dark:text-zinc-500">NIS: {selectedSubmission.student?.nis}</p>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-secondary/10 rounded-xl p-4 text-center">
                                 <p className="text-sm text-text-secondary dark:text-zinc-400">Nilai</p>
                                 <p className={`text-2xl font-bold ${getScoreColor(selectedSubmission.total_score, selectedSubmission.max_score).split(' ')[0]}`}>
@@ -1078,7 +1078,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                 </div>
                                 {manualForm.question_type === 'MULTIPLE_CHOICE' && (
                                 <>
-                                        <div className="grid grid-cols-2 gap-3">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                             {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                                 <div key={letter} className="flex flex-col">
                                                     <div className="flex items-center justify-between mb-1">
@@ -1126,7 +1126,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                         </div>
                                     </>
                                 )}
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tingkat Kesulitan <span className="text-red-500">*</span></label>
                                         <select value={manualForm.difficulty || ''} onChange={(e) => setManualForm({ ...manualForm, difficulty: e.target.value as any })} className={`w-full px-3 py-2 bg-secondary/5 border rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary ${!manualForm.difficulty ? 'border-red-300' : 'border-secondary/30'}`}>
@@ -1327,7 +1327,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         )}
                         {editQuestionForm.question_type === 'MULTIPLE_CHOICE' && editQuestionForm.options && (
                             <>
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     {(editQuestionForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
                                         <div key={letter} className="flex flex-col">
                                             <div className="flex items-center justify-between mb-1">
