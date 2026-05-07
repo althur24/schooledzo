@@ -51,6 +51,26 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        // H2 Security Fix: Verify ownership
+        const { data: teacher } = await supabase
+            .from('teachers')
+            .select('id')
+            .eq('user_id', user.id)
+            .single()
+
+        if (teacher) {
+            const { data: assignment } = await supabase
+                .from('assignments')
+                .select('teaching_assignment:teaching_assignments(teacher_id)')
+                .eq('id', id)
+                .single()
+
+            const assignmentTeacherId = (assignment as any)?.teaching_assignment?.teacher_id
+            if (assignmentTeacherId && assignmentTeacherId !== teacher.id) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses untuk menghapus tugas ini' }, { status: 403 })
+            }
+        }
+
         const { error } = await supabase
             .from('assignments')
             .delete()
@@ -78,6 +98,26 @@ export async function PUT(
 
         if (user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // H2 Security Fix: Verify ownership
+        const { data: teacher } = await supabase
+            .from('teachers')
+            .select('id')
+            .eq('user_id', user.id)
+            .single()
+
+        if (teacher) {
+            const { data: assignment } = await supabase
+                .from('assignments')
+                .select('teaching_assignment:teaching_assignments(teacher_id)')
+                .eq('id', id)
+                .single()
+
+            const assignmentTeacherId = (assignment as any)?.teaching_assignment?.teacher_id
+            if (assignmentTeacherId && assignmentTeacherId !== teacher.id) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses untuk mengubah tugas ini' }, { status: 403 })
+            }
         }
 
         const { title, description, type, due_date } = await request.json()

@@ -94,7 +94,25 @@ export async function PUT(
         }
 
         const id = params.id
-        const { answers, total_score, is_graded } = await request.json()
+        const { answers, is_graded } = await request.json()
+
+        // Verify teacher owns the teaching assignment for this exam
+        const { data: teacher } = await supabase
+            .from('teachers')
+            .select('id')
+            .eq('user_id', user.id)
+            .single()
+
+        const { data: submissionData } = await supabase
+            .from('exam_submissions')
+            .select('exam:exams(teaching_assignment:teaching_assignments(teacher_id))')
+            .eq('id', id)
+            .single()
+
+        const assignmentTeacherId = (submissionData?.exam as any)?.teaching_assignment?.teacher_id
+        if (!teacher || assignmentTeacherId !== teacher.id) {
+            return NextResponse.json({ error: 'Forbidden: You do not have access to grade this class' }, { status: 403 })
+        }
 
         // BATCH UPDATE: Update all exam_answers scores at once instead of one-by-one
         if (answers && Array.isArray(answers) && answers.length > 0) {
@@ -113,11 +131,19 @@ export async function PUT(
                 .upsert(updates, { onConflict: 'submission_id,question_id' })
         }
 
-        // Update the submission record with total_score and is_graded
+        // Recalculate total score server-side (prevent client manipulation)
+        const { data: allAnswers } = await supabase
+            .from('exam_answers')
+            .select('points_earned')
+            .eq('submission_id', id)
+
+        const totalScore = allAnswers?.reduce((sum, a) => sum + (a.points_earned || 0), 0) || 0
+
+        // Update the submission record with server-calculated total_score and is_graded
         const { data, error } = await supabase
             .from('exam_submissions')
             .update({
-                total_score,
+                total_score: totalScore,
                 is_graded
             })
             .eq('id', id)

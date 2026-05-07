@@ -54,7 +54,23 @@ export async function PUT(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'GURU') {
+        if (user.role === 'GURU') {
+            const { data: teacher } = await supabase
+                .from('teachers')
+                .select('id')
+                .eq('user_id', user.id)
+                .single()
+            
+            const { data: quiz } = await supabase
+                .from('quizzes')
+                .select('teaching_assignment:teaching_assignments(teacher_id)')
+                .eq('id', id)
+                .single()
+            
+            if (!teacher || (quiz?.teaching_assignment as any)?.teacher_id !== teacher.id) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke kuis ini' }, { status: 403 })
+            }
+        } else if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
@@ -193,23 +209,46 @@ export async function PUT(
                     .single()
 
                 if (activeYear) {
-                    const { data: enrollments } = await supabase
-                        .from('student_enrollments')
-                        .select('student:students(user_id)')
-                        .eq('academic_year_id', activeYear.id)
-                        .eq('class_id', data.teaching_assignment.class_id)
+                    // Check if this is a remedial quiz with specific allowed students
+                    if (data.is_remedial && data.allowed_student_ids && data.allowed_student_ids.length > 0) {
+                        // Send targeted notifications to remedial students only
+                        const { data: students } = await supabase
+                            .from('students')
+                            .select('user_id')
+                            .in('id', data.allowed_student_ids)
 
-                    if (enrollments && enrollments.length > 0) {
-                        const subjectName = data.teaching_assignment.subject?.name || ''
-                        await supabase.from('notifications').insert(
-                            enrollments.map((e: any) => ({
-                                user_id: e.student.user_id,
-                                type: 'KUIS_BARU',
-                                title: `Kuis Baru: ${data.title}`,
-                                message: `${subjectName} - ${data.duration_minutes || 0} menit`,
-                                link: '/dashboard/siswa/kuis'
-                            }))
-                        )
+                        if (students && students.length > 0) {
+                            const subjectName = data.teaching_assignment.subject?.name || ''
+                            await supabase.from('notifications').insert(
+                                students.map((s: any) => ({
+                                    user_id: s.user_id,
+                                    type: 'REMEDIAL',
+                                    title: `Remedial Kuis: ${data.title}`,
+                                    message: `${subjectName} - ${data.duration_minutes || 0} menit. Segera kerjakan!`,
+                                    link: '/dashboard/siswa/kuis'
+                                }))
+                            )
+                        }
+                    } else {
+                        // Regular quiz: notify all students in the class
+                        const { data: enrollments } = await supabase
+                            .from('student_enrollments')
+                            .select('student:students(user_id)')
+                            .eq('academic_year_id', activeYear.id)
+                            .eq('class_id', data.teaching_assignment.class_id)
+
+                        if (enrollments && enrollments.length > 0) {
+                            const subjectName = data.teaching_assignment.subject?.name || ''
+                            await supabase.from('notifications').insert(
+                                enrollments.map((e: any) => ({
+                                    user_id: e.student.user_id,
+                                    type: 'KUIS_BARU',
+                                    title: `Kuis Baru: ${data.title}`,
+                                    message: `${subjectName} - ${data.duration_minutes || 0} menit`,
+                                    link: '/dashboard/siswa/kuis'
+                                }))
+                            )
+                        }
                     }
                 }
             } catch (notifError) {
@@ -234,7 +273,23 @@ export async function DELETE(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'GURU') {
+        if (user.role === 'GURU') {
+            const { data: teacher } = await supabase
+                .from('teachers')
+                .select('id')
+                .eq('user_id', user.id)
+                .single()
+            
+            const { data: quiz } = await supabase
+                .from('quizzes')
+                .select('teaching_assignment:teaching_assignments(teacher_id)')
+                .eq('id', id)
+                .single()
+            
+            if (!teacher || (quiz?.teaching_assignment as any)?.teacher_id !== teacher.id) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke kuis ini' }, { status: 403 })
+            }
+        } else if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 

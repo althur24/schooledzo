@@ -83,14 +83,14 @@ export async function PUT(
             return NextResponse.json({ error: 'grades array required' }, { status: 400 })
         }
 
-        // Update each answer's score
-        for (const grade of grades) {
-            await supabase
+        // BATCH UPDATE: Update all scores in parallel with submission_id safety filter
+        await Promise.all(grades.map((grade: any) =>
+            supabase
                 .from('official_exam_answers')
                 .update({ points_earned: grade.points_earned })
                 .eq('id', grade.answer_id)
                 .eq('submission_id', id)
-        }
+        ))
 
         // Recalculate total score
         const { data: allAnswers } = await supabase

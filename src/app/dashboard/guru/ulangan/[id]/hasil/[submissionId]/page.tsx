@@ -64,6 +64,7 @@ export default function ExamGradingPage() {
     const fetchData = async () => {
         try {
             const res = await fetch(`/api/exam-submissions/${submissionId}`)
+            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
             const data = await res.json()
             // Normalize answers to always be an array
             const normalizedData = {
@@ -122,7 +123,7 @@ export default function ExamGradingPage() {
                 }
             })
 
-            await fetch(`/api/exam-submissions/${submissionId}`, {
+            const saveRes = await fetch(`/api/exam-submissions/${submissionId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -131,6 +132,7 @@ export default function ExamGradingPage() {
                     is_graded: true
                 })
             })
+            if (!saveRes.ok) throw new Error('Failed to save grading')
 
             alert('Penilaian berhasil disimpan!')
             router.push(`/dashboard/guru/ulangan/${examId}/hasil`)

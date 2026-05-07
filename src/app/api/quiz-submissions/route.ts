@@ -2,6 +2,35 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 
+// Helper function for sending notifications
+async function sendQuizSubmissionNotification(quizId: string, userFullName: string) {
+    try {
+        const { data: quiz } = await supabase
+            .from('quizzes')
+            .select(`
+                title,
+                teaching_assignment:teaching_assignments(
+                    teacher:teachers(user_id)
+                )
+            `)
+            .eq('id', quizId)
+            .single()
+
+        const teacherUserId = (quiz?.teaching_assignment as any)?.teacher?.user_id
+        if (teacherUserId) {
+            await supabase.from('notifications').insert({
+                user_id: teacherUserId,
+                type: 'SUBMISSION_KUIS',
+                title: 'Kuis Dikumpulkan',
+                message: `${userFullName} telah mengumpulkan kuis "${quiz?.title}"`,
+                link: `/dashboard/guru/kuis`
+            })
+        }
+    } catch (notifError) {
+        console.error('Error sending quiz submission notification:', notifError)
+    }
+}
+
 // GET submissions (for teacher or student)
 export async function GET(request: NextRequest) {
     try {
@@ -266,6 +295,33 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Student not found' }, { status: 404 })
         }
 
+        // Get quiz details for validation
+        const { data: quiz } = await supabase
+            .from('quizzes')
+            .select('deadline, is_remedial, allowed_student_ids')
+            .eq('id', quiz_id)
+            .single()
+            
+        if (!quiz) {
+            return NextResponse.json({ error: 'Quiz not found' }, { status: 404 })
+        }
+        
+        // 1. Deadline check
+        if (quiz.deadline) {
+            const now = new Date()
+            const deadline = new Date(quiz.deadline)
+            if (now > deadline) {
+                return NextResponse.json({ error: 'Kuis sudah melewati deadline' }, { status: 400 })
+            }
+        }
+        
+        // 2. Remedial guard
+        if (quiz.is_remedial && quiz.allowed_student_ids && quiz.allowed_student_ids.length > 0) {
+            if (!quiz.allowed_student_ids.includes(student.id)) {
+                return NextResponse.json({ error: 'Anda tidak terdaftar untuk kuis remedial ini' }, { status: 403 })
+            }
+        }
+
         // Get quiz questions for auto-grading
         const { data: questions } = await supabase
             .from('quiz_questions')
@@ -273,7 +329,7 @@ export async function POST(request: NextRequest) {
             .eq('quiz_id', quiz_id)
 
         if (!questions) {
-            return NextResponse.json({ error: 'Quiz not found' }, { status: 404 })
+            return NextResponse.json({ error: 'Quiz questions not found' }, { status: 404 })
         }
 
         // Check if already submitted or exists
@@ -360,32 +416,8 @@ export async function POST(request: NextRequest) {
 
             if (error) throw error
 
-            // Notify (Logic extracted to avoid duplication, but kept inline for now)
-            try {
-                const { data: quiz } = await supabase
-                    .from('quizzes')
-                    .select(`
-                        title,
-                        teaching_assignment:teaching_assignments(
-                            teacher:teachers(user_id)
-                        )
-                    `)
-                    .eq('id', quiz_id)
-                    .single()
-
-                const teacherUserId = (quiz?.teaching_assignment as any)?.teacher?.user_id
-                if (teacherUserId) {
-                    await supabase.from('notifications').insert({
-                        user_id: teacherUserId,
-                        type: 'SUBMISSION_KUIS',
-                        title: 'Kuis Dikumpulkan',
-                        message: `${user.full_name} telah mengumpulkan kuis "${quiz?.title}"`,
-                        link: `/dashboard/guru/kuis`
-                    })
-                }
-            } catch (notifError) {
-                console.error('Error sending quiz submission notification:', notifError)
-            }
+            // Notify
+            await sendQuizSubmissionNotification(quiz_id, user.full_name || 'Siswa')
 
             return NextResponse.json(data)
         }
@@ -416,31 +448,7 @@ export async function POST(request: NextRequest) {
 
         // Notify for new submission if submitted
         if (submit) {
-            try {
-                const { data: quiz } = await supabase
-                    .from('quizzes')
-                    .select(`
-                        title,
-                        teaching_assignment:teaching_assignments(
-                            teacher:teachers(user_id)
-                        )
-                    `)
-                    .eq('id', quiz_id)
-                    .single()
-
-                const teacherUserId = (quiz?.teaching_assignment as any)?.teacher?.user_id
-                if (teacherUserId) {
-                    await supabase.from('notifications').insert({
-                        user_id: teacherUserId,
-                        type: 'SUBMISSION_KUIS',
-                        title: 'Kuis Dikumpulkan',
-                        message: `${user.full_name} telah mengumpulkan kuis "${quiz?.title}"`,
-                        link: `/dashboard/guru/kuis`
-                    })
-                }
-            } catch (notifError) {
-                console.error('Error sending quiz submission notification:', notifError)
-            }
+            await sendQuizSubmissionNotification(quiz_id, user.full_name || 'Siswa')
         }
 
         return NextResponse.json(data)

@@ -526,7 +526,8 @@ export default function TakeExamPage() {
                 // Fullscreen API not supported (mobile browsers) — bypass
                 setIsFullscreen(true)
             }
-        } catch {
+        } catch (error) {
+            console.error('Fullscreen request error:', error)
             // Fullscreen request failed — bypass
             setIsFullscreen(true)
         }
@@ -554,25 +555,51 @@ export default function TakeExamPage() {
         }
     }, [])
 
-    // Save answer
-    const saveAnswer = async (questionId: string, answer: string) => {
+    // Save answer — per-question debounce so passage groups with multiple essays don't cancel each other
+    const debounceTimersRef = useRef<Record<string, NodeJS.Timeout>>({})
+
+    // Cleanup all pending timers on unmount
+    useEffect(() => {
+        return () => {
+            Object.values(debounceTimersRef.current).forEach(clearTimeout)
+        }
+    }, [])
+
+    const saveAnswer = (questionId: string, answer: string) => {
         const newAnswers = { ...answers, [questionId]: answer }
         setAnswers(newAnswers)
         saveAnswersToLocal(newAnswers)
 
-        if (submission) {
-            try {
-                await fetch('/api/exam-submissions', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        submission_id: submission.id,
-                        answers: [{ question_id: questionId, answer }]
-                    })
+        // Debounce server sync per question (1.5 seconds)
+        if (debounceTimersRef.current[questionId]) {
+            clearTimeout(debounceTimersRef.current[questionId])
+        }
+        debounceTimersRef.current[questionId] = setTimeout(() => {
+            syncToServer(questionId, answer)
+            delete debounceTimersRef.current[questionId]
+        }, 1500)
+    }
+
+    const saveAnswerImmediate = (questionId: string, answer: string) => {
+        const newAnswers = { ...answers, [questionId]: answer }
+        setAnswers(newAnswers)
+        saveAnswersToLocal(newAnswers)
+        syncToServer(questionId, answer)
+    }
+
+    const syncToServer = async (questionId: string, answer: string) => {
+        if (!submission) return
+        try {
+            await fetch('/api/exam-submissions', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    submission_id: submission.id,
+                    answers: [{ question_id: questionId, answer }]
                 })
-            } catch (error) {
-                console.error('Error saving answer:', error)
-            }
+            })
+        } catch (error) {
+            console.error('Error saving answer:', error)
         }
     }
 
@@ -846,7 +873,7 @@ export default function TakeExamPage() {
                                                             const letter = String.fromCharCode(65 + optIdx)
                                                             const isSelected = answers[q.id] === letter
                                                             return (
-                                                                <button key={optIdx} onClick={() => saveAnswer(q.id, letter)} className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'} flex items-center`}>
+                                                                <button key={optIdx} onClick={() => saveAnswerImmediate(q.id, letter)} className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'} flex items-center`}>
                                                                     <span className={`inline-flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-lg ${q.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`} dir="ltr">{letter}</span>
                                                                     <div className="flex-1" dir={q.text_direction || 'ltr'}><SmartText text={opt} as="span" className={q.text_direction === 'rtl' ? 'text-right block' : ''} /></div>
                                                                 </button>
@@ -888,7 +915,7 @@ export default function TakeExamPage() {
                                                 const letter = String.fromCharCode(65 + optIdx)
                                                 const isSelected = answers[currentItem.question.id] === letter
                                                 return (
-                                                    <button key={optIdx} onClick={() => saveAnswer(currentItem.question.id, letter)} className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}>
+                                                    <button key={optIdx} onClick={() => saveAnswerImmediate(currentItem.question.id, letter)} className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}>
                                                         <span className={`inline-flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-lg ${currentItem.question.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`} dir="ltr">{letter}</span>
                                                         <div className="flex-1" dir={currentItem.question.text_direction || 'ltr'}><SmartText text={opt} as="span" className={currentItem.question.text_direction === 'rtl' ? 'text-right block' : ''} /></div>
                                                     </button>

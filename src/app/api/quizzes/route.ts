@@ -162,29 +162,10 @@ export async function POST(request: NextRequest) {
                 if (duplicateError) throw duplicateError
             }
         }
-        // Send notifications to remedial students
-        if (is_remedial && allowed_student_ids && allowed_student_ids.length > 0) {
-            try {
-                const { data: students } = await supabase
-                    .from('students')
-                    .select('user_id')
-                    .in('id', allowed_student_ids)
-
-                if (students && students.length > 0) {
-                    await supabase.from('notifications').insert(
-                        students.map((s: any) => ({
-                            user_id: s.user_id,
-                            type: 'REMEDIAL',
-                            title: `Remedial Kuis: ${title}`,
-                            message: 'Guru telah membuat kuis remedial untuk Anda. Segera kerjakan!',
-                            link: '/dashboard/siswa/kuis'
-                        }))
-                    )
-                }
-            } catch (notifError) {
-                console.error('Error sending remedial notification:', notifError)
-            }
-        }
+        // NOTE: Remedial notifications are NOT sent here at creation time
+        // because the quiz is still in draft (is_active: false).
+        // Notifications will be sent when the guru publishes the quiz
+        // (PUT /api/quizzes/[id] with is_active: true).
 
         return NextResponse.json(quiz)
     } catch (error) {

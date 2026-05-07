@@ -276,7 +276,7 @@ export default function GuruUlanganPage() {
 
             setRemedialStudents(studentsWithScores)
             // Pre-select those below KKM
-            setSelectedStudentIds(studentsWithScores.filter((s: any) => s.isBelowKKM).map((s: any) => s.user.id))
+            setSelectedStudentIds(studentsWithScores.filter((s: any) => s.isBelowKKM).map((s: any) => s.id))
         } catch (error) {
             console.error('Error fetching remedial data:', error)
             alert('Gagal memuat data siswa untuk remedial')
@@ -930,7 +930,7 @@ export default function GuruUlanganPage() {
                                     Pilih Siswa ({selectedStudentIds.length} terpilih)
                                 </label>
                                 <button
-                                    onClick={() => setSelectedStudentIds(remedialStudents.map(s => s.user.id))}
+                                    onClick={() => setSelectedStudentIds(remedialStudents.map(s => s.id))}
                                     className="text-xs text-primary font-bold hover:underline"
                                 >
                                     Pilih Semua
@@ -941,15 +941,15 @@ export default function GuruUlanganPage() {
                                     <p className="text-sm text-text-secondary text-center py-4">Tidak ada siswa di kelas ini</p>
                                 ) : (
                                     remedialStudents.map((student) => {
-                                        const isSelected = selectedStudentIds.includes(student.user.id)
+                                        const isSelected = selectedStudentIds.includes(student.id)
                                         return (
                                             <div
                                                 key={student.id}
                                                 onClick={() => {
                                                     if (isSelected) {
-                                                        setSelectedStudentIds(prev => prev.filter(id => id !== student.user.id))
+                                                        setSelectedStudentIds(prev => prev.filter(id => id !== student.id))
                                                     } else {
-                                                        setSelectedStudentIds(prev => [...prev, student.user.id])
+                                                        setSelectedStudentIds(prev => [...prev, student.id])
                                                     }
                                                 }}
                                                 className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${isSelected ? 'border-primary bg-primary/5 dark:bg-primary/20' : 'border-secondary/20 bg-white dark:bg-surface-dark hover:bg-secondary/5'}`}

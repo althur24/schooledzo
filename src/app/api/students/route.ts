@@ -16,6 +16,7 @@ export async function GET(request: NextRequest) {
         const school_level = searchParams.get('school_level')
         const status = searchParams.get('status')
         const enrollment_year_id = searchParams.get('enrollment_year_id')
+        const user_id = searchParams.get('user_id')
 
         // If enrollment_year_id is provided, fetch students with their enrollment in that specific year
         if (enrollment_year_id) {
@@ -91,6 +92,7 @@ export async function GET(request: NextRequest) {
             if (angkatan) query = query.eq('angkatan', angkatan)
             if (school_level) query = query.eq('school_level', school_level)
             if (status) query = query.eq('status', status)
+            if (user_id) query = query.eq('user_id', user_id)
 
             const { data, error } = await query
 

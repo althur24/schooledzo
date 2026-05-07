@@ -15,7 +15,8 @@ export async function checkAndAutoPublish(
                 *,
                 teaching_assignment:teaching_assignments(
                     class_id,
-                    subject:subjects(name)
+                    subject:subjects(name),
+                    class:classes(school_id)
                 )
             `)
             .eq('id', parentId)
@@ -143,11 +144,20 @@ async function sendPublishNotifications(source: 'quiz' | 'exam', parent: any) {
 
         // Notify Students
         if (parent.teaching_assignment?.class_id) {
-            const { data: activeYear } = await supabase
+            // Derive school_id from the teaching assignment's class
+            const classData = parent.teaching_assignment.class as any
+            const schoolId = Array.isArray(classData) ? classData[0]?.school_id : classData?.school_id
+
+            let yearQuery = supabase
                 .from('academic_years')
                 .select('id')
                 .eq('is_active', true)
-                .single()
+            
+            if (schoolId) {
+                yearQuery = yearQuery.eq('school_id', schoolId)
+            }
+
+            const { data: activeYear } = await yearQuery.single()
 
             if (activeYear) {
                 const { data: enrollments } = await supabase

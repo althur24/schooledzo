@@ -27,6 +27,7 @@ interface Quiz {
     duration_minutes: number
     is_randomized: boolean
     questions: QuizQuestion[]
+    deadline?: string | null
 }
 
 interface QuizAnswer {
@@ -235,10 +236,16 @@ export default function KerjakanKuisPage() {
             }
             const quizData = await quizRes.json()
 
+            if (quizData.deadline && new Date() > new Date(quizData.deadline)) {
+                setError('Kuis ini sudah melewati deadline.')
+                setLoading(false)
+                return
+            }
+
             // Fetch Student Data
-            const studentsRes = await fetch('/api/students')
+            const studentsRes = await fetch(`/api/students?user_id=${user?.id}`)
             const students = await studentsRes.json()
-            const myStudent = students.find((s: any) => s.user.id === user?.id)
+            const myStudent = students[0] || null
 
             if (!myStudent) {
                 setError('Data siswa tidak ditemukan. Pastikan akun anda terdaftar sebagai siswa.')

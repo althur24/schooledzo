@@ -307,6 +307,11 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
         }
 
+        const numScore = parseInt(score)
+        if (isNaN(numScore) || numScore < 0 || numScore > 100) {
+            return NextResponse.json({ error: 'Nilai harus antara 0 dan 100' }, { status: 400 })
+        }
+
         // H2 Security Fix: Verify this teacher owns the submission's teaching assignment
         const { data: teacher } = await supabase
             .from('teachers')
@@ -340,7 +345,7 @@ export async function POST(request: NextRequest) {
             // Update existing grade
             const { data, error } = await supabase
                 .from('grades')
-                .update({ score, feedback, graded_at: new Date().toISOString() })
+                .update({ score: numScore, feedback, graded_at: new Date().toISOString() })
                 .eq('id', existing.id)
                 .select()
                 .single()
@@ -351,7 +356,7 @@ export async function POST(request: NextRequest) {
             // Create new grade
             const { data, error } = await supabase
                 .from('grades')
-                .insert({ submission_id, score, feedback })
+                .insert({ submission_id, score: numScore, feedback })
                 .select()
                 .single()
 
@@ -379,7 +384,7 @@ export async function POST(request: NextRequest) {
                     user_id: studentData.user_id,
                     type: 'NILAI_KELUAR',
                     title: `Nilai Keluar: ${assignmentTitle}`,
-                    message: `${subjectName} - Nilai: ${score}`,
+                    message: `${subjectName} - Nilai: ${numScore}`,
                     link: '/dashboard/siswa/nilai'
                 })
             }

@@ -179,12 +179,21 @@ export interface Question {
     created_at: string
 }
 
+export interface SubmissionAttachment {
+    url: string
+    name: string
+    type: string   // MIME type
+    size: number   // bytes
+}
+
 export interface StudentSubmission {
     id: string
     assignment_id: string
     student_id: string
-    answers: { question_id: string; answer: string }[] | null
+    answers: any[] | null
     submitted_at: string
+    attachments: SubmissionAttachment[] | null
+    is_late: boolean
     assignment?: Assignment
     student?: Student
 }

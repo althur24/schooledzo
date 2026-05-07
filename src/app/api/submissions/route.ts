@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
         const assignmentId = request.nextUrl.searchParams.get('assignment_id')
         const studentId = request.nextUrl.searchParams.get('student_id')
         const allYears = request.nextUrl.searchParams.get('all_years')
+        const includeMissing = request.nextUrl.searchParams.get('include_missing')
 
         let query = supabase
             .from('student_submissions')
@@ -79,6 +80,36 @@ export async function GET(request: NextRequest) {
 
         if (error) throw error
 
+        if (assignmentId && includeMissing === 'true') {
+            const { data: assignmentInfo } = await supabase
+                .from('assignments')
+                .select('teaching_assignment:teaching_assignments(class_id, academic_year_id)')
+                .eq('id', assignmentId).single()
+            
+            const classId = (assignmentInfo?.teaching_assignment as any)?.class_id
+            const yearId = (assignmentInfo?.teaching_assignment as any)?.academic_year_id
+            
+            let missingStudents: any[] = []
+            
+            if (classId && yearId) {
+                const { data: enrollments } = await supabase
+                    .from('student_enrollments')
+                    .select('student:students(id, nis, user:users!students_user_id_fkey(full_name))')
+                    .eq('class_id', classId)
+                    .eq('academic_year_id', yearId)
+                
+                const submittedIds = new Set(data.map((s: any) => s.student_id))
+                
+                if (enrollments) {
+                    missingStudents = enrollments
+                        .filter((e: any) => !submittedIds.has(e.student?.id))
+                        .map((e: any) => e.student)
+                }
+            }
+            
+            return NextResponse.json({ submissions: data, missing_students: missingStudents })
+        }
+
         return NextResponse.json(data)
     } catch (error) {
         console.error('Error fetching submissions:', error)
@@ -97,10 +128,24 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { assignment_id, answers } = await request.json()
+        const { assignment_id, answers, attachments } = await request.json()
 
         if (!assignment_id) {
             return NextResponse.json({ error: 'Assignment ID diperlukan' }, { status: 400 })
+        }
+
+        // Auto-detect late submission
+        let isLate = false
+        if (assignment_id) {
+            const { data: assignment } = await supabase
+                .from('assignments')
+                .select('due_date')
+                .eq('id', assignment_id)
+                .single()
+            
+            if (assignment?.due_date && new Date() > new Date(assignment.due_date)) {
+                isLate = true
+            }
         }
 
         // Get student record
@@ -126,7 +171,12 @@ export async function POST(request: NextRequest) {
             // Update existing
             const { data, error } = await supabase
                 .from('student_submissions')
-                .update({ answers, submitted_at: new Date().toISOString() })
+                .update({ 
+                    answers, 
+                    attachments,
+                    is_late: isLate,
+                    submitted_at: new Date().toISOString() 
+                })
                 .eq('id', existing.id)
                 .select()
                 .single()
@@ -138,7 +188,13 @@ export async function POST(request: NextRequest) {
         // Create new
         const { data, error } = await supabase
             .from('student_submissions')
-            .insert({ assignment_id, student_id: student.id, answers })
+            .insert({ 
+                assignment_id, 
+                student_id: student.id, 
+                answers,
+                attachments,
+                is_late: isLate
+            })
             .select()
             .single()
 

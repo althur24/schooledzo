@@ -39,10 +39,12 @@ export default function SiswaKuisPage() {
 
     useEffect(() => {
         const fetchData = async () => {
+            if (!user) return
             try {
-                const studentsRes = await fetch('/api/students')
+                // Fetch Student Profile First
+                const studentsRes = await fetch(`/api/students?user_id=${user.id}`)
                 const students = await studentsRes.json()
-                const myStudent = students.find((s: any) => s.user.id === user?.id)
+                const myStudent = students[0] || null
 
                 if (!myStudent?.class_id) {
                     setLoading(false)

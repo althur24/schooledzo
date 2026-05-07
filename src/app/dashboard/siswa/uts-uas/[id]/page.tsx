@@ -158,10 +158,9 @@ export default function TakeOfficialExamPage() {
                 initialAnswers = localAnswers
             }
 
-            // Calculate time
-            const startedAt = new Date(subData.started_at).getTime()
-            const durationMs = examData.duration_minutes * 60000
-            const remaining = Math.max(0, Math.floor((durationMs - (Date.now() - startedAt)) / 1000))
+            // Calculate time — use exam's fixed end time so all students end together
+            const examEndTime = new Date(examData.start_time).getTime() + examData.duration_minutes * 60000
+            const remaining = Math.max(0, Math.floor((examEndTime - Date.now()) / 1000))
 
             if (remaining <= 0) {
                 // Auto-submit expired
@@ -206,12 +205,10 @@ export default function TakeOfficialExamPage() {
 
                     // Check if exam time is expired
                     const currentExam = examRef.current
-                    const currentSub = submissionRef.current
                     let isTimeUp = false
-                    if (currentExam && currentSub) {
-                        const durationMs = currentExam.duration_minutes * 60 * 1000
-                        const elapsed = Date.now() - new Date(currentSub.started_at).getTime()
-                        isTimeUp = durationMs > 0 && elapsed >= durationMs
+                    if (currentExam) {
+                        const examEndTime = new Date(currentExam.start_time).getTime() + currentExam.duration_minutes * 60 * 1000
+                        isTimeUp = Date.now() >= examEndTime
                     }
 
                     await fetch('/api/official-exam-submissions', {
@@ -356,7 +353,9 @@ export default function TakeOfficialExamPage() {
             }
             setViolationCount(data.violation_count)
             // Don't show warning here — it will show when student returns to tab
-        } catch { }
+        } catch (error) {
+            console.error('Error logging violation:', error)
+        }
     }
 
     const requestFullscreen = async () => {
@@ -372,7 +371,8 @@ export default function TakeOfficialExamPage() {
                 // Fullscreen API not supported (mobile browsers) — bypass
                 setIsFullscreen(true)
             }
-        } catch {
+        } catch (error) {
+            console.error('Fullscreen request error:', error)
             // Fullscreen request failed (e.g. user denied, or not allowed) — bypass
             setIsFullscreen(true)
         }
@@ -399,19 +399,48 @@ export default function TakeOfficialExamPage() {
         }
     }, [])
 
-    const saveAnswer = async (questionId: string, answer: string) => {
+    // Save answer — per-question debounce
+    const debounceTimersRef = useRef<Record<string, NodeJS.Timeout>>({})
+
+    // Cleanup all pending timers on unmount
+    useEffect(() => {
+        return () => {
+            Object.values(debounceTimersRef.current).forEach(clearTimeout)
+        }
+    }, [])
+
+    const saveAnswer = (questionId: string, answer: string) => {
         const newAnswers = { ...answers, [questionId]: answer }
         setAnswers(newAnswers)
         saveLocal(newAnswers)
 
-        if (submission) {
-            try {
-                await fetch('/api/official-exam-submissions', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ submission_id: submission.id, answers: [{ question_id: questionId, answer }] })
-                })
-            } catch { }
+        // Debounce server sync per question (1.5 seconds)
+        if (debounceTimersRef.current[questionId]) {
+            clearTimeout(debounceTimersRef.current[questionId])
+        }
+        debounceTimersRef.current[questionId] = setTimeout(() => {
+            syncToServer(questionId, answer)
+            delete debounceTimersRef.current[questionId]
+        }, 1500)
+    }
+
+    const saveAnswerImmediate = (questionId: string, answer: string) => {
+        const newAnswers = { ...answers, [questionId]: answer }
+        setAnswers(newAnswers)
+        saveLocal(newAnswers)
+        syncToServer(questionId, answer)
+    }
+
+    const syncToServer = async (questionId: string, answer: string) => {
+        if (!submission) return
+        try {
+            await fetch('/api/official-exam-submissions', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ submission_id: submission.id, answers: [{ question_id: questionId, answer }] })
+            })
+        } catch (error) {
+            console.error('Error saving answer:', error)
         }
     }
 
@@ -602,7 +631,7 @@ export default function TakeOfficialExamPage() {
                                         const letter = String.fromCharCode(65 + optIdx)
                                         const isSelected = answers[currentQuestion.id] === letter
                                         return (
-                                            <button key={optIdx} onClick={() => saveAnswer(currentQuestion.id, letter)}
+                                            <button key={optIdx} onClick={() => saveAnswerImmediate(currentQuestion.id, letter)}
                                                 className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-indigo-500/10 border-indigo-500 text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary hover:border-gray-400'}`}>
                                                 <span className={`inline-flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-lg ${currentQuestion.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary'}`} dir="ltr">{letter}</span>
                                                 <div className="flex-1" dir={currentQuestion.text_direction || 'ltr'}><SmartText text={opt} as="span" className={currentQuestion.text_direction === 'rtl' ? 'text-right block' : ''} /></div>
