@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
+import { isHtmlContent, sanitizeHtml } from '@/lib/richTextUtils'
 
 // Check if text contains Arabic characters
 function containsArabic(text: string): boolean {
@@ -163,6 +164,26 @@ export default function SmartText({ text, className = '', as: Tag = 'p' }: Smart
 
     const arabicClasses = isArabic ? 'arabic-text' : ''
     const combinedClassName = `${className} ${arabicClasses}`.trim()
+
+    // Path 0: HTML content (from RichTextEditor)
+    if (isHtmlContent(text)) {
+        // Sanitize HTML then render it.
+        // We also want to render LaTeX inside the HTML. Since renderLatexInText expects raw text,
+        // applying it directly to HTML might break tags. However, KaTeX handles basic DOM if we parse carefully,
+        // but for simplicity, we'll process block math first, then sanitize.
+        // A better approach is to render the math AFTER it's safely in the DOM, but since this is SSR compatible:
+        // We will just process LaTeX on the HTML string (assuming LaTeX delimiters don't cross HTML tags).
+        let processedHtml = renderLatexInText(text)
+        processedHtml = sanitizeHtml(processedHtml)
+        
+        return (
+            <Tag
+                className={combinedClassName}
+                dangerouslySetInnerHTML={{ __html: processedHtml }}
+                dir="auto"
+            />
+        )
+    }
 
     // Path 1: Explicit LaTeX ($...$) or raw LaTeX commands (\frac, \pi, etc.)
     if (hasLatex) {

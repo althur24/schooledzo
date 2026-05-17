@@ -5,13 +5,18 @@ import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
-// Dynamic imports for heavy components (mathlive 5.6MB, AI modal 724 lines)
+// Dynamic imports for heavy components
 const MathTextarea = dynamic(() => import('@/components/MathTextarea'), {
     ssr: false,
     loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={3} readOnly />
 })
 const PreviewModal = dynamic(() => import('@/components/PreviewModal'), { ssr: false })
 const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
+const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
+    ssr: false,
+    loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={4} readOnly />
+})
+import { plainToHtml } from '@/lib/richTextUtils'
 // import { PenLine, WandSparkles, FolderOpen, Plus } from 'lucide-react'
 import { Edit, Discovery, Folder, Plus, Upload, Danger, InfoCircle, TickSquare, CloseSquare, Delete, Document, Search } from 'react-iconly'
 import { Loader2, Eye, Brain } from 'lucide-react'
@@ -35,6 +40,7 @@ interface QuizQuestion {
     teacher_hots_claim?: boolean
     text_direction?: 'ltr' | 'rtl'
     admin_review?: any
+    content_format?: 'html' | 'plain'
 }
 
 interface Quiz {
@@ -225,7 +231,8 @@ export default function EditQuizPage() {
                         passage_text: passageText,
                         passage_audio_url: passageAudioUrl || null,
                         teacher_hots_claim: q.teacher_hots_claim || false,
-                        text_direction: q.text_direction || 'ltr'
+                        text_direction: q.text_direction || 'ltr',
+                        content_format: 'html'
                     }))
                 await fetch(`/api/quizzes/${quizId}/questions`, {
                     method: 'POST',
@@ -254,7 +261,8 @@ export default function EditQuizPage() {
                 body: JSON.stringify({
                     ...manualForm,
                     order_index: questions.length,
-                    options: manualForm.question_type === 'MULTIPLE_CHOICE' ? manualForm.options : null
+                    options: manualForm.question_type === 'MULTIPLE_CHOICE' ? manualForm.options : null,
+                    content_format: 'html'
                 })
             })
             setManualForm({
@@ -299,6 +307,7 @@ export default function EditQuizPage() {
                     image_url: editForm.image_url,
                     teacher_hots_claim: editForm.teacher_hots_claim || false,
                     text_direction: editForm.text_direction || 'ltr',
+                    content_format: 'html',
                     passage_text: editForm.passage_text || null,
                     passage_audio_url: (editForm as any).passage_audio_url || null
                 })
@@ -338,7 +347,7 @@ export default function EditQuizPage() {
                 points: q.points || 10,
                 order_index: questions.length + idx,
                 passage_text: q.passage_text || null,
-                teacher_hots_claim: q.teacher_hots_claim || false,
+                teacher_hots_claim: q.teacher_hots_claim || false
             }))
 
             const res = await fetch(`/api/quizzes/${quizId}/questions`, {
@@ -944,7 +953,10 @@ export default function EditQuizPage() {
                                         <button
                                             onClick={() => {
                                                 setEditingQuestionId(q.id || null)
-                                                setEditForm(q)
+                                                setEditForm({
+                                                    ...q,
+                                                    question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text)
+                                                })
                                             }}
                                             className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors"
                                             disabled={quiz?.is_active}
@@ -1063,30 +1075,12 @@ export default function EditQuizPage() {
                             {/* Question Text */}
                             <div>
                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Teks Soal</label>
-                                <div dir={editForm.text_direction || 'ltr'}>
-                                    <MathTextarea
-                                        value={editForm.question_text}
-                                        onChange={(val: string) => setEditForm({ ...editForm, question_text: val })}
-                                        placeholder="Masukkan teks soal..."
-                                        rows={4}
-                                    />
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Gambar Soal (Opsional)</label>
-                                <div className="flex items-start gap-4">
-                                    <QuestionImageUpload
-                                        imageUrl={editForm.image_url}
-                                        onImageChange={(url) => setEditForm({ ...editForm, image_url: url })}
-                                        disabled={false}
-                                    />
-                                    {editForm.image_url && (
-                                        <div className="flex-1 bg-secondary/5 rounded-xl border border-secondary/20 p-2 text-center">
-                                            <img src={editForm.image_url} className="max-h-40 mx-auto rounded-lg" alt="Preview" />
-                                        </div>
-                                    )}
-                                </div>
+                                <RichTextEditor
+                                    value={editForm.question_text}
+                                    onChange={(val: string) => setEditForm({ ...editForm, question_text: val })}
+                                    placeholder="Masukkan teks soal..."
+                                    textDirection={editForm.text_direction || 'ltr'}
+                                />
                             </div>
 
                             {/* Passage Text / Audio (if exists) */}
@@ -1411,17 +1405,15 @@ export default function EditQuizPage() {
                                                         <button type="button" onClick={() => { const updated = [...passageQuestions]; updated[pqIdx] = { ...updated[pqIdx], text_direction: 'rtl' }; setPassageQuestions(updated) }} className={`px-2 py-0.5 text-[10px] font-bold rounded transition-colors ${pq.text_direction === 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary'}`}>RTL</button>
                                                     </div>
                                                 </div>
-                                                <textarea
-                                                    dir={pq.text_direction || 'ltr'}
+                                                <RichTextEditor
                                                     value={pq.question_text}
-                                                    onChange={(e) => {
+                                                    onChange={(val) => {
                                                         const updated = [...passageQuestions]
-                                                        updated[pqIdx] = { ...updated[pqIdx], question_text: e.target.value }
+                                                        updated[pqIdx] = { ...updated[pqIdx], question_text: val }
                                                         setPassageQuestions(updated)
                                                     }}
-                                                    className={`w-full px-3 py-2 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${pq.text_direction === 'rtl' ? 'text-right' : ''}`}
-                                                    rows={2}
                                                     placeholder="Tulis pertanyaan..."
+                                                    textDirection={pq.text_direction || 'ltr'}
                                                 />
                                                 {pq.question_type === 'MULTIPLE_CHOICE' && (
                                                     <div className="mt-3 space-y-2">
@@ -1552,14 +1544,12 @@ export default function EditQuizPage() {
                                             <button type="button" onClick={() => setManualForm({ ...manualForm, text_direction: 'rtl' })} className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors ${manualForm.text_direction === 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>Arab (RTL)</button>
                                         </div>
                                     </div>
-                                    <div dir={manualForm.text_direction || 'ltr'}>
-                                        <MathTextarea
-                                            value={manualForm.question_text}
-                                            onChange={(val) => setManualForm({ ...manualForm, question_text: val })}
-                                            placeholder="Tulis pertanyaan..."
-                                            rows={3}
-                                        />
-                                    </div>
+                                    <RichTextEditor
+                                        value={manualForm.question_text}
+                                        onChange={(val) => setManualForm({ ...manualForm, question_text: val })}
+                                        placeholder="Tulis pertanyaan..."
+                                        textDirection={manualForm.text_direction || 'ltr'}
+                                    />
                                 </div>
 
                                 {manualForm.question_type === 'MULTIPLE_CHOICE' && (

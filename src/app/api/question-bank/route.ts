@@ -113,7 +113,7 @@ export async function PUT(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { question_text, question_type, options, correct_answer, difficulty, subject_id, teacher_hots_claim, image_url } = body
+        const { question_text, question_type, options, correct_answer, difficulty, subject_id, teacher_hots_claim, image_url, content_format } = body
         const id = request.nextUrl.searchParams.get('id') || body.id
 
         if (!id) {
@@ -129,6 +129,7 @@ export async function PUT(request: NextRequest) {
         if (subject_id !== undefined) updateData.subject_id = subject_id || null
         if (teacher_hots_claim !== undefined) updateData.teacher_hots_claim = teacher_hots_claim
         if (image_url !== undefined) updateData.image_url = image_url || null
+        if (content_format !== undefined) updateData.content_format = content_format
 
         // Check if AI review is enabled
         const aiEnabled = await isAIReviewEnabled(schoolId)
@@ -215,7 +216,8 @@ export async function POST(request: NextRequest) {
                 difficulty: q.difficulty || 'MEDIUM',
                 tags: q.tags || null,
                 image_url: q.image_url || null,
-                teacher_hots_claim: Boolean(q.teacher_hots_claim)
+                teacher_hots_claim: Boolean(q.teacher_hots_claim),
+                content_format: q.content_format || 'plain'
             }))
 
             const { data, error } = await supabase
@@ -258,7 +260,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Single insert
-        const { subject_id, question_text, question_type, options, correct_answer, difficulty, tags, teacher_hots_claim } = body
+        const { subject_id, question_text, question_type, options, correct_answer, difficulty, tags, teacher_hots_claim, content_format } = body
 
         const { data, error } = await supabase
             .from('question_bank')
@@ -271,7 +273,8 @@ export async function POST(request: NextRequest) {
                 correct_answer: correct_answer || null,
                 difficulty: difficulty || 'MEDIUM',
                 tags: tags || null,
-                teacher_hots_claim: Boolean(teacher_hots_claim)
+                teacher_hots_claim: Boolean(teacher_hots_claim),
+                content_format: content_format || 'plain'
             })
             .select()
             .single()

@@ -1,0 +1,275 @@
+/* ──────── TipTap Rich Text Editor Styles ──────── */
+
+/* Editor container */
+.rich-text-editor {
+    border: 1px solid rgba(var(--secondary-rgb, 128, 128, 128), 0.3);
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: white;
+    transition: box-shadow 0.2s, border-color 0.2s;
+    width: 100%;
+}
+
+.rich-text-editor:focus-within {
+    border-color: var(--primary, #3b82f6);
+    box-shadow: 0 0 0 2px rgba(var(--primary-rgb, 59, 130, 246), 0.15);
+}
+
+/* Dark mode */
+:is(.dark) .rich-text-editor {
+    background: #18181b;
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+:is(.dark) .rich-text-editor:focus-within {
+    border-color: var(--primary, #3b82f6);
+}
+
+/* ─── Toolbar ─── */
+.rte-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 8px;
+    border-bottom: 1px solid rgba(var(--secondary-rgb, 128, 128, 128), 0.15);
+    background: rgba(var(--secondary-rgb, 128, 128, 128), 0.03);
+}
+
+:is(.dark) .rte-toolbar {
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.rte-toolbar-divider {
+    width: 1px;
+    height: 24px;
+    background: rgba(var(--secondary-rgb, 128, 128, 128), 0.2);
+    margin: 0 4px;
+}
+
+.rte-toolbar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 0.375rem;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary, #6b7280);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 14px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.rte-toolbar-btn:hover {
+    background: rgba(var(--secondary-rgb, 128, 128, 128), 0.1);
+    color: var(--text-main, #111827);
+}
+
+.rte-toolbar-btn.is-active {
+    background: var(--primary, #3b82f6);
+    color: white;
+}
+
+.rte-toolbar-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+:is(.dark) .rte-toolbar-btn {
+    color: #a1a1aa;
+}
+
+:is(.dark) .rte-toolbar-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+}
+
+/* Image/Text upload button (wider) */
+.rte-toolbar-btn--image,
+.rte-toolbar-btn--text {
+    width: auto;
+    padding: 0 8px;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/* Preview toggle active state (separate from is-active to avoid conflict) */
+.rte-toolbar-btn.is-preview-active {
+    background: #eff6ff;
+    color: #2563eb;
+    border: 1px solid #bfdbfe;
+}
+
+:is(.dark) .rte-toolbar-btn.is-preview-active {
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+/* ─── Editor Content ─── */
+.rte-content .tiptap {
+    padding: 12px 16px;
+    min-height: 120px;
+    outline: none;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text-main, #111827);
+}
+
+:is(.dark) .rte-content .tiptap {
+    color: #e4e4e7;
+}
+
+/* Placeholder */
+.rte-content .tiptap p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    color: rgba(var(--secondary-rgb, 128, 128, 128), 0.5);
+    pointer-events: none;
+    height: 0;
+    font-style: italic;
+}
+
+/* Paragraphs */
+.rte-content .tiptap p {
+    margin: 0 0 0.25em 0;
+}
+
+.rte-content .tiptap p:last-child {
+    margin-bottom: 0;
+}
+
+/* Bold / Italic / Underline */
+.rte-content .tiptap strong {
+    font-weight: 700;
+}
+
+.rte-content .tiptap em {
+    font-style: italic;
+}
+
+.rte-content .tiptap u {
+    text-decoration: underline;
+}
+
+.rte-content .tiptap s {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+/* Images in editor */
+.rte-content .tiptap img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 0.5rem;
+    margin: 8px 0;
+    border: 1px solid rgba(var(--secondary-rgb, 128, 128, 128), 0.2);
+    cursor: pointer;
+    transition: outline 0.15s;
+    display: block;
+}
+
+.rte-content .tiptap img.ProseMirror-selectednode {
+    outline: 2px solid var(--primary, #3b82f6);
+    outline-offset: 2px;
+}
+
+/* Custom resizable image wrapper */
+.rte-content .tiptap .resizable-image-wrapper {
+    display: inline-block;
+    position: relative;
+    line-height: 0;
+    margin: 8px 0;
+}
+
+.rte-content .tiptap .resizable-image-wrapper img {
+    display: block;
+    max-width: 100%;
+    border-radius: 0.5rem;
+    border: 1px solid rgba(var(--secondary-rgb, 128, 128, 128), 0.2);
+    transition: outline 0.15s;
+}
+
+.rte-content .tiptap .resizable-image-wrapper:hover img {
+    outline: 2px solid var(--primary, #3b82f6);
+    outline-offset: 2px;
+}
+
+.rte-content .tiptap .resizable-image-wrapper.is-resizing img {
+    outline: 2px solid #f59e0b;
+    outline-offset: 2px;
+}
+
+.rte-content .tiptap .resizable-image-wrapper .resizable-image-handle::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M6 0L8 2M3 0L8 5M0 0L8 8' stroke='white' stroke-width='1'/%3E%3C/svg%3E") center/8px no-repeat;
+}
+
+/* RTL support */
+.rte-content .tiptap[dir="rtl"] {
+    text-align: right;
+    direction: rtl;
+}
+
+/* ─── Uploading indicator ─── */
+.rte-uploading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--primary, #3b82f6);
+    background: rgba(var(--primary-rgb, 59, 130, 246), 0.08);
+    border-radius: 0.375rem;
+    animation: rte-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes rte-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ─── Preview Panel ─── */
+.rte-preview {
+    border-top: 1px solid rgba(var(--secondary-rgb, 128, 128, 128), 0.15);
+    background: #f8fafc;
+    padding: 12px 16px;
+}
+
+:is(.dark) .rte-preview {
+    background: #18181b;
+    border-top-color: rgba(255, 255, 255, 0.1);
+}
+
+.rte-preview-label {
+    display: flex;
+    align-items: center;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    color: var(--text-secondary, #64748b);
+    margin-bottom: 8px;
+}
+
+:is(.dark) .rte-preview-label {
+    color: #a1a1aa;
+}
+
+.rte-preview-content {
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text-main, #0f172a);
+}
+
+:is(.dark) .rte-preview-content {
+    color: #e2e8f0;
+}

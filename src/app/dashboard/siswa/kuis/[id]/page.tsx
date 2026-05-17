@@ -560,7 +560,7 @@ export default function KerjakanKuisPage() {
                                                         <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
                                                             {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
                                                         </span>
-                                                        <span className="text-[10px] md:text-xs text-text-secondary">({q.points} poin)</span>
+
                                                     </div>
                                                     <div dir={q.text_direction || 'ltr'}>
                                                         <SmartText text={q.question_text} className="text-text-main dark:text-white text-sm md:text-base mb-3 whitespace-pre-wrap" />
@@ -612,7 +612,7 @@ export default function KerjakanKuisPage() {
                                         <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
                                             {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
                                         </span>
-                                        <span className="text-[10px] md:text-xs text-text-secondary">({q.points} poin)</span>
+
                                     </div>
                                     <div dir={q.text_direction || 'ltr'}>
                                         <SmartText text={q.question_text} className={`text-text-main dark:text-white text-sm md:text-base mb-3 whitespace-pre-wrap ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />

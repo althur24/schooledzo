@@ -16,10 +16,11 @@ import {
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 
-const MathTextarea = dynamic(() => import('@/components/MathTextarea'), {
+const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
     ssr: false,
-    loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={3} readOnly />
+    loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={4} readOnly />
 })
+import { plainToHtml } from '@/lib/richTextUtils'
 const PreviewModal = dynamic(() => import('@/components/PreviewModal'), { ssr: false })
 const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
 
@@ -42,6 +43,7 @@ interface Question {
     passage_audio_url?: string | null; image_url?: string | null; status?: string
     teacher_hots_claim?: boolean
     text_direction?: 'ltr' | 'rtl'
+    content_format?: 'html' | 'plain'
 }
 
 type TabType = 'soal' | 'pengaturan' | 'hasil' | 'monitor'
@@ -74,7 +76,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
         id: '', question_text: '', question_type: 'MULTIPLE_CHOICE',
         options: ['', '', '', ''], correct_answer: '', points: 10,
         order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false,
-        text_direction: 'ltr'
+        text_direction: 'ltr', content_format: 'html'
     })
 
     // Passage mode
@@ -84,7 +86,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     const [uploadingAudio, setUploadingAudio] = useState(false)
     const [passageQuestions, setPassageQuestions] = useState<Question[]>([{
         id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''],
-        correct_answer: '', points: 10, order_index: 0, difficulty: null, passage_text: null, text_direction: 'ltr'
+        correct_answer: '', points: 10, order_index: 0, difficulty: null, passage_text: null, text_direction: 'ltr', content_format: 'html'
     }])
 
     // Bank Soal
@@ -284,14 +286,14 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     correct_answer: q.correct_answer || null, points: q.points || 10,
                     order_index: questions.length + idx, passage_text: passageText,
                     passage_audio_url: passageAudioUrl || null, teacher_hots_claim: q.teacher_hots_claim || false,
-                    text_direction: q.text_direction || 'ltr'
+                    text_direction: q.text_direction || 'ltr', content_format: 'html'
                 }))
                 await fetch(`/api/official-exams/${examId}/questions`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ questions: questionsToSave })
                 })
                 setPassageText(''); setPassageAudioUrl('')
-                setPassageQuestions([{ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: null, passage_text: null, text_direction: 'ltr' }])
+                setPassageQuestions([{ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: null, passage_text: null, text_direction: 'ltr', content_format: 'html' }])
                 setIsPassageMode(false); setSoalMode('list'); fetchQuestions()
             } finally { setSaving(false) }
             return
@@ -306,10 +308,11 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     options: manualForm.question_type === 'MULTIPLE_CHOICE' ? manualForm.options : null,
                     correct_answer: manualForm.correct_answer || null, points: manualForm.points,
                     difficulty: manualForm.difficulty, teacher_hots_claim: manualForm.teacher_hots_claim || false,
-                    order_index: questions.length, text_direction: manualForm.text_direction || 'ltr'
+                    order_index: questions.length, text_direction: manualForm.text_direction || 'ltr',
+                    content_format: 'html'
                 })
             })
-            setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false, text_direction: 'ltr' })
+            setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false, text_direction: 'ltr', content_format: 'html' })
             setSoalMode('list'); fetchQuestions()
         } finally { setSaving(false) }
     }
@@ -366,7 +369,8 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     image_url: editQuestionForm.image_url || null,
                     text_direction: editQuestionForm.text_direction || 'ltr',
                     passage_text: editQuestionForm.passage_text || null,
-                    passage_audio_url: (editQuestionForm as any).passage_audio_url || null
+                    passage_audio_url: (editQuestionForm as any).passage_audio_url || null,
+                    content_format: 'html'
                 })
             })
             setEditingQuestionId(null); setEditQuestionForm(null); fetchQuestions()
@@ -382,7 +386,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                 options: q.options || null, correct_answer: q.correct_answer || null,
                 difficulty: q.difficulty || 'MEDIUM', points: q.points || 10,
                 order_index: questions.length + idx, passage_text: q.passage_text || null,
-                teacher_hots_claim: q.teacher_hots_claim || false,
+                teacher_hots_claim: q.teacher_hots_claim || false
             }))
             const res = await fetch(`/api/official-exams/${examId}/questions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -657,7 +661,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                 }}
                                                 disabled={exam?.is_active}
                                             />
-                                            <button onClick={() => { setEditingQuestionId(q.id); setEditQuestionForm(q) }} className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors" disabled={exam?.is_active} title="Edit soal">
+                                            <button onClick={() => { setEditingQuestionId(q.id); setEditQuestionForm({ ...q, question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text), options: q.options ? q.options.map((opt: string) => q.content_format === 'html' ? opt : plainToHtml(opt)) : null, passage_text: q.passage_text ? (q.content_format === 'html' ? q.passage_text : plainToHtml(q.passage_text)) : null, content_format: 'html' }) }} className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors" disabled={exam?.is_active} title="Edit soal">
                                                 <Edit set="bold" primaryColor="currentColor" size={20} />
                                             </button>
                                             <button onClick={() => handleDeleteQuestion(q.id)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors" disabled={exam?.is_active}>
@@ -957,7 +961,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                             <div className="space-y-6">
                                 <div>
                                     <label className="block text-sm font-bold text-teal-700 dark:text-teal-400 mb-2">📖 Teks Bacaan (Passage)</label>
-                                    <textarea value={passageText} onChange={(e) => setPassageText(e.target.value)} className="w-full px-4 py-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-300 dark:border-teal-700 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 min-h-[120px]" placeholder="Tulis teks bacaan / passage di sini..." />
+                                    <RichTextEditor value={passageText} onChange={(val) => setPassageText(val)} placeholder="Tulis teks bacaan / passage di sini..." />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-2">🎧 Audio Listening (Opsional)</label>
@@ -997,7 +1001,9 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                         <button type="button" onClick={() => { const u = [...passageQuestions]; u[pqIdx] = { ...u[pqIdx], text_direction: 'rtl' }; setPassageQuestions(u) }} className={`px-2 py-0.5 text-[10px] font-bold rounded transition-colors ${pq.text_direction === 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary'}`}>RTL</button>
                                                     </div>
                                                 </div>
-                                                <textarea dir={pq.text_direction || 'ltr'} value={pq.question_text} onChange={(e) => { const u = [...passageQuestions]; u[pqIdx] = { ...u[pqIdx], question_text: e.target.value }; setPassageQuestions(u) }} className={`w-full px-3 py-2 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${pq.text_direction === 'rtl' ? 'text-right' : ''}`} rows={2} placeholder="Tulis pertanyaan..." />
+                                                <div dir={pq.text_direction || 'ltr'}>
+                                                    <RichTextEditor value={pq.question_text} onChange={(val) => { const u = [...passageQuestions]; u[pqIdx] = { ...u[pqIdx], question_text: val }; setPassageQuestions(u) }} placeholder="Tulis pertanyaan..." />
+                                                </div>
                                                 {pq.question_type === 'MULTIPLE_CHOICE' && (
                                                     <div className="mt-3 space-y-2">
                                                         <div className="space-y-2">
@@ -1073,7 +1079,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                         </div>
                                     </div>
                                     <div dir={manualForm.text_direction || 'ltr'}>
-                                        <MathTextarea value={manualForm.question_text} onChange={(val: string) => setManualForm({ ...manualForm, question_text: val })} placeholder="Tulis pertanyaan..." rows={3} />
+                                        <RichTextEditor value={manualForm.question_text} onChange={(val: string) => setManualForm({ ...manualForm, question_text: val })} placeholder="Tulis pertanyaan..." />
                                     </div>
                                 </div>
                                 {manualForm.question_type === 'MULTIPLE_CHOICE' && (
@@ -1100,7 +1106,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                             >✕ Hapus</button>
                                                         )}
                                                     </div>
-                                                    <MathTextarea value={manualForm.options?.[idx] || ''} onChange={(val: string) => { const o = [...(manualForm.options || ['','','',''])]; o[idx] = val; setManualForm({ ...manualForm, options: o }) }} placeholder={`Jawaban ${letter}`} rows={1} />
+                                                    <RichTextEditor value={manualForm.options?.[idx] || ''} onChange={(val: string) => { const o = [...(manualForm.options || ['','','',''])]; o[idx] = val; setManualForm({ ...manualForm, options: o }) }} placeholder={`Jawaban ${letter}`} />
                                                 </div>
                                             )})}
                                         </div>
@@ -1218,7 +1224,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                     <div className="flex items-center gap-2 mb-1">
                                                         <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>{q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : 'Essay'}</span>
                                                     </div>
-                                                    <p className="text-text-main dark:text-white text-sm">{q.question_text}</p>
+                                                    <SmartText text={q.question_text} className="text-text-main dark:text-white text-sm line-clamp-2" />
                                                 </div>
                                             </label>
                                         ))}
@@ -1283,7 +1289,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pertanyaan</label>
                             <div dir={editQuestionForm.text_direction || 'ltr'}>
-                                <MathTextarea value={editQuestionForm.question_text} onChange={(val: string) => setEditQuestionForm({ ...editQuestionForm, question_text: val })} placeholder="Tulis pertanyaan..." rows={3} />
+                                <RichTextEditor value={editQuestionForm.question_text} onChange={(val: string) => setEditQuestionForm({ ...editQuestionForm, question_text: val })} placeholder="Tulis pertanyaan..." />
                             </div>
                         </div>
                         <div>
@@ -1314,12 +1320,10 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                 {editQuestionForm.passage_text !== undefined && (
                                     <>
                                         <p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1">📖 Bacaan:</p>
-                                        <textarea
+                                        <RichTextEditor
                                             value={editQuestionForm.passage_text || ''}
-                                            onChange={(e) => setEditQuestionForm({ ...editQuestionForm, passage_text: e.target.value || null })}
-                                            className="w-full px-3 py-2 bg-white dark:bg-zinc-800 border border-teal-300 dark:border-teal-700 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 min-h-[80px]"
+                                            onChange={(val) => setEditQuestionForm({ ...editQuestionForm, passage_text: val || null })}
                                             placeholder="Edit teks bacaan..."
-                                            rows={4}
                                         />
                                     </>
                                 )}
@@ -1349,7 +1353,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                     >✕ Hapus</button>
                                                 )}
                                             </div>
-                                            <MathTextarea value={editQuestionForm.options?.[idx] || ''} onChange={(val: string) => { const o = [...(editQuestionForm.options || [])]; o[idx] = val; setEditQuestionForm({ ...editQuestionForm, options: o }) }} placeholder={`Opsi ${letter}`} rows={1} />
+                                            <RichTextEditor value={editQuestionForm.options?.[idx] || ''} onChange={(val: string) => { const o = [...(editQuestionForm.options || [])]; o[idx] = val; setEditQuestionForm({ ...editQuestionForm, options: o }) }} placeholder={`Opsi ${letter}`} />
                                         </div>
                                     )})}
                                 </div>

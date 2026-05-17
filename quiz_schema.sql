@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS quiz_questions (
   correct_answer TEXT, -- untuk PG: "A", "B", "C", atau "D"
   points INT DEFAULT 10,
   order_index INT DEFAULT 0,
+  content_format TEXT DEFAULT 'plain' NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS question_bank (
   correct_answer TEXT,
   difficulty VARCHAR(20) DEFAULT 'MEDIUM' CHECK (difficulty IN ('EASY', 'MEDIUM', 'HARD')),
   tags TEXT[],
+  content_format TEXT DEFAULT 'plain' NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

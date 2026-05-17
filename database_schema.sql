@@ -106,6 +106,7 @@ CREATE TABLE questions (
   options JSONB, -- For PG: ["A. Option 1", "B. Option 2", ...]
   correct_answer TEXT,
   points INTEGER DEFAULT 1,
+  content_format TEXT DEFAULT 'plain' NOT NULL,
   created_at TIMESTAMP DEFAULT NOW()
 );
 

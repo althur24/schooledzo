@@ -33,6 +33,7 @@ interface QuizQuestion {
     passage_text?: string | null
     passage_audio_url?: string | null
     text_direction?: 'ltr' | 'rtl'
+    image_url?: string | null
 }
 
 interface Quiz {
@@ -149,6 +150,11 @@ export default function HasilKuisPage() {
                     <div dir={q.text_direction || 'ltr'}>
                         <SmartText text={q.question_text} className={`text-text-main dark:text-white mb-3 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
                     </div>
+                    {q.image_url && (
+                        <div className="mb-3">
+                            <img src={q.image_url} alt="Gambar soal" className="max-h-40 rounded-lg border border-secondary/20" />
+                        </div>
+                    )}
 
                     <div className="bg-secondary/10 rounded-lg p-4 text-sm space-y-2">
                         <div>
@@ -179,14 +185,7 @@ export default function HasilKuisPage() {
                         )}
                     </div>
                 </div>
-                <div className="text-right">
-                    <span className={`text-sm font-bold ${q.question_type !== 'MULTIPLE_CHOICE' && !result.is_graded
-                        ? 'text-text-secondary'
-                        : (userAnswer?.score || 0) === q.points ? 'text-green-600 dark:text-green-400' : 'text-text-secondary'
-                        }`}>
-                        {userAnswer?.score || 0}/{q.points}
-                    </span>
-                </div>
+
             </div>
         )
     }

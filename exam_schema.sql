@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS exam_questions (
     correct_answer TEXT,
     points INTEGER DEFAULT 1,
     order_index INTEGER DEFAULT 0,
+    content_format TEXT DEFAULT 'plain' NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

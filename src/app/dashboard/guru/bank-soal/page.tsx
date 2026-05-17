@@ -7,12 +7,13 @@ import dynamic from 'next/dynamic'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import SmartText from '@/components/SmartText'
 import Card from '@/components/ui/Card'
-// Dynamic imports for heavy components (mathlive 5.6MB, AI modal 724 lines)
+// Dynamic imports for heavy components
 const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
-const MathTextarea = dynamic(() => import('@/components/MathTextarea'), {
+const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
     ssr: false,
-    loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={3} readOnly />
+    loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={4} readOnly />
 })
+import { plainToHtml } from '@/lib/richTextUtils'
 const AIReviewPanel = dynamic(() => import('@/components/AIReviewPanel'), { ssr: false })
 import { Folder, Plus, Document, Delete, Edit, Discovery, Paper, ShieldDone, TickSquare, InfoCircle, CloseSquare, Download, Search, Danger } from 'react-iconly'
 import { Copy, ChevronLeft, ChevronRight } from 'lucide-react'
@@ -32,6 +33,7 @@ interface QuestionBankItem {
     teacher_hots_claim?: boolean
     ai_review?: any
     admin_review?: any
+    content_format?: 'html' | 'plain'
 }
 
 interface Subject {
@@ -46,6 +48,7 @@ interface PassageQuestion {
     correct_answer: string
     difficulty: 'EASY' | 'MEDIUM' | 'HARD'
     teacher_hots_claim?: boolean
+    content_format?: 'html' | 'plain'
 }
 
 interface Passage {
@@ -65,6 +68,7 @@ interface Passage {
         status?: string
         teacher_hots_claim?: boolean
         admin_review?: any
+        content_format?: 'html' | 'plain'
     }>
     created_at: string
 }
@@ -120,7 +124,8 @@ export default function BankSoalPage() {
         difficulty: 'MEDIUM' as 'EASY' | 'MEDIUM' | 'HARD',
         subject_id: '',
         image_url: '',
-        teacher_hots_claim: false
+        teacher_hots_claim: false,
+        content_format: 'html' as 'html' | 'plain'
     })
     const [uploading, setUploading] = useState(false)
     const [uploadingAudio, setUploadingAudio] = useState(false)
@@ -138,7 +143,8 @@ export default function BankSoalPage() {
             options: ['', '', '', ''],
             correct_answer: '',
             difficulty: 'MEDIUM' as 'EASY' | 'MEDIUM' | 'HARD',
-            teacher_hots_claim: false
+            teacher_hots_claim: false,
+            content_format: 'html' as 'html' | 'plain'
         }] as PassageQuestion[]
     })
 
@@ -288,7 +294,8 @@ export default function BankSoalPage() {
             difficulty: 'MEDIUM',
             subject_id: '',
             image_url: '',
-            teacher_hots_claim: false
+            teacher_hots_claim: false,
+            content_format: 'html'
         })
         setPassageForm({
             title: '',
@@ -301,7 +308,8 @@ export default function BankSoalPage() {
                 options: ['', '', '', ''],
                 correct_answer: '',
                 difficulty: 'MEDIUM',
-                teacher_hots_claim: false
+                teacher_hots_claim: false,
+                content_format: 'html'
             }]
         })
     }
@@ -315,7 +323,8 @@ export default function BankSoalPage() {
                 options: ['', '', '', ''],
                 correct_answer: '',
                 difficulty: 'MEDIUM',
-                teacher_hots_claim: false
+                teacher_hots_claim: false,
+                content_format: 'html'
             }]
         })
     }
@@ -338,12 +347,13 @@ export default function BankSoalPage() {
             audio_url: p.audio_url || '',
             subject_id: p.subject?.id || '',
             questions: p.questions?.map(q => ({
-                question_text: q.question_text,
+                question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text),
                 question_type: q.question_type,
                 options: q.options || ['', '', '', ''],
                 correct_answer: q.correct_answer || '',
                 difficulty: q.difficulty,
-                teacher_hots_claim: q.teacher_hots_claim || false
+                teacher_hots_claim: q.teacher_hots_claim || false,
+                content_format: 'html' as 'html' | 'plain'
             })) || []
         })
         setShowEditPassageModal(true)
@@ -380,7 +390,8 @@ export default function BankSoalPage() {
                 options: ['', '', '', ''],
                 correct_answer: '',
                 difficulty: 'MEDIUM',
-                teacher_hots_claim: false
+                teacher_hots_claim: false,
+                content_format: 'html' as 'html' | 'plain'
             }]
         })
     }
@@ -405,20 +416,22 @@ export default function BankSoalPage() {
         difficulty: 'MEDIUM' as 'EASY' | 'MEDIUM' | 'HARD',
         subject_id: '',
         image_url: '',
-        teacher_hots_claim: false
+        teacher_hots_claim: false,
+        content_format: 'html' as 'html' | 'plain'
     })
 
     const handleEditQuestion = (q: QuestionBankItem) => {
         setEditingQuestionId(q.id)
         setEditQuestionForm({
-            question_text: q.question_text,
+            question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text),
             question_type: q.question_type,
             options: q.options || ['', '', '', ''],
             correct_answer: q.correct_answer || '',
             difficulty: q.difficulty,
             subject_id: q.subject?.id || '',
             image_url: q.image_url || '',
-            teacher_hots_claim: q.teacher_hots_claim || false
+            teacher_hots_claim: q.teacher_hots_claim || false,
+            content_format: 'html'
         })
         setShowEditQuestionModal(true)
     }
@@ -624,7 +637,8 @@ export default function BankSoalPage() {
                         options: q.options || null,
                         correct_answer: q.correct_answer || null,
                         difficulty: q.difficulty || 'MEDIUM',
-                        subject_id: selectedSubject || null
+                        subject_id: selectedSubject || null,
+                        content_format: 'html'
                     })))
                 })
             }
@@ -643,7 +657,8 @@ export default function BankSoalPage() {
                             question_type: q.question_type,
                             options: q.options || null,
                             correct_answer: q.correct_answer || null,
-                            difficulty: q.difficulty || 'MEDIUM'
+                            difficulty: q.difficulty || 'MEDIUM',
+                            content_format: 'html'
                         }))
                     })
                 })
@@ -1183,10 +1198,9 @@ export default function BankSoalPage() {
 
                             <div>
                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pertanyaan *</label>
-                                <MathTextarea
+                                <RichTextEditor
                                     value={questionForm.question_text}
                                     onChange={(val) => setQuestionForm({ ...questionForm, question_text: val })}
-                                    rows={3}
                                     placeholder="Tulis soal..."
                                 />
                             </div>
@@ -1388,14 +1402,13 @@ export default function BankSoalPage() {
                                                 </select>
                                             </div>
 
-                                            <MathTextarea
+                                            <RichTextEditor
                                                 value={pq.question_text}
                                                 onChange={(val) => {
                                                     const newQuestions = [...passageForm.questions]
                                                     newQuestions[idx].question_text = val
                                                     setPassageForm({ ...passageForm, questions: newQuestions })
                                                 }}
-                                                rows={2}
                                                 placeholder="Tulis pertanyaan..."
                                             />
 
@@ -1526,10 +1539,9 @@ export default function BankSoalPage() {
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Pertanyaan</label>
-                        <MathTextarea
+                        <RichTextEditor
                             value={editQuestionForm.question_text}
                             onChange={(val) => setEditQuestionForm({ ...editQuestionForm, question_text: val })}
-                            rows={4}
                             placeholder="Tulis pertanyaan..."
                         />
                     </div>
@@ -1708,16 +1720,14 @@ export default function BankSoalPage() {
                                             <option value="HARD">Sulit</option>
                                         </select>
                                     </div>
-                                    <textarea
+                                    <RichTextEditor
                                         value={q.question_text}
-                                        onChange={(e) => {
+                                        onChange={(val) => {
                                             const newQs = [...editPassageForm.questions]
-                                            newQs[idx].question_text = e.target.value
+                                            newQs[idx].question_text = val
                                             setEditPassageForm({ ...editPassageForm, questions: newQs })
                                         }}
-                                        className="w-full p-2 border border-secondary/30 rounded-lg bg-secondary/10 mb-2 text-sm"
                                         placeholder="Pertanyaan..."
-                                        rows={2}
                                     />
                                     {q.question_type === 'MULTIPLE_CHOICE' && (
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">

@@ -608,7 +608,7 @@ export default function TakeOfficialExamPage() {
                                 <span className={`px-2 py-0.5 text-xs rounded ${currentQuestion.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500' : 'bg-amber-500/20 text-amber-600'}`}>
                                     {currentQuestion.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
                                 </span>
-                                <span className="text-xs text-text-secondary">({currentQuestion.points} poin)</span>
+
                             </div>
 
                             {currentQuestion.passage_text && (

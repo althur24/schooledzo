@@ -857,7 +857,7 @@ export default function TakeExamPage() {
                                                     <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
                                                         {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
                                                     </span>
-                                                    <span className="text-xs text-text-secondary">({q.points} poin)</span>
+
                                                 </div>
                                                 <div dir={q.text_direction || 'ltr'}>
                                                     <SmartText text={q.question_text} className="text-text-main dark:text-white text-base md:text-lg mb-4 whitespace-pre-wrap" />
@@ -895,7 +895,7 @@ export default function TakeExamPage() {
                                         <span className={`px-2 py-0.5 text-xs rounded ${currentItem.question.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
                                             {currentItem.question.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
                                         </span>
-                                        <span className="text-xs text-text-secondary">({currentItem.question.points} poin)</span>
+
                                     </div>
                                     {/* Text-only passage — show BEFORE question */}
                                     {currentItem.question.passage_text && !currentItem.question.passage_audio_url && (
