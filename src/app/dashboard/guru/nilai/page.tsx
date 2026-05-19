@@ -301,8 +301,11 @@ export default function NilaiPage() {
             'Rata-rata'
         ]
 
-        // Build data rows
-        const rows = students.map((student, idx) => {
+        // Build data rows (sorted alphabetically by student name)
+        const sortedStudents = [...students].sort((a, b) =>
+            (a.user.full_name || '').localeCompare(b.user.full_name || '', 'id')
+        )
+        const rows = sortedStudents.map((student, idx) => {
             const tugasGrades = tugasAssignmentsLocal.map(a => {
                 const sub = allSubmissions.find(s => s.student?.id === student.id && s.assignment?.id === a.id)
                 return sub?.grade?.[0]?.score ?? ''

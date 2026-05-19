@@ -13,6 +13,7 @@ import {
     Settings, FileText, BarChart3, Sparkles, Activity,
     ChevronUp, CheckCircle, Download
 } from 'lucide-react'
+import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 
@@ -205,7 +206,11 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     const handleDownloadExcel = () => {
         if (!exam || submissions.length === 0) return
 
-        const formattedData = submissions.map((sub: any, index: number) => {
+        const sortedSubmissions = [...submissions].sort((a: any, b: any) =>
+            (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '', 'id')
+        )
+
+        const formattedData = sortedSubmissions.map((sub: any, index: number) => {
             const maxScore = sub.max_score || 1
             const percentage = Math.round((sub.total_score / maxScore) * 100)
             
@@ -793,6 +798,15 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                             )}
                         </div>
                     </div>
+
+                    {/* Analytics Dashboard */}
+                    {submissions.length > 0 && (
+                        <AssessmentAnalytics
+                            assessmentId={examId}
+                            assessmentType="official-exam"
+                            classId={resultsClassFilter || undefined}
+                        />
+                    )}
 
                     {resultsLoading ? (
                         <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>

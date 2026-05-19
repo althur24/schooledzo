@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation'
 import { PageHeader, Card, Button, EmptyState, StatsCard } from '@/components/ui'
 import { InfoCircle, TickSquare, User, TimeCircle, Document, ArrowDown, ChevronDown } from 'react-iconly'
 import { Loader2 } from 'lucide-react'
+import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
 
 interface QuizSubmission {
     id: string
@@ -155,6 +156,14 @@ export default function QuizSubmissionsPage() {
                         </div>
                     )}
                 </Card>
+            )}
+
+            {/* Analytics Dashboard */}
+            {submissions.length > 0 && (
+                <AssessmentAnalytics
+                    assessmentId={quizId}
+                    assessmentType="quiz"
+                />
             )}
 
             {/* Submissions Table */}

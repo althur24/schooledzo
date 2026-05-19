@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { Modal, PageHeader, Button } from '@/components/ui'
+import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
 
 interface ExamSubmission {
     id: string
@@ -139,6 +140,14 @@ export default function GuruExamHasilPage() {
                     <p className="text-xs text-text-secondary dark:text-zinc-400">Terendah</p>
                 </div>
             </div>
+
+            {/* Analytics Dashboard */}
+            {submissions.filter(s => s.is_submitted).length > 0 && (
+                <AssessmentAnalytics
+                    assessmentId={examId}
+                    assessmentType="exam"
+                />
+            )}
 
             {/* Submissions Table */}
             <div className="bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl overflow-hidden shadow-sm">

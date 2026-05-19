@@ -683,7 +683,11 @@ export default function EditExamPage() {
     const handleDownloadExcel = () => {
         if (!exam || submissions.length === 0) return
 
-        const formattedData = submissions.map((sub: any, index: number) => {
+        const sortedSubmissions = [...submissions].sort((a: any, b: any) =>
+            (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '', 'id')
+        )
+
+        const formattedData = sortedSubmissions.map((sub: any, index: number) => {
             const maxScore = sub.max_score || 1
             const percentage = Math.round((sub.total_score / maxScore) * 100)
             

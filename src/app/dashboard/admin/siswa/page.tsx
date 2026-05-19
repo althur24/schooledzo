@@ -437,7 +437,10 @@ export default function SiswaPage() {
 
     const downloadExcel = () => {
         if (filteredStudents.length === 0) return
-        const data = filteredStudents.map((s, i) => ({
+        const sortedStudents = [...filteredStudents].sort((a, b) =>
+            (a.user.full_name || '').localeCompare(b.user.full_name || '', 'id')
+        )
+        const data = sortedStudents.map((s, i) => ({
             'No': i + 1,
             'Nama Lengkap': s.user.full_name || '-',
             'NIS': s.nis || '-',

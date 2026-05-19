@@ -73,7 +73,10 @@ export default function WaliKelasPage() {
         const subjects = data.subjects || []
         const headers = ['No', 'NIS', 'Nama Siswa', ...subjects.map((s: any) => s.name), 'Rata-rata']
 
-        const rows = data.students.map((student: any, idx: number) => {
+        const sortedStudents = [...data.students].sort((a: any, b: any) =>
+            (a.user?.full_name || '').localeCompare(b.user?.full_name || '', 'id')
+        )
+        const rows = sortedStudents.map((student: any, idx: number) => {
             const studentGrade = data.student_grades?.find((sg: any) => sg.student_id === student.id)
             const overall = calcStudentOverall(studentGrade)
 
