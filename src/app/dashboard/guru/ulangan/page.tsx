@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
+import { Modal, PageHeader, Button } from '@/components/ui'
 import Card from '@/components/ui/Card'
+import MultiClassSelector from '@/components/MultiClassSelector'
 import { useAuth } from '@/contexts/AuthContext'
 import { Paper as FileText, TimeCircle as Clock, Calendar, Plus, Lock, ShieldDone, User, Swap, Graph, Edit, Delete, ChevronDown, Document } from 'react-iconly'
 import { Loader2, CheckSquare, Square, RefreshCw, GraduationCap, BookOpen, Users } from 'lucide-react'
@@ -62,7 +63,7 @@ export default function GuruUlanganPage() {
     const [showCreate, setShowCreate] = useState(false)
     const [creating, setCreating] = useState(false)
     const [form, setForm] = useState({
-        teaching_assignment_id: '',
+        teaching_assignment_ids: [] as string[],
         title: '',
         description: '',
         start_time: '',
@@ -126,7 +127,6 @@ export default function GuruUlanganPage() {
                 myAssignments = Array.isArray(data) ? data : []
             }
 
-            // Get active academic year and fetch students with enrollment
             const yearsData = yearsRes.ok ? await yearsRes.json() : []
             const activeYear = Array.isArray(yearsData) ? yearsData.find((y: any) => y.is_active) : null
             if (activeYear) {
@@ -147,13 +147,11 @@ export default function GuruUlanganPage() {
 
             setTeachingAssignments(myAssignments)
 
-            // Filter exams by my teaching assignments
             const myExams = examsData.filter((e: Exam) =>
                 myAssignments.some((ta: TeachingAssignment) => ta.id === e.teaching_assignment?.id)
             )
             setExams(myExams)
 
-            // Fetch submission counts per exam
             const subCounts: Record<string, number> = {}
             const pendingCounts: Record<string, number> = {}
             
@@ -192,39 +190,63 @@ export default function GuruUlanganPage() {
     }
 
     const handleCreate = async () => {
-        if (!form.teaching_assignment_id || !form.title || !form.start_time) return
+        if (form.teaching_assignment_ids.length === 0 || !form.title || !form.start_time) return
         setCreating(true)
         try {
-            // Convert local datetime-local string to UTC for backend
-            let formattedStartTime = null;
-            if (form.start_time) {
-                const localDate = new Date(form.start_time);
-                formattedStartTime = localDate.toISOString();
-            }
+            const localStart = new Date(form.start_time)
+            const utcStart = localStart.toISOString()
+            const payload = { ...form, start_time: utcStart }
 
-            const res = await fetch('/api/exams', {
+            // Create first (primary) exam
+            const primaryRes = await fetch('/api/exams', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    ...form,
-                    start_time: formattedStartTime
+                    ...payload,
+                    teaching_assignment_id: form.teaching_assignment_ids[0]
                 })
             })
-            if (res.ok) {
-                const newExam = await res.json()
-                setShowCreate(false)
-                setForm({
-                    teaching_assignment_id: '',
-                    title: '',
-                    description: '',
-                    start_time: '',
-                    duration_minutes: 60,
-                    is_randomized: true,
-                    max_violations: 3,
-                    show_results_immediately: true
+
+            if (!primaryRes.ok) return
+
+            const primaryExam = await primaryRes.json()
+            
+            // Create sibling exams (remaining classes)
+            const siblingIds: string[] = []
+            if (form.teaching_assignment_ids.length > 1) {
+                const siblingResults = await Promise.allSettled(
+                    form.teaching_assignment_ids.slice(1).map(taId =>
+                        fetch('/api/exams', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                ...payload,
+                                teaching_assignment_id: taId
+                            })
+                        }).then(r => r.json())
+                    )
+                )
+                siblingResults.forEach(r => {
+                    if (r.status === 'fulfilled' && r.value?.id) {
+                        siblingIds.push(r.value.id)
+                    }
                 })
-                router.push(`/dashboard/guru/ulangan/${newExam.id}`)
             }
+
+            setShowCreate(false)
+            setForm({
+                teaching_assignment_ids: [],
+                title: '',
+                description: '',
+                start_time: '',
+                duration_minutes: 60,
+                is_randomized: true,
+                max_violations: 3,
+                show_results_immediately: true
+            })
+            
+            const siblingParam = siblingIds.length > 0 ? `?siblings=${siblingIds.join(',')}` : ''
+            router.push(`/dashboard/guru/ulangan/${primaryExam.id}${siblingParam}`)
         } finally {
             setCreating(false)
         }
@@ -242,7 +264,7 @@ export default function GuruUlanganPage() {
         setRemedialLoading(true)
         setSelectedStudentIds([])
         setRemedialMethod('ASLI')
-        setRemedialStartTime('') // Need new start time for exam
+        setRemedialStartTime('')
 
         try {
             const classId = exam.teaching_assignment?.class?.id
@@ -271,11 +293,9 @@ export default function GuruUlanganPage() {
                 }
             })
 
-            // Sort by score
             studentsWithScores.sort((a, b) => a.score - b.score)
 
             setRemedialStudents(studentsWithScores)
-            // Pre-select those below KKM
             setSelectedStudentIds(studentsWithScores.filter((s: any) => s.isBelowKKM).map((s: any) => s.id))
         } catch (error) {
             console.error('Error fetching remedial data:', error)
@@ -289,7 +309,6 @@ export default function GuruUlanganPage() {
         if (!remedialExam || selectedStudentIds.length === 0 || !remedialStartTime) return
         setCreating(true)
         try {
-            // Convert local datetime-local string to UTC for backend
             let formattedRemedialStartTime = null;
             if (remedialStartTime) {
                 const localDate = new Date(remedialStartTime);
@@ -319,9 +338,8 @@ export default function GuruUlanganPage() {
             if (res.ok) {
                 const newExam = await res.json()
                 setShowRemedial(false)
-                fetchData() // Refresh list
+                fetchData()
 
-                // If they require new questions, redirect to exam editor
                 if (remedialMethod === 'BARU') {
                     router.push(`/dashboard/guru/ulangan/${newExam.id}`)
                 }
@@ -360,7 +378,6 @@ export default function GuruUlanganPage() {
         const startTime = new Date(exam.start_time)
         const endTime = new Date(startTime.getTime() + exam.duration_minutes * 60000)
 
-        // Check time-based conditions FIRST, so ended exams (auto-deactivated) show "Selesai" not "Draft"
         if (now > endTime) return { label: 'Selesai', color: 'bg-secondary/10 text-text-secondary border-secondary/20' }
         if (now >= startTime && now <= endTime && exam.is_active) return { label: 'Berlangsung', color: 'bg-green-500/10 text-green-600 border-green-200 dark:border-green-500/20 dark:text-green-400' }
         if (exam.is_active && now < startTime) return { label: 'Terjadwal', color: 'bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-500/20 dark:text-blue-400' }
@@ -384,7 +401,6 @@ export default function GuruUlanganPage() {
                 }
             />
 
-            {/* Info cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Card padding="p-4" className="bg-gradient-to-br from-purple-500/5 to-purple-600/5 border-purple-200/50">
                     <div className="flex items-center gap-4">
@@ -450,7 +466,6 @@ export default function GuruUlanganPage() {
                 </div>
             ) : (
                 <div className="space-y-8">
-                    {/* Ulangan Harian Section */}
                     <div>
                         <h2 className="text-xl font-bold text-text-main dark:text-white mb-4 flex items-center gap-2">
                             <div className="text-red-500"><Clock set="bold" primaryColor="currentColor" size={24} /></div>
@@ -467,148 +482,126 @@ export default function GuruUlanganPage() {
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                                 {exams.map((exam) => {
                                     const status = getExamStatus(exam as any)
-                        return (
-                            <Card key={exam.id} padding="p-5" className="group hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all">
-                                <div className="flex flex-col h-full gap-4">
-                                    <div className="flex items-start justify-between">
-                                        <div className="flex-1">
-                                            <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${status.color}`}>{status.label}</span>
-                                                {(exam as any).is_remedial && (
-                                                    <span className="px-2 py-0.5 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm animate-pulse-slow">
-                                                        REMEDIAL
-                                                    </span>
-                                                )}
-                                                {exam.is_randomized && <span className="text-xs text-text-secondary flex items-center gap-1 bg-secondary/10 px-2 py-1 rounded-full"><Swap set="bold" primaryColor="currentColor" size={12} /> Acak</span>}
-                                            </div>
-                                            <h3 className="font-bold text-text-main dark:text-white text-lg group-hover:text-primary transition-colors line-clamp-2">{exam.title}</h3>
-                                        </div>
-                                        <div className="w-10 h-10 rounded-full bg-secondary/10 flex items-center justify-center text-text-secondary group-hover:bg-primary/10 group-hover:text-primary transition-colors">
-                                            <User set="bold" primaryColor="currentColor" size={20} />
-                                        </div>
-                                    </div>
-
-                                    <p className="text-sm text-text-secondary dark:text-zinc-400 line-clamp-2 flex-grow">{exam.description || 'Tidak ada deskripsi'}</p>
-
-                                    <div className="space-y-3 pt-4 border-t border-secondary/10">
-                                        <div className="flex items-center text-xs text-text-secondary dark:text-zinc-500 mb-2">
-                                            <Calendar set="bold" primaryColor="currentColor" size={14} />
-                                            <span className="ml-1.5">Dibuat: {new Date(exam.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                            <span>Kelas & Mapel</span>
-                                            <div className="flex gap-1">
-                                                <span className="px-2 py-1 bg-secondary/10 rounded font-bold text-text-main dark:text-white">{exam.teaching_assignment?.class?.name}</span>
-                                                <span className="px-2 py-1 bg-primary/10 rounded font-bold text-primary">{exam.teaching_assignment?.subject?.name}</span>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                            <span>Waktu & Soal</span>
-                                            <div className="flex gap-3">
-                                                <span className="flex items-center gap-1 font-medium">
-                                                    <Clock set="bold" primaryColor="currentColor" size={14} /> {exam.duration_minutes}m
-                                                </span>
-                                                <span className="flex items-center gap-1 font-medium">
-                                                    <Edit set="bold" primaryColor="currentColor" size={14} /> {exam.question_count || 0}
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                            <span>Mulai</span>
-                                            <span className="font-medium">{formatDateTime(exam.start_time)}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                            <span>Berakhir</span>
-                                            <span className="font-medium text-red-500 dark:text-red-400">
-                                                {formatDateTime(new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
-                                            </span>
-                                        </div>
-                                        {(() => {
-                                            const classId = exam.teaching_assignment?.class?.id
-                                            const total = classId ? (studentCounts[classId] || 0) : 0
-                                            const submitted = submissionCounts[exam.id] || 0
-                                            const pendingGrading = pendingGradingCounts[exam.id] || 0
-                                            return (
-                                                <>
-                                                    <div className="flex items-center justify-between text-xs mt-1">
-                                                        <span className="text-text-secondary">Pengumpulan</span>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className={`font-bold ${submitted >= total && total > 0 ? 'text-green-600' : 'text-primary'}`}>{submitted}/{total}</span>
-                                                            {total > 0 && (
-                                                                <div className="w-16 bg-secondary/20 rounded-full h-1.5 overflow-hidden">
-                                                                    <div
-                                                                        className={`h-full rounded-full transition-all duration-500 ${submitted >= total ? 'bg-green-500' : submitted > 0 ? 'bg-primary' : 'bg-secondary/30'}`}
-                                                                        style={{ width: `${Math.min(100, total > 0 ? (submitted / total) * 100 : 0)}%` }}
-                                                                    />
-                                                                </div>
+                                    return (
+                                        <Card key={exam.id} padding="p-5" className="group hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all">
+                                            <div className="flex flex-col h-full gap-4">
+                                                <div className="flex items-start justify-between">
+                                                    <div className="flex-1">
+                                                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                            <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${status.color}`}>{status.label}</span>
+                                                            {(exam as any).is_remedial && (
+                                                                <span className="px-2 py-0.5 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm animate-pulse-slow">
+                                                                    REMEDIAL
+                                                                </span>
                                                             )}
+                                                            {exam.is_randomized && <span className="text-xs text-text-secondary flex items-center gap-1 bg-secondary/10 px-2 py-1 rounded-full"><Swap set="bold" primaryColor="currentColor" size={12} /> Acak</span>}
+                                                        </div>
+                                                        <h3 className="font-bold text-text-main dark:text-white text-lg group-hover:text-primary transition-colors line-clamp-2">{exam.title}</h3>
+                                                    </div>
+                                                </div>
+
+                                                <p className="text-sm text-text-secondary dark:text-zinc-400 line-clamp-2 flex-grow">{exam.description || 'Tidak ada deskripsi'}</p>
+
+                                                <div className="space-y-3 pt-4 border-t border-secondary/10">
+                                                    <div className="flex items-center text-xs text-text-secondary dark:text-zinc-500 mb-2">
+                                                        <Calendar set="bold" primaryColor="currentColor" size={14} />
+                                                        <span className="ml-1.5">Dibuat: {new Date(exam.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                        <span>Kelas & Mapel</span>
+                                                        <div className="flex gap-1">
+                                                            <span className="px-2 py-1 bg-secondary/10 rounded font-bold text-text-main dark:text-white">{exam.teaching_assignment?.class?.name}</span>
+                                                            <span className="px-2 py-1 bg-primary/10 rounded font-bold text-primary">{exam.teaching_assignment?.subject?.name}</span>
                                                         </div>
                                                     </div>
-                                                    {pendingGrading > 0 && (
-                                                        <Link href={`/dashboard/guru/ulangan/${exam.id}?tab=hasil`} className="block">
-                                                            <div className="flex items-center justify-between text-xs mt-1 px-2 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition-colors cursor-pointer">
-                                                                <span className="text-amber-600 dark:text-amber-400 font-medium">📝 Perlu Dikoreksi</span>
-                                                                <span className="font-bold text-amber-600 dark:text-amber-400">{pendingGrading}</span>
-                                                            </div>
+                                                    <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                        <span>Waktu & Soal</span>
+                                                        <div className="flex gap-3">
+                                                            <span className="flex items-center gap-1 font-medium">
+                                                                <Clock set="bold" primaryColor="currentColor" size={14} /> {exam.duration_minutes}m
+                                                            </span>
+                                                            <span className="flex items-center gap-1 font-medium">
+                                                                <Edit set="bold" primaryColor="currentColor" size={14} /> {exam.question_count || 0}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    {(() => {
+                                                        const classId = exam.teaching_assignment?.class?.id
+                                                        const total = classId ? (studentCounts[classId] || 0) : 0
+                                                        const submitted = submissionCounts[exam.id] || 0
+                                                        const pendingGrading = pendingGradingCounts[exam.id] || 0
+                                                        return (
+                                                            <>
+                                                                <div className="flex items-center justify-between text-xs mt-1">
+                                                                    <span className="text-text-secondary">Pengumpulan</span>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className={`font-bold ${submitted >= total && total > 0 ? 'text-green-600' : 'text-primary'}`}>{submitted}/{total}</span>
+                                                                    </div>
+                                                                </div>
+                                                                {pendingGrading > 0 && (
+                                                                    <Link href={`/dashboard/guru/ulangan/${exam.id}?tab=hasil`} className="block">
+                                                                        <div className="flex items-center justify-between text-xs mt-1 px-2 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition-colors cursor-pointer">
+                                                                            <span className="text-amber-600 dark:text-amber-400 font-medium">📝 Perlu Dikoreksi</span>
+                                                                            <span className="font-bold text-amber-600 dark:text-amber-400">{pendingGrading}</span>
+                                                                        </div>
+                                                                    </Link>
+                                                                )}
+                                                            </>
+                                                        )
+                                                    })()}
+                                                </div>
+
+                                                <div className="flex flex-col gap-2 mt-auto pt-2">
+                                                    <div className="flex gap-2 w-full">
+                                                        {exam.is_active ? (
+                                                            <>
+                                                                <Link href={`/dashboard/guru/ulangan/${exam.id}?tab=hasil`} className="flex-1">
+                                                                    <Button variant="secondary" size="sm" className="w-full justify-center">
+                                                                        <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> Hasil
+                                                                    </Button>
+                                                                </Link>
+                                                                {!(exam as any).is_remedial && status.label === 'Selesai' && (
+                                                                    <Button
+                                                                        variant="secondary"
+                                                                        size="sm"
+                                                                        onClick={() => handleOpenRemedial(exam)}
+                                                                        className="flex-1 justify-center bg-orange-100 dark:bg-orange-900/30 text-orange-600 hover:bg-orange-200 dark:hover:bg-orange-800/50 border-orange-200 dark:border-orange-800/50"
+                                                                    >
+                                                                        <RefreshCw className="w-4 h-4 mr-1 hidden sm:inline" /> Remedial
+                                                                    </Button>
+                                                                )}
+                                                            </>
+                                                        ) : (
+                                                            <Button variant="secondary" size="sm" disabled className="w-full justify-center opacity-50 cursor-not-allowed">
+                                                                <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> Hasil
+                                                            </Button>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="flex gap-2 w-full">
+                                                        <Link href={`/dashboard/guru/ulangan/${exam.id}`} className="flex-1">
+                                                            <Button variant="outline" size="sm" className="w-full justify-center border-primary/20 text-primary hover:bg-primary/5">
+                                                                <Edit set="bold" primaryColor="currentColor" size={16} /> Edit
+                                                            </Button>
                                                         </Link>
-                                                    )}
-                                                </>
-                                            )
-                                        })()}
-                                    </div>
-
-                                    <div className="flex flex-col gap-2 mt-auto pt-2">
-                                        <div className="flex gap-2 w-full">
-                                            {exam.is_active ? (
-                                                <>
-                                                    <Link href={`/dashboard/guru/ulangan/${exam.id}?tab=hasil`} className="flex-1">
-                                                        <Button variant="secondary" size="sm" className="w-full justify-center">
-                                                            <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> Hasil
-                                                        </Button>
-                                                    </Link>
-                                                    {!(exam as any).is_remedial && status.label === 'Selesai' && (
                                                         <Button
-                                                            variant="secondary"
+                                                            variant="outline"
                                                             size="sm"
-                                                            onClick={() => handleOpenRemedial(exam)}
-                                                            className="flex-1 justify-center bg-orange-100 dark:bg-orange-900/30 text-orange-600 hover:bg-orange-200 dark:hover:bg-orange-800/50 border-orange-200 dark:border-orange-800/50"
+                                                            onClick={() => handleDelete(exam.id)}
+                                                            className="flex-1 justify-center text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-900/30"
                                                         >
-                                                            <RefreshCw className="w-4 h-4 mr-1 hidden sm:inline" /> Remedial
+                                                            <span className="text-red-500"><Delete set="bold" primaryColor="currentColor" size={16} /></span> Hapus
                                                         </Button>
-                                                    )}
-                                                </>
-                                            ) : (
-                                                <Button variant="secondary" size="sm" disabled className="w-full justify-center opacity-50 cursor-not-allowed">
-                                                    <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> Hasil
-                                                </Button>
-                                            )}
-                                        </div>
-
-                                        <div className="flex gap-2 w-full">
-                                            <Link href={`/dashboard/guru/ulangan/${exam.id}`} className="flex-1">
-                                                <Button variant="outline" size="sm" className="w-full justify-center border-primary/20 text-primary hover:bg-primary/5">
-                                                    <Edit set="bold" primaryColor="currentColor" size={16} /> Edit
-                                                </Button>
-                                            </Link>
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => handleDelete(exam.id)}
-                                                className="flex-1 justify-center text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-900/30"
-                                            >
-                                                <span className="text-red-500"><Delete set="bold" primaryColor="currentColor" size={16} /></span> Hapus
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </Card>
-                        )
-                    })}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </Card>
+                                    )
+                                })}
                             </div>
                         )}
                     </div>
 
-                    {/* UTS / UAS Section */}
                     <div>
                         <h2 className="text-xl font-bold text-text-main dark:text-white mb-4 flex items-center gap-2">
                             <GraduationCap className="w-6 h-6 text-indigo-500" />
@@ -649,78 +642,11 @@ export default function GuruUlanganPage() {
                                                                     </span>
                                                                 ) : status.label}
                                                             </span>
-                                                            <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'}`}>
-                                                                {exam.exam_type}
-                                                            </span>
                                                         </div>
-                                                        {isLive && (
-                                                            <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-1 rounded border border-red-200 uppercase tracking-wider">
-                                                                Pantau Live ➔
-                                                            </span>
-                                                        )}
                                                     </div>
 
                                                     <h3 className={`font-bold text-lg transition-colors ${isLive ? 'text-red-700 dark:text-red-400 group-hover:text-red-600' : 'text-text-main dark:text-white group-hover:text-primary'}`}>{exam.title}</h3>
                                                     <p className="text-sm text-text-secondary line-clamp-1">{exam.description || 'Tidak ada deskripsi'}</p>
-
-                                                    <div className="space-y-2 pt-3 border-t border-secondary/10 mt-auto">
-                                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                            <span>Mata Pelajaran</span>
-                                                            <span className="font-bold text-primary">{exam.subject?.name}</span>
-                                                        </div>
-                                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                            <span>Kelas Target</span>
-                                                            <span className="font-medium flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {exam.target_class_ids?.length || 0}</span>
-                                                        </div>
-                                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                            <span>Soal & Durasi</span>
-                                                            <div className="flex gap-3">
-                                                                <span className="flex items-center gap-1 font-medium pb-0.5">
-                                                                    📝 {exam.question_count} soal
-                                                                </span>
-                                                                <span className="flex items-center gap-1 font-medium"><div className="w-3.5 h-3.5"><Clock set="bold" primaryColor="currentColor" size={14} /></div> {exam.duration_minutes}m</span>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                            <span>Mulai</span>
-                                                            <span className="font-medium">{formatDateTime(exam.start_time)}</span>
-                                                        </div>
-                                                        <div className="flex items-center justify-between text-xs text-text-secondary pb-1">
-                                                            <span>Berakhir</span>
-                                                            <span className="font-medium text-red-500 dark:text-red-400">
-                                                                {formatDateTime(new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
-                                                            </span>
-                                                        </div>
-                                                        {(() => {
-                                                            const total = exam.target_class_ids?.reduce((sum, cid) => sum + (studentCounts[cid] || 0), 0) || 0
-                                                            const submitted = submissionCounts[exam.id] || 0
-                                                            const pendingGrading = pendingGradingCounts[exam.id] || 0
-                                                            return (
-                                                                <>
-                                                                    <div className="flex items-center justify-between text-xs mt-1">
-                                                                        <span className="text-text-secondary">Pengumpulan</span>
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className={`font-bold ${submitted >= total && total > 0 ? 'text-green-600' : 'text-primary'}`}>{submitted}/{total}</span>
-                                                                            {total > 0 && (
-                                                                                <div className="w-16 bg-secondary/20 rounded-full h-1.5 overflow-hidden">
-                                                                                    <div
-                                                                                        className={`h-full rounded-full transition-all duration-500 ${submitted >= total ? 'bg-green-500' : submitted > 0 ? 'bg-primary' : 'bg-secondary/30'}`}
-                                                                                        style={{ width: `${Math.min(100, total > 0 ? (submitted / total) * 100 : 0)}%` }}
-                                                                                    />
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                    {pendingGrading > 0 && !isLive && (
-                                                                        <div className="flex items-center justify-between text-xs mt-1 px-2 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                                                                            <span className="text-amber-600 dark:text-amber-400 font-medium">📝 Perlu Dikoreksi</span>
-                                                                            <span className="font-bold text-amber-600 dark:text-amber-400">{pendingGrading}</span>
-                                                                        </div>
-                                                                    )}
-                                                                </>
-                                                            )
-                                                        })()}
-                                                    </div>
                                                     
                                                     {status.label === 'Selesai' && (
                                                         <div className="mt-auto pt-3 border-t border-secondary/10 flex justify-center">
@@ -740,7 +666,6 @@ export default function GuruUlanganPage() {
                 </div>
             )}
 
-            {/* Create Modal */}
             <Modal
                 open={showCreate}
                 onClose={() => setShowCreate(false)}
@@ -749,21 +674,13 @@ export default function GuruUlanganPage() {
                 <div className="space-y-4">
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran</label>
-                        <div className="relative">
-                            <select
-                                value={form.teaching_assignment_id}
-                                onChange={(e) => setForm({ ...form, teaching_assignment_id: e.target.value })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none"
-                            >
-                                <option value="">Pilih kelas...</option>
-                                {teachingAssignments.map((ta) => (
-                                    <option key={ta.id} value={ta.id}>
-                                        {ta.class.name} - {ta.subject.name}
-                                    </option>
-                                ))}
-                            </select>
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary"><ChevronDown set="bold" primaryColor="currentColor" size={20} /></div>
-                        </div>
+                        <MultiClassSelector
+                            teachingAssignments={teachingAssignments}
+                            selectedIds={form.teaching_assignment_ids}
+                            onChange={(ids) => setForm({ ...form, teaching_assignment_ids: ids })}
+                            mode="multi"
+                            disabled={teachingAssignments.length === 0}
+                        />
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ulangan</label>
@@ -807,15 +724,6 @@ export default function GuruUlanganPage() {
                             />
                         </div>
                     </div>
-                    {form.start_time && form.duration_minutes > 0 && (
-                        <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700/30 rounded-xl">
-                            <p className="text-xs text-text-secondary mb-0.5">Waktu Berakhir (otomatis)</p>
-                            <p className="text-sm font-bold text-blue-600 dark:text-blue-400">
-                                {new Date(new Date(form.start_time).getTime() + form.duration_minutes * 60000)
-                                    .toLocaleString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                            </p>
-                        </div>
-                    )}
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran (auto-submit)</label>
                         <input
@@ -826,7 +734,6 @@ export default function GuruUlanganPage() {
                             min={1}
                             max={10}
                         />
-                        <p className="text-xs text-text-secondary mt-1">Jika siswa keluar tab melebihi batas, ulangan auto-submit</p>
                     </div>
                     <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
                         <input
@@ -849,7 +756,6 @@ export default function GuruUlanganPage() {
                         />
                         <label htmlFor="showResults" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none flex flex-col">
                             <span>Tampilkan Hasil Langsung</span>
-                            <span className="text-xs text-text-secondary font-normal mt-0.5">Jika dimatikan, siswa baru bisa melihat nilai setelah Anda klik "Bagikan Hasil"</span>
                         </label>
                     </div>
 
@@ -860,7 +766,7 @@ export default function GuruUlanganPage() {
                         <Button
                             onClick={handleCreate}
                             loading={creating}
-                            disabled={!form.teaching_assignment_id || !form.title || !form.start_time}
+                            disabled={creating || form.teaching_assignment_ids.length === 0 || !form.title || !form.start_time}
                             className="flex-1"
                         >
                             Buat & Tambah Soal
@@ -869,7 +775,6 @@ export default function GuruUlanganPage() {
                 </div>
             </Modal>
 
-            {/* Remedial Modal */}
             <Modal
                 open={showRemedial}
                 onClose={() => setShowRemedial(false)}
@@ -881,7 +786,6 @@ export default function GuruUlanganPage() {
                     </div>
                 ) : remedialExam ? (
                     <div className="space-y-6">
-                        {/* Info Ulangan & KKM */}
                         <div className="bg-secondary/10 p-4 rounded-xl">
                             <h4 className="font-bold text-text-main dark:text-white mb-1">{remedialExam.title}</h4>
                             <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
@@ -891,7 +795,6 @@ export default function GuruUlanganPage() {
                             </div>
                         </div>
 
-                        {/* Waktu Mulai */}
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai Ulangan Remedial</label>
                             <input
@@ -902,7 +805,6 @@ export default function GuruUlanganPage() {
                             />
                         </div>
 
-                        {/* Metode Soal */}
                         <div className="space-y-3">
                             <label className="block text-sm font-bold text-text-main dark:text-white">Metode Soal Remedial</label>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -923,18 +825,11 @@ export default function GuruUlanganPage() {
                             </div>
                         </div>
 
-                        {/* Pemilihan Siswa */}
                         <div className="space-y-3">
                             <div className="flex items-center justify-between">
                                 <label className="block text-sm font-bold text-text-main dark:text-white">
                                     Pilih Siswa ({selectedStudentIds.length} terpilih)
                                 </label>
-                                <button
-                                    onClick={() => setSelectedStudentIds(remedialStudents.map(s => s.id))}
-                                    className="text-xs text-primary font-bold hover:underline"
-                                >
-                                    Pilih Semua
-                                </button>
                             </div>
                             <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
                                 {remedialStudents.length === 0 ? (
@@ -973,11 +868,11 @@ export default function GuruUlanganPage() {
                                 Batal
                             </Button>
                             <Button
-                                onClick={handleCreateRemedial}
-                                disabled={creating || selectedStudentIds.length === 0 || !remedialStartTime}
-                                loading={creating}
-                                className="flex-1"
-                            >
+                            onClick={handleCreateRemedial}
+                            disabled={creating || selectedStudentIds.length === 0 || !remedialStartTime}
+                            loading={creating}
+                            className="flex-1"
+                        >
                                 Proses Remedial
                             </Button>
                         </div>

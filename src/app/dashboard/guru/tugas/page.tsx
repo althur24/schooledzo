@@ -4,14 +4,15 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
+import MultiClassSelector from '@/components/MultiClassSelector'
 import { Edit as PenTool, Calendar, TimeCircle as Clock, Plus, ChevronDown, Paper, Activity, Search, Delete, Danger, Edit } from 'react-iconly'
 import { Loader2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 
 interface TeachingAssignment {
     id: string
-    subject: { name: string }
-    class: { name: string }
+    subject: { id: string; name: string }
+    class: { id: string; name: string }
 }
 
 interface Assignment {
@@ -36,7 +37,7 @@ export default function TugasPage() {
     const [editingId, setEditingId] = useState<string | null>(null)
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
     const [formData, setFormData] = useState({
-        teaching_assignment_id: '',
+        teaching_assignment_ids: [] as string[],
         title: '',
         description: '',
         type: 'TUGAS',
@@ -104,9 +105,6 @@ export default function TugasPage() {
         e.preventDefault()
         setSaving(true)
         try {
-            const url = editingId ? `/api/assignments/${editingId}` : '/api/assignments'
-            const method = editingId ? 'PUT' : 'POST'
-
             // Convert local datetime-local string to UTC for backend
             let formattedDueDate = null;
             if (formData.due_date) {
@@ -114,21 +112,44 @@ export default function TugasPage() {
                 formattedDueDate = localDate.toISOString();
             }
 
-            const res = await fetch(url, {
-                method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ...formData,
-                    due_date: formattedDueDate
+            if (editingId) {
+                const res = await fetch(`/api/assignments/${editingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        teaching_assignment_id: formData.teaching_assignment_ids[0],
+                        title: formData.title,
+                        description: formData.description,
+                        type: formData.type,
+                        due_date: formattedDueDate
+                    })
                 })
-            })
-
-            if (res.ok) {
-                setShowModal(false)
-                setEditingId(null)
-                setFormData({ teaching_assignment_id: '', title: '', description: '', type: 'TUGAS', due_date: '' })
-                fetchData()
+            } else {
+                const results = await Promise.allSettled(
+                    formData.teaching_assignment_ids.map(taId =>
+                        fetch('/api/assignments', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                teaching_assignment_id: taId,
+                                title: formData.title,
+                                description: formData.description,
+                                type: formData.type,
+                                due_date: formattedDueDate
+                            })
+                        })
+                    )
+                )
+                const failed = results.filter(r => r.status === 'rejected').length
+                if (failed > 0) {
+                    alert(`${results.length - failed} tugas berhasil dibuat, ${failed} gagal.`)
+                }
             }
+            
+            setShowModal(false)
+            setEditingId(null)
+            setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '' })
+            fetchData()
         } finally {
             setSaving(false)
         }
@@ -146,7 +167,7 @@ export default function TugasPage() {
         }
 
         setFormData({
-            teaching_assignment_id: assignment.teaching_assignment.id,
+            teaching_assignment_ids: [assignment.teaching_assignment.id],
             title: assignment.title,
             description: assignment.description || '',
             type: assignment.type,
@@ -384,27 +405,19 @@ export default function TugasPage() {
 
             <Modal
                 open={showModal}
-                onClose={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_id: '', title: '', description: '', type: 'TUGAS', due_date: '' }) }}
+                onClose={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '' }) }}
                 title={editingId ? "Edit Tugas" : "Buat Tugas Baru"}
             >
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran</label>
-                        <div className="relative">
-                            <select
-                                value={formData.teaching_assignment_id}
-                                onChange={(e) => setFormData({ ...formData, teaching_assignment_id: e.target.value })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none disabled:opacity-60 disabled:cursor-not-allowed"
-                                required
-                                disabled={!!editingId}
-                            >
-                                <option value="">Pilih Kelas & Mapel</option>
-                                {teachingAssignments.map((a) => (
-                                    <option key={a.id} value={a.id}>{a.class.name} - {a.subject.name}</option>
-                                ))}
-                            </select>
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary"><ChevronDown set="bold" primaryColor="currentColor" size={20} /></div>
-                        </div>
+                        <MultiClassSelector
+                            teachingAssignments={teachingAssignments}
+                            selectedIds={formData.teaching_assignment_ids}
+                            onChange={(ids) => setFormData({ ...formData, teaching_assignment_ids: ids })}
+                            mode={editingId ? 'single' : 'multi'}
+                            disabled={!!editingId}
+                        />
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Tugas</label>
@@ -455,10 +468,10 @@ export default function TugasPage() {
                     </div>
 
                     <div className="flex gap-3 pt-4 border-t border-secondary/10 mt-4">
-                        <Button type="button" variant="secondary" onClick={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_id: '', title: '', description: '', type: 'TUGAS', due_date: '' }) }} className="flex-1">
+                        <Button type="button" variant="secondary" onClick={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '' }) }} className="flex-1">
                             Batal
                         </Button>
-                        <Button type="submit" loading={saving} className="flex-1">
+                        <Button type="submit" loading={saving} disabled={formData.teaching_assignment_ids.length === 0 || !formData.title} className="flex-1">
                             {editingId ? 'Simpan Perubahan' : 'Buat Tugas'}
                         </Button>
                     </div>

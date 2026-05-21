@@ -17,8 +17,7 @@ const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
     loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={4} readOnly />
 })
 import { plainToHtml } from '@/lib/richTextUtils'
-// import { PenLine, WandSparkles, FolderOpen, Plus } from 'lucide-react'
-import { Edit, Discovery, Folder, Plus, Upload, Danger, InfoCircle, TickSquare, CloseSquare, Delete, Document, Search } from 'react-iconly'
+import { Edit, Discovery, Folder, Plus, Upload, Danger, InfoCircle, TickSquare, CloseSquare, Delete, Document, Search, User } from 'react-iconly'
 import { Loader2, Eye, Brain } from 'lucide-react'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import { PageHeader, Button, Modal, EmptyState } from '@/components/ui'
@@ -63,9 +62,11 @@ export default function EditQuizPage() {
     const searchParams = useSearchParams()
     const quizId = params.id as string
     const highlightId = searchParams.get('highlight')
+    const siblingParam = searchParams.get('siblings')
 
     const [quiz, setQuiz] = useState<Quiz | null>(null)
     const [questions, setQuestions] = useState<QuizQuestion[]>([])
+    const [siblingIds, setSiblingIds] = useState<string[]>([])
 
     // Auto-scroll for deep-linked notifications
     useEffect(() => {
@@ -146,6 +147,17 @@ export default function EditQuizPage() {
     }, [quizId])
 
     useEffect(() => {
+        if (siblingParam) {
+            const ids = siblingParam.split(',').filter(Boolean)
+            setSiblingIds(ids)
+            sessionStorage.setItem(`quiz_siblings_${quizId}`, JSON.stringify(ids))
+        } else {
+            const stored = sessionStorage.getItem(`quiz_siblings_${quizId}`)
+            if (stored) setSiblingIds(JSON.parse(stored))
+        }
+    }, [siblingParam, quizId])
+
+    useEffect(() => {
         fetchQuiz()
     }, [fetchQuiz])
 
@@ -188,6 +200,26 @@ export default function EditQuizPage() {
 
             if (res.ok) {
                 const resData = await res.json()
+                
+                // After successful publish, sync questions to siblings
+                if (siblingIds.length > 0) {
+                    try {
+                        await fetch('/api/quizzes/copy-questions', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                source_quiz_id: quizId,
+                                target_quiz_ids: siblingIds,
+                                also_publish: true
+                            })
+                        })
+                        sessionStorage.removeItem(`quiz_siblings_${quizId}`)
+                    } catch (syncError) {
+                        console.error('Error syncing questions to siblings:', syncError)
+                        // Note: primary quiz is still published, so we just log the sync error
+                    }
+                }
+
                 setShowPublishConfirm(false)
                 setShowSuccessModal(resData?.pending_publish ? 'pending' : 'published')
                 fetchQuiz()
@@ -526,6 +558,23 @@ export default function EditQuizPage() {
                     </div>
                 }
             />
+
+            {/* Multi-Class Banner */}
+            {siblingIds.length > 0 && !quiz.is_active && !quiz.pending_publish && (
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700 rounded-xl animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-3">
+                        <User className="w-5 h-5 text-blue-500 shrink-0" set="bold" />
+                        <div>
+                            <h4 className="font-bold text-blue-800 dark:text-blue-300 text-sm">
+                                Kuis Multi-Kelas ({siblingIds.length + 1} kelas)
+                            </h4>
+                            <p className="text-xs text-blue-600/70 dark:text-blue-400/70 mt-0.5">
+                                Kuis ini juga akan dibuat untuk kelas lainnya. Soal yang Anda tambahkan di sini akan otomatis disalin ke kelas lainnya saat publish.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Returned Questions Banner */}
             {questions.some(q => q.status === 'returned') && (

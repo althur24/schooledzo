@@ -17,8 +17,7 @@ const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
 import { plainToHtml } from '@/lib/richTextUtils'
 const PreviewModal = dynamic(() => import('@/components/PreviewModal'), { ssr: false })
 const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
-// import { PenLine, WandSparkles, FolderOpen, Plus } from 'lucide-react'
-import { Edit, Discovery, Folder, Plus, Setting, Upload, Danger, InfoCircle, Document, TickSquare, CloseSquare, Delete } from 'react-iconly'
+import { Edit, Discovery, Folder, Plus, Setting, Upload, Danger, InfoCircle, Document, TickSquare, CloseSquare, Delete, User } from 'react-iconly'
 import { Loader2, Eye, Brain, BarChart3, FileText, Download, RotateCcw, ChevronDown as ChevronDownIcon } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
@@ -70,9 +69,11 @@ export default function EditExamPage() {
     const searchParams = useSearchParams()
     const examId = params.id as string
     const highlightId = searchParams.get('highlight')
+    const siblingParam = searchParams.get('siblings')
 
     const [exam, setExam] = useState<Exam | null>(null)
     const [questions, setQuestions] = useState<ExamQuestion[]>([])
+    const [siblingIds, setSiblingIds] = useState<string[]>([])
 
     // Auto-scroll for deep-linked notifications
     useEffect(() => {
@@ -176,6 +177,17 @@ export default function EditExamPage() {
             setLoading(false)
         }
     }, [examId])
+
+    useEffect(() => {
+        if (siblingParam) {
+            const ids = siblingParam.split(',').filter(Boolean)
+            setSiblingIds(ids)
+            sessionStorage.setItem(`exam_siblings_${examId}`, JSON.stringify(ids))
+        } else {
+            const stored = sessionStorage.getItem(`exam_siblings_${examId}`)
+            if (stored) setSiblingIds(JSON.parse(stored))
+        }
+    }, [siblingParam, examId])
 
     useEffect(() => {
         fetchExam()
@@ -287,6 +299,26 @@ export default function EditExamPage() {
             })
             if (res.ok) {
                 const resData = await res.json()
+                
+                // After successful publish, sync questions to siblings
+                if (siblingIds.length > 0) {
+                    try {
+                        await fetch('/api/exams/copy-questions', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                source_exam_id: examId,
+                                target_exam_ids: siblingIds,
+                                also_publish: true
+                            })
+                        })
+                        sessionStorage.removeItem(`exam_siblings_${examId}`)
+                    } catch (syncError) {
+                        console.error('Error syncing questions to siblings:', syncError)
+                        // Note: primary exam is still published, so we just log the sync error
+                    }
+                }
+
                 setShowPublishConfirm(false)
                 setShowSuccessModal(resData?.pending_publish ? 'pending' : 'published')
                 fetchExam()
@@ -791,6 +823,23 @@ export default function EditExamPage() {
                     </div>
                 }
             />
+
+            {/* Multi-Class Banner */}
+            {siblingIds.length > 0 && !exam.is_active && !exam.pending_publish && (
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700 rounded-xl animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-3">
+                        <User className="w-5 h-5 text-blue-500 shrink-0" set="bold" />
+                        <div>
+                            <h4 className="font-bold text-blue-800 dark:text-blue-300 text-sm">
+                                Ulangan Multi-Kelas ({siblingIds.length + 1} kelas)
+                            </h4>
+                            <p className="text-xs text-blue-600/70 dark:text-blue-400/70 mt-0.5">
+                                Ulangan ini juga akan dibuat untuk kelas lainnya. Soal yang Anda tambahkan di sini akan otomatis disalin ke kelas lainnya saat publish.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Tabs */}
             <div className="flex gap-1 bg-secondary/5 p-1 rounded-xl border border-secondary/10 mt-4 mb-6">

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
+import MultiClassSelector from '@/components/MultiClassSelector'
 import { TimeCircle as Clock, Document as FileText, Graph as BarChart3, Game as Brain, Calendar, Plus, Game, Graph, Edit, Swap } from 'react-iconly'
 import { Loader2, CheckSquare, Square, RefreshCw } from 'lucide-react'
 
@@ -46,7 +47,7 @@ export default function GuruKuisPage() {
     const [showCreate, setShowCreate] = useState(false)
     const [creating, setCreating] = useState(false)
     const [form, setForm] = useState({
-        teaching_assignment_id: '',
+        teaching_assignment_ids: [] as string[],
         title: '',
         description: '',
         duration_minutes: 30,
@@ -156,25 +157,60 @@ export default function GuruKuisPage() {
     }
 
     const handleCreate = async () => {
-        if (!form.teaching_assignment_id || !form.title) return
+        if (form.teaching_assignment_ids.length === 0 || !form.title) return
         setCreating(true)
         try {
-            const res = await fetch('/api/quizzes', {
+            // Create first (primary) quiz
+            const primaryRes = await fetch('/api/quizzes', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    ...form,
+                    teaching_assignment_id: form.teaching_assignment_ids[0],
+                    title: form.title,
+                    description: form.description,
+                    duration_minutes: form.duration_minutes,
+                    is_randomized: form.is_randomized,
                     deadline: hasDeadline && deadlineValue ? new Date(deadlineValue).toISOString() : null
                 })
             })
-            if (res.ok) {
-                const newQuiz = await res.json()
-                setShowCreate(false)
-                setForm({ teaching_assignment_id: '', title: '', description: '', duration_minutes: 30, is_randomized: true })
-                setHasDeadline(false)
-                setDeadlineValue('')
-                router.push(`/dashboard/guru/kuis/${newQuiz.id}`)
+
+            if (!primaryRes.ok) return
+
+            const primaryQuiz = await primaryRes.json()
+            
+            // Create sibling quizzes (remaining classes)
+            const siblingIds: string[] = []
+            if (form.teaching_assignment_ids.length > 1) {
+                const siblingResults = await Promise.allSettled(
+                    form.teaching_assignment_ids.slice(1).map(taId =>
+                        fetch('/api/quizzes', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                teaching_assignment_id: taId,
+                                title: form.title,
+                                description: form.description,
+                                duration_minutes: form.duration_minutes,
+                                is_randomized: form.is_randomized,
+                                deadline: hasDeadline && deadlineValue ? new Date(deadlineValue).toISOString() : null
+                            })
+                        }).then(r => r.json())
+                    )
+                )
+                siblingResults.forEach(r => {
+                    if (r.status === 'fulfilled' && r.value?.id) {
+                        siblingIds.push(r.value.id)
+                    }
+                })
             }
+
+            setShowCreate(false)
+            setForm({ teaching_assignment_ids: [], title: '', description: '', duration_minutes: 30, is_randomized: true })
+            setHasDeadline(false)
+            setDeadlineValue('')
+            
+            const siblingParam = siblingIds.length > 0 ? `?siblings=${siblingIds.join(',')}` : ''
+            router.push(`/dashboard/guru/kuis/${primaryQuiz.id}${siblingParam}`)
         } finally {
             setCreating(false)
         }
@@ -436,23 +472,13 @@ export default function GuruKuisPage() {
                 <div className="space-y-4">
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran</label>
-                        <select
-                            value={form.teaching_assignment_id}
-                            onChange={(e) => setForm({ ...form, teaching_assignment_id: e.target.value })}
-                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                        <MultiClassSelector
+                            teachingAssignments={teachingAssignments}
+                            selectedIds={form.teaching_assignment_ids}
+                            onChange={(ids) => setForm({ ...form, teaching_assignment_ids: ids })}
+                            mode="multi"
                             disabled={teachingAssignments.length === 0}
-                        >
-                            <option value="">-- Pilih --</option>
-                            {teachingAssignments.length === 0 ? (
-                                <option disabled>Tidak ada kelas (Hubungi Admin)</option>
-                            ) : (
-                                teachingAssignments.map((ta) => (
-                                    <option key={ta.id} value={ta.id}>
-                                        {ta.class?.name || 'Unknown Class'} - {ta.subject?.name || 'Unknown Subject'}
-                                    </option>
-                                ))
-                            )}
-                        </select>
+                        />
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Kuis</label>
@@ -532,7 +558,7 @@ export default function GuruKuisPage() {
                         </Button>
                         <Button
                             onClick={handleCreate}
-                            disabled={creating || !form.teaching_assignment_id || !form.title}
+                            disabled={creating || form.teaching_assignment_ids.length === 0 || !form.title}
                             loading={creating}
                             className="flex-1"
                         >
