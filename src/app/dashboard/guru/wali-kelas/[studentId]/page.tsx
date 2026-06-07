@@ -44,17 +44,17 @@ export default function WaliKelasStudentDetail() {
         return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
     }
 
-    const getScoreColor = (score: number | null) => {
+    const getScoreColor = (score: number | null, kkm: number = 75) => {
         if (score === null) return 'text-text-secondary'
-        if (score >= 75) return 'text-green-600 dark:text-green-400'
-        if (score >= 60) return 'text-amber-600 dark:text-amber-400'
+        if (score >= kkm) return 'text-green-600 dark:text-green-400'
+        if (score >= kkm - 15) return 'text-amber-600 dark:text-amber-400'
         return 'text-red-600 dark:text-red-400'
     }
 
-    const getScoreBadgeBg = (score: number | null) => {
-        if (score === null) return 'bg-secondary/10 text-text-secondary'
-        if (score >= 75) return 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20'
-        if (score >= 60) return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+    const getScoreBadgeBg = (score: number | null, kkm: number = 75) => {
+        if (score === null) return 'bg-secondary/10 text-text-secondary border border-secondary/20'
+        if (score >= kkm) return 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20'
+        if (score >= kkm - 15) return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
         return 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'
     }
 
@@ -130,6 +130,7 @@ export default function WaliKelasStudentDetail() {
     const overallAvg = validAvgs.length > 0
         ? Math.round(validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length)
         : null
+    const avgKkm = subjects.length > 0 ? Math.round(subjects.reduce((sum: number, s: any) => sum + (s.kkm || 75), 0) / subjects.length) : 75
 
     // Calculate ranking
     const allStudentOveralls = data.students.map((s: any) => {
@@ -190,7 +191,7 @@ export default function WaliKelasStudentDetail() {
                         </div>
                     </div>
                     <div className="text-right">
-                        <div className={`text-2xl md:text-3xl font-extrabold ${getScoreColor(overallAvg)}`}>
+                        <div className={`text-2xl md:text-3xl font-extrabold ${getScoreColor(overallAvg, avgKkm)}`}>
                             {overallAvg !== null ? overallAvg : '-'}
                         </div>
                         <div className="text-xs text-text-secondary mt-0.5">Rata-rata</div>
@@ -247,7 +248,7 @@ export default function WaliKelasStudentDetail() {
                                             </p>
                                         </div>
                                     </div>
-                                    <div className={`px-4 py-1.5 rounded-full text-lg font-extrabold ${getScoreBadgeBg(avg)}`}>
+                                    <div className={`px-4 py-1.5 rounded-full text-lg font-extrabold ${getScoreBadgeBg(avg, subj.kkm)}`}>
                                         {avg !== null ? avg : '-'}
                                     </div>
                                 </div>
@@ -268,7 +269,7 @@ export default function WaliKelasStudentDetail() {
                                                     {subjData.tugas_scores.map((score: number, i: number) => (
                                                         <span
                                                             key={i}
-                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score)}`}
+                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score, subj.kkm)}`}
                                                         >
                                                             {score}
                                                         </span>
@@ -292,7 +293,7 @@ export default function WaliKelasStudentDetail() {
                                                     {subjData.kuis_scores.map((score: number, i: number) => (
                                                         <span
                                                             key={i}
-                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score)}`}
+                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score, subj.kkm)}`}
                                                         >
                                                             {score}
                                                         </span>
@@ -316,7 +317,7 @@ export default function WaliKelasStudentDetail() {
                                                     {subjData.ulangan_scores.map((score: number, i: number) => (
                                                         <span
                                                             key={i}
-                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score)}`}
+                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score, subj.kkm)}`}
                                                         >
                                                             {score}
                                                         </span>
@@ -340,7 +341,7 @@ export default function WaliKelasStudentDetail() {
                                                     {subjData.uts_scores.map((score: number, i: number) => (
                                                         <span
                                                             key={i}
-                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score)}`}
+                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score, subj.kkm)}`}
                                                         >
                                                             {score}
                                                         </span>
@@ -364,7 +365,7 @@ export default function WaliKelasStudentDetail() {
                                                     {subjData.uas_scores.map((score: number, i: number) => (
                                                         <span
                                                             key={i}
-                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score)}`}
+                                                            className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score, subj.kkm)}`}
                                                         >
                                                             {score}
                                                         </span>

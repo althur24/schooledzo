@@ -8,7 +8,7 @@ import Card from '@/components/ui/Card'
 import MultiClassSelector from '@/components/MultiClassSelector'
 import { useAuth } from '@/contexts/AuthContext'
 import { Paper as FileText, TimeCircle as Clock, Calendar, Plus, Lock, ShieldDone, User, Swap, Graph, Edit, Delete, ChevronDown, Document } from 'react-iconly'
-import { Loader2, CheckSquare, Square, RefreshCw, GraduationCap, BookOpen, Users } from 'lucide-react'
+import { Loader2, CheckSquare, Square, RefreshCw, GraduationCap, BookOpen, Users, Copy } from 'lucide-react'
 
 interface Exam {
     id: string
@@ -24,7 +24,7 @@ interface Exam {
     created_at: string
     teaching_assignment: {
         id: string
-        subject: { name: string, kkm: number }
+        subject: { id?: string, name: string, kkm: number }
         class: { id: string, name: string }
     }
 }
@@ -73,6 +73,21 @@ export default function GuruUlanganPage() {
         show_results_immediately: true
     })
 
+    // Copy States
+    const [showCopy, setShowCopy] = useState(false)
+    const [copySourceExam, setCopySourceExam] = useState<Exam | null>(null)
+    const [copying, setCopying] = useState(false)
+    const [copyForm, setCopyForm] = useState({
+        teaching_assignment_ids: [] as string[],
+        title: '',
+        description: '',
+        start_time: '',
+        duration_minutes: 60,
+        is_randomized: true,
+        max_violations: 3,
+        show_results_immediately: true
+    })
+
     // Remedial States
     const [showRemedial, setShowRemedial] = useState(false)
     const [remedialExam, setRemedialExam] = useState<Exam | null>(null)
@@ -81,6 +96,7 @@ export default function GuruUlanganPage() {
     const [remedialMethod, setRemedialMethod] = useState<'ASLI' | 'BARU'>('ASLI')
     const [remedialLoading, setRemedialLoading] = useState(false)
     const [remedialStartTime, setRemedialStartTime] = useState('')
+    const [remedialKkm, setRemedialKkm] = useState(75)
 
     useEffect(() => {
         fetchData()
@@ -207,7 +223,11 @@ export default function GuruUlanganPage() {
                 })
             })
 
-            if (!primaryRes.ok) return
+            if (!primaryRes.ok) {
+                const err = await primaryRes.json().catch(() => ({}))
+                alert(err.error || 'Gagal membuat ulangan. Silakan coba lagi.')
+                return
+            }
 
             const primaryExam = await primaryRes.json()
             
@@ -223,14 +243,21 @@ export default function GuruUlanganPage() {
                                 ...payload,
                                 teaching_assignment_id: taId
                             })
-                        }).then(r => r.json())
+                        }).then(r => {
+                            if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                            return r.json()
+                        })
                     )
                 )
+                const failed = siblingResults.filter(r => r.status === 'rejected').length
                 siblingResults.forEach(r => {
                     if (r.status === 'fulfilled' && r.value?.id) {
                         siblingIds.push(r.value.id)
                     }
                 })
+                if (failed > 0) {
+                    alert(`Ulangan utama berhasil dibuat. ${siblingIds.length} kelas tambahan berhasil, ${failed} gagal.`)
+                }
             }
 
             setShowCreate(false)
@@ -252,6 +279,90 @@ export default function GuruUlanganPage() {
         }
     }
 
+    const openCopyModal = (exam: Exam) => {
+        setCopySourceExam(exam)
+        setCopyForm({
+            teaching_assignment_ids: [],
+            title: `[Copy] ${exam.title}`,
+            description: exam.description || '',
+            start_time: '', // Waktu mulai wajib diisi baru
+            duration_minutes: exam.duration_minutes,
+            is_randomized: exam.is_randomized,
+            max_violations: exam.max_violations,
+            show_results_immediately: true
+        })
+        setShowCopy(true)
+    }
+
+    const handleCopyExam = async () => {
+        if (!copySourceExam || copyForm.teaching_assignment_ids.length === 0 || !copyForm.title || !copyForm.start_time) return
+        setCopying(true)
+        try {
+            const targetIds: string[] = []
+            const localStart = new Date(copyForm.start_time)
+            const utcStart = localStart.toISOString()
+            
+            // Create target exams
+            const createResults = await Promise.allSettled(
+                copyForm.teaching_assignment_ids.map(taId => 
+                    fetch('/api/exams', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            teaching_assignment_id: taId,
+                            title: copyForm.title,
+                            description: copyForm.description,
+                            start_time: utcStart,
+                            duration_minutes: copyForm.duration_minutes,
+                            is_randomized: copyForm.is_randomized,
+                            max_violations: copyForm.max_violations,
+                            show_results_immediately: copyForm.show_results_immediately
+                        })
+                    }).then(r => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                        return r.json()
+                    })
+                )
+            )
+
+            createResults.forEach(r => {
+                if (r.status === 'fulfilled' && r.value?.id) {
+                    targetIds.push(r.value.id)
+                }
+            })
+
+            if (targetIds.length === 0) {
+                alert('Gagal membuat ulangan baru. Silakan coba lagi.')
+                return
+            }
+
+            // Copy questions
+            const copyRes = await fetch('/api/exams/copy-questions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_exam_id: copySourceExam.id,
+                    target_exam_ids: targetIds,
+                    also_publish: false
+                })
+            })
+
+            if (!copyRes.ok) {
+                alert('Berhasil membuat ulangan, tetapi gagal menyalin soal.')
+            } else {
+                alert(`Ulangan berhasil disalin ke ${targetIds.length} kelas.`)
+            }
+
+            setShowCopy(false)
+            fetchData()
+        } catch (error) {
+            console.error('Error copying exam:', error)
+            alert('Terjadi kesalahan saat menyalin ulangan.')
+        } finally {
+            setCopying(false)
+        }
+    }
+
     const handleDelete = async (id: string) => {
         if (!confirm('Hapus ulangan ini?')) return
         await fetch(`/api/exams/${id}`, { method: 'DELETE' })
@@ -268,7 +379,23 @@ export default function GuruUlanganPage() {
 
         try {
             const classId = exam.teaching_assignment?.class?.id
-            const kkm = exam.teaching_assignment?.subject?.kkm || 75
+            let kkm = exam.teaching_assignment?.subject?.kkm || 75
+
+            // Resolve Granular KKM if available
+            try {
+                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${exam.teaching_assignment?.subject?.id}`)
+                if (kkmRes.ok) {
+                    const kkmData = await kkmRes.json()
+                    const classLevel = (exam.teaching_assignment?.class as any)?.school_level
+                    const gradeLevel = (exam.teaching_assignment?.class as any)?.grade_level
+                    const granular = kkmData.find((k: any) => k.school_level === classLevel && k.grade_level === gradeLevel)
+                    if (granular) kkm = granular.kkm
+                }
+            } catch (e) {
+                console.error('Failed to fetch granular KKM', e)
+            }
+            
+            setRemedialKkm(kkm)
 
             if (!classId) throw new Error('Class ID missing')
 
@@ -584,6 +711,16 @@ export default function GuruUlanganPage() {
                                                                 <Edit set="bold" primaryColor="currentColor" size={16} /> Edit
                                                             </Button>
                                                         </Link>
+                                                        {exam.is_active && (
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => openCopyModal(exam)}
+                                                                className="flex-1 justify-center border-blue-200/50 dark:border-blue-500/20 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10"
+                                                            >
+                                                                <Copy className="w-4 h-4 mr-1 hidden sm:inline" /> Pakai Ulang
+                                                            </Button>
+                                                        )}
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
@@ -665,6 +802,113 @@ export default function GuruUlanganPage() {
                     </div>
                 </div>
             )}
+
+            <Modal
+                open={showCopy}
+                onClose={() => setShowCopy(false)}
+                title="Pakai Ulang Ulangan"
+            >
+                <div className="space-y-4">
+                    <div className="bg-secondary/10 p-4 rounded-xl mb-2">
+                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source Ulangan: {copySourceExam?.title}</h4>
+                        <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
+                            <span>Mata Pelajaran: <strong>{copySourceExam?.teaching_assignment?.subject?.name}</strong></span>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pilih Kelas Tujuan</label>
+                        <MultiClassSelector
+                            teachingAssignments={teachingAssignments}
+                            selectedIds={copyForm.teaching_assignment_ids}
+                            onChange={(ids) => setCopyForm({ ...copyForm, teaching_assignment_ids: ids })}
+                            mode="multi"
+                            disabled={teachingAssignments.length === 0}
+                            defaultSubjectLock={copySourceExam?.teaching_assignment?.subject?.name}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ulangan Baru</label>
+                        <input
+                            type="text"
+                            value={copyForm.title}
+                            onChange={(e) => setCopyForm({ ...copyForm, title: e.target.value })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Deskripsi (Opsional)</label>
+                        <textarea
+                            value={copyForm.description}
+                            onChange={(e) => setCopyForm({ ...copyForm, description: e.target.value })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            rows={2}
+                        />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai Baru <span className="text-red-500">*</span></label>
+                            <input
+                                type="datetime-local"
+                                value={copyForm.start_time}
+                                onChange={(e) => setCopyForm({ ...copyForm, start_time: e.target.value })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
+                            <input
+                                type="number"
+                                value={copyForm.duration_minutes}
+                                onChange={(e) => setCopyForm({ ...copyForm, duration_minutes: parseInt(e.target.value) || 60 })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                min={5}
+                                max={180}
+                            />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran</label>
+                            <input
+                                type="number"
+                                value={copyForm.max_violations}
+                                onChange={(e) => setCopyForm({ ...copyForm, max_violations: parseInt(e.target.value) || 3 })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                min={1}
+                                max={10}
+                            />
+                        </div>
+                        <div className="flex items-end">
+                            <label className="flex items-center gap-2 cursor-pointer p-3 bg-secondary/5 border border-secondary/20 rounded-xl w-full">
+                                <input
+                                    type="checkbox"
+                                    checked={copyForm.is_randomized}
+                                    onChange={(e) => setCopyForm({ ...copyForm, is_randomized: e.target.checked })}
+                                    className="w-5 h-5 rounded bg-white border-secondary/30 text-primary focus:ring-primary"
+                                />
+                                <span className="text-text-main dark:text-white flex items-center gap-1"><Swap set="bold" primaryColor="currentColor" size={16} /> Acak Soal</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div className="flex gap-3 pt-4">
+                        <Button
+                            variant="secondary"
+                            onClick={() => setShowCopy(false)}
+                            className="flex-1"
+                        >
+                            Batal
+                        </Button>
+                        <Button
+                            onClick={handleCopyExam}
+                            disabled={copying || copyForm.teaching_assignment_ids.length === 0 || !copyForm.title || !copyForm.start_time}
+                            loading={copying}
+                            className="flex-1"
+                        >
+                            Salin Ulangan
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
 
             <Modal
                 open={showCreate}
@@ -789,9 +1033,8 @@ export default function GuruUlanganPage() {
                         <div className="bg-secondary/10 p-4 rounded-xl">
                             <h4 className="font-bold text-text-main dark:text-white mb-1">{remedialExam.title}</h4>
                             <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
-                                <span>Kls: <strong>{remedialExam.teaching_assignment?.class?.name}</strong></span>
                                 <span>Mata Pelajaran: <strong>{remedialExam.teaching_assignment?.subject?.name}</strong></span>
-                                <span>KKM: <strong className="text-red-500">{remedialExam.teaching_assignment?.subject?.kkm || 75}</strong></span>
+                                <span>KKM: <strong className="text-red-500">{remedialKkm}</strong></span>
                             </div>
                         </div>
 

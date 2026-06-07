@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { resolveKkm } from '@/lib/resolveKkm'
 
 // ─── Shared helpers ─────────────────────────────────────────────
 function median(arr: number[]): number {
@@ -64,8 +65,24 @@ export async function GET(
             return NextResponse.json({ error: 'Official exam not found' }, { status: 404 })
         }
 
-        const kkm = (exam.subject as any)?.kkm ?? null
+        const subjectId = (exam.subject as any)?.id
         const targetClassIds = exam.target_class_ids || []
+        
+        let kkm = (exam.subject as any)?.kkm ?? 75
+        
+        // Resolve KKM based on target class (use classIdFilter if available, else first target class)
+        const classToResolve = classIdFilter || (targetClassIds.length > 0 ? targetClassIds[0] : null)
+        if (subjectId && classToResolve) {
+            const { data: cls } = await supabase
+                .from('classes')
+                .select('school_level, grade_level')
+                .eq('id', classToResolve)
+                .single()
+                
+            if (cls?.school_level && cls?.grade_level) {
+                kkm = await resolveKkm(subjectId, cls.school_level, cls.grade_level)
+            }
+        }
 
         // 2) Fetch all questions
         const { data: questions } = await supabase

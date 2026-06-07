@@ -13,6 +13,17 @@ export async function GET(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
+        // S1 Security Fix: IDOR protection — SISWA can only access their own submission's answers
+        if (user.role === 'SISWA') {
+            const { data: student } = await supabase
+                .from('students').select('id').eq('user_id', user.id).single()
+            const { data: sub } = await supabase
+                .from('exam_submissions').select('student_id').eq('id', id).single()
+            if (!student || !sub || sub.student_id !== student.id) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+            }
+        }
+
         // Check visibility: look up the submission's exam to get visibility settings
         const { data: submission } = await supabase
             .from('exam_submissions')

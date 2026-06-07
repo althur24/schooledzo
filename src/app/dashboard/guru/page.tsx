@@ -353,11 +353,6 @@ export default function GuruDashboard() {
                             </div>
                             <h2 className="text-xl md:text-2xl font-bold text-text-main dark:text-white tracking-tight">Peringatan</h2>
                         </div>
-                        {warnings?.kkm && (
-                            <div className="bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 text-xs font-bold px-3 py-1.5 rounded-full border border-red-200 dark:border-red-800">
-                                KKM: {warnings.kkm}
-                            </div>
-                        )}
                     </div>
 
                     {/* Warning Tabs */}

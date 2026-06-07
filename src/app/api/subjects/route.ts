@@ -77,6 +77,21 @@ export async function POST(request: NextRequest) {
 
         if (error) throw error
 
+        // Automatically create subject_kkm entries for all grade levels (SMP 1-3, SMA 1-3)
+        const newSubjectKkmEntries = []
+        for (const sl of ['SMP', 'SMA']) {
+            for (const gl of [1, 2, 3]) {
+                newSubjectKkmEntries.push({
+                    subject_id: data.id,
+                    school_level: sl,
+                    grade_level: gl,
+                    kkm: kkm ?? 75,
+                    school_id: schoolId
+                })
+            }
+        }
+        await supabase.from('subject_kkm').insert(newSubjectKkmEntries)
+
         return NextResponse.json(data)
     } catch (error) {
         console.error('Error creating subject:', error)

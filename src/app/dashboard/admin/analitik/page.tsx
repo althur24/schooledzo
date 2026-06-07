@@ -728,7 +728,7 @@ export default function AnalitikPage() {
                                 <p className="text-xl font-bold text-text-main dark:text-white">{selectedSubject.student_count}</p>
                             </div>
                             <div className="bg-green-100 dark:bg-green-900/20 rounded-lg p-4 text-center">
-                                <p className="text-xs text-text-secondary dark:text-zinc-400">Lulus (≥75)</p>
+                                <p className="text-xs text-text-secondary dark:text-zinc-400">Lulus (≥KKM)</p>
                                 <p className="text-xl font-bold text-green-700 dark:text-green-400">{selectedSubject.pass_count}</p>
                             </div>
                             <div className="bg-red-100 dark:bg-red-900/20 rounded-lg p-4 text-center">

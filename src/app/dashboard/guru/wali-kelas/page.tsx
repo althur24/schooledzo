@@ -109,17 +109,17 @@ export default function WaliKelasPage() {
     }
 
     // Get score color
-    const getScoreColor = (score: number | null) => {
+    const getScoreColor = (score: number | null, kkm: number = 75) => {
         if (score === null) return 'text-text-secondary'
-        if (score >= 75) return 'text-green-600 dark:text-green-400'
-        if (score >= 60) return 'text-amber-600 dark:text-amber-400'
+        if (score >= kkm) return 'text-green-600 dark:text-green-400'
+        if (score >= kkm - 15) return 'text-amber-600 dark:text-amber-400'
         return 'text-red-600 dark:text-red-400'
     }
 
-    const getScoreBg = (score: number | null) => {
+    const getScoreBg = (score: number | null, kkm: number = 75) => {
         if (score === null) return ''
-        if (score >= 75) return 'bg-green-50 dark:bg-green-500/10'
-        if (score >= 60) return 'bg-amber-50 dark:bg-amber-500/10'
+        if (score >= kkm) return 'bg-green-50 dark:bg-green-500/10'
+        if (score >= kkm - 15) return 'bg-amber-50 dark:bg-amber-500/10'
         return 'bg-red-50 dark:bg-red-500/10'
     }
 
@@ -165,7 +165,8 @@ export default function WaliKelasPage() {
     const classAvg = allOveralls.length > 0
         ? Math.round(allOveralls.reduce((a, b) => a + b, 0) / allOveralls.length)
         : 0
-    const tuntasCount = allOveralls.filter(v => v >= 75).length
+    const avgKkm = subjects.length > 0 ? Math.round(subjects.reduce((sum: number, s: any) => sum + (s.kkm || 75), 0) / subjects.length) : 75
+    const tuntasCount = allOveralls.filter(v => v >= avgKkm).length
 
     // Filter students by search
     const filteredStudents = students.filter((s: any) => {
@@ -229,7 +230,7 @@ export default function WaliKelasPage() {
                         </div>
                         <div>
                             <div className="text-xl md:text-2xl font-bold text-green-600 dark:text-green-400">{tuntasCount}</div>
-                            <div className="text-xs text-text-secondary">Tuntas (≥75)</div>
+                            <div className="text-xs text-text-secondary">Tuntas (Rata-rata ≥ KKM)</div>
                         </div>
                     </div>
                 </Card>
@@ -308,12 +309,12 @@ export default function WaliKelasPage() {
                                                 avg = calcAvg(allScores)
                                             }
                                             return (
-                                                <td key={subj.id} className={`px-4 py-3 text-center text-sm font-bold ${getScoreColor(avg)} ${getScoreBg(avg)} transition-colors`}>
+                                                <td key={subj.id} className={`px-4 py-3 text-center text-sm font-bold ${getScoreColor(avg, subj.kkm)} ${getScoreBg(avg, subj.kkm)} transition-colors`}>
                                                     {avg !== null ? avg : '-'}
                                                 </td>
                                             )
                                         })}
-                                        <td className={`px-4 py-3 text-center text-sm font-extrabold ${getScoreColor(overall)}`}>
+                                        <td className={`px-4 py-3 text-center text-sm font-extrabold ${getScoreColor(overall, avgKkm)}`}>
                                             {overall !== null ? overall : '-'}
                                         </td>
                                         <td className="px-4 py-3 text-center">
@@ -339,15 +340,15 @@ export default function WaliKelasPage() {
             <div className="flex items-center gap-6 text-xs text-text-secondary px-2">
                 <span className="flex items-center gap-1.5">
                     <span className="w-3 h-3 rounded-full bg-green-500"></span>
-                    ≥ 75 (Tuntas)
+                    ≥ KKM (Tuntas)
                 </span>
                 <span className="flex items-center gap-1.5">
                     <span className="w-3 h-3 rounded-full bg-amber-500"></span>
-                    60-74
+                    Dekat KKM
                 </span>
                 <span className="flex items-center gap-1.5">
                     <span className="w-3 h-3 rounded-full bg-red-500"></span>
-                    &lt; 60
+                    Kurang
                 </span>
             </div>
         </div>

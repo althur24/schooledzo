@@ -80,8 +80,8 @@ interface OfficialExamSubForNilai {
 
 interface TeachingAssignment {
     id: string
-    subject: { id: string; name: string }
-    class: { id: string; name: string }
+    subject: { id: string; name: string; kkm?: number }
+    class: { id: string; name: string; school_level?: string; grade_level?: number }
 }
 
 type TabType = 'rekap' | 'tugas' | 'kuis' | 'ulangan' | 'uts-uas' | 'export'
@@ -105,13 +105,19 @@ export default function NilaiPage() {
     const [loadingData, setLoadingData] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     const [exportSuccess, setExportSuccess] = useState(false)
+    const [subjectKkms, setSubjectKkms] = useState<any[]>([])
 
     useEffect(() => {
         const fetchInitial = async () => {
             try {
-                const res = await fetch('/api/my-teaching-assignments')
-                const data = await res.json()
-                setTeachingAssignments(Array.isArray(data) ? data : [])
+                const [taRes, skkmRes] = await Promise.all([
+                    fetch('/api/my-teaching-assignments'),
+                    fetch('/api/subject-kkm')
+                ])
+                const taData = await taRes.json()
+                const skkmData = await skkmRes.json()
+                setTeachingAssignments(Array.isArray(taData) ? taData : [])
+                setSubjectKkms(Array.isArray(skkmData) ? skkmData : [])
             } catch (error) {
                 console.error('Error:', error)
             } finally {
@@ -120,6 +126,21 @@ export default function NilaiPage() {
         }
         if (user) fetchInitial()
     }, [user])
+
+    const getKkm = (taId: string) => {
+        const ta = teachingAssignments.find(t => t.id === taId)
+        if (!ta) return 75
+        const fallback = ta.subject.kkm || 75
+        const { school_level, grade_level } = ta.class
+        if (!school_level || !grade_level) return fallback
+
+        const granular = subjectKkms.find(k => 
+            k.subject_id === ta.subject.id && 
+            k.school_level === school_level && 
+            k.grade_level === grade_level
+        )
+        return granular ? granular.kkm : fallback
+    }
 
     // Auto-select teaching assignment from query param (deep-link from dashboard warnings)
     useEffect(() => {
@@ -667,7 +688,7 @@ export default function NilaiPage() {
                                                             })}
                                                             <td className="px-6 py-4 text-center">
                                                                 {avg !== null ? (
-                                                                    <span className={`px-2 py-1 rounded-md font-bold text-sm ${avg >= 75 ? 'bg-green-500/10 text-green-600' : avg >= 60 ? 'bg-amber-500/10 text-amber-600' : 'bg-red-500/10 text-red-600'}`}>
+                                                                    <span className={`px-2 py-1 rounded-md font-bold text-sm ${avg >= getKkm(selectedTA) ? 'bg-green-500/10 text-green-600' : avg >= getKkm(selectedTA) - 15 ? 'bg-amber-500/10 text-amber-600' : 'bg-red-500/10 text-red-600'}`}>
                                                                         {avg}
                                                                     </span>
                                                                 ) : (

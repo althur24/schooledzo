@@ -6,7 +6,7 @@ import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import MultiClassSelector from '@/components/MultiClassSelector'
 import { Edit as PenTool, Calendar, TimeCircle as Clock, Plus, ChevronDown, Paper, Activity, Search, Delete, Danger, Edit } from 'react-iconly'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Copy } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 
 interface TeachingAssignment {
@@ -44,6 +44,18 @@ export default function TugasPage() {
         due_date: ''
     })
     const [saving, setSaving] = useState(false)
+
+    // Copy States
+    const [showCopy, setShowCopy] = useState(false)
+    const [copySourceAssignment, setCopySourceAssignment] = useState<Assignment | null>(null)
+    const [copying, setCopying] = useState(false)
+    const [copyForm, setCopyForm] = useState({
+        teaching_assignment_ids: [] as string[],
+        title: '',
+        description: '',
+        type: 'TUGAS',
+        due_date: ''
+    })
 
     // Filter, Search, & Pagination
     const [searchQuery, setSearchQuery] = useState('')
@@ -124,6 +136,11 @@ export default function TugasPage() {
                         due_date: formattedDueDate
                     })
                 })
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}))
+                    alert(err.error || 'Gagal menyimpan perubahan tugas.')
+                    return
+                }
             } else {
                 const results = await Promise.allSettled(
                     formData.teaching_assignment_ids.map(taId =>
@@ -137,6 +154,9 @@ export default function TugasPage() {
                                 type: formData.type,
                                 due_date: formattedDueDate
                             })
+                        }).then(r => {
+                            if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                            return r.json()
                         })
                     )
                 )
@@ -152,6 +172,73 @@ export default function TugasPage() {
             fetchData()
         } finally {
             setSaving(false)
+        }
+    }
+
+    const openCopyModal = (assignment: Assignment) => {
+        setCopySourceAssignment(assignment)
+
+        let localDueStr = '';
+        if (assignment.due_date) {
+            const d = new Date(assignment.due_date);
+            d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+            localDueStr = d.toISOString().slice(0, 16);
+        }
+
+        setCopyForm({
+            teaching_assignment_ids: [],
+            title: `[Copy] ${assignment.title}`,
+            description: assignment.description || '',
+            type: assignment.type,
+            due_date: localDueStr
+        })
+        setShowCopy(true)
+    }
+
+    const handleCopyAssignment = async () => {
+        if (!copySourceAssignment || copyForm.teaching_assignment_ids.length === 0 || !copyForm.title) return
+        setCopying(true)
+        try {
+            let formattedDueDate = null;
+            if (copyForm.due_date) {
+                const localDate = new Date(copyForm.due_date);
+                formattedDueDate = localDate.toISOString();
+            }
+
+            const createResults = await Promise.allSettled(
+                copyForm.teaching_assignment_ids.map(taId => 
+                    fetch('/api/assignments', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            teaching_assignment_id: taId,
+                            title: copyForm.title,
+                            description: copyForm.description,
+                            type: copyForm.type,
+                            due_date: formattedDueDate
+                        })
+                    }).then(r => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                        return r.json()
+                    })
+                )
+            )
+
+            const successful = createResults.filter(r => r.status === 'fulfilled').length
+            const failed = createResults.length - successful
+
+            if (successful > 0) {
+                alert(`Tugas berhasil disalin ke ${successful} kelas.${failed > 0 ? ` (${failed} gagal)` : ''}`)
+                setShowCopy(false)
+                fetchData()
+            } else {
+                alert('Gagal menyalin tugas. Silakan coba lagi.')
+            }
+        } catch (error) {
+            console.error('Error copying assignment:', error)
+            alert('Terjadi kesalahan saat menyalin tugas.')
+        } finally {
+            setCopying(false)
         }
     }
 
@@ -358,6 +445,14 @@ export default function TugasPage() {
                                             <Button
                                                 variant="secondary"
                                                 size="sm"
+                                                onClick={() => openCopyModal(assignment)}
+                                                className="w-full justify-center text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                            >
+                                                <span className="text-blue-500"><Copy className="w-4 h-4" /></span> Pakai Ulang
+                                            </Button>
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
                                                 onClick={() => openEditModal(assignment)}
                                                 className="w-full justify-center"
                                             >
@@ -476,6 +571,93 @@ export default function TugasPage() {
                         </Button>
                     </div>
                 </form>
+            </Modal>
+
+            <Modal
+                open={showCopy}
+                onClose={() => setShowCopy(false)}
+                title="Pakai Ulang Tugas"
+            >
+                <div className="space-y-4">
+                    <div className="bg-secondary/10 p-4 rounded-xl mb-2">
+                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source Tugas: {copySourceAssignment?.title}</h4>
+                        <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
+                            <span>Mata Pelajaran: <strong>{copySourceAssignment?.teaching_assignment?.subject?.name}</strong></span>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pilih Kelas Tujuan</label>
+                        <MultiClassSelector
+                            teachingAssignments={teachingAssignments}
+                            selectedIds={copyForm.teaching_assignment_ids}
+                            onChange={(ids) => setCopyForm({ ...copyForm, teaching_assignment_ids: ids })}
+                            mode="multi"
+                            disabled={teachingAssignments.length === 0}
+                            defaultSubjectLock={copySourceAssignment?.teaching_assignment?.subject?.name}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Tugas Baru</label>
+                        <input
+                            type="text"
+                            value={copyForm.title}
+                            onChange={(e) => setCopyForm({ ...copyForm, title: e.target.value })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Deskripsi (Opsional)</label>
+                        <textarea
+                            value={copyForm.description}
+                            onChange={(e) => setCopyForm({ ...copyForm, description: e.target.value })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px]"
+                        />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe</label>
+                            <div className="relative">
+                                <select
+                                    value={copyForm.type}
+                                    onChange={(e) => setCopyForm({ ...copyForm, type: e.target.value })}
+                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none"
+                                >
+                                    <option value="TUGAS">Tugas</option>
+                                    <option value="PR">PR</option>
+                                    <option value="PROYEK">Proyek</option>
+                                    <option value="LATIHAN">Latihan</option>
+                                </select>
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary"><ChevronDown set="bold" primaryColor="currentColor" size={20} /></div>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Batas Waktu Baru</label>
+                            <input
+                                type="datetime-local"
+                                value={copyForm.due_date}
+                                onChange={(e) => setCopyForm({ ...copyForm, due_date: e.target.value })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        </div>
+                    </div>
+                    <div className="flex gap-3 pt-4 border-t border-secondary/10 mt-4">
+                        <Button
+                            variant="secondary"
+                            onClick={() => setShowCopy(false)}
+                            className="flex-1"
+                        >
+                            Batal
+                        </Button>
+                        <Button
+                            onClick={handleCopyAssignment}
+                            disabled={copying || copyForm.teaching_assignment_ids.length === 0 || !copyForm.title}
+                            loading={copying}
+                            className="flex-1"
+                        >
+                            Salin Tugas
+                        </Button>
+                    </div>
+                </div>
             </Modal>
 
             {/* Custom Delete Modal */}

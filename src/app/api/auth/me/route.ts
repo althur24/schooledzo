@@ -21,7 +21,18 @@ export async function GET(request: NextRequest) {
             )
         }
 
-        return NextResponse.json({ user })
+        const response = NextResponse.json({ user })
+
+        // Ensure user_role cookie stays in sync (for middleware route protection)
+        response.cookies.set('user_role', user.role, {
+            httpOnly: false,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 60 * 60 * 24 * 7,
+            path: '/'
+        })
+
+        return response
     } catch (error) {
         console.error('Session check error:', error)
         return NextResponse.json(

@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
             .from('official_exams')
             .select(`
                 id, title, exam_type, duration_minutes, start_time, is_active, max_violations, subject_id, target_class_ids,
-                subject:subjects(name)
+                subject:subjects(id, name, kkm)
             `)
             .eq('id', examId)
             .single()
@@ -41,13 +41,14 @@ export async function GET(request: NextRequest) {
         const examData: any = {
             ...exam,
             subject_name: Array.isArray(exam.subject) ? exam.subject[0]?.name : (exam.subject as any)?.name || 'Unknown Subject',
+            subject_kkm: Array.isArray(exam.subject) ? exam.subject[0]?.kkm : (exam.subject as any)?.kkm || 75,
             total_questions: totalQuestions || 0
         }
 
         // 2. Fetch target classes info
         const { data: classesData } = await supabase
             .from('classes')
-            .select('id, name')
+            .select('id, name, school_level, grade_level')
             .in('id', exam.target_class_ids || [])
 
         examData.target_classes = classesData || []

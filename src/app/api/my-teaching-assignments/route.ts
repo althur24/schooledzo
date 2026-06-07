@@ -54,8 +54,8 @@ export async function GET(request: NextRequest) {
             .select(`
                 id,
                 teacher_id,
-                subject:subjects(id, name),
-                class:classes(id, name),
+                subject:subjects(id, name, kkm),
+                class:classes(id, name, school_level, grade_level),
                 academic_year:academic_years(id, name, is_active)
             `)
             .eq('teacher_id', teacher.id)

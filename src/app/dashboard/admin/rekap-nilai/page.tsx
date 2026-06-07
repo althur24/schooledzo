@@ -15,6 +15,8 @@ interface AcademicYear {
 interface Class {
     id: string
     name: string
+    school_level?: string
+    grade_level?: number
 }
 
 interface Student {
@@ -43,6 +45,7 @@ interface SubjectGrade {
     uts: number | null
     uas: number | null
     rata_rata: number | null
+    kkm: number
 }
 
 interface StudentGrades {
@@ -109,12 +112,31 @@ export default function RekapNilaiPage() {
             const subjectsData = await subjectsRes.json()
             setSubjects(Array.isArray(subjectsData) ? subjectsData : [])
 
+            // Fetch subject_kkm
+            const subjectKkmRes = await fetch('/api/subject-kkm')
+            const subjectKkmData = await subjectKkmRes.json()
+            const allSubjectKkms = Array.isArray(subjectKkmData) ? subjectKkmData : []
+
+            const classObj = classes.find(c => c.id === selectedClass)
+            const classSchoolLevel = classObj?.school_level
+            const classGradeLevel = classObj?.grade_level
+
+            const getKkm = (subjectId: string, fallbackKkm: number = 75) => {
+                if (!classSchoolLevel || !classGradeLevel) return fallbackKkm
+                const granular = allSubjectKkms.find((k: any) => 
+                    k.subject_id === subjectId && 
+                    k.school_level === classSchoolLevel && 
+                    k.grade_level === classGradeLevel
+                )
+                return granular ? granular.kkm : fallbackKkm
+            }
+
             // Process grades per student
             const processedGrades: StudentGrades[] = students.map(student => {
                 const studentGradesList = allGrades.filter(g => g.student_id === student.id)
 
                 // Group by subject
-                const subjectGrades: SubjectGrade[] = subjectsData.map((subject: { id: string; name: string }) => {
+                const subjectGrades: SubjectGrade[] = subjectsData.map((subject: { id: string; name: string; kkm?: number }) => {
                     const subjectGradesList = studentGradesList.filter(g => g.subject_id === subject.id)
 
                     const tugasGrades = subjectGradesList.filter(g => g.grade_type === 'TUGAS').map(g => g.score)
@@ -131,6 +153,7 @@ export default function RekapNilaiPage() {
 
                     const allScores = [tugasAvg, kuisAvg, ulanganAvg, utsAvg, uasAvg].filter(s => s !== null) as number[]
                     const subjectAvg = allScores.length > 0 ? allScores.reduce((a, b) => a + b, 0) / allScores.length : null
+                    const subjectKkm = getKkm(subject.id, subject.kkm)
 
                     return {
                         subject_id: subject.id,
@@ -140,7 +163,8 @@ export default function RekapNilaiPage() {
                         ulangan: ulanganAvg,
                         uts: utsAvg,
                         uas: uasAvg,
-                        rata_rata: subjectAvg
+                        rata_rata: subjectAvg,
+                        kkm: subjectKkm
                     }
                 })
 
@@ -348,9 +372,9 @@ export default function RekapNilaiPage() {
                                         {sg.grades.map(g => (
                                             <td key={g.subject_id} className="px-4 py-3 text-center">
                                                 <span className={`font-medium ${g.rata_rata !== null
-                                                    ? g.rata_rata >= 75
+                                                    ? g.rata_rata >= g.kkm
                                                         ? 'text-green-700 dark:text-green-400'
-                                                        : g.rata_rata >= 60
+                                                        : g.rata_rata >= g.kkm - 15
                                                             ? 'text-amber-700 dark:text-amber-400'
                                                             : 'text-red-700 dark:text-red-400'
                                                     : 'text-text-secondary dark:text-zinc-500'
@@ -361,9 +385,9 @@ export default function RekapNilaiPage() {
                                         ))}
                                         <td className="px-4 py-3 text-center">
                                             <span className={`font-bold ${sg.average !== null
-                                                ? sg.average >= 75
+                                                ? sg.average >= (sg.grades.length > 0 ? sg.grades.reduce((sum, s) => sum + s.kkm, 0) / sg.grades.length : 75)
                                                     ? 'text-emerald-600 dark:text-emerald-400'
-                                                    : sg.average >= 60
+                                                    : sg.average >= (sg.grades.length > 0 ? sg.grades.reduce((sum, s) => sum + s.kkm, 0) / sg.grades.length : 75) - 15
                                                         ? 'text-amber-600 dark:text-amber-400'
                                                         : 'text-rose-600 dark:text-rose-400'
                                                 : 'text-slate-400 dark:text-slate-500'

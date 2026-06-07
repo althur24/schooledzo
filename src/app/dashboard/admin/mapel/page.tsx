@@ -20,7 +20,8 @@ export default function MapelPage() {
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
     const [editingSubject, setEditingSubject] = useState<Subject | null>(null)
-    const [formData, setFormData] = useState({ name: '', level: 'UMUM', kkm: 75 })
+    const [formData, setFormData] = useState({ name: '', level: 'UMUM' })
+    const [kkmData, setKkmData] = useState<{school_level: string, grade_level: number, kkm: number}[]>([])
     const [saving, setSaving] = useState(false)
 
     // Bulk Upload States
@@ -85,11 +86,22 @@ export default function MapelPage() {
         setFilteredSubjects(filtered)
     }, [subjects, searchQuery, levelFilter])
 
+    // Detail Modal states
+    const [detailKkm, setDetailKkm] = useState<{school_level: string, grade_level: number, kkm: number}[]>([])
+
     const openDetail = async (subject: Subject) => {
         setDetailSubject(subject)
         setDetailLoading(true)
         setDetailTeachers([])
+        setDetailKkm([])
         try {
+            // Fetch KKM data
+            const kkmRes = await fetch(`/api/subject-kkm?subject_id=${subject.id}`)
+            if (kkmRes.ok) {
+                const kkmData = await kkmRes.json()
+                setDetailKkm(kkmData)
+            }
+
             const res = await fetch('/api/teaching-assignments')
             const data = await res.json()
             if (!Array.isArray(data)) return
@@ -141,6 +153,7 @@ export default function MapelPage() {
             const url = editingSubject ? `/api/subjects/${editingSubject.id}` : '/api/subjects'
             const method = editingSubject ? 'PUT' : 'POST'
 
+            // Save subject basic info
             const res = await fetch(url, {
                 method,
                 headers: { 'Content-Type': 'application/json' },
@@ -148,14 +161,32 @@ export default function MapelPage() {
             })
 
             if (res.ok) {
+                const savedSubject = await res.json()
+                
+                // Save KKM data using batch API
+                if (kkmData.length > 0) {
+                    await fetch('/api/subject-kkm/batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            subject_id: editingSubject ? editingSubject.id : savedSubject.id,
+                            kkm_data: kkmData
+                        })
+                    })
+                }
+
                 setShowModal(false)
                 setEditingSubject(null)
-                setFormData({ name: '', level: 'UMUM', kkm: 75 })
+                setFormData({ name: '', level: 'UMUM' })
+                setKkmData([])
                 fetchSubjects()
             } else {
                 const err = await res.json()
                 alert(err.error || 'Gagal menyimpan mata pelajaran')
             }
+        } catch (error) {
+            console.error('Error saving subject:', error)
+            alert('Terjadi kesalahan saat menyimpan.')
         } finally {
             setSaving(false)
         }
@@ -167,15 +198,54 @@ export default function MapelPage() {
         fetchSubjects()
     }
 
-    const openEdit = (subject: Subject) => {
+    const openEdit = async (subject: Subject) => {
         setEditingSubject(subject)
-        setFormData({ name: subject.name, level: subject.level || 'UMUM', kkm: subject.kkm ?? 75 })
+        setFormData({ name: subject.name, level: subject.level || 'UMUM' })
+        
+        // Fetch specific KKM for this subject
+        try {
+            const res = await fetch(`/api/subject-kkm?subject_id=${subject.id}`)
+            if (res.ok) {
+                const data = await res.json()
+                if (data && data.length > 0) {
+                    setKkmData(data.map((d: any) => ({
+                        school_level: d.school_level,
+                        grade_level: d.grade_level,
+                        kkm: d.kkm
+                    })))
+                } else {
+                    // Initialize empty KKM array if none exists
+                    setKkmData(getDefaultKkm(subject.level || 'UMUM'))
+                }
+            } else {
+                setKkmData(getDefaultKkm(subject.level || 'UMUM'))
+            }
+        } catch (e) {
+            setKkmData(getDefaultKkm(subject.level || 'UMUM'))
+        }
+        
         setShowModal(true)
+    }
+
+    const getDefaultKkm = (level: string) => {
+        const defaultArr = []
+        if (level === 'UMUM' || level === 'SMP') {
+            defaultArr.push({ school_level: 'SMP', grade_level: 1, kkm: 75 })
+            defaultArr.push({ school_level: 'SMP', grade_level: 2, kkm: 75 })
+            defaultArr.push({ school_level: 'SMP', grade_level: 3, kkm: 75 })
+        }
+        if (level === 'UMUM' || level === 'SMA') {
+            defaultArr.push({ school_level: 'SMA', grade_level: 1, kkm: 75 })
+            defaultArr.push({ school_level: 'SMA', grade_level: 2, kkm: 75 })
+            defaultArr.push({ school_level: 'SMA', grade_level: 3, kkm: 75 })
+        }
+        return defaultArr
     }
 
     const openAdd = () => {
         setEditingSubject(null)
-        setFormData({ name: '', level: 'UMUM', kkm: 75 })
+        setFormData({ name: '', level: 'UMUM' })
+        setKkmData(getDefaultKkm('UMUM'))
         setShowModal(true)
     }
 
@@ -431,7 +501,39 @@ export default function MapelPage() {
                             ))}
                         </div>
                     )}
-                    <div className="pt-3 flex gap-3">
+                    
+                    {/* KKM Table display in detail */}
+                    {detailKkm.length > 0 && (
+                        <div className="mt-6">
+                            <h4 className="font-bold text-sm text-slate-800 dark:text-white mb-3 flex items-center gap-2">
+                                🎯 Standar KKM (Kriteria Ketuntasan Minimal)
+                            </h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                {['SMP', 'SMA'].map(sl => {
+                                    const grades = detailKkm.filter(k => k.school_level === sl).sort((a,b) => a.grade_level - b.grade_level)
+                                    if (grades.length === 0) return null
+                                    
+                                    return (
+                                        <div key={sl} className="bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                                            <div className={`px-4 py-2 font-bold text-xs text-center border-b border-slate-200 dark:border-slate-700 ${sl === 'SMP' ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30' : 'bg-purple-50 text-purple-700 dark:bg-purple-900/30'}`}>
+                                                Jenjang {sl}
+                                            </div>
+                                            <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                                                {grades.map(g => (
+                                                    <div key={g.grade_level} className="flex justify-between items-center px-4 py-2 text-sm">
+                                                        <span className="text-slate-600 dark:text-slate-400">Kelas {g.grade_level === 1 ? (sl === 'SMP' ? 7 : 10) : g.grade_level === 2 ? (sl === 'SMP' ? 8 : 11) : (sl === 'SMP' ? 9 : 12)}</span>
+                                                        <span className="font-bold text-slate-900 dark:text-white">{g.kkm}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="pt-3 flex gap-3 mt-4">
                         <Button 
                             variant="secondary" 
                             onClick={() => { setDetailSubject(null); if (detailSubject) openEdit(detailSubject); }} 
@@ -477,7 +579,10 @@ export default function MapelPage() {
                                 <button
                                     type="button"
                                     key={lvl}
-                                    onClick={() => setFormData({ ...formData, level: lvl })}
+                                    onClick={() => {
+                                        setFormData({ ...formData, level: lvl })
+                                        setKkmData(getDefaultKkm(lvl))
+                                    }}
                                     className={`py-2 px-3 rounded-xl border text-sm font-medium transition-all ${
                                         formData.level === lvl 
                                             ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400' 
@@ -490,18 +595,51 @@ export default function MapelPage() {
                         </div>
                         <p className="text-xs text-slate-500 mt-2">UMUM = Mapel dasar yang diajarkan di SMP maupun SMA.</p>
                     </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">KKM (Kriteria Ketuntasan Minimal)</label>
-                        <input
-                            type="number"
-                            value={formData.kkm}
-                            onChange={(e) => setFormData({ ...formData, kkm: parseInt(e.target.value) || 0 })}
-                            className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder-slate-400 transition-all"
-                            placeholder="75"
-                            min={0}
-                            max={100}
-                        />
-                        <p className="text-xs text-slate-500 mt-2">Nilai minimum yang harus dicapai siswa. Default: 75.</p>
+                    <div className="space-y-3">
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
+                            KKM per Tingkat Kelas
+                        </label>
+                        <div className="grid grid-cols-2 gap-4">
+                            {['SMP', 'SMA'].map(sl => {
+                                if (formData.level !== 'UMUM' && formData.level !== sl) return null
+                                
+                                return (
+                                    <div key={sl} className="space-y-2 border border-slate-200 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800/50">
+                                        <div className={`text-xs font-bold px-2 py-1 rounded inline-block ${sl === 'SMP' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                                            Jenjang {sl}
+                                        </div>
+                                        {[1, 2, 3].map(gl => {
+                                            const gradeLabel = gl === 1 ? (sl === 'SMP' ? 7 : 10) : gl === 2 ? (sl === 'SMP' ? 8 : 11) : (sl === 'SMP' ? 9 : 12)
+                                            const itemIdx = kkmData.findIndex(k => k.school_level === sl && k.grade_level === gl)
+                                            const kkmValue = itemIdx >= 0 ? kkmData[itemIdx].kkm : 75
+                                            
+                                            return (
+                                                <div key={gl} className="flex items-center gap-3">
+                                                    <span className="text-xs text-slate-600 dark:text-slate-400 w-16">Kelas {gradeLabel}</span>
+                                                    <input
+                                                        type="number"
+                                                        value={kkmValue}
+                                                        onChange={(e) => {
+                                                            const val = parseInt(e.target.value) || 0
+                                                            setKkmData(prev => {
+                                                                const newData = [...prev]
+                                                                const idx = newData.findIndex(k => k.school_level === sl && k.grade_level === gl)
+                                                                if (idx >= 0) newData[idx].kkm = val
+                                                                else newData.push({ school_level: sl, grade_level: gl, kkm: val })
+                                                                return newData
+                                                            })
+                                                        }}
+                                                        className="flex-1 px-3 py-1.5 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-all"
+                                                        min={0}
+                                                        max={100}
+                                                    />
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                )
+                            })}
+                        </div>
                     </div>
                     <div className="flex gap-3 pt-2">
                         <Button type="button" variant="secondary" onClick={() => setShowModal(false)} className="flex-1">

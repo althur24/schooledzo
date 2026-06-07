@@ -147,13 +147,17 @@ export default function EditQuizPage() {
     }, [quizId])
 
     useEffect(() => {
-        if (siblingParam) {
-            const ids = siblingParam.split(',').filter(Boolean)
-            setSiblingIds(ids)
-            sessionStorage.setItem(`quiz_siblings_${quizId}`, JSON.stringify(ids))
-        } else {
-            const stored = sessionStorage.getItem(`quiz_siblings_${quizId}`)
-            if (stored) setSiblingIds(JSON.parse(stored))
+        try {
+            if (siblingParam) {
+                const ids = siblingParam.split(',').filter(Boolean)
+                setSiblingIds(ids)
+                sessionStorage.setItem(`quiz_siblings_${quizId}`, JSON.stringify(ids))
+            } else {
+                const stored = sessionStorage.getItem(`quiz_siblings_${quizId}`)
+                if (stored) setSiblingIds(JSON.parse(stored))
+            }
+        } catch {
+            // Ignore corrupt or unavailable sessionStorage
         }
     }, [siblingParam, quizId])
 
@@ -563,7 +567,7 @@ export default function EditQuizPage() {
             {siblingIds.length > 0 && !quiz.is_active && !quiz.pending_publish && (
                 <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700 rounded-xl animate-in fade-in slide-in-from-top-2">
                     <div className="flex items-center gap-3">
-                        <User className="w-5 h-5 text-blue-500 shrink-0" set="bold" />
+                        <div className="w-5 h-5 text-blue-500 shrink-0"><User set="bold" primaryColor="currentColor" size={20} /></div>
                         <div>
                             <h4 className="font-bold text-blue-800 dark:text-blue-300 text-sm">
                                 Kuis Multi-Kelas ({siblingIds.length + 1} kelas)

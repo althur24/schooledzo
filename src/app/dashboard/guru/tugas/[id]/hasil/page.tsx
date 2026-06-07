@@ -39,8 +39,8 @@ interface Assignment {
     type: string
     due_date: string | null
     teaching_assignment: {
-        subject: { name: string }
-        class: { name: string }
+        subject: { id: string; name: string; kkm?: number }
+        class: { id: string; name: string; school_level?: string; grade_level?: number }
     }
 }
 
@@ -52,6 +52,7 @@ export default function TugasHasilPage() {
     const [submissions, setSubmissions] = useState<Submission[]>([])
     const [missingStudents, setMissingStudents] = useState<MissingStudent[]>([])
     const [loading, setLoading] = useState(true)
+    const [resolvedKkm, setResolvedKkm] = useState<number>(75)
 
     const [grading, setGrading] = useState<{
         submissionId: string
@@ -74,6 +75,20 @@ export default function TugasHasilPage() {
             const subsData = await subsRes.json()
 
             setAssignment(assignmentData)
+
+            if (assignmentData?.teaching_assignment?.subject?.id) {
+                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${assignmentData.teaching_assignment.subject.id}`)
+                if (kkmRes.ok) {
+                    const kkmData = await kkmRes.json()
+                    const fallback = assignmentData.teaching_assignment.subject.kkm || 75
+                    const classObj = assignmentData.teaching_assignment.class
+                    const granular = Array.isArray(kkmData) ? kkmData.find((k: any) => 
+                        k.school_level === classObj?.school_level && 
+                        k.grade_level === classObj?.grade_level
+                    ) : null
+                    setResolvedKkm(granular ? granular.kkm : fallback)
+                }
+            }
             
             if (subsData.submissions) {
                 setSubmissions(subsData.submissions)
@@ -229,9 +244,9 @@ export default function TugasHasilPage() {
                                             </td>
                                             <td className="px-6 py-4 text-center">
                                                 {sub.grade?.length > 0 ? (
-                                                    <span className={`inline-flex px-3 py-1.5 rounded-full text-sm font-bold shadow-sm ${sub.grade[0].score >= 75
+                                                    <span className={`inline-flex px-3 py-1.5 rounded-full text-sm font-bold shadow-sm ${sub.grade[0].score >= resolvedKkm
                                                         ? 'bg-green-500/10 text-green-600 border border-green-200 dark:border-green-500/20 dark:text-green-400'
-                                                        : sub.grade[0].score >= 60
+                                                        : sub.grade[0].score >= resolvedKkm - 15
                                                             ? 'bg-amber-500/10 text-amber-600 border border-amber-200 dark:border-amber-500/20 dark:text-amber-400'
                                                             : 'bg-red-500/10 text-red-600 border border-red-200 dark:border-red-500/20 dark:text-red-400'
                                                         }`}>

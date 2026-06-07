@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
         // Get all subjects
         const { data: subjects, error: subjectsError } = await supabase
             .from('subjects')
-            .select('id, name')
+            .select('id, name, kkm')
             .eq('school_id', schoolId)
             .order('name')
 
@@ -137,7 +137,7 @@ export async function GET(request: NextRequest) {
 
         const officialExamIds = officialExams?.map(oe => oe.id) || []
 
-        // Get official exam submissions (only submitted ones)
+        // Get all official exam submissions (only submitted ones)
         const { data: officialExamSubmissions } = officialExamIds.length > 0
             ? await supabase
                 .from('official_exam_submissions')
@@ -146,7 +146,24 @@ export async function GET(request: NextRequest) {
                 .eq('is_submitted', true)
             : { data: [] as any[] }
 
+        // Get all granular KKM
+        const subjectIds = subjects?.map(s => s.id) || []
+        const { data: subjectKkms } = subjectIds.length > 0
+            ? await supabase
+                .from('subject_kkm')
+                .select('subject_id, school_level, grade_level, kkm')
+                .in('subject_id', subjectIds)
+            : { data: [] as any[] }
 
+        const getKkm = (subjectId: string, schoolLevel: string, gradeLevel: number, fallback: number = 75) => {
+            if (!schoolLevel || !gradeLevel) return fallback
+            const match = subjectKkms?.find(sk => 
+                sk.subject_id === subjectId && 
+                sk.school_level === schoolLevel && 
+                sk.grade_level === gradeLevel
+            )
+            return match?.kkm || fallback
+        }
 
         // Build a map: class_id -> subject_id -> student grades
         const classSubjectGrades: Record<string, Record<string, { student_id: string; scores: number[] }[]>> = {}
@@ -279,7 +296,8 @@ export async function GET(request: NextRequest) {
                     ? studentAverages.reduce((a, b) => a + (b.average || 0), 0) / studentAverages.length
                     : null
 
-                const passCount = studentAverages.filter(sa => (sa.average || 0) >= 75).length
+                const kkm = getKkm(sub.id, (cls as any).school_level, (cls as any).grade_level, sub.kkm)
+                const passCount = studentAverages.filter(sa => (sa.average || 0) >= kkm).length
                 const failCount = studentAverages.length - passCount
 
                 // Get student details for this subject

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { resolveKkm } from '@/lib/resolveKkm'
 
 // Helper: Supabase single-relation selects sometimes type as array
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,7 +82,7 @@ export async function GET(request: NextRequest) {
             .from('teaching_assignments')
             .select(`
                 id,
-                subject:subjects(id, name),
+                subject:subjects(id, name, kkm),
                 academic_year:academic_years(id, is_active)
             `)
             .eq('class_id', classId)
@@ -298,8 +299,15 @@ export async function GET(request: NextRequest) {
             classes,
             current_class_id: classId,
             students: students || [],
-            subjects: activeAssignments.map((ta) => unwrap(ta.subject)).filter(
-                (s: any, i: number, arr: any[]) => s && arr.findIndex((x: any) => x?.id === s.id) === i
+            subjects: await Promise.all(
+                activeAssignments
+                    .map((ta) => unwrap(ta.subject))
+                    .filter((s: any, i: number, arr: any[]) => s && arr.findIndex((x: any) => x?.id === s.id) === i)
+                    .map(async (subj: any) => {
+                        const c = classesUnwrapped.find((cls: any) => cls.id === classId)
+                        const resolvedKkm = await resolveKkm(subj.id, c?.school_level, c?.grade_level)
+                        return { ...subj, kkm: resolvedKkm }
+                    })
             ),
             student_grades: studentGrades,
             // Raw data for detail view

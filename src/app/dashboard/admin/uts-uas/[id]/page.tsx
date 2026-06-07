@@ -108,7 +108,8 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     const [rapihSaving, setRapihSaving] = useState(false)
 
     // Settings
-    const [allClasses, setAllClasses] = useState<{ id: string; name: string; school_level: string }[]>([])
+    const [allClasses, setAllClasses] = useState<{ id: string; name: string; school_level: string; grade_level: number }[]>([])
+    const [granularKkms, setGranularKkms] = useState<any[]>([])
     const [settingsForm, setSettingsForm] = useState({
         title: '', description: '', start_time: '',
         duration_minutes: 90, is_randomized: true, max_violations: 3,
@@ -130,10 +131,19 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     const totalPoints = questions.reduce((sum, q) => sum + (q.points || 0), 0)
     const getDefaultPoints = () => Math.floor(100 / (questions.length + 1))
 
-    const getScoreColor = (score: number, max: number) => {
+    const getStudentKkm = (student: any) => {
+        const baseKkm = (exam?.subject as any)?.kkm || 75;
+        const studentClass = allClasses.find(c => c.id === student?.class_id);
+        if (studentClass && studentClass.school_level && studentClass.grade_level) {
+            const granular = granularKkms.find((k: any) => k.school_level === studentClass.school_level && k.grade_level === studentClass.grade_level);
+            if (granular) return granular.kkm;
+        }
+        return baseKkm;
+    }
+
+    const getScoreColor = (score: number, max: number, studentKkm: number) => {
         const percentage = max > 0 ? (score / max) * 100 : 0
-        if (percentage >= 75) return 'text-green-600 bg-green-500/10'
-        if (percentage >= 50) return 'text-amber-600 bg-amber-500/10'
+        if (percentage >= studentKkm) return 'text-green-600 bg-green-500/10'
         return 'text-red-600 bg-red-500/10'
     }
 
@@ -160,6 +170,16 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                 max_violations: data.max_violations || 3,
                 target_class_ids: data.target_class_ids || []
             })
+            if (data.subject?.id) {
+                try {
+                    const kkmRes = await fetch(`/api/subject-kkm?subject_id=${data.subject.id}`)
+                    if (kkmRes.ok) {
+                        setGranularKkms(await kkmRes.json())
+                    }
+                } catch (err) {
+                    console.error('Failed to fetch granular KKM', err)
+                }
+            }
         } catch (error) {
             console.error('Error:', error)
         } finally {
@@ -835,6 +855,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                     <tbody className="divide-y divide-secondary/10">
                                         {[...submissions].sort((a, b) => (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '')).map((sub: any, idx: number) => {
                                             const percentage = sub.max_score > 0 ? Math.round((sub.total_score / sub.max_score) * 100) : 0
+                                            const studentKkm = getStudentKkm(sub.student)
                                             return (
                                                 <tr key={sub.id} className="hover:bg-secondary/5">
                                                     <td className="px-4 py-3 text-sm text-text-secondary">{idx + 1}</td>
@@ -847,9 +868,12 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                     </td>
                                                     <td className="px-4 py-3 text-center">
                                                         {sub.is_submitted ? (
-                                                            <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${percentage >= 75 ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400' : percentage >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400' : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'}`}>
-                                                                {percentage}
-                                                            </span>
+                                                            <div className="flex flex-col items-center gap-0.5">
+                                                                <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${percentage >= studentKkm ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'}`}>
+                                                                    {percentage}
+                                                                </span>
+                                                                <span className="text-[10px] text-text-secondary font-medium">KKM: {studentKkm}</span>
+                                                            </div>
                                                         ) : (
                                                             <span className="text-text-secondary text-sm">-</span>
                                                         )}
@@ -918,7 +942,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-secondary/10 rounded-xl p-4 text-center">
                                 <p className="text-sm text-text-secondary dark:text-zinc-400">Nilai</p>
-                                <p className={`text-2xl font-bold ${getScoreColor(selectedSubmission.total_score, selectedSubmission.max_score).split(' ')[0]}`}>
+                                <p className={`text-2xl font-bold ${getScoreColor(selectedSubmission.total_score, selectedSubmission.max_score, getStudentKkm(selectedSubmission.student)).split(' ')[0]}`}>
                                     {selectedSubmission.total_score}/{selectedSubmission.max_score}
                                 </p>
                             </div>

@@ -24,6 +24,15 @@ export async function GET(
 
         if (error) throw error
 
+        // S4 Security Fix: IDOR protection — SISWA can only access their own official exam submission
+        if (ctx.user.role === 'SISWA') {
+            const { data: student } = await supabase
+                .from('students').select('id').eq('user_id', ctx.user.id).single()
+            if (!student || (submission as any)?.student?.id !== student.id) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+            }
+        }
+
         // Check visibility for SISWA
         const examObj = (submission as any)?.exam || {}
         const showImmediately = examObj.show_results_immediately ?? true

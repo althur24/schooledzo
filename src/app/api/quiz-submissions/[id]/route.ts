@@ -35,6 +35,15 @@ export async function GET(
 
         if (error) throw error
 
+        // S3 Security Fix: IDOR protection — SISWA can only access their own quiz submission
+        if (user.role === 'SISWA') {
+            const { data: student } = await supabase
+                .from('students').select('id').eq('user_id', user.id).single()
+            if (!student || (data as any)?.student?.id !== student.id) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+            }
+        }
+
         return NextResponse.json(data)
     } catch (error) {
         console.error('Error fetching quiz submission:', error)

@@ -210,9 +210,30 @@ export default function AdminUtsUasPage() {
                 const res = await fetch(`/api/official-exam-submissions?exam_id=${exam.id}`)
                 if (res.ok) {
                     const submissions = await res.json()
-                    const kkm = exam.subject?.kkm || 75
+                    const baseKkm = exam.subject?.kkm || 75
+                    let granularKkms: any[] = []
+                    
+                    try {
+                        const kkmRes = await fetch(`/api/subject-kkm?subject_id=${exam.subject?.id}`)
+                        if (kkmRes.ok) {
+                            granularKkms = await kkmRes.json()
+                        }
+                    } catch (e) {
+                        console.error('Failed to fetch granular KKM', e)
+                    }
+
                     const studentsList = submissions.map((sub: any) => {
                         const pct = (sub.total_score || 0) / (sub.max_score || 1) * 100
+                        let studentKkm = baseKkm
+                        
+                        const classLevel = sub.student?.class?.school_level
+                        const gradeLevel = sub.student?.class?.grade_level
+                        
+                        if (classLevel && gradeLevel) {
+                            const granular = granularKkms.find((k: any) => k.school_level === classLevel && k.grade_level === gradeLevel)
+                            if (granular) studentKkm = granular.kkm
+                        }
+                        
                         return {
                             id: sub.student?.id,
                             name: sub.student?.user?.full_name,
@@ -220,7 +241,8 @@ export default function AdminUtsUasPage() {
                             score: sub.total_score,
                             max_score: sub.max_score,
                             pct,
-                            needsRemedial: pct < kkm
+                            needsRemedial: pct < studentKkm,
+                            kkmApplied: studentKkm
                         }
                     })
                     setRemedialStudents(studentsList)

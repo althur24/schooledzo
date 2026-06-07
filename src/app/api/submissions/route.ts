@@ -43,6 +43,17 @@ export async function GET(request: NextRequest) {
             query = query.eq('student_id', studentId)
         }
 
+        // S6 Security Fix: Auto-scope to student's own submissions for SISWA role
+        if (user.role === 'SISWA') {
+            const { data: student } = await supabase
+                .from('students').select('id').eq('user_id', user.id).single()
+            if (student) {
+                query = query.eq('student_id', student.id)
+            } else {
+                return NextResponse.json([])
+            }
+        }
+
         // Filter by active year when no specific assignment is requested
         if (!assignmentId && allYears !== 'true') {
             const { data: activeYear } = await supabase

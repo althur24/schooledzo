@@ -8,7 +8,7 @@ import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import MultiClassSelector from '@/components/MultiClassSelector'
 import { TimeCircle as Clock, Document as FileText, Graph as BarChart3, Game as Brain, Calendar, Plus, Game, Graph, Edit, Swap } from 'react-iconly'
-import { Loader2, CheckSquare, Square, RefreshCw } from 'lucide-react'
+import { Loader2, CheckSquare, Square, RefreshCw, Copy, CalendarDays, Clock as LuClock, FileText as LuFileText, Shuffle } from 'lucide-react'
 
 interface Quiz {
     id: string
@@ -21,7 +21,7 @@ interface Quiz {
     created_at: string
     teaching_assignment: {
         id: string
-        subject: { name: string, kkm: number }
+        subject: { id?: string, name: string, kkm: number }
         class: { id: string, name: string }
     }
     questions: { count: number }[]
@@ -56,6 +56,20 @@ export default function GuruKuisPage() {
     const [hasDeadline, setHasDeadline] = useState(false)
     const [deadlineValue, setDeadlineValue] = useState('')
 
+    // Copy States
+    const [showCopy, setShowCopy] = useState(false)
+    const [copySourceQuiz, setCopySourceQuiz] = useState<Quiz | null>(null)
+    const [copying, setCopying] = useState(false)
+    const [copyForm, setCopyForm] = useState({
+        teaching_assignment_ids: [] as string[],
+        title: '',
+        description: '',
+        duration_minutes: 30,
+        is_randomized: true
+    })
+    const [copyHasDeadline, setCopyHasDeadline] = useState(false)
+    const [copyDeadlineValue, setCopyDeadlineValue] = useState('')
+
     // Remedial States
     const [showRemedial, setShowRemedial] = useState(false)
     const [remedialQuiz, setRemedialQuiz] = useState<Quiz | null>(null)
@@ -63,6 +77,7 @@ export default function GuruKuisPage() {
     const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
     const [remedialMethod, setRemedialMethod] = useState<'ASLI' | 'BARU'>('ASLI')
     const [remedialLoading, setRemedialLoading] = useState(false)
+    const [remedialKkm, setRemedialKkm] = useState(75)
 
     useEffect(() => {
         fetchData()
@@ -174,7 +189,11 @@ export default function GuruKuisPage() {
                 })
             })
 
-            if (!primaryRes.ok) return
+            if (!primaryRes.ok) {
+                const err = await primaryRes.json().catch(() => ({}))
+                alert(err.error || 'Gagal membuat kuis. Silakan coba lagi.')
+                return
+            }
 
             const primaryQuiz = await primaryRes.json()
             
@@ -194,14 +213,21 @@ export default function GuruKuisPage() {
                                 is_randomized: form.is_randomized,
                                 deadline: hasDeadline && deadlineValue ? new Date(deadlineValue).toISOString() : null
                             })
-                        }).then(r => r.json())
+                        }).then(r => {
+                            if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                            return r.json()
+                        })
                     )
                 )
+                const failed = siblingResults.filter(r => r.status === 'rejected').length
                 siblingResults.forEach(r => {
                     if (r.status === 'fulfilled' && r.value?.id) {
                         siblingIds.push(r.value.id)
                     }
                 })
+                if (failed > 0) {
+                    alert(`Kuis utama berhasil dibuat. ${siblingIds.length} kelas tambahan berhasil, ${failed} gagal.`)
+                }
             }
 
             setShowCreate(false)
@@ -213,6 +239,85 @@ export default function GuruKuisPage() {
             router.push(`/dashboard/guru/kuis/${primaryQuiz.id}${siblingParam}`)
         } finally {
             setCreating(false)
+        }
+    }
+
+    const openCopyModal = (quiz: Quiz) => {
+        setCopySourceQuiz(quiz)
+        setCopyForm({
+            teaching_assignment_ids: [],
+            title: `[Copy] ${quiz.title}`,
+            description: quiz.description || '',
+            duration_minutes: quiz.duration_minutes,
+            is_randomized: quiz.is_randomized
+        })
+        setCopyHasDeadline(false)
+        setCopyDeadlineValue('')
+        setShowCopy(true)
+    }
+
+    const handleCopyQuiz = async () => {
+        if (!copySourceQuiz || copyForm.teaching_assignment_ids.length === 0 || !copyForm.title) return
+        setCopying(true)
+        try {
+            const targetIds: string[] = []
+            
+            // Create target quizzes
+            const createResults = await Promise.allSettled(
+                copyForm.teaching_assignment_ids.map(taId => 
+                    fetch('/api/quizzes', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            teaching_assignment_id: taId,
+                            title: copyForm.title,
+                            description: copyForm.description,
+                            duration_minutes: copyForm.duration_minutes,
+                            is_randomized: copyForm.is_randomized,
+                            deadline: copyHasDeadline && copyDeadlineValue ? new Date(copyDeadlineValue).toISOString() : null
+                        })
+                    }).then(r => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                        return r.json()
+                    })
+                )
+            )
+
+            createResults.forEach(r => {
+                if (r.status === 'fulfilled' && r.value?.id) {
+                    targetIds.push(r.value.id)
+                }
+            })
+
+            if (targetIds.length === 0) {
+                alert('Gagal membuat kuis baru. Silakan coba lagi.')
+                return
+            }
+
+            // Copy questions to the newly created quizzes
+            const copyRes = await fetch('/api/quizzes/copy-questions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_quiz_id: copySourceQuiz.id,
+                    target_quiz_ids: targetIds,
+                    also_publish: false
+                })
+            })
+
+            if (!copyRes.ok) {
+                alert('Berhasil membuat kuis, tetapi gagal menyalin soal.')
+            } else {
+                alert(`Kuis berhasil disalin ke ${targetIds.length} kelas.`)
+            }
+
+            setShowCopy(false)
+            fetchData()
+        } catch (error) {
+            console.error('Error copying quiz:', error)
+            alert('Terjadi kesalahan saat menyalin kuis.')
+        } finally {
+            setCopying(false)
         }
     }
 
@@ -231,7 +336,23 @@ export default function GuruKuisPage() {
 
         try {
             const classId = quiz.teaching_assignment?.class?.id
-            const kkm = quiz.teaching_assignment?.subject?.kkm || 75
+            let kkm = quiz.teaching_assignment?.subject?.kkm || 75
+            
+            // Resolve Granular KKM if available
+            try {
+                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${quiz.teaching_assignment?.subject?.id}`)
+                if (kkmRes.ok) {
+                    const kkmData = await kkmRes.json()
+                    const classLevel = (quiz.teaching_assignment?.class as any)?.school_level
+                    const gradeLevel = (quiz.teaching_assignment?.class as any)?.grade_level
+                    const granular = kkmData.find((k: any) => k.school_level === classLevel && k.grade_level === gradeLevel)
+                    if (granular) kkm = granular.kkm
+                }
+            } catch (e) {
+                console.error('Failed to fetch granular KKM', e)
+            }
+            
+            setRemedialKkm(kkm)
 
             if (!classId) throw new Error('Class ID missing')
 
@@ -383,16 +504,16 @@ export default function GuruKuisPage() {
                                         )}
                                     </div>
                                     <p className="text-sm text-text-secondary dark:text-zinc-400 mb-2">{quiz.description || '-'}</p>
-                                    <div className="flex items-center gap-4 text-xs text-text-secondary dark:text-zinc-500">
+                                    <div className="flex items-center flex-wrap gap-x-4 gap-y-2 text-xs text-text-secondary dark:text-zinc-500">
                                         <span className="flex items-center gap-1.5">
-                                            <Calendar set="bold" primaryColor="currentColor" size={14} />
+                                            <CalendarDays className="w-3.5 h-3.5" />
                                             Dibuat: {new Date(quiz.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                                         </span>
                                         <span className="px-2 py-1 bg-secondary/10 rounded">{quiz.teaching_assignment?.subject?.name}</span>
                                         <span className="px-2 py-1 bg-secondary/10 rounded">{quiz.teaching_assignment?.class?.name}</span>
-                                        <span className="flex items-center gap-1"><Clock set="bold" primaryColor="currentColor" size={14} /> {quiz.duration_minutes} menit</span>
-                                        <span className="flex items-center gap-1"><Edit set="bold" primaryColor="currentColor" size={14} /> {quiz.questions?.[0]?.count || 0} soal</span>
-                                        {quiz.is_randomized && <span className="flex items-center gap-1"><Swap set="bold" primaryColor="currentColor" size={14} /> Acak</span>}
+                                        <span className="flex items-center gap-1"><LuClock className="w-3.5 h-3.5" /> {quiz.duration_minutes} menit</span>
+                                        <span className="flex items-center gap-1"><LuFileText className="w-3.5 h-3.5" /> {quiz.questions?.[0]?.count || 0} soal</span>
+                                        {quiz.is_randomized && <span className="flex items-center gap-1"><Shuffle className="w-3.5 h-3.5" /> Acak</span>}
                                     </div>
                                     {/* Submission Counter */}
                                     {(() => {
@@ -442,6 +563,14 @@ export default function GuruKuisPage() {
                                             className="px-3 py-1.5 bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400 rounded-full hover:bg-orange-200 dark:hover:bg-orange-500/30 transition-colors text-sm font-medium flex items-center gap-1"
                                         >
                                             <RefreshCw className="w-4 h-4" /> Remedial
+                                        </button>
+                                    )}
+                                    {quiz.is_active && (
+                                        <button
+                                            onClick={() => openCopyModal(quiz)}
+                                            className="px-3 py-1.5 bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 rounded-full hover:bg-blue-200 dark:hover:bg-blue-500/30 transition-colors text-sm font-medium flex items-center gap-1"
+                                        >
+                                            <Copy className="w-4 h-4" /> Pakai Ulang
                                         </button>
                                     )}
                                     <Link
@@ -569,6 +698,112 @@ export default function GuruKuisPage() {
             </Modal>
 
             <Modal
+                open={showCopy}
+                onClose={() => setShowCopy(false)}
+                title="Pakai Ulang Kuis"
+            >
+                <div className="space-y-4">
+                    <div className="bg-secondary/10 p-4 rounded-xl mb-2">
+                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source Kuis: {copySourceQuiz?.title}</h4>
+                        <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
+                            <span>Mata Pelajaran: <strong>{copySourceQuiz?.teaching_assignment?.subject?.name}</strong></span>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pilih Kelas Tujuan</label>
+                        <MultiClassSelector
+                            teachingAssignments={teachingAssignments}
+                            selectedIds={copyForm.teaching_assignment_ids}
+                            onChange={(ids) => setCopyForm({ ...copyForm, teaching_assignment_ids: ids })}
+                            mode="multi"
+                            disabled={teachingAssignments.length === 0}
+                            defaultSubjectLock={copySourceQuiz?.teaching_assignment?.subject?.name}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Kuis Baru</label>
+                        <input
+                            type="text"
+                            value={copyForm.title}
+                            onChange={(e) => setCopyForm({ ...copyForm, title: e.target.value })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Deskripsi (Opsional)</label>
+                        <textarea
+                            value={copyForm.description}
+                            onChange={(e) => setCopyForm({ ...copyForm, description: e.target.value })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            rows={2}
+                        />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
+                            <input
+                                type="number"
+                                value={copyForm.duration_minutes}
+                                onChange={(e) => setCopyForm({ ...copyForm, duration_minutes: parseInt(e.target.value) || 30 })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                min={5}
+                            />
+                        </div>
+                        <div className="flex items-end">
+                            <label className="flex items-center gap-2 cursor-pointer p-3 bg-secondary/5 border border-secondary/20 rounded-xl w-full">
+                                <input
+                                    type="checkbox"
+                                    checked={copyForm.is_randomized}
+                                    onChange={(e) => setCopyForm({ ...copyForm, is_randomized: e.target.checked })}
+                                    className="w-5 h-5 rounded bg-white border-secondary/30 text-primary focus:ring-primary"
+                                />
+                                <span className="text-text-main dark:text-white flex items-center gap-1"><Swap set="bold" primaryColor="currentColor" size={16} /> Acak Soal</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="flex items-center gap-2 cursor-pointer mb-2">
+                            <input
+                                type="checkbox"
+                                checked={copyHasDeadline}
+                                onChange={(e) => {
+                                    setCopyHasDeadline(e.target.checked)
+                                    if (!e.target.checked) setCopyDeadlineValue('')
+                                }}
+                                className="w-5 h-5 rounded bg-white border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm font-bold text-text-main dark:text-white">Batas Waktu Pengerjaan Baru</span>
+                        </label>
+                        {copyHasDeadline && (
+                            <input
+                                type="datetime-local"
+                                value={copyDeadlineValue}
+                                onChange={(e) => setCopyDeadlineValue(e.target.value)}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        )}
+                    </div>
+                    <div className="flex gap-3 pt-4">
+                        <Button
+                            variant="secondary"
+                            onClick={() => setShowCopy(false)}
+                            className="flex-1"
+                        >
+                            Batal
+                        </Button>
+                        <Button
+                            onClick={handleCopyQuiz}
+                            disabled={copying || copyForm.teaching_assignment_ids.length === 0 || !copyForm.title}
+                            loading={copying}
+                            className="flex-1"
+                        >
+                            Salin Kuis
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal
                 open={showRemedial}
                 onClose={() => setShowRemedial(false)}
                 title="Tugaskan Remedial"
@@ -584,7 +819,7 @@ export default function GuruKuisPage() {
                             <h4 className="font-bold text-text-main dark:text-white mb-1">{remedialQuiz.title}</h4>
                             <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
                                 <span>Mata Pelajaran: <strong>{remedialQuiz.teaching_assignment?.subject?.name}</strong></span>
-                                <span>KKM: <strong className="text-red-500">{remedialQuiz.teaching_assignment?.subject?.kkm || 75}</strong></span>
+                                <span>KKM: <strong className="text-red-500">{remedialKkm}</strong></span>
                             </div>
                         </div>
 

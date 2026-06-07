@@ -54,6 +54,7 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
     const [submissions, setSubmissions] = useState<Submission[]>([])
     const [loading, setLoading] = useState(true)
     const [classFilter, setClassFilter] = useState('')
+    const [subjectKkms, setSubjectKkms] = useState<any[]>([])
 
     // Grading modal
     const [gradingSubmission, setGradingSubmission] = useState<SubmissionDetail | null>(null)
@@ -75,6 +76,15 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
             const res = await fetch(`/api/official-exams/${examId}`)
             const data = await res.json()
             setExam(data)
+
+            if (data?.subject_id) {
+                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${data.subject_id}`)
+                if (kkmRes.ok) {
+                    const kkmData = await kkmRes.json()
+                    setSubjectKkms(Array.isArray(kkmData) ? kkmData : [])
+                }
+            }
+
             await fetchSubmissions()
         } catch (error) {
             console.error('Error:', error)
@@ -145,6 +155,18 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
     }
 
     const targetClasses = exam.target_classes || []
+
+    const getKkm = (classId: string) => {
+        const fallback = exam.subject?.kkm || 75
+        const targetClass = targetClasses.find((c: any) => c.id === classId)
+        if (!targetClass?.school_level || !targetClass?.grade_level) return fallback
+
+        const granular = subjectKkms.find((k: any) => 
+            k.school_level === targetClass.school_level && 
+            k.grade_level === targetClass.grade_level
+        )
+        return granular ? granular.kkm : fallback
+    }
 
     // Stats
     const totalSubmitted = submissions.filter(s => s.is_submitted).length
@@ -246,7 +268,7 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
                                         <td className="px-4 py-3 text-sm font-medium text-text-main dark:text-white">{sub.student?.user?.full_name || '-'}</td>
                                         <td className="px-4 py-3 text-center text-xs text-text-secondary">{sub.student?.nis || '-'}</td>
                                         <td className="px-4 py-3 text-center">
-                                            <span className={`font-bold text-sm ${pct >= 75 ? 'text-green-600' : pct >= 50 ? 'text-amber-600' : 'text-red-600'}`}>
+                                            <span className={`font-bold text-sm ${pct >= getKkm(sub.student?.class_id) ? 'text-green-600' : pct >= getKkm(sub.student?.class_id) - 15 ? 'text-amber-600' : 'text-red-600'}`}>
                                                 {sub.total_score}/{sub.max_score} ({pct}%)
                                             </span>
                                         </td>

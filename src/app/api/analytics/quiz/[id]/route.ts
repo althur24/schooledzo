@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { resolveKkm } from '@/lib/resolveKkm'
 
 // ─── Shared helpers ─────────────────────────────────────────────
 function median(arr: number[]): number {
@@ -54,7 +55,7 @@ export async function GET(
             .select(`
                 id, title, duration_minutes,
                 teaching_assignment:teaching_assignments(
-                    class:classes(id, name),
+                    class:classes(id, name, school_level, grade_level),
                     subject:subjects(id, name, kkm)
                 )
             `)
@@ -67,7 +68,14 @@ export async function GET(
 
         const ta = quiz.teaching_assignment as any
         const classId = ta?.class?.id
-        const kkm = ta?.subject?.kkm ?? null
+        const subjectId = ta?.subject?.id
+        const schoolLevel = ta?.class?.school_level
+        const gradeLevel = ta?.class?.grade_level
+        
+        let kkm = ta?.subject?.kkm ?? 75
+        if (subjectId && schoolLevel && gradeLevel) {
+            kkm = await resolveKkm(subjectId, schoolLevel, gradeLevel)
+        }
 
         // 2) Fetch all questions for this quiz
         const { data: questions } = await supabase

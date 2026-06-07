@@ -39,7 +39,9 @@ interface MonitorData {
         total_questions: number
         is_active: boolean
         max_violations: number
-        target_classes: { id: string; name: string }[]
+        subject_id: string
+        subject_kkm: number
+        target_classes: { id: string; name: string; school_level?: string; grade_level?: number }[]
     }
     students: StudentProgress[]
     summary: {
@@ -61,6 +63,7 @@ export default function AdminUtsUasMonitorPage({ params }: { params: Promise<{ i
     const [classFilter, setClassFilter] = useState('')
     const [statusFilter, setStatusFilter] = useState('')
     const [error, setError] = useState<string | null>(null)
+    const [subjectKkms, setSubjectKkms] = useState<any[]>([])
 
     // Reset
     const [resettingId, setResettingId] = useState<string | null>(null)
@@ -85,6 +88,13 @@ export default function AdminUtsUasMonitorPage({ params }: { params: Promise<{ i
             if (!res.ok) throw new Error(json.error || 'Gagal memuat data')
             
             setData(json)
+            if (json.exam?.subject_id) {
+                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${json.exam.subject_id}`)
+                if (kkmRes.ok) {
+                    const kkmData = await kkmRes.json()
+                    setSubjectKkms(Array.isArray(kkmData) ? kkmData : [])
+                }
+            }
             setLastUpdated(new Date())
             setTickOffset(0) // Reset client countdown on fresh data
             setError(null)
@@ -219,6 +229,18 @@ export default function AdminUtsUasMonitorPage({ params }: { params: Promise<{ i
         const s = seconds % 60
         if (h > 0) return `${h}h ${m}m ${s}s`
         return `${m}m ${s}s`
+    }
+
+    const getKkm = (className: string) => {
+        const fallback = exam.subject_kkm || 75
+        const targetClass = exam.target_classes.find((c: any) => c.name === className)
+        if (!targetClass?.school_level || !targetClass?.grade_level) return fallback
+
+        const granular = subjectKkms.find((k: any) => 
+            k.school_level === targetClass.school_level && 
+            k.grade_level === targetClass.grade_level
+        )
+        return granular ? granular.kkm : fallback
     }
 
     return (
@@ -429,15 +451,13 @@ export default function AdminUtsUasMonitorPage({ params }: { params: Promise<{ i
                                         <td className="p-4 text-center">
                                             {student.status === 'submitted' && student.total_score !== null && student.max_score ? (() => {
                                                 const pctGrade = Math.round((student.total_score / student.max_score) * 100)
+                                                const kkm = getKkm(student.class_name)
                                                 return (
-                                                    <span 
-                                                        className={`px-2.5 py-1 text-xs font-bold rounded-full ${
-                                                            pctGrade >= 75 ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400'
-                                                            : pctGrade >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'
-                                                            : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'
-                                                        }`}
-                                                        title={!student.is_graded ? "Nilai belum final (ada soal essay yang belum dikoreksi)" : "Nilai final"}
-                                                    >
+                                                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${
+                                                        pctGrade >= kkm ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400'
+                                                        : pctGrade >= kkm - 15 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'
+                                                        : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'
+                                                    }`}>
                                                         {pctGrade}
                                                         {!student.is_graded && <span className="ml-1 text-[10px] opacity-60">*</span>}
                                                     </span>

@@ -92,6 +92,15 @@ export async function POST(request: NextRequest) {
             path: '/'
         })
 
+        // Set role cookie (non-httpOnly) for middleware-level route protection
+        response.cookies.set('user_role', user.role, {
+            httpOnly: false,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 60 * 60 * 24 * 7, // 7 days
+            path: '/'
+        })
+
         return response
     } catch (error) {
         console.error('Login error:', error)

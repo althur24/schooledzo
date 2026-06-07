@@ -1,12 +1,22 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
     try {
+        // Auth check
+        const ctx = await getSchoolContextOrError(req)
+        if (isErrorResponse(ctx)) return ctx
+        const { user } = ctx
+
+        if (user.role !== 'GURU' && user.role !== 'ADMIN') {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
         const body = await req.json()
         const { source_exam_id, target_exam_ids, also_publish } = body
 
@@ -32,50 +42,68 @@ export async function POST(req: Request) {
             return NextResponse.json({ message: 'No questions to copy' })
         }
 
-        // 2. Prepare inserts for all targets
-        const newQuestions = []
+        // 2. Copy questions to each target (per-target error isolation)
+        let totalCopied = 0
+        const failedTargets: string[] = []
+
         for (const targetId of target_exam_ids) {
-            // Optional: delete existing questions in target before copying
-            await supabase.from('exam_questions').delete().eq('exam_id', targetId)
-
-            for (const q of sourceQuestions) {
-                // omit id, exam_id, created_at
-                const { id, exam_id, created_at, ...rest } = q
-                newQuestions.push({
-                    ...rest,
-                    exam_id: targetId
+            try {
+                // Prepare new questions for this target
+                const questionsForTarget = sourceQuestions.map(q => {
+                    const { id, exam_id, created_at, ...rest } = q
+                    return { ...rest, exam_id: targetId }
                 })
+
+                // Delete existing questions in target
+                const { error: deleteError } = await supabase
+                    .from('exam_questions')
+                    .delete()
+                    .eq('exam_id', targetId)
+
+                if (deleteError) {
+                    console.error(`Error deleting old questions for target ${targetId}:`, deleteError)
+                    failedTargets.push(targetId)
+                    continue
+                }
+
+                // Insert copied questions
+                const { error: insertError } = await supabase
+                    .from('exam_questions')
+                    .insert(questionsForTarget)
+
+                if (insertError) {
+                    console.error(`Error inserting questions for target ${targetId}:`, insertError)
+                    failedTargets.push(targetId)
+                    continue
+                }
+
+                totalCopied += questionsForTarget.length
+            } catch (targetError) {
+                console.error(`Unexpected error for target ${targetId}:`, targetError)
+                failedTargets.push(targetId)
             }
         }
 
-        // 3. Insert copied questions
-        if (newQuestions.length > 0) {
-            const { error: insertError } = await supabase
-                .from('exam_questions')
-                .insert(newQuestions)
-
-            if (insertError) {
-                console.error('Error inserting copied questions:', insertError)
-                return NextResponse.json({ error: insertError.message }, { status: 500 })
-            }
-        }
-
-        // 4. Update also_publish for targets
+        // 3. Update also_publish for successfully copied targets
         if (also_publish) {
-            const { error: updateError } = await supabase
-                .from('exams')
-                .update({ 
-                    is_active: true
-                })
-                .in('id', target_exam_ids)
+            const successTargets = target_exam_ids.filter(id => !failedTargets.includes(id))
+            if (successTargets.length > 0) {
+                const { error: updateError } = await supabase
+                    .from('exams')
+                    .update({ is_active: true })
+                    .in('id', successTargets)
 
-            if (updateError) {
-                console.error('Error updating target exams publish state:', updateError)
-                // non-fatal, continue
+                if (updateError) {
+                    console.error('Error updating target exams publish state:', updateError)
+                }
             }
         }
 
-        return NextResponse.json({ success: true, copied_count: newQuestions.length })
+        return NextResponse.json({
+            success: true,
+            copied_count: totalCopied,
+            failed_targets: failedTargets.length > 0 ? failedTargets : undefined
+        })
 
     } catch (error: any) {
         console.error('API /exams/copy-questions error:', error)

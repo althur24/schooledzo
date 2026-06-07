@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
         // 1. Get Homeroom Classes (only from active academic year)
         const { data: allHomeroomClasses } = await supabase
             .from('classes')
-            .select('id, name, academic_year:academic_years(is_active)')
+            .select('id, name, school_level, grade_level, academic_year:academic_years(is_active)')
             .eq('homeroom_teacher_id', teacherId)
 
         // Filter to active year only
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
                 id, 
                 class_id, 
                 subject:subjects(id, name, kkm), 
-                class:classes(id, name),
+                class:classes(id, name, school_level, grade_level),
                 academic_year:academic_years(is_active)
             `)
             .eq('teacher_id', teacherId)
@@ -87,6 +87,7 @@ export async function GET(request: NextRequest) {
             .select(`
                 id, class_id,
                 subject:subjects(id, name, kkm),
+                class:classes(id, name, school_level, grade_level),
                 academic_year:academic_years(is_active)
             `)
             .in('class_id', allRelevantClassIds)
@@ -176,6 +177,18 @@ export async function GET(request: NextRequest) {
             return scores
         }
 
+        // Batch fetch all subject KKM for the school to avoid N+1
+        const { data: allSubjectKkms } = await supabase
+            .from('subject_kkm')
+            .select('subject_id, school_level, grade_level, kkm')
+            .eq('school_id', schoolId)
+            
+        const getKkm = (subjectId: string, schoolLevel: string, gradeLevel: number, fallbackKkm: number) => {
+            if (!schoolLevel || !gradeLevel) return fallbackKkm || DEFAULT_KKM
+            const granular = allSubjectKkms?.find(k => k.subject_id === subjectId && k.school_level === schoolLevel && k.grade_level === gradeLevel)
+            return granular ? granular.kkm : (fallbackKkm || DEFAULT_KKM)
+        }
+
         const teachingWarnings: any[] = []
         const homeroomWarnings: any[] = []
 
@@ -189,13 +202,15 @@ export async function GET(request: NextRequest) {
                 const scores = getScoresForTAAndStudent(ta.id, student.id)
                 if (scores.length > 0) {
                     const avg = scores.reduce((a, b) => a + b, 0) / scores.length
-                    const subjectKkm = unwrap(ta.subject)?.kkm || DEFAULT_KKM
+                    const subject = unwrap(ta.subject)
+                    const cls = unwrap(ta.class)
+                    const subjectKkm = getKkm(subject?.id, cls?.school_level, cls?.grade_level, subject?.kkm)
                     if (avg < subjectKkm) {
                         teachingWarnings.push({
                             student_id: student.id,
                             student_name: unwrap(student.user)?.full_name || 'Tanpa Nama',
-                            class_name: unwrap(ta.class)?.name || 'Tanpa Kelas',
-                            subject_name: unwrap(ta.subject)?.name || 'Tanpa Mapel',
+                            class_name: cls?.name || 'Tanpa Kelas',
+                            subject_name: subject?.name || 'Tanpa Mapel',
                             avg_score: Math.round(avg),
                             score_count: scores.length,
                             teaching_assignment_id: ta.id,
@@ -217,13 +232,15 @@ export async function GET(request: NextRequest) {
                     const scores = getScoresForTAAndStudent(ta.id, student.id)
                     if (scores.length > 0) {
                         const avg = scores.reduce((a, b) => a + b, 0) / scores.length
-                        const subjectKkm = unwrap(ta.subject)?.kkm || DEFAULT_KKM
+                        const subject = unwrap(ta.subject)
+                        const cls = unwrap(ta.class) || hrClass // fallback to hrClass if class relation is missing in TA
+                        const subjectKkm = getKkm(subject?.id, cls?.school_level, cls?.grade_level, subject?.kkm)
                         if (avg < subjectKkm) {
                             homeroomWarnings.push({
                                 student_id: student.id,
                                 student_name: unwrap(student.user)?.full_name || 'Tanpa Nama',
                                 class_name: hrClass.name,
-                                subject_name: unwrap(ta.subject)?.name || 'Tanpa Mapel',
+                                subject_name: subject?.name || 'Tanpa Mapel',
                                 avg_score: Math.round(avg),
                                 score_count: scores.length,
                                 kkm: subjectKkm
@@ -277,7 +294,7 @@ export async function GET(request: NextRequest) {
         const myClasses = Array.from(classMap.values()).sort((a, b) => a.class_name.localeCompare(b.class_name))
 
         return NextResponse.json({
-            kkm: DEFAULT_KKM,
+            kkm: DEFAULT_KKM, // Kept for legacy fallback, but warnings now have specific `kkm`
             teachingWarnings,
             homeroomWarnings,
             myClasses

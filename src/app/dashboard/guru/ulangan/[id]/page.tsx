@@ -56,8 +56,8 @@ interface Exam {
     results_released: boolean
     max_violations: number
     teaching_assignment: {
-        subject: { id: string; name: string }
-        class: { name: string }
+        subject: { id: string; name: string; kkm?: number }
+        class: { name: string; school_level?: string; grade_level?: number }
     }
 }
 
@@ -140,6 +140,7 @@ export default function EditExamPage() {
     const [showSuccessModal, setShowSuccessModal] = useState<false | 'published' | 'pending'>(false)
     const [alertInfo, setAlertInfo] = useState<{ type: 'info' | 'warning' | 'error' | 'success', title: string, message: string } | null>(null)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
+    const [resolvedKkm, setResolvedKkm] = useState(75)
 
     // Results state
     const [submissions, setSubmissions] = useState<any[]>([])
@@ -171,6 +172,20 @@ export default function EditExamPage() {
             const questionsData = await questionsRes.json()
             setExam(examData)
             setQuestions(Array.isArray(questionsData) ? questionsData : [])
+
+            if (examData?.teaching_assignment?.subject?.id) {
+                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${examData.teaching_assignment.subject.id}`)
+                if (kkmRes.ok) {
+                    const kkmData = await kkmRes.json()
+                    const fallback = examData.teaching_assignment.subject.kkm || 75
+                    const classObj = examData.teaching_assignment.class
+                    const granular = Array.isArray(kkmData) ? kkmData.find((k: any) => 
+                        k.school_level === classObj?.school_level && 
+                        k.grade_level === classObj?.grade_level
+                    ) : null
+                    setResolvedKkm(granular ? granular.kkm : fallback)
+                }
+            }
         } catch (error) {
             console.error('Error:', error)
         } finally {
@@ -179,13 +194,17 @@ export default function EditExamPage() {
     }, [examId])
 
     useEffect(() => {
-        if (siblingParam) {
-            const ids = siblingParam.split(',').filter(Boolean)
-            setSiblingIds(ids)
-            sessionStorage.setItem(`exam_siblings_${examId}`, JSON.stringify(ids))
-        } else {
-            const stored = sessionStorage.getItem(`exam_siblings_${examId}`)
-            if (stored) setSiblingIds(JSON.parse(stored))
+        try {
+            if (siblingParam) {
+                const ids = siblingParam.split(',').filter(Boolean)
+                setSiblingIds(ids)
+                sessionStorage.setItem(`exam_siblings_${examId}`, JSON.stringify(ids))
+            } else {
+                const stored = sessionStorage.getItem(`exam_siblings_${examId}`)
+                if (stored) setSiblingIds(JSON.parse(stored))
+            }
+        } catch {
+            // Ignore corrupt or unavailable sessionStorage
         }
     }, [siblingParam, examId])
 
@@ -828,7 +847,7 @@ export default function EditExamPage() {
             {siblingIds.length > 0 && !exam.is_active && !exam.pending_publish && (
                 <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700 rounded-xl animate-in fade-in slide-in-from-top-2">
                     <div className="flex items-center gap-3">
-                        <User className="w-5 h-5 text-blue-500 shrink-0" set="bold" />
+                        <div className="w-5 h-5 text-blue-500 shrink-0"><User set="bold" primaryColor="currentColor" size={20} /></div>
                         <div>
                             <h4 className="font-bold text-blue-800 dark:text-blue-300 text-sm">
                                 Ulangan Multi-Kelas ({siblingIds.length + 1} kelas)
@@ -2293,7 +2312,7 @@ export default function EditExamPage() {
                                                 </td>
                                                 <td className="px-4 py-3 text-center">
                                                     {sub.is_submitted ? (
-                                                        <span className={`font-bold text-sm ${percentage >= 75 ? 'text-green-600' : percentage >= 50 ? 'text-amber-600' : 'text-red-600'}`}>
+                                                        <span className={`font-bold text-sm ${percentage >= resolvedKkm ? 'text-green-600' : percentage >= resolvedKkm - 15 ? 'text-amber-600' : 'text-red-600'}`}>
                                                             {sub.total_score}/{sub.max_score} ({percentage}%)
                                                         </span>
                                                     ) : (

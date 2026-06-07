@@ -40,6 +40,33 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         }
     }, [user, loading, pathname, router])
 
+    // Role-based route guard: prevent cross-role access
+    useEffect(() => {
+        if (!loading && user) {
+            const role = user.role
+            const roleRouteMap: Record<string, string> = {
+                'SISWA': '/dashboard/siswa',
+                'GURU': '/dashboard/guru',
+                'ADMIN': '/dashboard/admin',
+                'SUPER_ADMIN': '/dashboard/super-admin',
+                'WALI': '/dashboard/wali',
+            }
+
+            // Check if user is accessing a role-specific route that doesn't match their role
+            for (const [routeRole, routePrefix] of Object.entries(roleRouteMap)) {
+                if (pathname.startsWith(routePrefix) && role !== routeRole) {
+                    // Exception: ADMIN can access guru pages for oversight
+                    if (role === 'ADMIN' && routeRole === 'GURU') continue
+                    // Exception: SUPER_ADMIN can access all pages
+                    if (role === 'SUPER_ADMIN') continue
+
+                    router.replace(roleRouteMap[role] || '/dashboard')
+                    return
+                }
+            }
+        }
+    }, [user, loading, pathname, router])
+
     // Only show loading screen on initial mount, not after login redirect
     if (loading && !user) {
         return (
@@ -53,6 +80,39 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 </div>
             </div>
         )
+    }
+
+    // Blocking render guard: prevent page flash while redirect is in progress
+    if (user) {
+        const role = user.role
+        const roleRoutePrefixes: Record<string, string> = {
+            'SISWA': '/dashboard/siswa',
+            'GURU': '/dashboard/guru',
+            'ADMIN': '/dashboard/admin',
+            'SUPER_ADMIN': '/dashboard/super-admin',
+            'WALI': '/dashboard/wali',
+        }
+        for (const [routeRole, routePrefix] of Object.entries(roleRoutePrefixes)) {
+            if (pathname.startsWith(routePrefix) && role !== routeRole) {
+                // Exception: ADMIN can access guru pages
+                if (role === 'ADMIN' && routeRole === 'GURU') continue
+                // Exception: SUPER_ADMIN can access all pages
+                if (role === 'SUPER_ADMIN') continue
+
+                // Block render — show loading while useEffect redirect fires
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-[#D4E0D2]">
+                        <div className="flex flex-col items-center gap-4 text-primary">
+                            <svg className="animate-spin w-10 h-10" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span className="font-medium text-text-main">Mengalihkan...</span>
+                        </div>
+                    </div>
+                )
+            }
+        }
     }
 
     const getRoleLabel = (role: string) => {

@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
             .select(`
                 id, exam_id, student_id, started_at, submitted_at, is_submitted,
                 total_score, max_score, violation_count, violations_log, is_graded, created_at,
-                student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name)),
+                student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name), class:classes(id, school_level, grade_level)),
                 exam:official_exams(
                     id, title, exam_type, duration_minutes, is_active, subject_id,
                     show_results_immediately, results_released,
@@ -162,7 +162,7 @@ export async function GET(request: NextRequest) {
                     .from('official_exam_submissions')
                     .select(`
                         *,
-                        student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name)),
+                        student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name), class:classes(id, school_level, grade_level)),
                         exam:official_exams(
                             id, title, exam_type, duration_minutes, is_active, subject_id,
                             show_results_immediately, results_released,

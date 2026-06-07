@@ -21,7 +21,7 @@ export async function GET(
                 teaching_assignment:teaching_assignments(
                     id,
                     teacher:teachers(id, user:users(full_name)),
-                    subject:subjects(id, name),
+                    subject:subjects(id, name, kkm),
                     class:classes(id, name, school_level, grade_level)
                 )
             `)
