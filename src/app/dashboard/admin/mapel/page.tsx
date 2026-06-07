@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import { Document as BookOpen, Plus, Edit, Delete, User as Users, Home as School } from 'react-iconly'
-import { Loader2, Upload, FileDown, Search as SearchIcon, ChevronRight } from 'lucide-react'
+import { Loader2, Upload, FileDown, Search as SearchIcon, ChevronRight, Table2, LayoutGrid, Save, Copy, Check } from 'lucide-react'
 import { Subject } from '@/lib/types'
 import { parseSpreadsheet } from '@/lib/parseSpreadsheet'
 
@@ -34,6 +34,16 @@ export default function MapelPage() {
     // Search & Filter
     const [searchQuery, setSearchQuery] = useState('')
     const [levelFilter, setLevelFilter] = useState<string>('ALL')
+
+    // Tab View
+    const [activeView, setActiveView] = useState<'list' | 'bulk-kkm'>('list')
+
+    // Bulk KKM Matrix
+    const [bulkKkmMatrix, setBulkKkmMatrix] = useState<Record<string, Record<string, number>>>({})
+    const [bulkKkmOriginal, setBulkKkmOriginal] = useState<Record<string, Record<string, number>>>({})
+    const [bulkKkmLoading, setBulkKkmLoading] = useState(false)
+    const [bulkKkmSaving, setBulkKkmSaving] = useState(false)
+    const [bulkKkmSaved, setBulkKkmSaved] = useState(false)
 
     // Detail Modal
     const [detailSubject, setDetailSubject] = useState<Subject | null>(null)
@@ -73,6 +83,120 @@ export default function MapelPage() {
             setTeacherCountMap(result)
         }).catch(() => {})
     }, [])
+
+    // Fetch all KKM data for bulk matrix
+    const fetchBulkKkm = useCallback(async () => {
+        if (subjects.length === 0) return
+        setBulkKkmLoading(true)
+        try {
+            const matrix: Record<string, Record<string, number>> = {}
+            // Fetch KKM for all subjects in parallel
+            const promises = subjects.map(async (subj) => {
+                const res = await fetch(`/api/subject-kkm?subject_id=${subj.id}`)
+                if (res.ok) {
+                    const data = await res.json()
+                    const kkmMap: Record<string, number> = {}
+                    data.forEach((d: any) => {
+                        kkmMap[`${d.school_level}_${d.grade_level}`] = d.kkm
+                    })
+                    matrix[subj.id] = kkmMap
+                } else {
+                    matrix[subj.id] = {}
+                }
+            })
+            await Promise.all(promises)
+            setBulkKkmMatrix(JSON.parse(JSON.stringify(matrix)))
+            setBulkKkmOriginal(JSON.parse(JSON.stringify(matrix)))
+        } catch (err) {
+            console.error('Error fetching bulk KKM:', err)
+        } finally {
+            setBulkKkmLoading(false)
+        }
+    }, [subjects])
+
+    useEffect(() => {
+        if (activeView === 'bulk-kkm' && subjects.length > 0) {
+            fetchBulkKkm()
+        }
+    }, [activeView, subjects, fetchBulkKkm])
+
+    const getBulkKkmValue = (subjectId: string, key: string): number => {
+        return bulkKkmMatrix[subjectId]?.[key] ?? 75
+    }
+
+    const setBulkKkmValue = (subjectId: string, key: string, value: number) => {
+        setBulkKkmMatrix(prev => ({
+            ...prev,
+            [subjectId]: {
+                ...(prev[subjectId] || {}),
+                [key]: value
+            }
+        }))
+        setBulkKkmSaved(false)
+    }
+
+    const applyToAllGrades = (subjectId: string, value: number) => {
+        const subject = subjects.find(s => s.id === subjectId)
+        if (!subject) return
+        const level = subject.level || 'UMUM'
+        const newMap: Record<string, number> = { ...(bulkKkmMatrix[subjectId] || {}) }
+        if (level === 'UMUM' || level === 'SMP') {
+            newMap['SMP_1'] = value; newMap['SMP_2'] = value; newMap['SMP_3'] = value
+        }
+        if (level === 'UMUM' || level === 'SMA') {
+            newMap['SMA_1'] = value; newMap['SMA_2'] = value; newMap['SMA_3'] = value
+        }
+        setBulkKkmMatrix(prev => ({ ...prev, [subjectId]: newMap }))
+        setBulkKkmSaved(false)
+    }
+
+    const isCellChanged = (subjectId: string, key: string): boolean => {
+        const current = bulkKkmMatrix[subjectId]?.[key]
+        const original = bulkKkmOriginal[subjectId]?.[key]
+        if (current === undefined && original === undefined) return false
+        return current !== original
+    }
+
+    const hasAnyChanges = (): boolean => {
+        return JSON.stringify(bulkKkmMatrix) !== JSON.stringify(bulkKkmOriginal)
+    }
+
+    const saveBulkKkm = async () => {
+        setBulkKkmSaving(true)
+        try {
+            const savePromises = subjects.map(async (subj) => {
+                const kkmMap = bulkKkmMatrix[subj.id]
+                if (!kkmMap || Object.keys(kkmMap).length === 0) return
+                const kkmData = Object.entries(kkmMap).map(([key, kkm]) => {
+                    const [school_level, grade_level] = key.split('_')
+                    return { school_level, grade_level: parseInt(grade_level), kkm }
+                })
+                await fetch('/api/subject-kkm/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subject_id: subj.id, kkm_data: kkmData })
+                })
+            })
+            await Promise.all(savePromises)
+            setBulkKkmOriginal(JSON.parse(JSON.stringify(bulkKkmMatrix)))
+            setBulkKkmSaved(true)
+            setTimeout(() => setBulkKkmSaved(false), 3000)
+        } catch (err) {
+            console.error('Error saving bulk KKM:', err)
+            alert('Gagal menyimpan KKM. Silakan coba lagi.')
+        } finally {
+            setBulkKkmSaving(false)
+        }
+    }
+
+    const GRADE_COLUMNS = [
+        { key: 'SMP_1', label: 'Kls 7', level: 'SMP' },
+        { key: 'SMP_2', label: 'Kls 8', level: 'SMP' },
+        { key: 'SMP_3', label: 'Kls 9', level: 'SMP' },
+        { key: 'SMA_1', label: 'Kls 10', level: 'SMA' },
+        { key: 'SMA_2', label: 'Kls 11', level: 'SMA' },
+        { key: 'SMA_3', label: 'Kls 12', level: 'SMA' },
+    ]
 
     useEffect(() => {
         let filtered = subjects
@@ -384,14 +508,42 @@ export default function MapelPage() {
                 </select>
             </div>
 
-            {/* Counter */}
+            {/* View Toggle Tabs */}
             {!loading && subjects.length > 0 && (
-                <div className="flex items-center justify-between px-1">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div className="flex bg-slate-100 dark:bg-slate-800 rounded-xl p-1 gap-1">
+                        <button
+                            onClick={() => setActiveView('list')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                activeView === 'list'
+                                    ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                            }`}
+                        >
+                            <LayoutGrid className="w-4 h-4" />
+                            Daftar Mapel
+                        </button>
+                        <button
+                            onClick={() => setActiveView('bulk-kkm')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                activeView === 'bulk-kkm'
+                                    ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                            }`}
+                        >
+                            <Table2 className="w-4 h-4" />
+                            Bulk KKM
+                        </button>
+                    </div>
                     <div className="text-sm font-medium text-text-secondary">
-                        {searchQuery 
-                            ? <>Menampilkan <span className="text-text-main dark:text-white font-bold">{filteredSubjects.length}</span> dari <span className="text-text-main dark:text-white font-bold">{subjects.length}</span> mapel</>
-                            : <>Total: <span className="text-text-main dark:text-white font-bold">{subjects.length}</span> Mata Pelajaran</>
-                        }
+                        {activeView === 'list' && (
+                            searchQuery 
+                                ? <>Menampilkan <span className="text-text-main dark:text-white font-bold">{filteredSubjects.length}</span> dari <span className="text-text-main dark:text-white font-bold">{subjects.length}</span> mapel</>
+                                : <>Total: <span className="text-text-main dark:text-white font-bold">{subjects.length}</span> Mata Pelajaran</>
+                        )}
+                        {activeView === 'bulk-kkm' && (
+                            <>🎯 Edit KKM semua mapel sekaligus</>
+                        )}
                     </div>
                 </div>
             )}
@@ -401,44 +553,191 @@ export default function MapelPage() {
                     <div className="p-12 flex justify-center">
                         <Loader2 className="w-8 h-8 animate-spin text-primary" />
                     </div>
-                ) : filteredSubjects.length === 0 ? (
-                    <EmptyState
-                        icon={<div className="text-secondary"><BookOpen set="bold" primaryColor="currentColor" size={48} /></div>}
-                        title="Belum Ada Mata Pelajaran"
-                        description={searchQuery ? "Mata pelajaran yang dicari tidak ditemukan" : "Tambahkan mata pelajaran untuk memulai"}
-                        action={!searchQuery ? <Button onClick={openAdd}>Tambah Mapel</Button> : <Button variant="secondary" onClick={() => setSearchQuery('')}>Clear Search</Button>}
-                    />
+                ) : activeView === 'list' ? (
+                    /* === LIST VIEW === */
+                    filteredSubjects.length === 0 ? (
+                        <EmptyState
+                            icon={<div className="text-secondary"><BookOpen set="bold" primaryColor="currentColor" size={48} /></div>}
+                            title="Belum Ada Mata Pelajaran"
+                            description={searchQuery ? "Mata pelajaran yang dicari tidak ditemukan" : "Tambahkan mata pelajaran untuk memulai"}
+                            action={!searchQuery ? <Button onClick={openAdd}>Tambah Mapel</Button> : <Button variant="secondary" onClick={() => setSearchQuery('')}>Clear Search</Button>}
+                        />
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {filteredSubjects.map((subject) => {
+                                const uniqueTeacherCount = teacherCountMap[subject.id] || 0;
+                                return (
+                                    <Card key={subject.id} className="group hover:border-emerald-500/50 transition-all hover:shadow-lg cursor-pointer" onClick={() => openDetail(subject)}>
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-900/10 flex items-center justify-center text-xl font-bold text-emerald-600 dark:text-emerald-400 group-hover:bg-emerald-500 group-hover:text-white transition-colors flex-shrink-0">
+                                                {subject.name[0]}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <h3 className="font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors truncate">{subject.name}</h3>
+                                                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md flex-shrink-0 ${
+                                                        (!subject.level || subject.level === 'UMUM') ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' :
+                                                        subject.level === 'SMP' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                                                        'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                                                    }`}>
+                                                        {subject.level || 'UMUM'}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 dark:text-slate-400 font-medium">
+                                                    <Users set="bold" primaryColor="currentColor" size={12} />
+                                                    <span>{uniqueTeacherCount} Guru Mengajar</span>
+                                                </div>
+                                            </div>
+                                            <ChevronRight className="w-5 h-5 text-slate-300 dark:text-slate-600 group-hover:text-emerald-500 transition-colors flex-shrink-0" />
+                                        </div>
+                                    </Card>
+                                )
+                            })}
+                        </div>
+                    )
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {filteredSubjects.map((subject) => {
-                            const uniqueTeacherCount = teacherCountMap[subject.id] || 0;
-                            return (
-                                <Card key={subject.id} className="group hover:border-emerald-500/50 transition-all hover:shadow-lg cursor-pointer" onClick={() => openDetail(subject)}>
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-900/10 flex items-center justify-center text-xl font-bold text-emerald-600 dark:text-emerald-400 group-hover:bg-emerald-500 group-hover:text-white transition-colors flex-shrink-0">
-                                            {subject.name[0]}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <h3 className="font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors truncate">{subject.name}</h3>
-                                                <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md flex-shrink-0 ${
-                                                    (!subject.level || subject.level === 'UMUM') ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' :
-                                                    subject.level === 'SMP' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                                                    'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                                                }`}>
-                                                    {subject.level || 'UMUM'}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 dark:text-slate-400 font-medium">
-                                                <Users set="bold" primaryColor="currentColor" size={12} />
-                                                <span>{uniqueTeacherCount} Guru Mengajar</span>
-                                            </div>
-                                        </div>
-                                        <ChevronRight className="w-5 h-5 text-slate-300 dark:text-slate-600 group-hover:text-emerald-500 transition-colors flex-shrink-0" />
+                    /* === BULK KKM MATRIX VIEW === */
+                    <div className="space-y-4">
+                        {bulkKkmLoading ? (
+                            <div className="p-12 flex flex-col items-center gap-3">
+                                <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+                                <p className="text-sm text-slate-500">Memuat data KKM...</p>
+                            </div>
+                        ) : (
+                            <>
+                                {/* Info Banner */}
+                                <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-start gap-3">
+                                    <div className="text-emerald-500 mt-0.5 flex-shrink-0">🎯</div>
+                                    <div className="text-sm text-emerald-800 dark:text-emerald-300">
+                                        <p className="font-bold mb-1">Edit KKM Semua Mapel Sekaligus</p>
+                                        <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                                            Ubah nilai di tabel, lalu klik <strong>Simpan Semua KKM</strong>. Gunakan tombol <Copy className="w-3 h-3 inline" /> untuk apply satu nilai ke semua kelas.
+                                        </p>
                                     </div>
-                                </Card>
-                            )
-                        })}
+                                </div>
+
+                                {/* Matrix Table */}
+                                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full">
+                                            <thead>
+                                                <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                    <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider bg-slate-50 dark:bg-slate-800/50 sticky left-0 z-10 min-w-[180px]">
+                                                        Mata Pelajaran
+                                                    </th>
+                                                    <th colSpan={3} className="text-center px-2 py-2 bg-blue-50 dark:bg-blue-900/20 border-x border-slate-200 dark:border-slate-700">
+                                                        <span className="text-xs font-bold text-blue-700 dark:text-blue-400">SMP</span>
+                                                    </th>
+                                                    <th colSpan={3} className="text-center px-2 py-2 bg-purple-50 dark:bg-purple-900/20 border-r border-slate-200 dark:border-slate-700">
+                                                        <span className="text-xs font-bold text-purple-700 dark:text-purple-400">SMA</span>
+                                                    </th>
+                                                    <th className="text-center px-2 py-3 text-xs font-bold text-slate-400 bg-slate-50 dark:bg-slate-800/50 w-20">
+                                                        Aksi
+                                                    </th>
+                                                </tr>
+                                                <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                    <th className="bg-slate-50 dark:bg-slate-800/50 sticky left-0 z-10"></th>
+                                                    {GRADE_COLUMNS.map(col => (
+                                                        <th key={col.key} className={`text-center px-2 py-2 text-xs font-bold ${
+                                                            col.level === 'SMP' 
+                                                                ? 'text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10 border-x border-slate-100 dark:border-slate-800' 
+                                                                : 'text-purple-600 dark:text-purple-400 bg-purple-50/50 dark:bg-purple-900/10 border-r border-slate-100 dark:border-slate-800'
+                                                        }`}>
+                                                            {col.label}
+                                                        </th>
+                                                    ))}
+                                                    <th className="bg-slate-50 dark:bg-slate-800/50"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                                {subjects.map((subject) => {
+                                                    const level = subject.level || 'UMUM'
+                                                    return (
+                                                        <tr key={subject.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                                                            <td className="px-4 py-2.5 bg-white dark:bg-slate-900 group-hover:bg-slate-50/50 dark:group-hover:bg-slate-800/30 sticky left-0 z-10 border-r border-slate-100 dark:border-slate-800">
+                                                                <div className="flex items-center gap-2.5">
+                                                                    <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/10 flex items-center justify-center text-sm font-bold text-emerald-600 dark:text-emerald-400 flex-shrink-0">
+                                                                        {subject.name[0]}
+                                                                    </div>
+                                                                    <div className="min-w-0">
+                                                                        <div className="font-semibold text-sm text-slate-800 dark:text-white truncate max-w-[140px]">{subject.name}</div>
+                                                                        <span className={`text-[10px] font-bold ${
+                                                                            level === 'SMP' ? 'text-blue-500' : level === 'SMA' ? 'text-purple-500' : 'text-slate-400'
+                                                                        }`}>{level}</span>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                            {GRADE_COLUMNS.map(col => {
+                                                                const isDisabled = level !== 'UMUM' && level !== col.level
+                                                                const isChanged = isCellChanged(subject.id, col.key)
+                                                                return (
+                                                                    <td key={col.key} className={`text-center px-1.5 py-1.5 ${
+                                                                        col.level === 'SMP' ? 'border-x border-slate-50 dark:border-slate-800/50' : 'border-r border-slate-50 dark:border-slate-800/50'
+                                                                    }`}>
+                                                                        {isDisabled ? (
+                                                                            <div className="text-slate-300 dark:text-slate-700 text-sm">—</div>
+                                                                        ) : (
+                                                                            <input
+                                                                                type="number"
+                                                                                value={getBulkKkmValue(subject.id, col.key)}
+                                                                                onChange={(e) => setBulkKkmValue(subject.id, col.key, parseInt(e.target.value) || 0)}
+                                                                                min={0}
+                                                                                max={100}
+                                                                                className={`w-16 mx-auto text-center px-2 py-1.5 text-sm font-semibold rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                                                                                    isChanged
+                                                                                        ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300'
+                                                                                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white'
+                                                                                }`}
+                                                                            />
+                                                                        )}
+                                                                    </td>
+                                                                )
+                                                            })}
+                                                            <td className="text-center px-2 py-1.5">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        const firstKey = level === 'SMA' ? 'SMA_1' : 'SMP_1'
+                                                                        const val = getBulkKkmValue(subject.id, firstKey)
+                                                                        applyToAllGrades(subject.id, val)
+                                                                    }}
+                                                                    className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors"
+                                                                    title="Apply nilai kelas pertama ke semua kelas"
+                                                                >
+                                                                    <Copy className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    )
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                {/* Save Button */}
+                                <div className="flex items-center justify-between bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm">
+                                    <div className="text-sm text-slate-500 dark:text-slate-400">
+                                        {hasAnyChanges() ? (
+                                            <span className="text-amber-600 dark:text-amber-400 font-medium">⚠️ Ada perubahan yang belum disimpan</span>
+                                        ) : bulkKkmSaved ? (
+                                            <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5">
+                                                <Check className="w-4 h-4" /> Semua KKM berhasil disimpan!
+                                            </span>
+                                        ) : (
+                                            <span>Tidak ada perubahan</span>
+                                        )}
+                                    </div>
+                                    <Button
+                                        onClick={saveBulkKkm}
+                                        loading={bulkKkmSaving}
+                                        disabled={!hasAnyChanges()}
+                                        icon={<Save className="w-4 h-4" />}
+                                    >
+                                        Simpan Semua KKM
+                                    </Button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
             </div>
