@@ -26,7 +26,6 @@ interface MyClassItem {
 }
 
 interface WarningsData {
-    kkm: number
     teachingWarnings: WarningItem[]
     homeroomWarnings: WarningItem[]
     myClasses: MyClassItem[]

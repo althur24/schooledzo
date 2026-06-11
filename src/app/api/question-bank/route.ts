@@ -10,22 +10,28 @@ export async function GET(request: NextRequest) {
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'GURU') {
+        if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
         const subjectId = request.nextUrl.searchParams.get('subject_id')
         const search = request.nextUrl.searchParams.get('search')
+        const filterTeacherId = request.nextUrl.searchParams.get('teacher_id')
+        const sourceType = request.nextUrl.searchParams.get('source_type')
 
-        // Get teacher
-        const { data: teacher } = await supabase
-            .from('teachers')
-            .select('id')
-            .eq('user_id', user.id)
-            .single()
+        // Get teacher id if user is GURU
+        let currentTeacherId = null
+        if (user.role === 'GURU') {
+            const { data: teacher } = await supabase
+                .from('teachers')
+                .select('id')
+                .eq('user_id', user.id)
+                .single()
 
-        if (!teacher) {
-            return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
+            if (!teacher) {
+                return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
+            }
+            currentTeacherId = teacher.id
         }
 
         let query = supabase
@@ -35,12 +41,22 @@ export async function GET(request: NextRequest) {
                 subject:subjects(id, name),
                 teacher:teachers(id, user:users(full_name))
             `)
-            .eq('teacher_id', teacher.id)
             .is('passage_id', null)
             .order('created_at', { ascending: false })
 
+        // Role-based filtering
+        if (user.role === 'GURU') {
+            query = query.eq('teacher_id', currentTeacherId)
+        } else if (user.role === 'ADMIN' && filterTeacherId) {
+            query = query.eq('teacher_id', filterTeacherId)
+        }
+
         if (subjectId) {
             query = query.eq('subject_id', subjectId)
+        }
+
+        if (sourceType) {
+            query = query.eq('source_type', sourceType)
         }
 
         if (search) {

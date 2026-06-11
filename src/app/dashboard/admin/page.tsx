@@ -8,7 +8,7 @@ import Card from '@/components/ui/Card'
 import StatsCard from '@/components/ui/StatsCard'
 import {
     Calendar, Category, Document, Work, User, AddUser, Chart, Graph,
-    Ticket, Notification, ShieldDone, Bookmark
+    Ticket, Notification, ShieldDone, Bookmark, Folder
 } from 'react-iconly'
 
 interface StatsData {
@@ -211,6 +211,12 @@ export default function AdminDashboard() {
             badge: pendingReviewCount,
         },
         {
+            title: 'Bank Soal',
+            description: 'Lihat seluruh bank soal sekolah',
+            icon: Folder,
+            href: '/dashboard/admin/bank-soal',
+        },
+        {
             title: 'Pengumuman',
             description: 'Kelola pengumuman',
             icon: Notification,
@@ -354,7 +360,8 @@ export default function AdminDashboard() {
                                                         item.href.includes('penugasan') ? 'bg-teal-50 dark:bg-teal-900/10 group-hover:bg-teal-500 text-teal-500 dark:text-teal-400 group-hover:text-white' :
                                                             item.href.includes('rekap-nilai') ? 'bg-green-50 dark:bg-green-900/10 group-hover:bg-green-500 text-green-500 dark:text-green-400 group-hover:text-white' :
                                                                 item.href.includes('uts-uas') ? 'bg-purple-50 dark:bg-purple-900/10 group-hover:bg-purple-500 text-purple-500 dark:text-purple-400 group-hover:text-white' :
-                                                                    'bg-slate-50 dark:bg-slate-800 group-hover:bg-slate-600 text-slate-500 dark:text-slate-400 group-hover:text-white'
+                                                                    item.href.includes('bank-soal') ? 'bg-rose-50 dark:bg-rose-900/10 group-hover:bg-rose-500 text-rose-500 dark:text-rose-400 group-hover:text-white' :
+                                                                        'bg-slate-50 dark:bg-slate-800 group-hover:bg-slate-600 text-slate-500 dark:text-slate-400 group-hover:text-white'
                                         }`}>
                                         <item.icon
                                             set="bold"

@@ -34,6 +34,8 @@ interface QuestionBankItem {
     ai_review?: any
     admin_review?: any
     content_format?: 'html' | 'plain'
+    source_type?: string
+    source_name?: string
 }
 
 interface Subject {
@@ -69,6 +71,8 @@ interface Passage {
         teacher_hots_claim?: boolean
         admin_review?: any
         content_format?: 'html' | 'plain'
+        source_type?: string
+        source_name?: string
     }>
     created_at: string
 }
@@ -507,6 +511,21 @@ export default function BankSoalPage() {
         }
     }
 
+    const getSourceLabel = (source: string, sourceName?: string): string => {
+        if (source === 'exam') return `Ulangan${sourceName ? `: ${sourceName}` : ''}`
+        if (source === 'quiz') return `Kuis${sourceName ? `: ${sourceName}` : ''}`
+        if (source === 'ai_generated') return 'AI Generated'
+        return 'Manual'
+    }
+
+    const getSourceBadge = (source?: string, sourceName?: string) => {
+        const type = source || 'manual'
+        if (type === 'exam') return <span className="px-2 py-0.5 text-xs rounded-full font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" title={sourceName}>📋 {getSourceLabel(type, sourceName)}</span>
+        if (type === 'quiz') return <span className="px-2 py-0.5 text-xs rounded-full font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300" title={sourceName}>📋 {getSourceLabel(type, sourceName)}</span>
+        if (type === 'ai_generated') return <span className="px-2 py-0.5 text-xs rounded-full font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">🤖 AI Generated</span>
+        return <span className="px-2 py-0.5 text-xs rounded-full font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">📝 Manual</span>
+    }
+
     const getStatusBadge = (status?: string) => {
         switch (status) {
             case 'approved':
@@ -912,6 +931,7 @@ export default function BankSoalPage() {
                                                                 <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${getDifficultyBadge(q.difficulty)}`}>
                                                                     {getDifficultyLabel(q.difficulty)}
                                                                 </span>
+                                                                {getSourceBadge(q.source_type, q.source_name)}
                                                                 {getStatusBadge(q.status)}
                                                                 {aiReviewEnabled && q.teacher_hots_claim && (
                                                                     <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-200 dark:text-emerald-400">
@@ -992,12 +1012,13 @@ export default function BankSoalPage() {
                                                     <span className={`px-2.5 py-1 text-xs font-bold rounded-full border ${getDifficultyBadge(q.difficulty)}`}>
                                                         {getDifficultyLabel(q.difficulty)}
                                                     </span>
+                                                    {getSourceBadge(q.source_type, q.source_name)}
+                                                    {getStatusBadge(q.status)}
                                                     {q.subject && (
                                                         <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-secondary/10 text-text-secondary border border-secondary/20">
                                                             {q.subject.name}
                                                         </span>
                                                     )}
-                                                    {getStatusBadge(q.status)}
                                                 </div>
                                                 {/* Admin return reason */}
                                                 {q.status === 'returned' && q.admin_review?.notes && (

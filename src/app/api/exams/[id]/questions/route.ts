@@ -134,34 +134,77 @@ export async function POST(
 
         if (error) throw error
 
-        // Trigger HOTS analysis only for questions NOT already approved from bank soal
-        if (data && data.length > 0 && aiEnabled) {
-            // Track which indices came from bank soal (already analyzed)
-            const bankIndices = new Set(questions.map((q: any, i: number) => q.bank_status === 'approved' ? i : -1).filter((i: number) => i >= 0))
-            const questionsNeedingAnalysis = data.filter((_: any, i: number) => !bankIndices.has(i))
-            if (questionsNeedingAnalysis.length > 0) {
-                const { data: exam } = await supabase
-                    .from('exams')
-                    .select('teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(school_level))')
-                    .eq('id', id).single()
-                const ta = exam?.teaching_assignment as any
-                const subjectName = ta?.subject?.name || ''
-                const gradeBand = ta?.class?.school_level || 'SMP'
-                const hotsInputs: TriggerHOTSInput[] = questionsNeedingAnalysis.map((q: any) => ({
-                    questionId: q.id,
-                    questionSource: 'exam' as const,
-                    questionText: q.question_text,
-                    questionType: q.question_type,
+        // --- Auto-sync to question_bank (Fire and Forget) ---
+        // Fetch exam data to get title, subject_id, teacher_id
+        const { data: examData } = await supabase
+            .from('exams')
+            .select(`
+                title,
+                teaching_assignment:teaching_assignments(
+                    teacher_id,
+                    subject_id,
+                    subject:subjects(name),
+                    class:classes(school_level)
+                )
+            `)
+            .eq('id', id)
+            .single()
+
+        if (examData && examData.teaching_assignment && data && data.length > 0) {
+            const ta = examData.teaching_assignment as any
+            const subjectName = ta?.subject?.name || ''
+            const gradeBand = ta?.class?.school_level || 'SMP'
+            const teacherId = ta.teacher_id
+            const subjectId = ta.subject_id
+
+            // Trigger HOTS analysis only for questions NOT already approved from bank soal
+            if (aiEnabled) {
+                // Track which indices came from bank soal (already analyzed)
+                const bankIndices = new Set(questions.map((q: any, i: number) => q.bank_status === 'approved' ? i : -1).filter((i: number) => i >= 0))
+                const questionsNeedingAnalysis = data.filter((_: any, i: number) => !bankIndices.has(i))
+                if (questionsNeedingAnalysis.length > 0) {
+                    const hotsInputs: TriggerHOTSInput[] = questionsNeedingAnalysis.map((q: any) => ({
+                        questionId: q.id,
+                        questionSource: 'exam' as const,
+                        questionText: q.question_text,
+                        questionType: q.question_type,
+                        options: q.options,
+                        correctAnswer: q.correct_answer,
+                        teacherDifficulty: q.difficulty,
+                        teacherHotsClaim: q.teacher_hots_claim || false,
+                        subjectName,
+                        gradeBand,
+                        examId: id
+                    }))
+                    console.log(`[HOTS] Triggering analysis for ${hotsInputs.length} exam questions`)
+                    triggerBulkHOTSAnalysis(hotsInputs)
+                }
+            }
+
+            // Sync to bank
+            try {
+                const bankInserts = data.map((q: any) => ({
+                    teacher_id: teacherId,
+                    subject_id: subjectId,
+                    question_text: q.question_text,
+                    question_type: q.question_type,
                     options: q.options,
-                    correctAnswer: q.correct_answer,
-                    teacherDifficulty: q.difficulty,
-                    teacherHotsClaim: q.teacher_hots_claim || false,
-                    subjectName,
-                    gradeBand,
-                    examId: id
+                    correct_answer: q.correct_answer,
+                    difficulty: q.difficulty,
+                    teacher_hots_claim: q.teacher_hots_claim,
+                    content_format: q.content_format,
+                    image_url: q.image_url,
+                    source_type: 'exam',
+                    source_exam_id: id,
+                    source_name: examData.title,
+                    status: 'approved' // Automatically approved since it's already used in an exam
                 }))
-                console.log(`[HOTS] Triggering analysis for ${hotsInputs.length} exam questions`)
-                triggerBulkHOTSAnalysis(hotsInputs)
+                // We don't await this to keep response fast (fire and forget)
+                supabase.from('question_bank').insert(bankInserts).then(({ error: bankErr }) => {
+                    if (bankErr) console.error('Failed to auto-sync exam questions to bank:', bankErr)
+                })
+            } catch (err) {
+                console.error('Error preparing bank sync:', err)
             }
         }
 

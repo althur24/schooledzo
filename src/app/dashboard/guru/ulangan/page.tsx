@@ -866,6 +866,19 @@ export default function GuruUlanganPage() {
                             />
                         </div>
                     </div>
+                    {/* Calculated End Time */}
+                    {copyForm.start_time && copyForm.duration_minutes > 0 && (
+                        <div className="flex items-center gap-2 px-4 py-3 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/30 rounded-xl">
+                            <span className="text-emerald-600 dark:text-emerald-400 text-sm">⏰</span>
+                            <span className="text-sm text-emerald-700 dark:text-emerald-300">
+                                <span className="font-medium">Waktu Berakhir:</span>{' '}
+                                {(() => {
+                                    const end = new Date(new Date(copyForm.start_time).getTime() + copyForm.duration_minutes * 60000)
+                                    return end.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' + end.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                                })()}
+                            </span>
+                        </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran</label>
@@ -968,6 +981,19 @@ export default function GuruUlanganPage() {
                             />
                         </div>
                     </div>
+                    {/* Calculated End Time */}
+                    {form.start_time && form.duration_minutes > 0 && (
+                        <div className="flex items-center gap-2 px-4 py-3 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/30 rounded-xl">
+                            <span className="text-emerald-600 dark:text-emerald-400 text-sm">⏰</span>
+                            <span className="text-sm text-emerald-700 dark:text-emerald-300">
+                                <span className="font-medium">Waktu Berakhir:</span>{' '}
+                                {(() => {
+                                    const end = new Date(new Date(form.start_time).getTime() + form.duration_minutes * 60000)
+                                    return end.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' + end.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                                })()}
+                            </span>
+                        </div>
+                    )}
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran (auto-submit)</label>
                         <input

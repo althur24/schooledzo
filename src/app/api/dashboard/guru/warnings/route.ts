@@ -294,7 +294,6 @@ export async function GET(request: NextRequest) {
         const myClasses = Array.from(classMap.values()).sort((a, b) => a.class_name.localeCompare(b.class_name))
 
         return NextResponse.json({
-            kkm: DEFAULT_KKM, // Kept for legacy fallback, but warnings now have specific `kkm`
             teachingWarnings,
             homeroomWarnings,
             myClasses

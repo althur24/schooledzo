@@ -121,36 +121,79 @@ export async function POST(
 
             if (error) throw error
 
-            // Trigger HOTS analysis only for questions NOT already approved from bank soal
-            console.log(`[HOTS-DEBUG] Inserted ${data?.length} questions. Body bank_status values:`, body.map((q: any) => q.bank_status))
-            if (data && data.length > 0 && aiEnabled) {
-                // Track which indices came from bank soal (already analyzed)
-                const bankIndices = new Set(body.map((q: any, i: number) => q.bank_status === 'approved' ? i : -1).filter((i: number) => i >= 0))
-                const questionsNeedingAnalysis = data.filter((_: any, i: number) => !bankIndices.has(i))
-                console.log(`[HOTS-DEBUG] bankIndices: ${JSON.stringify([...bankIndices])}, needsAnalysis: ${questionsNeedingAnalysis.length}`)
-                if (questionsNeedingAnalysis.length > 0) {
-                    const { data: quiz } = await supabase
-                        .from('quizzes')
-                        .select('teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(school_level))')
-                        .eq('id', id).single()
-                    const ta = quiz?.teaching_assignment as any
-                    const subjectName = ta?.subject?.name || ''
-                    const gradeBand = ta?.class?.school_level || 'SMP'
-                    const hotsInputs: TriggerHOTSInput[] = questionsNeedingAnalysis.map((q: any) => ({
-                        questionId: q.id,
-                        questionSource: 'quiz' as const,
-                        questionText: q.question_text,
-                        questionType: q.question_type,
+            // --- Auto-sync to question_bank (Fire and Forget) ---
+            // Fetch quiz data to get title, subject_id, teacher_id
+            const { data: quizData } = await supabase
+                .from('quizzes')
+                .select(`
+                    title,
+                    teaching_assignment:teaching_assignments(
+                        teacher_id,
+                        subject_id,
+                        subject:subjects(name),
+                        class:classes(school_level)
+                    )
+                `)
+                .eq('id', id)
+                .single()
+
+            if (quizData && quizData.teaching_assignment && data && data.length > 0) {
+                const ta = quizData.teaching_assignment as any
+                const subjectName = ta?.subject?.name || ''
+                const gradeBand = ta?.class?.school_level || 'SMP'
+                const teacherId = ta.teacher_id
+                const subjectId = ta.subject_id
+
+                // Trigger HOTS analysis only for questions NOT already approved from bank soal
+                console.log(`[HOTS-DEBUG] Inserted ${data?.length} questions. Body bank_status values:`, body.map((q: any) => q.bank_status))
+                if (aiEnabled) {
+                    // Track which indices came from bank soal (already analyzed)
+                    const bankIndices = new Set(body.map((q: any, i: number) => q.bank_status === 'approved' ? i : -1).filter((i: number) => i >= 0))
+                    const questionsNeedingAnalysis = data.filter((_: any, i: number) => !bankIndices.has(i))
+                    console.log(`[HOTS-DEBUG] bankIndices: ${JSON.stringify([...bankIndices])}, needsAnalysis: ${questionsNeedingAnalysis.length}`)
+                    if (questionsNeedingAnalysis.length > 0) {
+                        const hotsInputs: TriggerHOTSInput[] = questionsNeedingAnalysis.map((q: any) => ({
+                            questionId: q.id,
+                            questionSource: 'quiz' as const,
+                            questionText: q.question_text,
+                            questionType: q.question_type,
+                            options: q.options,
+                            correctAnswer: q.correct_answer,
+                            teacherDifficulty: q.difficulty,
+                            teacherHotsClaim: q.teacher_hots_claim || false,
+                            subjectName,
+                            gradeBand,
+                            quizId: id
+                        }))
+                        console.log(`[HOTS] Triggering analysis for ${hotsInputs.length} quiz questions`)
+                        triggerBulkHOTSAnalysis(hotsInputs)
+                    }
+                }
+
+                // Sync to bank
+                try {
+                    const bankInserts = data.map((q: any) => ({
+                        teacher_id: teacherId,
+                        subject_id: subjectId,
+                        question_text: q.question_text,
+                        question_type: q.question_type,
                         options: q.options,
-                        correctAnswer: q.correct_answer,
-                        teacherDifficulty: q.difficulty,
-                        teacherHotsClaim: q.teacher_hots_claim || false,
-                        subjectName,
-                        gradeBand,
-                        quizId: id
+                        correct_answer: q.correct_answer,
+                        difficulty: q.difficulty,
+                        teacher_hots_claim: q.teacher_hots_claim,
+                        content_format: q.content_format,
+                        image_url: q.image_url,
+                        source_type: 'quiz',
+                        source_quiz_id: id,
+                        source_name: quizData.title,
+                        status: 'approved' // Automatically approved since it's already used in a quiz
                     }))
-                    console.log(`[HOTS] Triggering analysis for ${hotsInputs.length} quiz questions`)
-                    triggerBulkHOTSAnalysis(hotsInputs)
+                    // We don't await this to keep response fast (fire and forget)
+                    supabase.from('question_bank').insert(bankInserts).then(({ error: bankErr }) => {
+                        if (bankErr) console.error('Failed to auto-sync quiz questions to bank:', bankErr)
+                    })
+                } catch (err) {
+                    console.error('Error preparing bank sync:', err)
                 }
             }
 
@@ -185,26 +228,70 @@ export async function POST(
 
         if (error) throw error
 
-        // Trigger HOTS analysis for single question (fire-and-forget)
-        if (data && aiEnabled) {
-            const { data: quiz } = await supabase
-                .from('quizzes')
-                .select('teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(school_level))')
-                .eq('id', id).single()
-            const ta = quiz?.teaching_assignment as any
-            triggerHOTSAnalysis({
-                questionId: data.id,
-                questionSource: 'quiz',
-                questionText: data.question_text,
-                questionType: data.question_type,
-                options: data.options,
-                correctAnswer: data.correct_answer,
-                teacherDifficulty: data.difficulty,
-                teacherHotsClaim: data.teacher_hots_claim || false,
-                subjectName: ta?.subject?.name || '',
-                gradeBand: ta?.class?.school_level || 'SMP',
-                quizId: id
-            }).catch(err => console.error('HOTS trigger error:', err))
+        // --- Auto-sync to question_bank (Fire and Forget) ---
+        // Fetch quiz data to get title, subject_id, teacher_id
+        const { data: quizData } = await supabase
+            .from('quizzes')
+            .select(`
+                title,
+                teaching_assignment:teaching_assignments(
+                    teacher_id,
+                    subject_id,
+                    subject:subjects(name),
+                    class:classes(school_level)
+                )
+            `)
+            .eq('id', id)
+            .single()
+
+        if (quizData && quizData.teaching_assignment && data) {
+            const ta = quizData.teaching_assignment as any
+            const subjectName = ta?.subject?.name || ''
+            const gradeBand = ta?.class?.school_level || 'SMP'
+            const teacherId = ta.teacher_id
+            const subjectId = ta.subject_id
+
+            // Trigger HOTS analysis for single question (fire-and-forget)
+            if (aiEnabled) {
+                triggerHOTSAnalysis({
+                    questionId: data.id,
+                    questionSource: 'quiz',
+                    questionText: data.question_text,
+                    questionType: data.question_type,
+                    options: data.options,
+                    correctAnswer: data.correct_answer,
+                    teacherDifficulty: data.difficulty,
+                    teacherHotsClaim: data.teacher_hots_claim || false,
+                    subjectName,
+                    gradeBand,
+                    quizId: id
+                }).catch(err => console.error('HOTS trigger error:', err))
+            }
+
+            // Sync to bank
+            try {
+                const bankInsert = {
+                    teacher_id: teacherId,
+                    subject_id: subjectId,
+                    question_text: data.question_text,
+                    question_type: data.question_type,
+                    options: data.options,
+                    correct_answer: data.correct_answer,
+                    difficulty: data.difficulty,
+                    teacher_hots_claim: data.teacher_hots_claim,
+                    content_format: data.content_format,
+                    image_url: data.image_url,
+                    source_type: 'quiz',
+                    source_quiz_id: id,
+                    source_name: quizData.title,
+                    status: 'approved'
+                }
+                supabase.from('question_bank').insert(bankInsert).then(({ error: bankErr }) => {
+                    if (bankErr) console.error('Failed to auto-sync quiz question to bank:', bankErr)
+                })
+            } catch (err) {
+                console.error('Error preparing bank sync:', err)
+            }
         }
 
         return NextResponse.json(data)
