@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { gradeAnswer, isAutoGradeable } from '@/lib/questionTypeUtils'
 
 // Helper function for sending notifications
 async function sendQuizSubmissionNotification(quizId: string, userFullName: string) {
@@ -90,11 +91,16 @@ export async function GET(request: NextRequest) {
                                         const q = questions.find(q => q.id === ans.question_id)
                                         if (!q) return ans
 
-                                        if (q.question_type === 'MULTIPLE_CHOICE') {
-                                            const isCorrect = ans.answer?.toUpperCase() === q.correct_answer?.toUpperCase()
-                                            const score = isCorrect ? q.points : 0
-                                            totalScore += score
-                                            return { ...ans, is_correct: isCorrect, score }
+                                        if (isAutoGradeable(q.question_type)) {
+                                            const graded = gradeAnswer(
+                                                q.question_type,
+                                                ans.answer,
+                                                q.correct_answer,
+                                                q.options,
+                                                q.points || 1
+                                            )
+                                            totalScore += graded.pointsEarned
+                                            return { ...ans, is_correct: graded.isCorrect, score: graded.pointsEarned }
                                         }
                                         return ans
                                     })
@@ -364,14 +370,19 @@ export async function POST(request: NextRequest) {
 
                 maxScore += question.points
 
-                if (question.question_type === 'MULTIPLE_CHOICE') {
-                    const isCorrect = ans.answer?.toUpperCase() === question.correct_answer?.toUpperCase()
-                    const score = isCorrect ? question.points : 0
-                    totalScore += score
+                if (isAutoGradeable(question.question_type)) {
+                    const graded = gradeAnswer(
+                        question.question_type,
+                        ans.answer,
+                        question.correct_answer,
+                        question.options,
+                        question.points || 1
+                    )
+                    totalScore += graded.pointsEarned
                     return {
                         ...ans,
-                        is_correct: isCorrect,
-                        score
+                        is_correct: graded.isCorrect,
+                        score: graded.pointsEarned
                     }
                 } else {
                     // Essay needs manual grading

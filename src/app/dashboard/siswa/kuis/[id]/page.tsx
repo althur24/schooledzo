@@ -4,13 +4,14 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import SmartText from '@/components/SmartText'
+import StudentAnswerInput from '@/components/StudentAnswerInput'
 import PassageBlock from '@/components/PassageBlock'
 import { Danger, TimeCircle, TickSquare } from 'react-iconly'
 
 interface QuizQuestion {
     id: string
     question_text: string
-    question_type: 'ESSAY' | 'MULTIPLE_CHOICE'
+    question_type: string
     options: string[] | null
     points: number
     order_index: number
@@ -557,9 +558,12 @@ export default function KerjakanKuisPage() {
                                                         <span className="w-7 h-7 md:w-8 md:h-8 flex-shrink-0 bg-violet-500/20 text-violet-600 dark:text-violet-400 rounded-full flex items-center justify-center font-bold text-xs md:text-sm">
                                                             {questionNumber}
                                                         </span>
-                                                        <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
-                                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
-                                                        </span>
+                                                        <span className={`px-2 py-0.5 text-xs rounded bg-secondary/10 text-text-main dark:text-white`}>
+                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
+                                             q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
+                                             q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
+                                             q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
+                                        </span>
 
                                                     </div>
                                                     <div dir={q.text_direction || 'ltr'}>
@@ -570,23 +574,12 @@ export default function KerjakanKuisPage() {
                                                             <img src={q.image_url} alt="Gambar soal" className="max-h-40 md:max-h-64 rounded-lg border border-gray-200 dark:border-gray-600" />
                                                         </div>
                                                     )}
-                                                    {q.question_type === 'MULTIPLE_CHOICE' && q.options ? (
-                                                        <div className="space-y-2">
-                                                            {q.options.map((opt, optIdx) => {
-                                                                const letter = String.fromCharCode(65 + optIdx)
-                                                                const isSelected = answers[q.id] === letter
-                                                                return (
-                                                                    <button key={optIdx} onClick={() => { const newAnswers = { ...answers, [q.id]: letter }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
-                                                                        className={`w-full text-left px-3 py-2 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-violet-500/10 border-violet-500 text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary hover:border-gray-400'}`}>
-                                                                        <span className={`inline-flex items-center justify-center w-6 h-6 md:w-7 md:h-7 rounded-lg ${q.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold text-xs flex-shrink-0 ${isSelected ? 'bg-violet-500 text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary'}`} dir="ltr">{letter}</span>
-                                                                        <div className="flex-1 text-sm md:text-base" dir={q.text_direction || 'ltr'}><SmartText text={opt} as="span" /></div>
-                                                                    </button>
-                                                                )
-                                                            })}
-                                                        </div>
-                                                    ) : (
-                                                        <textarea dir={q.text_direction || 'ltr'} value={answers[q.id] || ''} onChange={(e) => { const newAnswers = { ...answers, [q.id]: e.target.value }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className={`w-full h-24 md:h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 text-sm md:text-base ${q.text_direction === 'rtl' ? 'text-right' : ''}`} placeholder="Tulis jawaban Anda di sini..." />
-                                                    )}
+                                                    <StudentAnswerInput
+                                                        question={q}
+                                                        value={answers[q.id]}
+                                                        onChange={(val) => { const newAnswers = { ...answers, [q.id]: val }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
+                                                        onChangeImmediate={(val) => { const newAnswers = { ...answers, [q.id]: val }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
+                                                    />
                                                 </div>
                                             )
                                         })}
@@ -609,8 +602,11 @@ export default function KerjakanKuisPage() {
                                         <span className="w-7 h-7 md:w-8 md:h-8 flex-shrink-0 bg-primary/20 text-primary rounded-full flex items-center justify-center font-bold text-xs md:text-sm">
                                             {questionNumber}
                                         </span>
-                                        <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
-                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
+                                        <span className={`px-2 py-0.5 text-xs rounded bg-secondary/10 text-text-main dark:text-white`}>
+                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
+                                             q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
+                                             q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
+                                             q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                         </span>
 
                                     </div>
@@ -622,23 +618,12 @@ export default function KerjakanKuisPage() {
                                             <img src={q.image_url} alt="Gambar soal" className="max-h-40 md:max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />
                                         </div>
                                     )}
-                                    {q.question_type === 'MULTIPLE_CHOICE' && q.options ? (
-                                        <div className="space-y-2">
-                                            {q.options.map((opt, optIdx) => {
-                                                const letter = String.fromCharCode(65 + optIdx)
-                                                const isSelected = answers[q.id] === letter
-                                                return (
-                                                    <button key={optIdx} onClick={() => { const newAnswers = { ...answers, [q.id]: letter }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
-                                                        className={`w-full text-left px-3 py-2 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary hover:border-gray-400'}`}>
-                                                        <span className={`inline-flex items-center justify-center w-6 h-6 md:w-7 md:h-7 rounded-lg ${q.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold text-xs flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary'}`} dir="ltr">{letter}</span>
-                                                        <div className={`flex-1 text-sm md:text-base ${q.text_direction === 'rtl' ? 'text-right' : ''}`} dir={q.text_direction || 'ltr'}><SmartText text={opt} as="span" /></div>
-                                                    </button>
-                                                )
-                                            })}
-                                        </div>
-                                    ) : (
-                                        <textarea dir={q.text_direction || 'ltr'} value={answers[q.id] || ''} onChange={(e) => { const newAnswers = { ...answers, [q.id]: e.target.value }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }} className={`w-full h-24 md:h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 text-sm md:text-base ${q.text_direction === 'rtl' ? 'text-right' : ''}`} placeholder="Tulis jawaban Anda di sini..." />
-                                    )}
+                                    <StudentAnswerInput
+                                        question={q}
+                                        value={answers[q.id]}
+                                        onChange={(val) => { const newAnswers = { ...answers, [q.id]: val }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
+                                        onChangeImmediate={(val) => { const newAnswers = { ...answers, [q.id]: val }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
+                                    />
                                 </div>
                             )
                         }

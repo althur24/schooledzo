@@ -190,7 +190,7 @@ export async function GET(
                 ? answersForQ.reduce((sum: number, a: any) => sum + (a.score ?? 0), 0) / totalAnswered
                 : 0
 
-            // Option distribution for MC
+            // Option distribution for MC / TRUE_FALSE / MULTIPLE_ANSWER
             let optionDistribution: { option: string; count: number; isCorrect: boolean }[] | undefined
             if (q.question_type === 'MULTIPLE_CHOICE' && q.options) {
                 optionDistribution = (q.options as string[]).map((opt: string, optIdx: number) => {
@@ -201,6 +201,25 @@ export async function GET(
                             a.answer?.toUpperCase() === letter
                         ).length,
                         isCorrect: q.correct_answer?.toUpperCase() === letter
+                    }
+                })
+            } else if (q.question_type === 'TRUE_FALSE') {
+                optionDistribution = ['BENAR', 'SALAH'].map(val => ({
+                    option: val,
+                    count: answersForQ.filter((a: any) => a.answer?.toUpperCase() === val).length,
+                    isCorrect: q.correct_answer?.toUpperCase() === val
+                }))
+            } else if (q.question_type === 'MULTIPLE_ANSWER' && q.options) {
+                optionDistribution = (q.options as string[]).map((opt: string, optIdx: number) => {
+                    const letter = String.fromCharCode(65 + optIdx)
+                    let correctLetters: string[] = []
+                    try { correctLetters = JSON.parse(q.correct_answer || '[]') } catch {}
+                    return {
+                        option: letter,
+                        count: answersForQ.filter((a: any) => {
+                            try { return JSON.parse(a.answer || '[]').includes(letter) } catch { return false }
+                        }).length,
+                        isCorrect: correctLetters.includes(letter)
                     }
                 })
             }
@@ -250,7 +269,7 @@ export async function GET(
                         isCorrect: ans ? (ans.is_correct ?? null) : null,
                         scoreEarned: ans?.score ?? 0,
                         maxPoints: q.points || 0,
-                        questionType: q.question_type as 'MULTIPLE_CHOICE' | 'ESSAY'
+                        questionType: q.question_type
                     }
                 })
             }

@@ -54,7 +54,7 @@ export interface HeatmapAnswer {
     isCorrect: boolean | null
     scoreEarned: number
     maxPoints: number
-    questionType: 'MULTIPLE_CHOICE' | 'ESSAY'
+    questionType: string
 }
 
 export interface HeatmapStudent {

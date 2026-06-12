@@ -4,13 +4,14 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Document, Danger, Scan, TimeCircle, TickSquare } from 'react-iconly'
 import SmartText from '@/components/SmartText'
+import StudentAnswerInput from '@/components/StudentAnswerInput'
 import PassageBlock from '@/components/PassageBlock'
 import { GraduationCap } from 'lucide-react'
 
 interface ExamQuestion {
     id: string
     question_text: string
-    question_type: 'ESSAY' | 'MULTIPLE_CHOICE'
+    question_type: string
     options: string[] | null
     points: number
     passage_text?: string | null
@@ -605,8 +606,11 @@ export default function TakeOfficialExamPage() {
                         <div className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-6">
                             <div className="flex items-center gap-3 mb-4">
                                 <span className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">{currentIndex + 1}</span>
-                                <span className={`px-2 py-0.5 text-xs rounded ${currentQuestion.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500' : 'bg-amber-500/20 text-amber-600'}`}>
-                                    {currentQuestion.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
+                                <span className={`px-2 py-0.5 text-xs rounded bg-secondary/10 text-text-main dark:text-white`}>
+                                    {currentQuestion.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
+                                     currentQuestion.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
+                                     currentQuestion.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
+                                     currentQuestion.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                 </span>
 
                             </div>
@@ -625,26 +629,12 @@ export default function TakeOfficialExamPage() {
                                 </div>
                             )}
 
-                            {currentQuestion.question_type === 'MULTIPLE_CHOICE' && currentQuestion.options && (
-                                <div className="space-y-3">
-                                    {currentQuestion.options.map((opt, optIdx) => {
-                                        const letter = String.fromCharCode(65 + optIdx)
-                                        const isSelected = answers[currentQuestion.id] === letter
-                                        return (
-                                            <button key={optIdx} onClick={() => saveAnswerImmediate(currentQuestion.id, letter)}
-                                                className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-indigo-500/10 border-indigo-500 text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary hover:border-gray-400'}`}>
-                                                <span className={`inline-flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-lg ${currentQuestion.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary'}`} dir="ltr">{letter}</span>
-                                                <div className="flex-1" dir={currentQuestion.text_direction || 'ltr'}><SmartText text={opt} as="span" className={currentQuestion.text_direction === 'rtl' ? 'text-right block' : ''} /></div>
-                                            </button>
-                                        )
-                                    })}
-                                </div>
-                            )}
-
-                            {currentQuestion.question_type === 'ESSAY' && (
-                                <textarea dir={currentQuestion.text_direction || 'ltr'} value={answers[currentQuestion.id] || ''} onChange={(e) => saveAnswer(currentQuestion.id, e.target.value)}
-                                    className={`w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none ${currentQuestion.text_direction === 'rtl' ? 'text-right' : ''}`} rows={6} placeholder="Tulis jawaban Anda di sini..." />
-                            )}
+                            <StudentAnswerInput
+                                question={currentQuestion}
+                                value={answers[currentQuestion.id]}
+                                onChange={(val) => saveAnswer(currentQuestion.id, val)}
+                                onChangeImmediate={(val) => saveAnswerImmediate(currentQuestion.id, val)}
+                            />
                         </div>
                     </div>
 

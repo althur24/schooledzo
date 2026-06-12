@@ -4,12 +4,13 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Document, Danger, Scan, TimeCircle, TickSquare } from 'react-iconly'
 import SmartText from '@/components/SmartText'
+import StudentAnswerInput from '@/components/StudentAnswerInput'
 import PassageBlock from '@/components/PassageBlock'
 
 interface ExamQuestion {
     id: string
     question_text: string
-    question_type: 'ESSAY' | 'MULTIPLE_CHOICE'
+    question_type: string
     options: string[] | null
     points: number
     image_url?: string | null
@@ -854,9 +855,12 @@ export default function TakeExamPage() {
                                             <div key={q.id} className="p-3 md:p-6">
                                                 <div className="flex items-center gap-3 mb-4">
                                                     <span className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-violet-500/20 text-violet-600 dark:text-violet-400 flex items-center justify-center font-bold">{currentItem.questionNumbers[qIdx]}</span>
-                                                    <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
-                                                        {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
-                                                    </span>
+                                                    <span className={`px-2 py-0.5 text-xs rounded bg-secondary/10 text-text-main dark:text-white`}>
+                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
+                                             q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
+                                             q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
+                                             q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
+                                        </span>
 
                                                 </div>
                                                 <div dir={q.text_direction || 'ltr'}>
@@ -867,23 +871,12 @@ export default function TakeExamPage() {
                                                         <img src={q.image_url} alt="Gambar soal" className="max-h-48 md:max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />
                                                     </div>
                                                 )}
-                                                {q.question_type === 'MULTIPLE_CHOICE' && q.options && (
-                                                    <div className="space-y-3">
-                                                        {q.options.map((opt, optIdx) => {
-                                                            const letter = String.fromCharCode(65 + optIdx)
-                                                            const isSelected = answers[q.id] === letter
-                                                            return (
-                                                                <button key={optIdx} onClick={() => saveAnswerImmediate(q.id, letter)} className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'} flex items-center`}>
-                                                                    <span className={`inline-flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-lg ${q.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`} dir="ltr">{letter}</span>
-                                                                    <div className="flex-1" dir={q.text_direction || 'ltr'}><SmartText text={opt} as="span" className={q.text_direction === 'rtl' ? 'text-right block' : ''} /></div>
-                                                                </button>
-                                                            )
-                                                        })}
-                                                    </div>
-                                                )}
-                                                {q.question_type === 'ESSAY' && (
-                                                    <textarea dir={q.text_direction || 'ltr'} value={answers[q.id] || ''} onChange={(e) => saveAnswer(q.id, e.target.value)} className={`w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none ${q.text_direction === 'rtl' ? 'text-right' : ''}`} rows={6} placeholder="Tulis jawaban Anda di sini..." />
-                                                )}
+                                                <StudentAnswerInput
+                                                    question={q}
+                                                    value={answers[q.id]}
+                                                    onChange={(val) => saveAnswer(q.id, val)}
+                                                    onChangeImmediate={(val) => saveAnswerImmediate(q.id, val)}
+                                                />
                                             </div>
                                         ))}
                                     </div>
@@ -892,8 +885,11 @@ export default function TakeExamPage() {
                                 <div className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-6 min-h-0 md:min-h-[400px]">
                                     <div className="flex items-center gap-3 mb-4">
                                         <span className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold">{currentItem.questionNumbers[0]}</span>
-                                        <span className={`px-2 py-0.5 text-xs rounded ${currentItem.question.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-500 dark:text-blue-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
-                                            {currentItem.question.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
+                                        <span className={`px-2 py-0.5 text-xs rounded bg-secondary/10 text-text-main dark:text-white`}>
+                                            {currentItem.question.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
+                                             currentItem.question.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
+                                             currentItem.question.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
+                                             currentItem.question.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                         </span>
 
                                     </div>
@@ -909,23 +905,12 @@ export default function TakeExamPage() {
                                             <img src={currentItem.question.image_url} alt="Gambar soal" className="max-h-48 md:max-h-64 rounded-lg border border-gray-200 dark:border-gray-600 mx-auto" />
                                         </div>
                                     )}
-                                    {currentItem.question.question_type === 'MULTIPLE_CHOICE' && currentItem.question.options && (
-                                        <div className="space-y-3">
-                                            {currentItem.question.options.map((opt, optIdx) => {
-                                                const letter = String.fromCharCode(65 + optIdx)
-                                                const isSelected = answers[currentItem.question.id] === letter
-                                                return (
-                                                    <button key={optIdx} onClick={() => saveAnswerImmediate(currentItem.question.id, letter)} className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}>
-                                                        <span className={`inline-flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-lg ${currentItem.question.text_direction === 'rtl' ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`} dir="ltr">{letter}</span>
-                                                        <div className="flex-1" dir={currentItem.question.text_direction || 'ltr'}><SmartText text={opt} as="span" className={currentItem.question.text_direction === 'rtl' ? 'text-right block' : ''} /></div>
-                                                    </button>
-                                                )
-                                            })}
-                                        </div>
-                                    )}
-                                    {currentItem.question.question_type === 'ESSAY' && (
-                                        <textarea dir={currentItem.question.text_direction || 'ltr'} value={answers[currentItem.question.id] || ''} onChange={(e) => saveAnswer(currentItem.question.id, e.target.value)} className={`w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none ${currentItem.question.text_direction === 'rtl' ? 'text-right' : ''}`} rows={6} placeholder="Tulis jawaban Anda di sini..." />
-                                    )}
+                                    <StudentAnswerInput
+                                        question={currentItem.question}
+                                        value={answers[currentItem.question.id]}
+                                        onChange={(val) => saveAnswer(currentItem.question.id, val)}
+                                        onChangeImmediate={(val) => saveAnswerImmediate(currentItem.question.id, val)}
+                                    />
                                 </div>
                             ) : null}
 

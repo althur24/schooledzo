@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { parseGeminiJson } from '@/lib/parse-gemini-json'
 import { callGemini } from '@/lib/geminiClient'
+import { normalizeQuestionTypes } from '@/lib/normalizeQuestionTypes'
 
 // POST - Generate questions from material using Gemini
 export async function POST(request: NextRequest) {
@@ -26,11 +27,17 @@ export async function POST(request: NextRequest) {
 
         let typeInstruction = ''
         if (questionType === 'MULTIPLE_CHOICE') {
-            typeInstruction = 'Semua soal harus pilihan ganda dengan 4 opsi (A, B, C, D) dan kunci jawaban.'
+            typeInstruction = 'Semua soal harus Pilihan Ganda (MULTIPLE_CHOICE) dengan 4 opsi dan kunci jawaban huruf A/B/C/D.'
+        } else if (questionType === 'MULTIPLE_ANSWER') {
+            typeInstruction = 'Semua soal harus Ganda Kompleks (MULTIPLE_ANSWER) di mana siswa bisa memilih lebih dari satu jawaban benar. Berikan 4-5 opsi, dan kunci jawaban dalam format JSON array misal ["A", "C"].'
+        } else if (questionType === 'TRUE_FALSE') {
+            typeInstruction = 'Semua soal harus Benar/Salah (TRUE_FALSE). Opsi selalu ["Benar", "Salah"]. Kunci jawaban harus "BENAR" atau "SALAH".'
+        } else if (questionType === 'SHORT_ANSWER') {
+            typeInstruction = 'Semua soal harus Isian Singkat (SHORT_ANSWER). Tanpa opsi (null). Kunci jawaban berupa teks singkat yang benar.'
         } else if (questionType === 'ESSAY') {
-            typeInstruction = 'Semua soal harus berbentuk essay/uraian.'
+            typeInstruction = 'Semua soal harus berbentuk essay/uraian (ESSAY). Tanpa opsi. Berikan panduan jawaban di correct_answer.'
         } else {
-            typeInstruction = 'Buat campuran soal pilihan ganda dan essay.'
+            typeInstruction = 'Buat campuran kelima tipe soal secara proporsional: MULTIPLE_CHOICE, MULTIPLE_ANSWER, TRUE_FALSE, SHORT_ANSWER, ESSAY.'
         }
 
         let difficultyInstruction = ''
@@ -66,9 +73,9 @@ Format JSON:
   "questions": [
     {
       "question_text": "Teks soal lengkap dan jelas",
-      "question_type": "MULTIPLE_CHOICE atau ESSAY",
-      "options": ["isi opsi 1", "isi opsi 2", "isi opsi 3", "isi opsi 4"] (null jika essay),
-      "correct_answer": "A/B/C/D" (null jika essay),
+      "question_type": "MULTIPLE_CHOICE | MULTIPLE_ANSWER | TRUE_FALSE | SHORT_ANSWER | ESSAY",
+      "options": ["opsi1", "opsi2", "opsi3", "opsi4"] (Gunakan null jika ESSAY / SHORT_ANSWER. Untuk TRUE_FALSE gunakan ["Benar", "Salah"]),
+      "correct_answer": "A/B/C/D untuk pilihan ganda, [\"A\",\"C\"] untuk ganda kompleks, BENAR/SALAH untuk true-false, atau jawaban singkat untuk short-answer",
       "difficulty": "EASY/MEDIUM/HARD"
     }
   ]
@@ -97,6 +104,10 @@ Pastikan soal:
 
         try {
             const parsed = parseGeminiJson(result.data!)
+            // Post-process: fix AI-misclassified question types
+            if (parsed.questions && Array.isArray(parsed.questions)) {
+                parsed.questions = normalizeQuestionTypes(parsed.questions)
+            }
             return NextResponse.json(parsed)
         } catch (parseError: any) {
             console.error('JSON parse error:', parseError?.message, 'Raw:', result.data?.substring(0, 300))

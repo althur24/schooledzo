@@ -110,7 +110,11 @@ export default function QuestionAnalysisChart({ data }: QuestionAnalysisChartPro
                                     {q.correctRate.toFixed(0)}% • {getDifficultyLabel(q.correctRate)}
                                 </span>
                                 <span className="text-xs text-slate-500 truncate">
-                                    {q.questionType === 'ESSAY' ? '(Esai)' : ''}
+                                    {q.questionType === 'MULTIPLE_CHOICE' ? '(PG)' : 
+                                     q.questionType === 'MULTIPLE_ANSWER' ? '(GK)' :
+                                     q.questionType === 'TRUE_FALSE' ? '(BS)' :
+                                     q.questionType === 'SHORT_ANSWER' ? '(IS)' :
+                                     q.questionType === 'ESSAY' ? '(Esai)' : ''}
                                 </span>
                             </div>
                             <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${expandedQ === q.questionIndex ? 'rotate-180' : ''}`} />

@@ -130,17 +130,18 @@ export default function HasilKuisPage() {
 
     const renderQuestion = (q: QuizQuestion, idx: number) => {
         const userAnswer = getAnswerForQuestion(q.id)
-        const isCorrect = q.question_type === 'MULTIPLE_CHOICE'
-            ? userAnswer?.answer === q.correct_answer
+        const isAutoGraded = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(q.question_type)
+        const isCorrect = isAutoGraded
+            ? userAnswer?.answer === q.correct_answer || (userAnswer?.score === q.points)
             : (userAnswer?.score === q.points)
 
         return (
             <div key={q.id} className="flex items-start gap-4">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${q.question_type === 'MULTIPLE_CHOICE'
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${isAutoGraded
                     ? (isCorrect ? 'bg-green-500/20 text-green-600 dark:text-green-400' : 'bg-red-500/20 text-red-600 dark:text-red-400')
                     : 'bg-secondary/20 text-text-secondary'
                     }`}>
-                    {q.question_type === 'MULTIPLE_CHOICE' ? (
+                    {isAutoGraded ? (
                         isCorrect ? <TickSquare set="bold" primaryColor="currentColor" size={16} /> : <CloseSquare set="bold" primaryColor="currentColor" size={16} />
                     ) : (
                         idx + 1
@@ -162,16 +163,20 @@ export default function HasilKuisPage() {
                             <p className="text-text-main dark:text-white font-medium">
                                 {q.question_type === 'MULTIPLE_CHOICE' && q.options && userAnswer?.answer
                                     ? <><span>{userAnswer.answer}. </span><SmartText text={q.options[(userAnswer.answer.charCodeAt(0) - 65)] || ''} as="span" /></>
+                                    : q.question_type === 'TRUE_FALSE' && userAnswer?.answer
+                                    ? userAnswer.answer
                                     : userAnswer?.answer || '-'}
                             </p>
                         </div>
 
-                        {/* Show correct answer for Multiple Choice only if graded */}
-                        {result.is_graded && q.question_type === 'MULTIPLE_CHOICE' && !isCorrect && (
+                        {/* Show correct answer for auto-gradeable types if graded and incorrect */}
+                        {result.is_graded && isAutoGraded && !isCorrect && q.correct_answer && (
                             <div className="pt-2 border-t border-secondary/20">
                                 <p className="text-green-600 dark:text-green-400 text-xs mb-1">Kunci Jawaban:</p>
                                 <p className="text-green-700 dark:text-green-300">
-                                    <span>{q.correct_answer}. </span><SmartText text={q.options?.[(q.correct_answer?.charCodeAt(0) || 65) - 65] || ''} as="span" />
+                                    {q.question_type === 'MULTIPLE_CHOICE' && q.options
+                                        ? <><span>{q.correct_answer}. </span><SmartText text={q.options?.[(q.correct_answer?.charCodeAt(0) || 65) - 65] || ''} as="span" /></>
+                                        : q.correct_answer}
                                 </p>
                             </div>
                         )}

@@ -7,6 +7,7 @@ import dynamic from 'next/dynamic'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import SmartText from '@/components/SmartText'
 import Card from '@/components/ui/Card'
+import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 // Dynamic imports for heavy components
 const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
@@ -22,7 +23,7 @@ import Link from 'next/link' // Keep this import as it's used later
 interface QuestionBankItem {
     id: string
     question_text: string
-    question_type: 'ESSAY' | 'MULTIPLE_CHOICE'
+    question_type: string
     options: string[] | null
     correct_answer: string | null
     difficulty: 'EASY' | 'MEDIUM' | 'HARD'
@@ -45,7 +46,7 @@ interface Subject {
 
 interface PassageQuestion {
     question_text: string
-    question_type: 'ESSAY' | 'MULTIPLE_CHOICE'
+    question_type: string
     options: string[]
     correct_answer: string
     difficulty: 'EASY' | 'MEDIUM' | 'HARD'
@@ -62,7 +63,7 @@ interface Passage {
     questions: Array<{
         id: string
         question_text: string
-        question_type: 'ESSAY' | 'MULTIPLE_CHOICE'
+        question_type: string
         options: string[] | null
         correct_answer: string | null
         difficulty: 'EASY' | 'MEDIUM' | 'HARD'
@@ -122,7 +123,7 @@ export default function BankSoalPage() {
     // Standalone Question Form
     const [questionForm, setQuestionForm] = useState({
         question_text: '',
-        question_type: 'MULTIPLE_CHOICE' as 'ESSAY' | 'MULTIPLE_CHOICE',
+        question_type: 'MULTIPLE_CHOICE',
         options: ['', '', '', ''],
         correct_answer: '',
         difficulty: 'MEDIUM' as 'EASY' | 'MEDIUM' | 'HARD',
@@ -143,7 +144,7 @@ export default function BankSoalPage() {
         subject_id: '',
         questions: [{
             question_text: '',
-            question_type: 'MULTIPLE_CHOICE' as 'ESSAY' | 'MULTIPLE_CHOICE',
+            question_type: 'MULTIPLE_CHOICE',
             options: ['', '', '', ''],
             correct_answer: '',
             difficulty: 'MEDIUM' as 'EASY' | 'MEDIUM' | 'HARD',
@@ -414,7 +415,7 @@ export default function BankSoalPage() {
     const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null)
     const [editQuestionForm, setEditQuestionForm] = useState({
         question_text: '',
-        question_type: 'MULTIPLE_CHOICE' as 'ESSAY' | 'MULTIPLE_CHOICE',
+        question_type: 'MULTIPLE_CHOICE',
         options: ['', '', '', ''],
         correct_answer: '',
         difficulty: 'MEDIUM' as 'EASY' | 'MEDIUM' | 'HARD',
@@ -807,7 +808,10 @@ export default function BankSoalPage() {
                     >
                         <option value="">Semua Tipe</option>
                         <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
-                        <option value="ESSAY">Essay</option>
+                            <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
+                            <option value="TRUE_FALSE">Benar Salah</option>
+                            <option value="SHORT_ANSWER">Isian Singkat</option>
+                            <option value="ESSAY">Essay</option>
                     </select>
                     <select
                         value={selectedStatus}
@@ -925,8 +929,11 @@ export default function BankSoalPage() {
                                                         </span>
                                                         <div className="flex-1">
                                                             <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                                                <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-600' : 'bg-amber-500/20 text-amber-600'}`}>
-                                                                    {q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : 'Essay'}
+                                                                <span className={`px-2 py-0.5 text-xs font-bold rounded-full bg-secondary/10 text-text-main dark:text-white`}>
+                                                                    {q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : 
+                                                                     q.question_type === 'MULTIPLE_ANSWER' ? 'GK' : 
+                                                                     q.question_type === 'TRUE_FALSE' ? 'BS' : 
+                                                                     q.question_type === 'SHORT_ANSWER' ? 'IS' : 'Essay'}
                                                                 </span>
                                                                 <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${getDifficultyBadge(q.difficulty)}`}>
                                                                     {getDifficultyLabel(q.difficulty)}
@@ -947,13 +954,24 @@ export default function BankSoalPage() {
                                                                 </div>
                                                             )}
                                                             <SmartText text={q.question_text} className="text-text-main dark:text-white text-sm" />
-                                                            {q.question_type === 'MULTIPLE_CHOICE' && q.options && (
+                                                            {['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(q.question_type) && q.options && (
                                                                 <div className="mt-2 grid grid-cols-2 gap-1 text-xs">
-                                                                    {q.options.map((opt, optIdx) => (
-                                                                        <div key={optIdx} className={`px-2 py-1 rounded ${q.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'text-text-secondary'}`}>
-                                                                            {String.fromCharCode(65 + optIdx)}. {opt}
-                                                                        </div>
-                                                                    ))}
+                                                                    {q.options.map((opt, optIdx) => {
+                                                                        const letter = String.fromCharCode(65 + optIdx)
+                                                                        let isCorrect = false
+                                                                        if (q.question_type === 'MULTIPLE_ANSWER') {
+                                                                            try { isCorrect = JSON.parse(q.correct_answer || '[]').includes(letter) } catch {}
+                                                                        } else if (q.question_type === 'TRUE_FALSE') {
+                                                                            isCorrect = q.correct_answer?.toUpperCase() === opt.toUpperCase()
+                                                                        } else {
+                                                                            isCorrect = q.correct_answer === letter
+                                                                        }
+                                                                        return (
+                                                                            <div key={optIdx} className={`px-2 py-1 rounded ${isCorrect ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'text-text-secondary'}`}>
+                                                                                {q.question_type === 'TRUE_FALSE' ? opt : `${letter}. ${opt}`}
+                                                                            </div>
+                                                                        )
+                                                                    })}
                                                                 </div>
                                                             )}
                                                         </div>
@@ -1006,8 +1024,11 @@ export default function BankSoalPage() {
                                             </div>
                                             <div className="flex-1">
                                                 <div className="flex items-center gap-2 mb-3 flex-wrap">
-                                                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full border ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/10 text-blue-600 border-blue-200 dark:text-blue-400' : 'bg-orange-500/10 text-orange-600 border-orange-200 dark:text-orange-400'}`}>
-                                                        {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
+                                                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full border bg-secondary/10 text-text-main border-secondary/20 dark:text-white`}>
+                                                        {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
+                                                         q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
+                                                         q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
+                                                         q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                                     </span>
                                                     <span className={`px-2.5 py-1 text-xs font-bold rounded-full border ${getDifficultyBadge(q.difficulty)}`}>
                                                         {getDifficultyLabel(q.difficulty)}
@@ -1028,16 +1049,27 @@ export default function BankSoalPage() {
                                                     </div>
                                                 )}
                                                 <SmartText text={q.question_text} className="text-text-main dark:text-white mb-4 text-lg font-medium leading-relaxed" />
-                                                {q.question_type === 'MULTIPLE_CHOICE' && q.options && (
+                                                {['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(q.question_type) && q.options && (
                                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                                                        {q.options.map((opt, optIdx) => (
-                                                            <div key={optIdx} className={`px-4 py-3 rounded-xl border flex items-center gap-3 ${q.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-500/5 border-green-200 text-green-700 dark:text-green-400 dark:border-green-500/20' : 'bg-secondary/5 border-transparent text-text-secondary'}`}>
-                                                                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${q.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-500 text-white' : 'bg-secondary/20 text-text-secondary'}`}>
-                                                                    {String.fromCharCode(65 + optIdx)}
-                                                                </span>
-                                                                {opt}
-                                                            </div>
-                                                        ))}
+                                                        {q.options.map((opt, optIdx) => {
+                                                            const letter = String.fromCharCode(65 + optIdx)
+                                                            let isCorrect = false
+                                                            if (q.question_type === 'MULTIPLE_ANSWER') {
+                                                                try { isCorrect = JSON.parse(q.correct_answer || '[]').includes(letter) } catch {}
+                                                            } else if (q.question_type === 'TRUE_FALSE') {
+                                                                isCorrect = q.correct_answer?.toUpperCase() === opt.toUpperCase()
+                                                            } else {
+                                                                isCorrect = q.correct_answer === letter
+                                                            }
+                                                            return (
+                                                                <div key={optIdx} className={`px-4 py-3 rounded-xl border flex items-center gap-3 ${isCorrect ? 'bg-green-500/5 border-green-200 text-green-700 dark:text-green-400 dark:border-green-500/20' : 'bg-secondary/5 border-transparent text-text-secondary'}`}>
+                                                                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isCorrect ? 'bg-green-500 text-white' : 'bg-secondary/20 text-text-secondary'}`}>
+                                                                        {q.question_type === 'TRUE_FALSE' ? (opt === 'Benar' ? '✓' : '✗') : letter}
+                                                                    </span>
+                                                                    {q.question_type === 'TRUE_FALSE' ? opt : opt}
+                                                                </div>
+                                                            )
+                                                        })}
                                                     </div>
                                                 )}
                                             </div>
@@ -1173,22 +1205,21 @@ export default function BankSoalPage() {
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Soal</label>
-                                <div className="flex gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setQuestionForm({ ...questionForm, question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '' })}
-                                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${questionForm.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500 text-white' : 'bg-secondary/10 text-text-main hover:bg-secondary/20'}`}
-                                    >
-                                        Pilihan Ganda
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setQuestionForm({ ...questionForm, question_type: 'ESSAY', options: [], correct_answer: '' })}
-                                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${questionForm.question_type === 'ESSAY' ? 'bg-amber-500 text-white' : 'bg-secondary/10 text-text-main hover:bg-secondary/20'}`}
-                                    >
-                                        Essay
-                                    </button>
-                                </div>
+                                <select
+                                    value={questionForm.question_type}
+                                    onChange={(e) => {
+                                        const newType = e.target.value
+                                        const newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType) ? (questionForm.options?.length ? questionForm.options : ['', '', '', '']) : newType === 'TRUE_FALSE' ? ['Benar', 'Salah'] : []
+                                        setQuestionForm({ ...questionForm, question_type: newType, options: newOpts, correct_answer: '' })
+                                    }}
+                                    className="w-full px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white"
+                                >
+                                    <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
+                                    <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
+                                    <option value="TRUE_FALSE">Benar Salah</option>
+                                    <option value="SHORT_ANSWER">Isian Singkat</option>
+                                    <option value="ESSAY">Essay</option>
+                                </select>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1226,43 +1257,13 @@ export default function BankSoalPage() {
                                 />
                             </div>
 
-                            {questionForm.question_type === 'MULTIPLE_CHOICE' && (
-                                <>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        {(questionForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
-                                            <div key={letter}>
-                                                <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Opsi {letter}</label>
-                                                <input
-                                                    type="text"
-                                                    value={questionForm.options[idx] || ''}
-                                                    onChange={(e) => {
-                                                        const newOptions = [...questionForm.options]
-                                                        newOptions[idx] = e.target.value
-                                                        setQuestionForm({ ...questionForm, options: newOptions })
-                                                    }}
-                                                    placeholder={`Opsi ${letter}`}
-                                                    className="w-full px-3 py-2 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-sm"
-                                                />
-                                            </div>
-                                        )})}
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kunci Jawaban</label>
-                                        <div className="flex gap-2">
-                                            {(questionForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
-                                                <button
-                                                    key={letter}
-                                                    type="button"
-                                                    onClick={() => setQuestionForm({ ...questionForm, correct_answer: letter })}
-                                                    className={`w-12 h-12 rounded-lg font-bold transition-colors ${questionForm.correct_answer === letter ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-main hover:bg-secondary/20'}`}
-                                                >
-                                                    {letter}
-                                                </button>
-                                            )})}
-                                        </div>
-                                    </div>
-                                </>
-                            )}
+                            <QuestionOptionsEditor
+                                questionType={questionForm.question_type}
+                                options={questionForm.options}
+                                correctAnswer={questionForm.correct_answer}
+                                onChange={(opts, correct) => setQuestionForm({ ...questionForm, options: opts || [], correct_answer: correct || '' })}
+                            />
+
 
                             {/* HOTS Claim Toggle */}
                             {aiReviewEnabled && (
@@ -1406,7 +1407,10 @@ export default function BankSoalPage() {
                                                     className="px-3 py-2 bg-white dark:bg-surface-dark border border-secondary/20 rounded-lg text-sm"
                                                 >
                                                     <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
-                                                    <option value="ESSAY">Essay</option>
+                            <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
+                            <option value="TRUE_FALSE">Benar Salah</option>
+                            <option value="SHORT_ANSWER">Isian Singkat</option>
+                            <option value="ESSAY">Essay</option>
                                                 </select>
                                                 <select
                                                     value={pq.difficulty}
@@ -1433,38 +1437,17 @@ export default function BankSoalPage() {
                                                 placeholder="Tulis pertanyaan..."
                                             />
 
-                                            {pq.question_type === 'MULTIPLE_CHOICE' && (
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                                    {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
-                                                        <div key={letter} className="flex items-center gap-2">
-                                                            <input
-                                                                type="radio"
-                                                                name={`correct-${idx}`}
-                                                                checked={pq.correct_answer === letter}
-                                                                onChange={() => {
-                                                                    const newQuestions = [...passageForm.questions]
-                                                                    newQuestions[idx].correct_answer = letter
-                                                                    setPassageForm({ ...passageForm, questions: newQuestions })
-                                                                }}
-                                                                className="text-primary"
-                                                            />
-                                                            <input
-                                                                type="text"
-                                                                value={pq.options[optIdx] || ''}
-                                                                onChange={(e) => {
-                                                                    const newQuestions = [...passageForm.questions]
-                                                                    const newOpts = [...pq.options]
-                                                                    newOpts[optIdx] = e.target.value
-                                                                    newQuestions[idx].options = newOpts
-                                                                    setPassageForm({ ...passageForm, questions: newQuestions })
-                                                                }}
-                                                                placeholder={`Opsi ${letter}`}
-                                                                className="flex-1 px-2 py-1.5 bg-white dark:bg-surface-dark border border-secondary/20 rounded text-sm"
-                                                            />
-                                                        </div>
-                                                    )})}
-                                                </div>
-                                            )}
+                                            <QuestionOptionsEditor
+                                                questionType={pq.question_type}
+                                                options={pq.options}
+                                                correctAnswer={pq.correct_answer}
+                                                onChange={(opts, correct) => {
+                                                    const newQuestions = [...passageForm.questions]
+                                                    newQuestions[idx].options = opts || []
+                                                    newQuestions[idx].correct_answer = correct || ''
+                                                    setPassageForm({ ...passageForm, questions: newQuestions })
+                                                }}
+                                            />
                                         </div>
                                     ))}
                                 </div>
@@ -1526,10 +1509,13 @@ export default function BankSoalPage() {
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Tipe Soal</label>
                         <select
                             value={editQuestionForm.question_type}
-                            onChange={(e) => setEditQuestionForm({ ...editQuestionForm, question_type: e.target.value as 'ESSAY' | 'MULTIPLE_CHOICE' })}
+                            onChange={(e) => setEditQuestionForm({ ...editQuestionForm, question_type: e.target.value })}
                             className="w-full p-3 border border-secondary/30 rounded-xl bg-secondary/10 text-text-main"
                         >
                             <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
+                            <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
+                            <option value="TRUE_FALSE">Benar Salah</option>
+                            <option value="SHORT_ANSWER">Isian Singkat</option>
                             <option value="ESSAY">Essay</option>
                         </select>
                     </div>
@@ -1566,36 +1552,12 @@ export default function BankSoalPage() {
                             placeholder="Tulis pertanyaan..."
                         />
                     </div>
-                    {editQuestionForm.question_type === 'MULTIPLE_CHOICE' && (
-                        <div className="space-y-2">
-                            <label className="block text-sm font-bold text-text-main dark:text-white">Pilihan Jawaban</label>
-                            {editQuestionForm.options.map((opt, idx) => (
-                                <div key={idx} className="flex items-center gap-2">
-                                    <span className="w-8 h-8 rounded-full bg-secondary/20 flex items-center justify-center font-bold text-sm">
-                                        {String.fromCharCode(65 + idx)}
-                                    </span>
-                                    <input
-                                        type="text"
-                                        value={opt}
-                                        onChange={(e) => {
-                                            const newOpts = [...editQuestionForm.options]
-                                            newOpts[idx] = e.target.value
-                                            setEditQuestionForm({ ...editQuestionForm, options: newOpts })
-                                        }}
-                                        className="flex-1 p-2 border border-secondary/30 rounded-lg bg-secondary/10"
-                                        placeholder={`Pilihan ${String.fromCharCode(65 + idx)}`}
-                                    />
-                                    <input
-                                        type="radio"
-                                        name="editCorrectAnswer"
-                                        checked={editQuestionForm.correct_answer === String.fromCharCode(65 + idx)}
-                                        onChange={() => setEditQuestionForm({ ...editQuestionForm, correct_answer: String.fromCharCode(65 + idx) })}
-                                        className="w-5 h-5"
-                                    />
-                                </div>
-                            ))}
-                        </div>
-                    )}
+                    <QuestionOptionsEditor
+                        questionType={editQuestionForm.question_type}
+                        options={editQuestionForm.options}
+                        correctAnswer={editQuestionForm.correct_answer}
+                        onChange={(opts, correct) => setEditQuestionForm({ ...editQuestionForm, options: opts || [], correct_answer: correct || '' })}
+                    />
                     {/* HOTS Claim Toggle */}
                     {aiReviewEnabled && (
                         <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl">
@@ -1719,13 +1681,16 @@ export default function BankSoalPage() {
                                             value={q.question_type}
                                             onChange={(e) => {
                                                 const newQs = [...editPassageForm.questions]
-                                                newQs[idx].question_type = e.target.value as 'ESSAY' | 'MULTIPLE_CHOICE'
+                                                newQs[idx].question_type = e.target.value
                                                 setEditPassageForm({ ...editPassageForm, questions: newQs })
                                             }}
                                             className="p-2 border border-secondary/30 rounded-lg bg-secondary/10 text-sm"
                                         >
                                             <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
-                                            <option value="ESSAY">Essay</option>
+                            <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
+                            <option value="TRUE_FALSE">Benar Salah</option>
+                            <option value="SHORT_ANSWER">Isian Singkat</option>
+                            <option value="ESSAY">Essay</option>
                                         </select>
                                         <select
                                             value={q.difficulty}
@@ -1750,37 +1715,17 @@ export default function BankSoalPage() {
                                         }}
                                         placeholder="Pertanyaan..."
                                     />
-                                    {q.question_type === 'MULTIPLE_CHOICE' && (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                            {q.options.map((opt, optIdx) => (
-                                                <div key={optIdx} className="flex items-center gap-1">
-                                                    <input
-                                                        type="radio"
-                                                        name={`editPassageQ${idx}`}
-                                                        checked={q.correct_answer === String.fromCharCode(65 + optIdx)}
-                                                        onChange={() => {
-                                                            const newQs = [...editPassageForm.questions]
-                                                            newQs[idx].correct_answer = String.fromCharCode(65 + optIdx)
-                                                            setEditPassageForm({ ...editPassageForm, questions: newQs })
-                                                        }}
-                                                        className="w-4 h-4"
-                                                    />
-                                                    <span className="text-xs font-bold">{String.fromCharCode(65 + optIdx)}.</span>
-                                                    <input
-                                                        type="text"
-                                                        value={opt}
-                                                        onChange={(e) => {
-                                                            const newQs = [...editPassageForm.questions]
-                                                            newQs[idx].options[optIdx] = e.target.value
-                                                            setEditPassageForm({ ...editPassageForm, questions: newQs })
-                                                        }}
-                                                        className="flex-1 p-1 border border-secondary/30 rounded text-xs bg-white dark:bg-surface-dark"
-                                                        placeholder={`Pilihan ${String.fromCharCode(65 + optIdx)}`}
-                                                    />
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
+                                    <QuestionOptionsEditor
+                                        questionType={q.question_type}
+                                        options={q.options}
+                                        correctAnswer={q.correct_answer}
+                                        onChange={(opts, correct) => {
+                                            const newQs = [...editPassageForm.questions]
+                                            newQs[idx].options = opts || []
+                                            newQs[idx].correct_answer = correct || ''
+                                            setEditPassageForm({ ...editPassageForm, questions: newQs })
+                                        }}
+                                    />
                                     {/* HOTS Claim Toggle for Passage Question */}
                                     {aiReviewEnabled && (
                                         <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl mt-3">

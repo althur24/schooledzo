@@ -308,7 +308,10 @@ export default function AdminBankSoalPage() {
                                                 {getStatusBadge(item.status)}
                                                 {getDifficultyBadge(item.difficulty)}
                                                 <span className="px-1.5 py-0.5 text-xs rounded bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 font-medium">
-                                                    {item.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
+                                                    {item.question_type === 'MULTIPLE_CHOICE' ? 'PG' : 
+                                                     item.question_type === 'MULTIPLE_ANSWER' ? 'GK' :
+                                                     item.question_type === 'TRUE_FALSE' ? 'BS' :
+                                                     item.question_type === 'SHORT_ANSWER' ? 'IS' : 'Esai'}
                                                 </span>
                                                 {item.teacher_hots_claim && (
                                                     <span className="px-1.5 py-0.5 text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 rounded font-medium">
@@ -344,10 +347,18 @@ export default function AdminBankSoalPage() {
                                                     {item.options && Array.isArray(item.options) && (
                                                         <div className="mt-4 space-y-2 pl-4 border-l-2 border-slate-200 dark:border-zinc-700">
                                                             {item.options.map((opt: string, i: number) => {
-                                                                const isCorrect = String.fromCharCode(65 + i) === item.correct_answer
+                                                                const letter = String.fromCharCode(65 + i)
+                                                                let isCorrect = false
+                                                                if (item.question_type === 'MULTIPLE_ANSWER') {
+                                                                    try { isCorrect = JSON.parse(item.correct_answer || '[]').includes(letter) } catch {}
+                                                                } else if (item.question_type === 'TRUE_FALSE') {
+                                                                    isCorrect = item.correct_answer?.toUpperCase() === opt.toUpperCase()
+                                                                } else {
+                                                                    isCorrect = letter === item.correct_answer
+                                                                }
                                                                 return (
                                                                     <div key={i} className={`flex gap-2 text-sm ${isCorrect ? 'text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-50 dark:bg-emerald-900/10 -ml-4 pl-4 py-1 rounded-r-lg' : 'text-text-main dark:text-zinc-300'}`}>
-                                                                        <span className="flex-shrink-0">{String.fromCharCode(65 + i)}.</span>
+                                                                        <span className="flex-shrink-0">{item.question_type === 'TRUE_FALSE' ? '' : `${letter}.`}</span>
                                                                         <div><SmartText text={opt} /></div>
                                                                         {isCorrect && <span className="flex-shrink-0 ml-auto mr-2">✓ Jawaban Benar</span>}
                                                                     </div>
@@ -356,7 +367,7 @@ export default function AdminBankSoalPage() {
                                                         </div>
                                                     )}
                                                     
-                                                    {item.correct_answer && (!item.options || item.question_type === 'ESSAY') && (
+                                                    {item.correct_answer && (!item.options || item.question_type === 'ESSAY' || item.question_type === 'SHORT_ANSWER') && (
                                                         <div className="mt-4 pt-3 border-t dark:border-zinc-700">
                                                             <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase">Jawaban/Rubrik:</span>
                                                             <div className="text-sm text-emerald-700 dark:text-emerald-300 mt-1 bg-emerald-50 dark:bg-emerald-900/10 p-3 rounded-lg">

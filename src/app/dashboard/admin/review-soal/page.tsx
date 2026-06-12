@@ -531,7 +531,7 @@ export default function ReviewSoalPage() {
                                                             {getStatusBadge(item.status)}
                                                             {getDifficultyBadge(item.difficulty)}
                                                             <span className="px-1.5 py-0.5 text-xs rounded bg-gray-50 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                                                                {item.question_type === 'MULTIPLE_CHOICE' ? 'PG' : 'Essay'}
+                                                                {item.question_type === 'MULTIPLE_CHOICE' ? 'PG' : item.question_type === 'MULTIPLE_ANSWER' ? 'GK' : item.question_type === 'TRUE_FALSE' ? 'BS' : item.question_type === 'SHORT_ANSWER' ? 'IS' : 'Essay'}
                                                             </span>
                                                             {item.teacher_hots_claim && (
                                                                 <span className="px-1.5 py-0.5 text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 rounded font-medium">

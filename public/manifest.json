@@ -1,7 +1,7 @@
 {
-  "name": "Edzo - Education Zone",
-  "short_name": "Edzo",
-  "description": "Next-Generation Learning Management System",
+  "name": "HippoCampus by Edzo",
+  "short_name": "HippoCampus",
+  "description": "Next-Generation Learning Management System by Edzo",
   "theme_color": "#ffffff",
   "background_color": "#ffffff",
   "display": "standalone",

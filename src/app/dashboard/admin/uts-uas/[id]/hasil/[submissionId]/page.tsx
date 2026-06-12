@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import SmartText from '@/components/SmartText'
 import PassageBlock from '@/components/PassageBlock'
+import GradingAnswerDisplay from '@/components/GradingAnswerDisplay'
+import { isAutoGradeable } from '@/lib/questionTypeUtils'
 import { PageHeader, Card, Button } from '@/components/ui'
 
 interface Answer {
@@ -19,7 +21,7 @@ interface Answer {
 interface Question {
     id: string
     question_text: string
-    question_type: 'ESSAY' | 'MULTIPLE_CHOICE'
+    question_type: string
     options: string[] | null
     correct_answer: string | null
     points: number
@@ -177,9 +179,7 @@ export default function AdminUtsUasGradingPage() {
                 {questions.map((q, idx) => {
                     const ans = submission.answers.find(a => a.question_id === q.id)
                     const grade = grades[q.id] || { score: 0 }
-                    const isCorrect = q.question_type === 'MULTIPLE_CHOICE'
-                        ? (ans?.answer === q.correct_answer)
-                        : null
+                    const isCorrect = ans?.is_correct
 
                     return (
                         <Card
@@ -195,8 +195,11 @@ export default function AdminUtsUasGradingPage() {
                                 </span>
                                 <div className="flex-1">
                                     <div className="flex items-center gap-2 mb-2">
-                                        <span className={`px-2 py-0.5 text-xs rounded-full ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'}`}>
-                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
+                                        <span className={`px-2 py-0.5 text-xs rounded-full bg-secondary/10 text-text-main dark:text-white border border-secondary/20`}>
+                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
+                                             q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
+                                             q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
+                                             q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                         </span>
                                         <span className="text-xs text-text-secondary">Max: {q.points} Poin</span>
                                     </div>
@@ -220,30 +223,7 @@ export default function AdminUtsUasGradingPage() {
                                         <SmartText text={q.question_text} className={`text-text-main dark:text-white text-lg mb-4 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
                                     </div>
 
-                                    <div className="bg-secondary/5 dark:bg-black/20 p-4 rounded-xl border border-secondary/20 dark:border-white/10 space-y-3">
-                                        <div>
-                                            <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">Jawaban Siswa</p>
-                                            <p className={`font-medium ${q.question_type === 'MULTIPLE_CHOICE'
-                                                ? (isCorrect ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')
-                                                : 'text-text-main dark:text-white whitespace-pre-wrap'
-                                                }`}>
-                                                {q.question_type === 'MULTIPLE_CHOICE' && q.options
-                                                    ? ans?.answer
-                                                        ? <><span>{ans.answer}. </span><SmartText text={q.options[ans.answer.charCodeAt(0) - 65] || ''} as="span" /></>
-                                                        : '(Tidak menjawab)'
-                                                    : ans?.answer || '(Tidak menjawab)'}
-                                            </p>
-                                        </div>
-
-                                        {q.question_type === 'MULTIPLE_CHOICE' && !isCorrect && (
-                                            <div>
-                                                <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">Kunci Jawaban</p>
-                                                <p className="text-green-600 dark:text-green-400">
-                                                    <span>{q.correct_answer}. </span><SmartText text={q.options?.[(q.correct_answer?.charCodeAt(0) || 65) - 65] || ''} as="span" />
-                                                </p>
-                                            </div>
-                                        )}
-                                    </div>
+                                    <GradingAnswerDisplay question={q as any} answer={ans} />
                                 </div>
                             </div>
 
@@ -258,10 +238,10 @@ export default function AdminUtsUasGradingPage() {
                                                 const val = Math.min(q.points, Math.max(0, parseInt(e.target.value) || 0))
                                                 handleGradeChange(q.id, val)
                                             }}
-                                            className={`w-24 px-3 py-2 bg-secondary/5 dark:bg-white/5 border rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 ${q.question_type === 'ESSAY' ? 'border-amber-500 focus:ring-amber-500' : 'border-secondary/30 dark:border-white/20 focus:ring-primary'} ${q.question_type === 'MULTIPLE_CHOICE' ? 'opacity-50 cursor-not-allowed bg-secondary/10' : ''}`}
+                                            className={`w-24 px-3 py-2 bg-secondary/5 dark:bg-white/5 border rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 ${q.question_type === 'ESSAY' ? 'border-amber-500 focus:ring-amber-500' : 'border-secondary/30 dark:border-white/20 focus:ring-primary'} ${isAutoGradeable(q.question_type) ? 'opacity-50 cursor-not-allowed bg-secondary/10' : ''}`}
                                             max={q.points}
                                             min={0}
-                                            disabled={q.question_type === 'MULTIPLE_CHOICE'}
+                                            disabled={isAutoGradeable(q.question_type)}
                                         />
                                         <span className="text-text-secondary text-sm">/ {q.points}</span>
                                     </div>

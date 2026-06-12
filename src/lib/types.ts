@@ -171,7 +171,7 @@ export interface Assignment {
 export interface Question {
     id: string
     assignment_id: string
-    type: 'PG' | 'ESSAY'
+    type: 'PG' | 'ESSAY' | string // Legacy, use QuestionType instead
     question: string
     options: string[] | null
     correct_answer: string | null
@@ -220,7 +220,7 @@ export interface AuthUser {
 }
 
 // Quiz types
-export type QuestionType = 'ESSAY' | 'MULTIPLE_CHOICE'
+export type QuestionType = 'MULTIPLE_CHOICE' | 'MULTIPLE_ANSWER' | 'TRUE_FALSE' | 'SHORT_ANSWER' | 'ESSAY'
 export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD'
 
 export interface Quiz {
@@ -279,7 +279,7 @@ export interface QuestionBank {
     question_type: QuestionType
     options: string[] | null
     correct_answer: string | null
-    difficulty: Difficulty
+    difficulty: Difficulty | string
     tags: string[] | null
     created_at: string
     subject?: Subject

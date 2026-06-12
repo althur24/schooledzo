@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { parseGeminiJson } from '@/lib/parse-gemini-json'
 import { callGemini } from '@/lib/geminiClient'
+import { normalizeQuestionTypes } from '@/lib/normalizeQuestionTypes'
 
 const PROMPT_TEMPLATE = `Kamu adalah asisten yang membantu guru merapikan soal ujian/kuis.
 
@@ -11,13 +12,18 @@ Tugasmu:
 1. Parse dan identifikasi setiap soal dari teks
 2. Bersihkan format tanpa mengubah ISI soal sedikitpun
 3. Hapus nomor soal di depan (1., 2., dst)
-4. Tentukan tipe: "MULTIPLE_CHOICE" jika ada pilihan A/B/C/D/E, atau "ESSAY" jika tidak
+4. Tentukan tipe soal:
+   - "MULTIPLE_CHOICE" jika ada pilihan A/B/C/D/E dengan SATU jawaban benar
+   - "MULTIPLE_ANSWER" jika ada pilihan A/B/C/D/E dengan LEBIH DARI SATU jawaban benar (soal ganda kompleks/jawaban lebih dari satu)
+   - "TRUE_FALSE" jika soal memiliki pilihan Benar/Salah, B/S, True/False
+   - "SHORT_ANSWER" jika soal memerlukan jawaban singkat (isian, jawaban pendek, 1-3 kata)
+   - "ESSAY" jika soal memerlukan jawaban panjang/uraian
 5. Pisahkan opsi pilihan ganda menjadi array terpisah
 6. Jika ada kunci jawaban, tentukan jawaban yang benar
 7. Tentukan tingkat kesulitan: "EASY", "MEDIUM", atau "HARD"
 8. JIKA ADA TEKS BACAAN (Passage) untuk beberapa soal (Contoh: "Teks untuk soal no 1-3"):
    - Masukkan teks tersebut ke field "passage_text" untuk SETIAP soal yang relevan.
-   - Dalam passage_text, pisahkan setiap paragraf dengan DUA newline (\\n\\n), BUKAN satu newline.
+   - Dalam passage_text, pisahkan setiap paragraf dengan DUA newline (\n\n), BUKAN satu newline.
    - Jangan masukkan teks bacaan ke dalam "question_text".
 
 PENTING — KONTEN KHUSUS:
@@ -25,10 +31,10 @@ PENTING — KONTEN KHUSUS:
 📐 MATEMATIKA:
 - Semua ekspresi matematika HARUS dibungkus dengan tanda dolar: $...$ untuk inline, $$...$$ untuk display/block
 - Contoh: "Tentukan nilai x jika $2x^2 + 3x - 5 = 0$"
-- Contoh: "Hitung $\\\\log_2(x-1) + \\\\log_2(x+3) = 3$"
-- Contoh: "Nilai dari $\\\\int_0^1 (3x^2 - 4x + 2) \\\\, dx$ adalah ..."
-- Contoh: "Jika $\\\\frac{a}{b} = \\\\frac{3}{4}$, maka ..."
-- Gunakan LaTeX untuk simbol: $\\\\sqrt{x}$, $x^2$, $\\\\pi$, $\\\\infty$, $\\\\leq$, $\\\\geq$, $\\\\neq$, $\\\\times$, $\\\\div$, $\\\\pm$
+- Contoh: "Hitung $\\log_2(x-1) + \\log_2(x+3) = 3$"
+- Contoh: "Nilai dari $\\int_0^1 (3x^2 - 4x + 2) \\, dx$ adalah ..."
+- Contoh: "Jika $\\frac{a}{b} = \\frac{3}{4}$, maka ..."
+- Gunakan LaTeX untuk simbol: $\\sqrt{x}$, $x^2$, $\\pi$, $\\infty$, $\\leq$, $\\geq$, $\\neq$, $\\times$, $\\div$, $\\pm$
 - JANGAN tulis simbol matematika mentah tanpa $...$ delimiter
 
 🕌 BAHASA ARAB:
@@ -50,9 +56,9 @@ Format JSON:
   "questions": [
     {
       "question_text": "Teks soal yang sudah rapi",
-      "question_type": "MULTIPLE_CHOICE atau ESSAY",
-      "options": ["opsi 1", "opsi 2", "opsi 3", "opsi 4"] atau null,
-      "correct_answer": "A/B/C/D" atau null,
+      "question_type": "MULTIPLE_CHOICE | MULTIPLE_ANSWER | TRUE_FALSE | SHORT_ANSWER | ESSAY",
+      "options": ["opsi1", "opsi2", "opsi3", "opsi4"] (Gunakan null jika ESSAY / SHORT_ANSWER. Untuk TRUE_FALSE gunakan ["Benar", "Salah"]. Jika PG, pastikan opsi bersih tanpa label A/B/C/D di awalnya),
+      "correct_answer": "A/B/C/D untuk pilihan ganda, [\"A\",\"C\"] untuk ganda kompleks, BENAR/SALAH untuk true-false, atau jawaban singkat untuk short-answer",
       "difficulty": "EASY/MEDIUM/HARD",
       "passage_text": "Teks bacaan panjang jika ada (opsional)"
     }
@@ -88,6 +94,10 @@ export async function POST(request: NextRequest) {
 
         try {
             const parsed = parseGeminiJson(result.data!)
+            // Post-process: fix AI-misclassified question types
+            if (parsed.questions && Array.isArray(parsed.questions)) {
+                parsed.questions = normalizeQuestionTypes(parsed.questions)
+            }
             return NextResponse.json(parsed)
         } catch (parseError: any) {
             console.error('JSON parse error:', parseError?.message, 'Raw:', result.data?.substring(0, 300))

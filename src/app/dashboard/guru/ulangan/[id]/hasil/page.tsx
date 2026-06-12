@@ -75,8 +75,11 @@ export default function GuruExamHasilPage() {
     }
 
     const formatDuration = (start: string, end: string | null) => {
-        if (!end) return '-'
-        const diff = new Date(end).getTime() - new Date(start).getTime()
+        if (!start || !end) return '-'
+        const startTime = new Date(start).getTime()
+        const endTime = new Date(end).getTime()
+        if (isNaN(startTime) || isNaN(endTime)) return '-'
+        const diff = Math.abs(endTime - startTime)
         const mins = Math.floor(diff / 60000)
         const secs = Math.floor((diff % 60000) / 1000)
         return `${mins}m ${secs}s`

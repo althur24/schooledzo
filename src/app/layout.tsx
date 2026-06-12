@@ -3,13 +3,13 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Edzo - Education Zone",
-  description: "Next-Generation Learning Management System",
+  title: "HippoCampus by Edzo",
+  description: "Next-Generation Learning Management System by Edzo",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Edzo - Education Zone",
+    title: "HippoCampus by Edzo",
   },
   formatDetection: {
     telephone: false,

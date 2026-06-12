@@ -96,7 +96,7 @@ export async function PUT(
         await Promise.all(grades.map((grade: any) =>
             supabase
                 .from('official_exam_answers')
-                .update({ points_earned: grade.points_earned })
+                .update({ points_earned: Math.round(grade.points_earned) })
                 .eq('id', grade.answer_id)
                 .eq('submission_id', id)
         ))

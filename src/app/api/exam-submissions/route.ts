@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { gradeAnswer } from '@/lib/questionTypeUtils'
 
 // Helper: send notification to teacher when student submits exam
 async function notifyTeacherExamSubmission(examId: string, studentName: string, isForceSubmit: boolean = false) {
@@ -504,11 +505,18 @@ export async function PUT(request: NextRequest) {
                 let hasEssays = false
                 existingAnswers?.forEach(ans => {
                     const q = Array.isArray(ans.question) ? ans.question[0] : (ans.question as any);
-                    if (ans.answer === q?.correct_answer) {
-                        totalScore += q?.points || 1
-                    }
-                    if (q?.question_type === 'ESSAY') {
-                        hasEssays = true
+                    if (q) {
+                        const graded = gradeAnswer(
+                            q.question_type,
+                            ans.answer,
+                            q.correct_answer,
+                            null,
+                            q.points || 1
+                        )
+                        totalScore += graded.pointsEarned
+                        if (q.question_type === 'ESSAY') {
+                            hasEssays = true
+                        }
                     }
                 })
 
@@ -549,25 +557,38 @@ export async function PUT(request: NextRequest) {
             // BATCH OPTIMIZATION: Fetch ALL exam questions in 1 query instead of N
             const { data: allQuestions } = await supabase
                 .from('exam_questions')
-                .select('id, correct_answer, points, question_type')
+                .select('id, correct_answer, options, points, question_type')
                 .eq('exam_id', currentSubmission.exam_id)
 
             // Build a lookup map for instant grading
-            const questionMap = new Map<string, { correct_answer: string; points: number; question_type: string }>()
+            const questionMap = new Map<string, { correct_answer: string; options: string[] | null; points: number; question_type: string }>()
             allQuestions?.forEach(q => questionMap.set(q.id, q))
 
             // Grade all answers in memory
             const gradedAnswers = answers.map((ans: { question_id: string; answer: string }) => {
                 const question = questionMap.get(ans.question_id)
-                const isCorrect = question?.correct_answer === ans.answer
-                const pointsEarned = isCorrect ? (question?.points || 1) : 0
+                
+                let isCorrect = false
+                let pointsEarned = 0
+
+                if (question) {
+                    const graded = gradeAnswer(
+                        question.question_type,
+                        ans.answer,
+                        question.correct_answer,
+                        question.options,
+                        question.points || 1
+                    )
+                    isCorrect = graded.isCorrect
+                    pointsEarned = graded.pointsEarned
+                }
 
                 return {
                     submission_id,
                     question_id: ans.question_id,
                     answer: ans.answer,
                     is_correct: isCorrect,
-                    points_earned: pointsEarned
+                    points_earned: Math.round(pointsEarned)
                 }
             })
 

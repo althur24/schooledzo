@@ -7,7 +7,12 @@ const OCR_PROMPT = `Analisis gambar soal ujian/kuis ini dan ekstrak semua soal y
 
 Untuk setiap soal, tentukan:
 1. Teks soal lengkap (TANPA nomor soal di depan)
-2. Tipe soal: "MULTIPLE_CHOICE" jika ada pilihan A/B/C/D, atau "ESSAY" jika tidak
+2. Tipe soal:
+   - "MULTIPLE_CHOICE" jika ada pilihan A/B/C/D dengan SATU jawaban benar
+   - "MULTIPLE_ANSWER" jika ada pilihan A/B/C/D dengan LEBIH DARI SATU jawaban benar
+   - "TRUE_FALSE" jika soal memiliki pilihan Benar/Salah, B/S, True/False
+   - "SHORT_ANSWER" jika soal memerlukan jawaban singkat (isian, 1-3 kata)
+   - "ESSAY" jika soal memerlukan jawaban panjang/uraian
 3. Jika pilihan ganda, sertakan opsi-opsinya sebagai array
 4. Jika ada kunci jawaban yang terlihat, sertakan juga
 
@@ -17,9 +22,9 @@ Format JSON:
   "questions": [
     {
       "question_text": "Teks soal lengkap",
-      "question_type": "MULTIPLE_CHOICE atau ESSAY",
-      "options": ["isi opsi 1", "isi opsi 2", "isi opsi 3", "isi opsi 4"] atau null,
-      "correct_answer": "A/B/C/D" atau null
+      "question_type": "MULTIPLE_CHOICE | MULTIPLE_ANSWER | TRUE_FALSE | SHORT_ANSWER | ESSAY",
+      "options": ["opsi1", "opsi2", "opsi3", "opsi4"] (Gunakan null jika ESSAY / SHORT_ANSWER. Untuk TRUE_FALSE gunakan ["Benar", "Salah"]),
+      "correct_answer": "A/B/C/D untuk pilihan ganda, [\\"A\\",\\"C\\"] untuk ganda kompleks, BENAR/SALAH untuk true-false, atau jawaban singkat"
     }
   ]
 }

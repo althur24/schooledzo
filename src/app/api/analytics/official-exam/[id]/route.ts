@@ -215,6 +215,25 @@ export async function GET(
                         isCorrect: q.correct_answer?.toUpperCase() === letter
                     }
                 })
+            } else if (q.question_type === 'TRUE_FALSE') {
+                optionDistribution = ['BENAR', 'SALAH'].map(val => ({
+                    option: val,
+                    count: answersForQ.filter(a => a.answer?.toUpperCase() === val).length,
+                    isCorrect: q.correct_answer?.toUpperCase() === val
+                }))
+            } else if (q.question_type === 'MULTIPLE_ANSWER' && q.options) {
+                optionDistribution = (q.options as string[]).map((_: string, optIdx: number) => {
+                    const letter = String.fromCharCode(65 + optIdx)
+                    let correctLetters: string[] = []
+                    try { correctLetters = JSON.parse(q.correct_answer || '[]') } catch {}
+                    return {
+                        option: letter,
+                        count: answersForQ.filter(a => {
+                            try { return JSON.parse(a.answer || '[]').includes(letter) } catch { return false }
+                        }).length,
+                        isCorrect: correctLetters.includes(letter)
+                    }
+                })
             }
 
             return {
@@ -258,7 +277,7 @@ export async function GET(
                         isCorrect: ans ? (ans.is_correct ?? null) : null,
                         scoreEarned: ans?.points_earned ?? 0,
                         maxPoints: q.points || 0,
-                        questionType: q.question_type as 'MULTIPLE_CHOICE' | 'ESSAY'
+                        questionType: q.question_type
                     }
                 })
             }

@@ -19,6 +19,7 @@
     "@types/katex": "^0.16.8",
     "bcryptjs": "^3.0.3",
     "canvas": "^3.2.1",
+    "docx": "^9.7.1",
     "idb": "^8.0.3",
     "katex": "^0.16.28",
     "lucide-react": "^0.563.0",

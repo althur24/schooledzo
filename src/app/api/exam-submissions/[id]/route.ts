@@ -128,7 +128,7 @@ export async function PUT(
             const updates = answers.map((ans: any) => ({
                 submission_id: id,
                 question_id: ans.question_id,
-                points_earned: ans.score ?? ans.points_earned ?? 0,
+                points_earned: Math.round(ans.score ?? ans.points_earned ?? 0),
                 // Preserve existing fields by including them
                 answer: ans.answer,
                 is_correct: ans.is_correct,

@@ -5,10 +5,11 @@ import { WandSparkles, Sparkles, FileUp, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
+import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 
 interface AIQuestion {
     question_text: string
-    question_type: 'ESSAY' | 'MULTIPLE_CHOICE'
+    question_type: string
     options: string[] | null
     correct_answer: string | null
     points: number
@@ -324,8 +325,11 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                 onChange={(e) => setAiType(e.target.value)}
                                 className="w-full px-3 py-2 bg-secondary/5 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
                             >
-                                <option value="MIXED">Campuran</option>
+                                <option value="MIXED">Campuran (Semua Tipe)</option>
                                 <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
+                                <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
+                                <option value="TRUE_FALSE">Benar Salah</option>
+                                <option value="SHORT_ANSWER">Isian Singkat</option>
                                 <option value="ESSAY">Essay</option>
                             </select>
                         </div>
@@ -415,7 +419,7 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
             {hasResults && (() => {
                 // Validate ALL results since we save everything that isn't deleted
                 const unlabeledCount = results.filter(q => !q.difficulty).length
-                const unansweredMCCount = results.filter(q => q.question_type === 'MULTIPLE_CHOICE' && !q.correct_answer).length
+                const unansweredMCCount = results.filter(q => q.question_type !== 'ESSAY' && !q.correct_answer).length
                 const allValid = unlabeledCount === 0 && unansweredMCCount === 0
 
                 return (
@@ -537,7 +541,7 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                             </div>
                                         )}
 
-                                        <div className={`rounded-lg p-4 border transition-all ${isSelectionMode && selected[idx] ? 'bg-red-50/50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30' : (!q.difficulty || (q.question_type === 'MULTIPLE_CHOICE' && !q.correct_answer)) ? 'bg-red-50/50 dark:bg-red-500/5 border-red-200 dark:border-red-500/30' : 'bg-secondary/10 border-primary/30'}`}>
+                                        <div className={`rounded-lg p-4 border transition-all ${isSelectionMode && selected[idx] ? 'bg-red-50/50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30' : (!q.difficulty || (q.question_type !== 'ESSAY' && !q.correct_answer)) ? 'bg-red-50/50 dark:bg-red-500/5 border-red-200 dark:border-red-500/30' : 'bg-secondary/10 border-primary/30'}`}>
                                             <div className="flex items-start gap-3">
                                                 {isSelectionMode && (
                                                     <input
@@ -550,8 +554,11 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                                 <div className="flex-1 space-y-2">
                                                     <div className="flex items-center gap-2 flex-wrap">
                                                         <span className="text-primary font-bold text-sm">{idx + 1}.</span>
-                                                        <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
-                                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : 'Essay'}
+                                                        <span className={`px-2 py-0.5 text-xs rounded font-bold bg-secondary/10 text-text-main dark:text-white border border-secondary/20`}>
+                                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : 
+                                                             q.question_type === 'MULTIPLE_ANSWER' ? 'GK' : 
+                                                             q.question_type === 'TRUE_FALSE' ? 'BS' : 
+                                                             q.question_type === 'SHORT_ANSWER' ? 'IS' : 'Essay'}
                                                         </span>
 
                                                         {/* Difficulty selector — always visible */}
@@ -633,39 +640,70 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                                                     className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                                                                 />
                                                             </div>
-                                                            {q.options && q.options.map((opt, optIdx) => (
-                                                                <div key={optIdx} className="flex items-center gap-2">
-                                                                    <button
-                                                                        onClick={() => setResults(prev => prev.map((item, i) => i === idx ? { ...item, correct_answer: String.fromCharCode(65 + optIdx) } : item))}
-                                                                        className={`w-6 h-6 rounded-full text-xs font-bold flex-shrink-0 flex items-center justify-center transition-colors ${q.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-500 text-white' : 'bg-secondary/20 text-text-secondary hover:bg-green-100'}`}
-                                                                    >
-                                                                        {String.fromCharCode(65 + optIdx)}
-                                                                    </button>
-                                                                    <input
-                                                                        value={opt}
-                                                                        onChange={(e) => setResults(prev => prev.map((item, i) => i === idx ? { ...item, options: item.options?.map((o, oi) => oi === optIdx ? e.target.value : o) ?? null } : item))}
-                                                                        className="flex-1 px-3 py-1.5 text-sm bg-white dark:bg-zinc-800 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                                                    />
-                                                                </div>
-                                                            ))}
+                                                            <QuestionOptionsEditor
+                                                                questionType={q.question_type}
+                                                                options={q.options}
+                                                                correctAnswer={q.correct_answer}
+                                                                onChange={(opts, correct) => setResults(prev => prev.map((item, i) => i === idx ? { ...item, options: opts, correct_answer: correct } : item))}
+                                                            />
                                                         </div>
                                                     ) : (
                                                         <>
                                                             <SmartText text={q.question_text} className="text-text-main dark:text-white text-sm" />
-                                                            {q.options && (
-                                                                <div className="mt-1 text-xs text-text-secondary dark:text-zinc-400 flex flex-wrap gap-x-3">
-                                                                    {q.options.map((opt, optIdx) => (
-                                                                        <span key={optIdx} className={q.correct_answer === String.fromCharCode(65 + optIdx) ? 'text-green-600 dark:text-green-400 font-bold' : ''}>
-                                                                            {String.fromCharCode(65 + optIdx)}. <SmartText text={opt} as="span" />
-                                                                        </span>
-                                                                    ))}
+                                                            {/* MC / MULTIPLE_ANSWER options */}
+                                                            {q.options && ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(q.question_type) && (() => {
+                                                                let correctSet = new Set<string>()
+                                                                if (q.question_type === 'MULTIPLE_ANSWER') {
+                                                                    try {
+                                                                        const parsed = JSON.parse(q.correct_answer || '[]')
+                                                                        if (Array.isArray(parsed)) correctSet = new Set(parsed)
+                                                                    } catch { /* ignore */ }
+                                                                } else {
+                                                                    if (q.correct_answer) correctSet.add(q.correct_answer)
+                                                                }
+                                                                return (
+                                                                    <div className="mt-1 text-xs text-text-secondary dark:text-zinc-400 flex flex-wrap gap-x-3">
+                                                                        {q.options.map((opt, optIdx) => {
+                                                                            const letter = String.fromCharCode(65 + optIdx)
+                                                                            const isCorrect = correctSet.has(letter)
+                                                                            return (
+                                                                                <span key={optIdx} className={isCorrect ? 'text-green-600 dark:text-green-400 font-bold' : ''}>
+                                                                                    {letter}. <SmartText text={opt} as="span" />
+                                                                                    {isCorrect && ' ✓'}
+                                                                                </span>
+                                                                            )
+                                                                        })}
+                                                                    </div>
+                                                                )
+                                                            })()}
+                                                            {/* TRUE_FALSE display */}
+                                                            {q.question_type === 'TRUE_FALSE' && (
+                                                                <div className="mt-1 text-xs flex gap-3">
+                                                                    <span className={q.correct_answer === 'BENAR' ? 'text-green-600 dark:text-green-400 font-bold' : 'text-text-secondary'}>
+                                                                        Benar {q.correct_answer === 'BENAR' && '✓'}
+                                                                    </span>
+                                                                    <span className={q.correct_answer === 'SALAH' ? 'text-green-600 dark:text-green-400 font-bold' : 'text-text-secondary'}>
+                                                                        Salah {q.correct_answer === 'SALAH' && '✓'}
+                                                                    </span>
                                                                 </div>
+                                                            )}
+                                                            {/* SHORT_ANSWER display */}
+                                                            {q.question_type === 'SHORT_ANSWER' && q.correct_answer && (
+                                                                <p className="mt-1 text-xs text-green-600 dark:text-green-400 font-medium">
+                                                                    Jawaban: {q.correct_answer}
+                                                                </p>
+                                                            )}
+                                                            {/* ESSAY kunci jawaban display */}
+                                                            {q.question_type === 'ESSAY' && q.correct_answer && (
+                                                                <p className="mt-1 text-xs text-amber-600 dark:text-amber-400 italic truncate max-w-md">
+                                                                    Kunci: {q.correct_answer}
+                                                                </p>
                                                             )}
                                                         </>
                                                     )}
-                                                    {/* Missing answer warning for MC */}
-                                                    {q.question_type === 'MULTIPLE_CHOICE' && !q.correct_answer && (
-                                                        <p className="text-xs text-red-500 font-medium">⚠ Kunci jawaban belum dipilih — klik Edit untuk memilih</p>
+                                                    {/* Missing answer warning for auto-gradeable types */}
+                                                    {q.question_type !== 'ESSAY' && !q.correct_answer && (
+                                                        <p className="text-xs text-red-500 font-medium">⚠ Kunci jawaban belum diisi — klik Edit untuk mengisi</p>
                                                     )}
                                                 </div>
                                             </div>
@@ -697,7 +735,7 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                 className="flex-1"
                             >
                                 {saving ? 'Menyimpan...' : !allValid
-                                    ? `⚠ ${[unlabeledCount > 0 && `${unlabeledCount} Belum Dilabeli`, unansweredMCCount > 0 && `${unansweredMCCount} Belum Ada Jawaban`].filter(Boolean).join(', ')}`
+                                    ? `⚠ ${[unlabeledCount > 0 && `${unlabeledCount} Belum Dilabeli`, unansweredMCCount > 0 && `${unansweredMCCount} Soal Belum Ada Jawaban`].filter(Boolean).join(', ')}`
                                     : `Tambahkan ${results.length} Soal ke ${targetLabel}`}
                             </Button>
                         </div>

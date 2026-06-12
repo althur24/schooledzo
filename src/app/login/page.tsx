@@ -55,10 +55,11 @@ function LoginContent() {
                 <div className="relative bg-white/95 dark:bg-surface-dark/95 backdrop-blur-xl border border-white/50 dark:border-white/5 rounded-3xl shadow-2xl shadow-slate-300/50 dark:shadow-none p-8 sm:p-10 ring-1 ring-black/5">
                     {/* Logo/Title */}
                     <div className="text-center mb-8">
-                        <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl overflow-hidden mb-6 shadow-lg shadow-emerald-500/20 ring-4 ring-white dark:ring-surface-dark transform rotate-3 hover:rotate-6 transition-transform">
-                            <img src="/logoedzo.png" alt="EDZO Logo" className="w-full h-full object-cover" />
+                        <div className="inline-flex items-center justify-center w-28 h-28 rounded-full overflow-hidden mb-6 shadow-lg shadow-emerald-500/20 ring-4 ring-white dark:ring-surface-dark hover:scale-110 transition-transform">
+                            <img src="/logoedzo.png" alt="HippoCampus Logo" className="w-full h-full object-cover scale-125" />
                         </div>
-                        <h1 className="text-3xl font-bold text-slate-800 dark:text-white mb-2 tracking-tight">LMS Sekolah</h1>
+                        <h1 className="text-3xl font-bold text-slate-800 dark:text-white mb-1 tracking-tight">HippoCampus</h1>
+                        <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 mb-1">By Education Zone</p>
                         <p className="text-slate-500 dark:text-slate-400">Selamat datang kembali!</p>
                     </div>
 

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
+import { isCorrectOption } from '@/lib/questionTypeUtils'
 // Dynamic imports for heavy components
 const MathTextarea = dynamic(() => import('@/components/MathTextarea'), {
     ssr: false,
@@ -20,13 +21,14 @@ import { plainToHtml } from '@/lib/richTextUtils'
 import { Edit, Discovery, Folder, Plus, Upload, Danger, InfoCircle, TickSquare, CloseSquare, Delete, Document, Search, User } from 'react-iconly'
 import { Loader2, Eye, Brain } from 'lucide-react'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
+import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import { PageHeader, Button, Modal, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 
 interface QuizQuestion {
     id?: string
     question_text: string
-    question_type: 'ESSAY' | 'MULTIPLE_CHOICE'
+    question_type: string
     options: string[] | null
     correct_answer: string | null
     points: number
@@ -260,7 +262,7 @@ export default function EditQuizPage() {
                     .map((q, idx) => ({
                         question_text: q.question_text,
                         question_type: q.question_type,
-                        options: q.question_type === 'MULTIPLE_CHOICE' ? q.options : null,
+                        options: ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(q.question_type) ? q.options : null,
                         correct_answer: q.correct_answer || null,
                         points: q.points || 10,
                         order_index: questions.length + idx,
@@ -297,7 +299,7 @@ export default function EditQuizPage() {
                 body: JSON.stringify({
                     ...manualForm,
                     order_index: questions.length,
-                    options: manualForm.question_type === 'MULTIPLE_CHOICE' ? manualForm.options : null,
+                    options: ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(manualForm.question_type) ? manualForm.options : null,
                     content_format: 'html'
                 })
             })
@@ -889,8 +891,11 @@ export default function EditQuizPage() {
                                     </div>
                                     <div className="flex-1">
                                         <div className="flex items-center gap-2 mb-2">
-                                            <span className={`px-2 py-0.5 text-xs rounded-full ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500/20 text-blue-400' : 'bg-amber-500/20 text-amber-400'}`}>
-                                                {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Essay'}
+                                            <span className={`px-2 py-0.5 text-xs rounded-full bg-secondary/10 text-text-main dark:text-zinc-300`}>
+                                                {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
+                                                 q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
+                                                 q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
+                                                 q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                             </span>
                                             {!isInGroup && q.passage_text && (
                                                 <span className="px-2 py-0.5 text-xs rounded-full bg-teal-500/20 text-teal-400 flex items-center gap-1">
@@ -948,10 +953,10 @@ export default function EditQuizPage() {
                                             </div>
                                         )}
 
-                                        {q.question_type === 'MULTIPLE_CHOICE' && q.options && (
+                                        {['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(q.question_type) && q.options && (
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm" dir={q.text_direction || 'ltr'}>
                                                 {q.options.map((opt, optIdx) => (
-                                                    <div key={optIdx} className={`px-3 py-2 rounded-lg border ${q.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400 border-green-300 dark:border-green-500/30' : 'bg-secondary/5 text-text-main dark:text-zinc-300 border-secondary/20'}`}>
+                                                    <div key={optIdx} className={`px-3 py-2 rounded-lg border ${isCorrectOption(q.question_type, q.correct_answer, optIdx) ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400 border-green-300 dark:border-green-500/30' : 'bg-secondary/5 text-text-main dark:text-zinc-300 border-secondary/20'}`}>
                                                         <span className="font-bold mr-2">{String.fromCharCode(65 + optIdx)}.</span>
                                                         <SmartText text={opt} as="span" />
                                                     </div>
@@ -1089,11 +1094,12 @@ export default function EditQuizPage() {
                                     <select 
                                         value={editForm.question_type} 
                                         onChange={(e) => {
-                                            const type = e.target.value as 'MULTIPLE_CHOICE' | 'ESSAY'
-                                            if (type === 'ESSAY') {
-                                                if (confirm('Beralih ke Essay akan menghapus opsi dan kunci jawaban yang ada saat ini. Lanjutkan?')) {
-                                                    setEditForm({ ...editForm, question_type: type, options: null, correct_answer: null })
-                                                }
+                                            const type = e.target.value
+                                            const needsOptions = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(type)
+                                            if (type === 'ESSAY' || type === 'SHORT_ANSWER') {
+                                                setEditForm({ ...editForm, question_type: type, options: null, correct_answer: type === 'SHORT_ANSWER' ? '' : null })
+                                            } else if (type === 'TRUE_FALSE') {
+                                                setEditForm({ ...editForm, question_type: type, options: ['Benar', 'Salah'], correct_answer: '' })
                                             } else {
                                                 setEditForm({ ...editForm, question_type: type, options: editForm.options || ['', '', '', ''], correct_answer: '' })
                                             }
@@ -1101,6 +1107,9 @@ export default function EditQuizPage() {
                                         className="w-full px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                                     >
                                         <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
+                                        <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
+                                        <option value="TRUE_FALSE">Benar Salah</option>
+                                        <option value="SHORT_ANSWER">Isian Singkat</option>
                                         <option value="ESSAY">Essay</option>
                                     </select>
                                 </div>
@@ -1160,82 +1169,13 @@ export default function EditQuizPage() {
                                 </div>
                             )}
 
-                            {/* Options for Multiple Choice */}
-                            {editForm.question_type === 'MULTIPLE_CHOICE' && editForm.options && (
-                                <div>
-                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pilihan Jawaban</label>
-                                    <div className="space-y-2">
-                                        {editForm.options.map((opt, optIdx) => (
-                                            <div key={optIdx} className="space-y-1">
-                                                <div className="flex items-center gap-2">
-                                                    <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${editForm.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300'}`}>
-                                                        {String.fromCharCode(65 + optIdx)}
-                                                    </span>
-                                                    <div className="flex-1">
-                                                        <MathTextarea
-                                                            value={opt}
-                                                            onChange={(val: string) => {
-                                                                const newOptions = [...editForm.options!]
-                                                                newOptions[optIdx] = val
-                                                                setEditForm({ ...editForm, options: newOptions })
-                                                            }}
-                                                            placeholder={`Pilihan ${String.fromCharCode(65 + optIdx)}`}
-                                                            rows={1}
-                                                        />
-                                                    </div>
-                                                    <button
-                                                        onClick={() => setEditForm({ ...editForm, correct_answer: String.fromCharCode(65 + optIdx) })}
-                                                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex-shrink-0 ${editForm.correct_answer === String.fromCharCode(65 + optIdx) ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300 hover:bg-green-500/20'}`}
-                                                    >
-                                                        {editForm.correct_answer === String.fromCharCode(65 + optIdx) ? '✓ Benar' : 'Set Benar'}
-                                                    </button>
-                                                    {editForm.options!.length > 2 && (
-                                                        <button
-                                                            onClick={() => {
-                                                                const newOptions = [...editForm.options!]
-                                                                newOptions.splice(optIdx, 1)
-                                                                let newCorrectAnswer = editForm.correct_answer
-                                                                if (newCorrectAnswer) {
-                                                                    const charCode = newCorrectAnswer.charCodeAt(0) - 65
-                                                                    if (charCode === optIdx) newCorrectAnswer = ''
-                                                                    else if (charCode > optIdx) newCorrectAnswer = String.fromCharCode(charCode + 65 - 1)
-                                                                }
-                                                                setEditForm({ ...editForm, options: newOptions, correct_answer: newCorrectAnswer })
-                                                            }}
-                                                            className="px-3 py-2 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors flex-shrink-0"
-                                                        >
-                                                            ✕
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))}
-                                        {editForm.options.length < 6 && (
-                                            <button
-                                                onClick={() => setEditForm({ ...editForm, options: [...editForm.options!, ''] })}
-                                                className="mt-2 text-sm text-primary font-bold hover:underline flex items-center gap-1"
-                                            >
-                                                <Plus set="bold" primaryColor="currentColor" size={16} /> Tambah Opsi
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Essay correct answer */}
-                            {editForm.question_type === 'ESSAY' && (
-                                <div>
-                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kunci Jawaban (opsional)</label>
-                                    <textarea
-                                        value={editForm.correct_answer || ''}
-                                        onChange={(e) => setEditForm({ ...editForm, correct_answer: e.target.value })}
-                                        className={`w-full px-4 py-3 bg-secondary/5 border border-secondary/30 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none ${editForm.text_direction === 'rtl' ? 'text-right' : ''}`}
-                                        rows={3}
-                                        dir={editForm.text_direction || 'ltr'}
-                                        placeholder="Kunci jawaban essay..."
+                            <QuestionOptionsEditor
+                                        questionType={editForm.question_type}
+                                        options={editForm.options}
+                                        correctAnswer={editForm.correct_answer}
+                                        onChange={(opts, correct) => setEditForm({ ...editForm, options: opts, correct_answer: correct })}
+                                        textDirection={editForm.text_direction}
                                     />
-                                </div>
-                            )}
 
                             <div className="flex items-center gap-4">
                                 <div className="flex-1">
@@ -1313,25 +1253,33 @@ export default function EditQuizPage() {
                         {/* Type selector: PG / Essay / Passage */}
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Soal</label>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => { setIsPassageMode(false); setManualForm({ ...manualForm, question_type: 'MULTIPLE_CHOICE', options: manualForm.options || ['', '', '', ''], correct_answer: '' }) }}
-                                    className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${!isPassageMode && manualForm.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300 hover:bg-secondary/20'}`}
+                            <div className="flex gap-2 items-center">
+                                <select
+                                    value={isPassageMode ? '__passage__' : manualForm.question_type}
+                                    onChange={(e) => {
+                                        const val = e.target.value
+                                        if (val === '__passage__') {
+                                            setIsPassageMode(true)
+                                        } else {
+                                            setIsPassageMode(false)
+                                            const needsOptions = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(val)
+                                            setManualForm({
+                                                ...manualForm,
+                                                question_type: val,
+                                                options: needsOptions ? (manualForm.options || ['', '', '', '']) : val === 'TRUE_FALSE' ? ['Benar', 'Salah'] : null,
+                                                correct_answer: val === 'ESSAY' ? null : ''
+                                            })
+                                        }
+                                    }}
+                                    className="flex-1 px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                                 >
-                                    Pilihan Ganda
-                                </button>
-                                <button
-                                    onClick={() => { setIsPassageMode(false); setManualForm({ ...manualForm, question_type: 'ESSAY', options: null, correct_answer: null }) }}
-                                    className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${!isPassageMode && manualForm.question_type === 'ESSAY' ? 'bg-amber-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300 hover:bg-secondary/20'}`}
-                                >
-                                    Essay
-                                </button>
-                                <button
-                                    onClick={() => setIsPassageMode(true)}
-                                    className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isPassageMode ? 'bg-teal-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300 hover:bg-secondary/20'}`}
-                                >
-                                    📖 Passage
-                                </button>
+                                    <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
+                                    <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
+                                    <option value="TRUE_FALSE">Benar Salah</option>
+                                    <option value="SHORT_ANSWER">Isian Singkat</option>
+                                    <option value="ESSAY">Essay</option>
+                                    <option value="__passage__">📖 Passage</option>
+                                </select>
                             </div>
                         </div>
 
@@ -1429,18 +1377,23 @@ export default function EditQuizPage() {
                                                             <select
                                                                 value={pq.question_type}
                                                                 onChange={(e) => {
+                                                                    const newType = e.target.value
                                                                     const updated = [...passageQuestions]
+                                                                    const needsOptions = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)
                                                                     updated[pqIdx] = {
                                                                         ...updated[pqIdx],
-                                                                        question_type: e.target.value as 'MULTIPLE_CHOICE' | 'ESSAY',
-                                                                        options: e.target.value === 'MULTIPLE_CHOICE' ? (updated[pqIdx].options || ['', '', '', '']) : null,
-                                                                        correct_answer: e.target.value === 'MULTIPLE_CHOICE' ? '' : null
+                                                                        question_type: newType,
+                                                                        options: needsOptions ? (updated[pqIdx].options || ['', '', '', '']) : newType === 'TRUE_FALSE' ? ['Benar', 'Salah'] : null,
+                                                                        correct_answer: ''
                                                                     }
                                                                     setPassageQuestions(updated)
                                                                 }}
                                                                 className="text-xs px-2 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-secondary/30 text-text-main dark:text-white"
                                                             >
                                                             <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
+                                                            <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
+                                                            <option value="TRUE_FALSE">Benar Salah</option>
+                                                            <option value="SHORT_ANSWER">Isian Singkat</option>
                                                             <option value="ESSAY">Essay</option>
                                                         </select>
                                                         {passageQuestions.length > 1 && (
@@ -1468,81 +1421,19 @@ export default function EditQuizPage() {
                                                     placeholder="Tulis pertanyaan..."
                                                     textDirection={pq.text_direction || 'ltr'}
                                                 />
-                                                {pq.question_type === 'MULTIPLE_CHOICE' && (
-                                                    <div className="mt-3 space-y-2">
-                                                        <div className="space-y-2">
-                                                            {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
-                                                                <div key={letter} className="flex gap-2">
-                                                                    <div className="relative flex-1">
-                                                                        <div className={`absolute ${pq.text_direction === 'rtl' ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-secondary/20 flex items-center justify-center text-xs font-bold text-text-secondary`}>{letter}</div>
-                                                                        <input
-                                                                            dir={pq.text_direction || 'ltr'}
-                                                                            type="text"
-                                                                            value={pq.options?.[optIdx] || ''}
-                                                                            onChange={(e) => {
-                                                                                const updated = [...passageQuestions]
-                                                                                const newOpts = [...(updated[pqIdx].options || ['', '', '', ''])]
-                                                                                newOpts[optIdx] = e.target.value
-                                                                                updated[pqIdx] = { ...updated[pqIdx], options: newOpts }
-                                                                                setPassageQuestions(updated)
-                                                                            }}
-                                                                            className={`w-full ${pq.text_direction === 'rtl' ? 'pr-10 pl-3 text-right' : 'pl-10 pr-3'} py-1.5 bg-white dark:bg-zinc-800 border border-secondary/20 rounded-lg text-sm text-text-main dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500`}
-                                                                            placeholder={`Opsi ${letter}`}
-                                                                        />
-                                                                    </div>
-                                                                    {(pq.options || []).length > 2 && (
-                                                                        <button
-                                                                            onClick={() => {
-                                                                                const updated = [...passageQuestions]
-                                                                                const newOpts = [...(updated[pqIdx].options || ['', '', '', ''])]
-                                                                                newOpts.splice(optIdx, 1)
-                                                                                let newCorrectAnswer = updated[pqIdx].correct_answer
-                                                                                if (newCorrectAnswer) {
-                                                                                    const charCode = newCorrectAnswer.charCodeAt(0) - 65
-                                                                                    if (charCode === optIdx) newCorrectAnswer = ''
-                                                                                    else if (charCode > optIdx) newCorrectAnswer = String.fromCharCode(charCode + 65 - 1)
-                                                                                }
-                                                                                updated[pqIdx] = { ...updated[pqIdx], options: newOpts, correct_answer: newCorrectAnswer }
-                                                                                setPassageQuestions(updated)
-                                                                            }}
-                                                                            className="px-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
-                                                                        >
-                                                                            ✕
-                                                                        </button>
-                                                                    )}
-                                                                </div>
-                                                            )})}
-                                                        </div>
-                                                        {(pq.options || []).length < 6 && (
-                                                            <button
-                                                                onClick={() => {
-                                                                    const updated = [...passageQuestions]
-                                                                    const newOpts = [...(updated[pqIdx].options || ['', '', '', ''])]
-                                                                    newOpts.push('')
-                                                                    updated[pqIdx] = { ...updated[pqIdx], options: newOpts }
-                                                                    setPassageQuestions(updated)
-                                                                }}
-                                                                className="text-xs text-primary font-bold hover:underline flex items-center gap-1 mt-1"
-                                                            >
-                                                                <Plus set="bold" primaryColor="currentColor" size={14} /> Tambah Opsi
-                                                            </button>
-                                                        )}
-                                                        <div className="flex gap-2 mt-2">
-                                                            <span className="text-xs text-text-secondary mt-1">Jawaban:</span>
-                                                            {(pq.options || ['','','','']).map((_, optIdx) => { const letter = String.fromCharCode(65 + optIdx); return (
-                                                                <button
-                                                                    key={letter}
-                                                                    onClick={() => {
-                                                                        const updated = [...passageQuestions]
-                                                                        updated[pqIdx] = { ...updated[pqIdx], correct_answer: letter }
-                                                                        setPassageQuestions(updated)
-                                                                    }}
-                                                                    className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${pq.correct_answer === letter ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}
-                                                                >{letter}</button>
-                                                            )})}
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                <div className="mt-3">
+                                                    <QuestionOptionsEditor
+                                                        questionType={pq.question_type}
+                                                        options={pq.options}
+                                                        correctAnswer={pq.correct_answer}
+                                                        onChange={(newOptions, newCorrectAnswer) => {
+                                                            const updated = [...passageQuestions]
+                                                            updated[pqIdx] = { ...updated[pqIdx], options: newOptions, correct_answer: newCorrectAnswer }
+                                                            setPassageQuestions(updated)
+                                                        }}
+                                                        textDirection={pq.text_direction || 'ltr'}
+                                                    />
+                                                </div>
 
                                                 {/* HOTS Toggle */}
                                                 {aiReviewEnabled && (
@@ -1605,71 +1496,13 @@ export default function EditQuizPage() {
                                     />
                                 </div>
 
-                                {manualForm.question_type === 'MULTIPLE_CHOICE' && (
-                                    <>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                            {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
-                                                <div key={letter} className="flex flex-col">
-                                                    <div className="flex items-center justify-between mb-1">
-                                                        <label className="text-sm font-bold text-text-main dark:text-white">Opsi {letter}</label>
-                                                        {(manualForm.options || []).length > 2 && (
-                                                            <button
-                                                                onClick={() => {
-                                                                    const newOpts = [...(manualForm.options || ['', '', '', ''])]
-                                                                    newOpts.splice(idx, 1)
-                                                                    let newCorrectAnswer = manualForm.correct_answer
-                                                                    if (newCorrectAnswer) {
-                                                                        const charCode = newCorrectAnswer.charCodeAt(0) - 65
-                                                                        if (charCode === idx) newCorrectAnswer = ''
-                                                                        else if (charCode > idx) newCorrectAnswer = String.fromCharCode(charCode + 65 - 1)
-                                                                    }
-                                                                    setManualForm({ ...manualForm, options: newOpts, correct_answer: newCorrectAnswer })
-                                                                }}
-                                                                className="text-xs font-bold text-red-500 hover:text-red-700"
-                                                            >✕ Hapus</button>
-                                                        )}
-                                                    </div>
-                                                    <input
-                                                        dir={manualForm.text_direction || 'ltr'}
-                                                        type="text"
-                                                        value={manualForm.options?.[idx] || ''}
-                                                        onChange={(e) => {
-                                                            const newOptions = [...(manualForm.options || ['', '', '', ''])]
-                                                            newOptions[idx] = e.target.value
-                                                            setManualForm({ ...manualForm, options: newOptions })
-                                                        }}
-                                                        className={`w-full px-3 py-2 bg-secondary/5 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm ${manualForm.text_direction === 'rtl' ? 'text-right' : ''}`}
-                                                        placeholder={`Pilihan ${letter}`}
-                                                    />
-                                                </div>
-                                            )})}
-                                        </div>
-                                        {(manualForm.options || []).length < 6 && (
-                                            <button
-                                                onClick={() => {
-                                                    const newOpts = [...(manualForm.options || ['', '', '', ''])]
-                                                    newOpts.push('')
-                                                    setManualForm({ ...manualForm, options: newOpts })
-                                                }}
-                                                className="mt-2 text-sm text-primary font-bold hover:underline flex items-center gap-1"
-                                            >
-                                                <Plus set="bold" primaryColor="currentColor" size={16} /> Tambah Opsi
-                                            </button>
-                                        )}
-                                        <div>
-                                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kunci Jawaban</label>
-                                            <div className="flex gap-2">
-                                                {(manualForm.options || ['','','','']).map((_, idx) => { const letter = String.fromCharCode(65 + idx); return (
-                                                    <button
-                                                        key={letter}
-                                                        onClick={() => setManualForm({ ...manualForm, correct_answer: letter })}
-                                                        className={`w-12 h-12 rounded-lg font-bold transition-colors ${manualForm.correct_answer === letter ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300 hover:bg-secondary/20'}`}
-                                                    >{letter}</button>
-                                                )})}
-                                            </div>
-                                        </div>
-                                    </>
-                                )}
+                                <QuestionOptionsEditor
+                                    questionType={manualForm.question_type}
+                                    options={manualForm.options}
+                                    correctAnswer={manualForm.correct_answer}
+                                    onChange={(newOptions, newCorrectAnswer) => setManualForm({ ...manualForm, options: newOptions, correct_answer: newCorrectAnswer })}
+                                    textDirection={manualForm.text_direction || 'ltr'}
+                                />
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
@@ -1720,7 +1553,7 @@ export default function EditQuizPage() {
                                     </Button>
                                     <Button
                                         onClick={handleAddManualQuestion}
-                                        disabled={saving || !manualForm.question_text || !manualForm.difficulty || (manualForm.question_type === 'MULTIPLE_CHOICE' && !manualForm.correct_answer)}
+                                        disabled={saving || !manualForm.question_text || !manualForm.difficulty || (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(manualForm.question_type) && !manualForm.correct_answer)}
                                         loading={saving}
                                         className="flex-1"
                                     >
@@ -1865,8 +1698,8 @@ export default function EditQuizPage() {
                                                     />
                                                     <div className="flex-1">
                                                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                                            <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'}`}>
-                                                                {q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : 'Essay'}
+                                                            <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400' : q.question_type === 'MULTIPLE_ANSWER' ? 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400' : q.question_type === 'TRUE_FALSE' ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400' : q.question_type === 'SHORT_ANSWER' ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-700 dark:text-cyan-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'}`}>
+                                                                {q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : q.question_type === 'MULTIPLE_ANSWER' ? 'GK' : q.question_type === 'TRUE_FALSE' ? 'BS' : q.question_type === 'SHORT_ANSWER' ? 'IS' : 'Essay'}
                                                             </span>
                                                             <span className={`px-2 py-0.5 text-xs rounded ${q.difficulty === 'EASY' ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400' :
                                                                 q.difficulty === 'HARD' ? 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'

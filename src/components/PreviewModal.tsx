@@ -3,13 +3,14 @@
 import { useState } from 'react'
 import SmartText from '@/components/SmartText'
 import PassageBlock from '@/components/PassageBlock'
+import StudentAnswerInput from '@/components/StudentAnswerInput'
 import { TimeCircle, TickSquare, CloseSquare } from 'react-iconly'
 import { Eye, X } from 'lucide-react'
 
 interface PreviewQuestion {
     id?: string
     question_text: string
-    question_type: 'ESSAY' | 'MULTIPLE_CHOICE'
+    question_type: string
     options: string[] | null
     points: number
     order_index: number
@@ -156,25 +157,12 @@ export default function PreviewModal({
                                                             </div>
                                                         )}
                                                         <div className="pl-12">
-                                                            {q.question_type === 'MULTIPLE_CHOICE' && q.options ? (
-                                                                <div className="space-y-3" dir={q.text_direction || 'ltr'}>
-                                                                    {q.options.map((opt, optIdx) => {
-                                                                        const letter = String.fromCharCode(65 + optIdx)
-                                                                        const isSelected = answers[qId] === letter
-                                                                        return (
-                                                                            <label key={optIdx} className={`flex items-center gap-3 p-4 rounded-xl cursor-pointer transition-all border ${isSelected ? 'bg-primary/10 border-primary text-primary-dark dark:text-primary-light' : 'bg-gray-50 dark:bg-gray-800/50 border-transparent hover:bg-gray-100 dark:hover:bg-gray-800 text-text-secondary dark:text-slate-300'}`}>
-                                                                                <div className={`w-6 h-6 rounded-full border flex items-center justify-center flex-shrink-0 ${isSelected ? 'border-primary bg-primary text-white' : 'border-gray-400 dark:border-slate-500'}`}>
-                                                                                    {isSelected && <TickSquare set="bold" primaryColor="currentColor" size={16} />}
-                                                                                </div>
-                                                                                <input type="radio" name={`preview-q-${qId}`} value={letter} checked={isSelected} onChange={() => setAnswers({ ...answers, [qId]: letter })} className="hidden" />
-                                                                                <span className={`font-medium ${q.text_direction === 'rtl' ? 'text-right' : ''}`}><span className="mr-2 font-bold opacity-70">{letter}.</span><SmartText text={opt} as="span" /></span>
-                                                                            </label>
-                                                                        )
-                                                                    })}
-                                                                </div>
-                                                            ) : (
-                                                                <textarea dir={q.text_direction || 'ltr'} value={answers[qId] || ''} onChange={(e) => setAnswers({ ...answers, [qId]: e.target.value })} className={`w-full h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} placeholder="Tulis jawaban Anda di sini..." />
-                                                            )}
+                                                            <StudentAnswerInput
+                                                                question={{ id: qId, question_type: q.question_type, options: q.options, text_direction: q.text_direction }}
+                                                                value={answers[qId]}
+                                                                onChange={(val) => setAnswers({ ...answers, [qId]: val })}
+                                                                onChangeImmediate={(val) => setAnswers({ ...answers, [qId]: val })}
+                                                            />
                                                         </div>
                                                     </div>
                                                 )
@@ -206,25 +194,12 @@ export default function PreviewModal({
                                             </div>
                                         )}
                                         <div className="pl-12">
-                                            {q.question_type === 'MULTIPLE_CHOICE' && q.options ? (
-                                                <div className="space-y-3" dir={q.text_direction || 'ltr'}>
-                                                    {q.options.map((opt, optIdx) => {
-                                                        const letter = String.fromCharCode(65 + optIdx)
-                                                        const isSelected = answers[qId] === letter
-                                                        return (
-                                                            <label key={optIdx} className={`flex items-center gap-3 p-4 rounded-xl cursor-pointer transition-all border ${isSelected ? 'bg-primary/10 border-primary text-primary-dark dark:text-primary-light' : 'bg-gray-50 dark:bg-gray-800/50 border-transparent hover:bg-gray-100 dark:hover:bg-gray-800 text-text-secondary dark:text-slate-300'}`}>
-                                                                <div className={`w-6 h-6 rounded-full border flex items-center justify-center flex-shrink-0 ${isSelected ? 'border-primary bg-primary text-white' : 'border-gray-400 dark:border-slate-500'}`}>
-                                                                    {isSelected && <TickSquare set="bold" primaryColor="currentColor" size={16} />}
-                                                                </div>
-                                                                <input type="radio" name={`preview-q-${qId}`} value={letter} checked={isSelected} onChange={() => setAnswers({ ...answers, [qId]: letter })} className="hidden" />
-                                                                <span className={`font-medium ${q.text_direction === 'rtl' ? 'text-right' : ''}`}><span className="mr-2 font-bold opacity-70">{letter}.</span><SmartText text={opt} as="span" /></span>
-                                                            </label>
-                                                        )
-                                                    })}
-                                                </div>
-                                            ) : (
-                                                <textarea dir={q.text_direction || 'ltr'} value={answers[qId] || ''} onChange={(e) => setAnswers({ ...answers, [qId]: e.target.value })} className={`w-full h-32 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} placeholder="Tulis jawaban Anda di sini..." />
-                                            )}
+                                            <StudentAnswerInput
+                                                question={{ id: qId, question_type: q.question_type, options: q.options, text_direction: q.text_direction }}
+                                                value={answers[qId]}
+                                                onChange={(val) => setAnswers({ ...answers, [qId]: val })}
+                                                onChangeImmediate={(val) => setAnswers({ ...answers, [qId]: val })}
+                                            />
                                         </div>
                                     </div>
                                 )

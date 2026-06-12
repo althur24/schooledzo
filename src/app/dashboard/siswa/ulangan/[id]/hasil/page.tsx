@@ -66,9 +66,17 @@ export default function ExamResultPage() {
     }
 
     const formatDuration = (start: string, end: string) => {
-        const diff = new Date(end).getTime() - new Date(start).getTime()
-        const mins = Math.floor(diff / 60000)
+        if (!start) return '-'
+        const startTime = new Date(start).getTime()
+        if (isNaN(startTime)) return '-'
+        // If end is missing, use current time as fallback (exam was already submitted)
+        const endTime = end ? new Date(end).getTime() : Date.now()
+        if (isNaN(endTime)) return '-'
+        const diff = Math.abs(endTime - startTime)
+        const hours = Math.floor(diff / 3600000)
+        const mins = Math.floor((diff % 3600000) / 60000)
         const secs = Math.floor((diff % 60000) / 1000)
+        if (hours > 0) return `${hours} jam ${mins} menit`
         return `${mins} menit ${secs} detik`
     }
 
