@@ -1004,8 +1004,10 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                 } else {
                                                     setIsPassageMode(false);
                                                     const type = val as any;
-                                                    if (type === 'MULTIPLE_CHOICE') setManualForm({ ...manualForm, question_type: type, options: manualForm.options || ['', '', '', ''], correct_answer: '' });
-                                                    else if (type === 'MULTIPLE_ANSWER') setManualForm({ ...manualForm, question_type: type, options: manualForm.options || ['', '', '', ''], correct_answer: '[]' });
+                                                    const prevType = manualForm.question_type;
+                                                    const prevIsMCGK = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType);
+                                                    if (type === 'MULTIPLE_CHOICE') setManualForm({ ...manualForm, question_type: type, options: prevIsMCGK && manualForm.options && manualForm.options.length >= 3 ? manualForm.options : ['', '', '', ''], correct_answer: '' });
+                                                    else if (type === 'MULTIPLE_ANSWER') setManualForm({ ...manualForm, question_type: type, options: prevIsMCGK && manualForm.options && manualForm.options.length >= 3 ? manualForm.options : ['', '', '', ''], correct_answer: '[]' });
                                                     else if (type === 'TRUE_FALSE') setManualForm({ ...manualForm, question_type: type, options: ['Benar', 'Salah'], correct_answer: '' });
                                                     else if (type === 'SHORT_ANSWER') setManualForm({ ...manualForm, question_type: type, options: null, correct_answer: '' });
                                                     else if (type === 'ESSAY') setManualForm({ ...manualForm, question_type: type, options: null, correct_answer: '' });
@@ -1032,7 +1034,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                     <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-2">🎧 Audio Listening (Opsional)</label>
                                     {passageAudioUrl ? (
                                         <div className="p-4 bg-violet-50 dark:bg-violet-900/20 border border-violet-300 dark:border-violet-700 rounded-xl space-y-3">
-                                            <audio controls className="w-full" src={passageAudioUrl} />
+                                            <audio controls controlsList="nodownload" className="w-full" src={passageAudioUrl} />
                                             <button onClick={() => setPassageAudioUrl('')} className="text-sm text-red-500 hover:text-red-700 font-medium">✕ Hapus Audio</button>
                                         </div>
                                     ) : (
@@ -1052,7 +1054,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                 <div className="flex items-center justify-between mb-3">
                                                     <span className="text-sm font-bold text-text-main dark:text-white">Soal {pqIdx + 1}</span>
                                                     <div className="flex items-center gap-2">
-                                                        <select value={pq.question_type} onChange={(e) => { const newType = e.target.value; const u = [...passageQuestions]; const needsOptions = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType); u[pqIdx] = { ...u[pqIdx], question_type: newType, options: needsOptions ? (u[pqIdx].options || ['','','','']) : newType === 'TRUE_FALSE' ? ['Benar', 'Salah'] : null, correct_answer: '' }; setPassageQuestions(u) }} className="text-xs px-2 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-secondary/30 text-text-main dark:text-white">
+                                                        <select value={pq.question_type} onChange={(e) => { const newType = e.target.value; const prevType = pq.question_type; const u = [...passageQuestions]; const needsOptions = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType); const keepOpts = needsOptions && ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && u[pqIdx].options && u[pqIdx].options!.length >= 3; u[pqIdx] = { ...u[pqIdx], question_type: newType, options: needsOptions ? (keepOpts ? u[pqIdx].options : ['','','','']) : newType === 'TRUE_FALSE' ? ['Benar', 'Salah'] : null, correct_answer: '' }; setPassageQuestions(u) }} className="text-xs px-2 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-secondary/30 text-text-main dark:text-white">
                                                             <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
                                                             <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
                                                             <option value="TRUE_FALSE">Benar Salah</option>
@@ -1206,7 +1208,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                 <input type="checkbox" checked={selectedBankIds.has(q.id)} onChange={(e) => { const s = new Set(selectedBankIds); e.target.checked ? s.add(q.id) : s.delete(q.id); setSelectedBankIds(s) }} className="mt-1 w-5 h-5 rounded" />
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2 mb-1">
-                                                        <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-100 text-blue-700' : q.question_type === 'MULTIPLE_ANSWER' ? 'bg-indigo-100 text-indigo-700' : q.question_type === 'TRUE_FALSE' ? 'bg-green-100 text-green-700' : q.question_type === 'SHORT_ANSWER' ? 'bg-cyan-100 text-cyan-700' : 'bg-amber-100 text-amber-700'}`}>{q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : q.question_type === 'MULTIPLE_ANSWER' ? 'GK' : q.question_type === 'TRUE_FALSE' ? 'BS' : q.question_type === 'SHORT_ANSWER' ? 'IS' : 'Essay'}</span>
+                                                        <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-100 text-blue-700' : q.question_type === 'MULTIPLE_ANSWER' ? 'bg-indigo-100 text-indigo-700' : q.question_type === 'TRUE_FALSE' ? 'bg-green-100 text-green-700' : q.question_type === 'SHORT_ANSWER' ? 'bg-cyan-100 text-cyan-700' : 'bg-amber-100 text-amber-700'}`}>{q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}</span>
                                                     </div>
                                                     <SmartText text={q.question_text} className="text-text-main dark:text-white text-sm line-clamp-2" />
                                                 </div>
@@ -1241,7 +1243,9 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                         } else if (type === 'TRUE_FALSE') {
                                             setEditQuestionForm({ ...editQuestionForm, question_type: type, options: ['Benar', 'Salah'], correct_answer: '' })
                                         } else {
-                                            setEditQuestionForm({ ...editQuestionForm, question_type: type, options: editQuestionForm.options || ['', '', '', ''], correct_answer: '' })
+                                            const prevType = editQuestionForm.question_type
+                                            const keepOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && editQuestionForm.options && editQuestionForm.options.length >= 3
+                                            setEditQuestionForm({ ...editQuestionForm, question_type: type, options: keepOpts ? editQuestionForm.options : ['', '', '', ''], correct_answer: '' })
                                         }
                                     }}
                                     className="w-full px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm"

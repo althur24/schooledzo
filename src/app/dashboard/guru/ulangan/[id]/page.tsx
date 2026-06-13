@@ -1405,6 +1405,8 @@ export default function EditExamPage() {
                                             value={editQuestionForm.question_type} 
                                             onChange={(e) => {
                                                 const type = e.target.value as any;
+                                                const prevType = editQuestionForm.question_type;
+                                                const prevIsMCGK = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType);
                                                 let newOptions = editQuestionForm.options;
                                                 let newCorrectAnswer = editQuestionForm.correct_answer;
                                                 
@@ -1415,10 +1417,10 @@ export default function EditExamPage() {
                                                     newOptions = ['Benar', 'Salah'];
                                                     newCorrectAnswer = '';
                                                 } else if (type === 'MULTIPLE_ANSWER') {
-                                                    newOptions = editQuestionForm.options && editQuestionForm.options.length > 0 ? editQuestionForm.options : ['', '', '', ''];
+                                                    newOptions = prevIsMCGK && editQuestionForm.options && editQuestionForm.options.length >= 3 ? editQuestionForm.options : ['', '', '', ''];
                                                     newCorrectAnswer = '[]';
                                                 } else {
-                                                    newOptions = editQuestionForm.options && editQuestionForm.options.length > 0 ? editQuestionForm.options : ['', '', '', ''];
+                                                    newOptions = prevIsMCGK && editQuestionForm.options && editQuestionForm.options.length >= 3 ? editQuestionForm.options : ['', '', '', ''];
                                                     newCorrectAnswer = '';
                                                 }
 
@@ -1585,8 +1587,10 @@ export default function EditExamPage() {
                                             } else {
                                                 setIsPassageMode(false);
                                                 const type = val as any;
-                                                if (type === 'MULTIPLE_CHOICE') setManualForm({ ...manualForm, question_type: type, options: manualForm.options || ['', '', '', ''], correct_answer: '' });
-                                                else if (type === 'MULTIPLE_ANSWER') setManualForm({ ...manualForm, question_type: type, options: manualForm.options || ['', '', '', ''], correct_answer: '[]' });
+                                                const prevType = manualForm.question_type;
+                                                const prevIsMCGK = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType);
+                                                if (type === 'MULTIPLE_CHOICE') setManualForm({ ...manualForm, question_type: type, options: prevIsMCGK && manualForm.options && manualForm.options.length >= 3 ? manualForm.options : ['', '', '', ''], correct_answer: '' });
+                                                else if (type === 'MULTIPLE_ANSWER') setManualForm({ ...manualForm, question_type: type, options: prevIsMCGK && manualForm.options && manualForm.options.length >= 3 ? manualForm.options : ['', '', '', ''], correct_answer: '[]' });
                                                 else if (type === 'TRUE_FALSE') setManualForm({ ...manualForm, question_type: type, options: ['Benar', 'Salah'], correct_answer: '' });
                                                 else if (type === 'SHORT_ANSWER') setManualForm({ ...manualForm, question_type: type, options: null, correct_answer: '' });
                                                 else if (type === 'ESSAY') setManualForm({ ...manualForm, question_type: type, options: null, correct_answer: '' });
@@ -1622,7 +1626,7 @@ export default function EditExamPage() {
                                         <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-2">🎧 Audio Listening (Opsional)</label>
                                         {passageAudioUrl ? (
                                             <div className="p-4 bg-violet-50 dark:bg-violet-900/20 border border-violet-300 dark:border-violet-700 rounded-xl space-y-3">
-                                                <audio controls className="w-full" src={passageAudioUrl} />
+                                                <audio controls controlsList="nodownload" className="w-full" src={passageAudioUrl} />
                                                 <button
                                                     onClick={() => setPassageAudioUrl('')}
                                                     className="text-sm text-red-500 hover:text-red-700 font-medium"
@@ -1698,12 +1702,14 @@ export default function EditExamPage() {
                                                                 value={pq.question_type}
                                                                 onChange={(e) => {
                                                                     const newType = e.target.value
+                                                                    const prevType = pq.question_type
                                                                     const updated = [...passageQuestions]
                                                                     const needsOptions = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)
+                                                                    const keepOpts = needsOptions && ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && updated[pqIdx].options && updated[pqIdx].options!.length >= 3
                                                                     updated[pqIdx] = {
                                                                         ...updated[pqIdx],
                                                                         question_type: newType,
-                                                                        options: needsOptions ? (updated[pqIdx].options || ['', '', '', '']) : newType === 'TRUE_FALSE' ? ['Benar', 'Salah'] : null,
+                                                                        options: needsOptions ? (keepOpts ? updated[pqIdx].options : ['', '', '', '']) : newType === 'TRUE_FALSE' ? ['Benar', 'Salah'] : null,
                                                                         correct_answer: ''
                                                                     }
                                                                     setPassageQuestions(updated)
@@ -2002,7 +2008,7 @@ export default function EditExamPage() {
                                                     <div className="flex-1">
                                                         <div className="flex items-center gap-2 mb-1 flex-wrap">
                                                             <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400' : q.question_type === 'MULTIPLE_ANSWER' ? 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400' : q.question_type === 'TRUE_FALSE' ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400' : q.question_type === 'SHORT_ANSWER' ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-700 dark:text-cyan-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'}`}>
-                                                                {q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : q.question_type === 'MULTIPLE_ANSWER' ? 'GK' : q.question_type === 'TRUE_FALSE' ? 'BS' : q.question_type === 'SHORT_ANSWER' ? 'IS' : 'Essay'}
+                                                                {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                                             </span>
                                                             <span className={`px-2 py-0.5 text-xs rounded ${q.difficulty === 'EASY' ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400' :
                                                                 q.difficulty === 'HARD' ? 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'

@@ -517,7 +517,7 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                             <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-lg">
                                 <span className="text-sm">⚠️</span>
                                 <span className="text-xs text-red-600 dark:text-red-400 font-medium">
-                                    {[unlabeledCount > 0 && `${unlabeledCount} soal belum dilabeli kesulitan`, unansweredMCCount > 0 && `${unansweredMCCount} soal PG belum ada kunci jawaban`].filter(Boolean).join(' • ')}. Lengkapi untuk bisa menyimpan.
+                                    {[unlabeledCount > 0 && `${unlabeledCount} soal belum dilabeli kesulitan`, unansweredMCCount > 0 && `${unansweredMCCount} soal belum ada kunci jawaban`].filter(Boolean).join(' • ')}. Lengkapi untuk bisa menyimpan.
                                 </span>
                             </div>
                         )}
@@ -555,10 +555,10 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                                     <div className="flex items-center gap-2 flex-wrap">
                                                         <span className="text-primary font-bold text-sm">{idx + 1}.</span>
                                                         <span className={`px-2 py-0.5 text-xs rounded font-bold bg-secondary/10 text-text-main dark:text-white border border-secondary/20`}>
-                                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : 
-                                                             q.question_type === 'MULTIPLE_ANSWER' ? 'GK' : 
-                                                             q.question_type === 'TRUE_FALSE' ? 'BS' : 
-                                                             q.question_type === 'SHORT_ANSWER' ? 'IS' : 'Essay'}
+                                                            {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
+                                                             q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
+                                                             q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
+                                                             q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                                         </span>
 
                                                         {/* Difficulty selector — always visible */}
@@ -604,6 +604,34 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                                     {editIdx === idx ? (
                                                         <div className="space-y-2">
                                                             <div className="space-y-1">
+                                                                {/* Question Type Selector in Edit Mode */}
+                                                                <div>
+                                                                    <label className="block text-xs font-bold text-text-secondary mb-1">Tipe Soal</label>
+                                                                    <select
+                                                                        value={q.question_type}
+                                                                        onChange={(e) => {
+                                                                            const newType = e.target.value
+                                                                            const prevType = q.question_type
+                                                                            let newOpts: string[] | null = null
+                                                                            let newAnswer: string | null = ''
+                                                                            if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)) {
+                                                                                newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && q.options?.length
+                                                                                    ? q.options
+                                                                                    : ['', '', '', '']
+                                                                            } else if (newType === 'TRUE_FALSE') {
+                                                                                newOpts = ['Benar', 'Salah']
+                                                                            }
+                                                                            setResults(prev => prev.map((item, i) => i === idx ? { ...item, question_type: newType, options: newOpts, correct_answer: newAnswer } : item))
+                                                                        }}
+                                                                        className="w-full px-3 py-1.5 text-sm bg-white dark:bg-zinc-800 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                    >
+                                                                        <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
+                                                                        <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
+                                                                        <option value="TRUE_FALSE">Benar Salah</option>
+                                                                        <option value="SHORT_ANSWER">Isian Singkat</option>
+                                                                        <option value="ESSAY">Essay</option>
+                                                                    </select>
+                                                                </div>
                                                                 {/* Passage Editor in Edit Mode */}
                                                                 {q.passage_text && (
                                                                     <div className="text-xs text-text-secondary">

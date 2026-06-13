@@ -250,7 +250,29 @@ export default function BankSoalPage() {
         }
     }
 
+    // Helper to strip HTML tags for validation (RichTextEditor may output <p></p> for empty)
+    const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim()
+
     const handleSubmitStandalone = async () => {
+        // Validation
+        if (!stripHtml(questionForm.question_text)) {
+            showToast('Pertanyaan tidak boleh kosong'); return
+        }
+        if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(questionForm.question_type)) {
+            if (!questionForm.options || questionForm.options.filter(o => o.trim()).length < 2) {
+                showToast('Minimal 2 opsi jawaban harus diisi'); return
+            }
+            if (!questionForm.correct_answer) {
+                showToast('Jawaban benar harus dipilih'); return
+            }
+        }
+        if (questionForm.question_type === 'TRUE_FALSE' && !questionForm.correct_answer) {
+            showToast('Jawaban benar harus dipilih'); return
+        }
+        if (questionForm.question_type === 'SHORT_ANSWER' && !questionForm.correct_answer.trim()) {
+            showToast('Jawaban benar harus diisi'); return
+        }
+
         setSaving(true)
         try {
             await fetch('/api/question-bank', {
@@ -260,6 +282,7 @@ export default function BankSoalPage() {
             })
             await fetchData()
             handleCloseModal()
+            showToast('Soal berhasil ditambahkan!', 'success')
         } catch (error) {
             console.error('Error:', error)
             showToast('Gagal menyimpan soal')
@@ -269,6 +292,32 @@ export default function BankSoalPage() {
     }
 
     const handleSubmitPassage = async () => {
+        // Validation
+        if (!passageForm.passage_text.trim() && !passageForm.audio_url) {
+            showToast('Teks bacaan atau audio harus diisi'); return
+        }
+        const filledQuestions = passageForm.questions.filter(q => stripHtml(q.question_text))
+        if (filledQuestions.length === 0) {
+            showToast('Minimal 1 pertanyaan harus diisi'); return
+        }
+        for (let i = 0; i < filledQuestions.length; i++) {
+            const q = filledQuestions[i]
+            if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(q.question_type)) {
+                if (!q.options || q.options.filter(o => o.trim()).length < 2) {
+                    showToast(`Soal ${i + 1}: Minimal 2 opsi jawaban harus diisi`); return
+                }
+                if (!q.correct_answer) {
+                    showToast(`Soal ${i + 1}: Jawaban benar harus dipilih`); return
+                }
+            }
+            if (q.question_type === 'TRUE_FALSE' && !q.correct_answer) {
+                showToast(`Soal ${i + 1}: Jawaban benar harus dipilih`); return
+            }
+            if (q.question_type === 'SHORT_ANSWER' && !q.correct_answer.trim()) {
+                showToast(`Soal ${i + 1}: Jawaban benar harus diisi`); return
+            }
+        }
+
         setSaving(true)
         try {
             await fetch('/api/passages', {
@@ -278,6 +327,7 @@ export default function BankSoalPage() {
             })
             await fetchData()
             handleCloseModal()
+            showToast('Passage berhasil ditambahkan!', 'success')
         } catch (error) {
             console.error('Error:', error)
             showToast('Gagal menyimpan passage')
@@ -376,6 +426,7 @@ export default function BankSoalPage() {
             await fetchData()
             setShowEditPassageModal(false)
             setEditingPassageId(null)
+            showToast('Passage berhasil diperbarui!', 'success')
         } catch (error) {
             console.error('Error:', error)
             showToast('Gagal menyimpan perubahan')
@@ -453,6 +504,7 @@ export default function BankSoalPage() {
             await fetchData()
             setShowEditQuestionModal(false)
             setEditingQuestionId(null)
+            showToast('Soal berhasil diperbarui!', 'success')
         } catch (error) {
             console.error('Error:', error)
             showToast('Gagal menyimpan perubahan')
@@ -474,6 +526,7 @@ export default function BankSoalPage() {
         if (selectedSubject && p.subject?.id !== selectedSubject) return false
         if (selectedDifficulty && !p.questions?.some(q => q.difficulty === selectedDifficulty)) return false
         if (selectedType && !p.questions?.some(q => q.question_type === selectedType)) return false
+        if (selectedStatus && !p.questions?.some(q => q.status === selectedStatus)) return false
         if (searchQuery) {
             const passageMatch = p.passage_text.toLowerCase().includes(searchQuery.toLowerCase())
             const titleMatch = p.title?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -549,6 +602,45 @@ export default function BankSoalPage() {
         const passagesToExport = filteredPassages.filter(p => selectedPassageIds.has(p.id))
         let questionNumber = 0
 
+        // Helper: render options/answer for any question type
+        const renderOptionsHtml = (q: { question_type: string; options?: string[] | null; correct_answer?: string | null }) => {
+            if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(q.question_type) && q.options) {
+                let correctLetters: string[] = []
+                if (q.question_type === 'MULTIPLE_ANSWER') {
+                    try { correctLetters = JSON.parse(q.correct_answer || '[]') } catch { correctLetters = [] }
+                }
+                return `
+                    <ul style="list-style:none; padding-left:20px; margin:0;">
+                        ${q.options.map((opt, optIdx) => {
+                            const letter = String.fromCharCode(65 + optIdx)
+                            const isCorrect = q.question_type === 'MULTIPLE_ANSWER'
+                                ? correctLetters.includes(letter)
+                                : q.correct_answer === letter
+                            return `
+                                <li style="margin-bottom: 4px; ${isCorrect ? 'font-weight:bold; color:green;' : ''}">
+                                    ${letter}. ${opt}
+                                </li>`
+                        }).join('')}
+                    </ul>`
+            }
+            if (q.question_type === 'TRUE_FALSE' && q.options) {
+                return `
+                    <ul style="list-style:none; padding-left:20px; margin:0;">
+                        ${q.options.map(opt => {
+                            const isCorrect = q.correct_answer?.toUpperCase() === opt.toUpperCase()
+                            return `<li style="margin-bottom: 4px; ${isCorrect ? 'font-weight:bold; color:green;' : ''}">${opt}</li>`
+                        }).join('')}
+                    </ul>`
+            }
+            if (q.question_type === 'SHORT_ANSWER' && q.correct_answer) {
+                return `<p style="margin-top:8px; padding-left:20px;"><strong>Jawaban:</strong> <span style="color:green;">${q.correct_answer}</span></p>`
+            }
+            if (q.question_type === 'ESSAY' && q.correct_answer) {
+                return `<p style="margin-top:8px; padding-left:20px;"><strong>Rubrik:</strong> <span style="color:#555;">${q.correct_answer}</span></p>`
+            }
+            return ''
+        }
+
         const passageHtml = passagesToExport.map(p => `
             <div style="margin-bottom: 32px; page-break-inside: avoid; border: 1px solid #ddd; padding: 16px; border-radius: 8px;">
                 <h3 style="margin-bottom: 8px;">${p.title || 'Bacaan'}</h3>
@@ -557,15 +649,7 @@ export default function BankSoalPage() {
             questionNumber++
             return `<div style="margin-bottom: 12px;">
                         <p style="margin-bottom: 4px;"><strong>${questionNumber}. ${q.question_text}</strong></p>
-                        ${q.question_type === 'MULTIPLE_CHOICE' && q.options ? `
-                            <ul style="list-style:none; padding-left:20px; margin:0;">
-                                ${q.options.map((opt, optIdx) => `
-                                    <li style="margin-bottom: 4px; ${q.correct_answer === String.fromCharCode(65 + optIdx) ? 'font-weight:bold; color:green;' : ''}">
-                                        ${String.fromCharCode(65 + optIdx)}. ${opt}
-                                    </li>
-                                `).join('')}
-                            </ul>
-                        ` : ''}
+                        ${renderOptionsHtml(q)}
                     </div>`
         }).join('')}
             </div>
@@ -575,15 +659,7 @@ export default function BankSoalPage() {
             questionNumber++
             return `<div style="margin-bottom: 24px; page-break-inside: avoid;">
                 <p style="margin-bottom: 8px;"><strong>${questionNumber}. ${q.question_text}</strong></p>
-                ${q.question_type === 'MULTIPLE_CHOICE' && q.options ? `
-                    <ul style="list-style:none; padding-left:20px; margin:0;">
-                        ${q.options.map((opt, optIdx) => `
-                            <li style="margin-bottom: 4px; ${q.correct_answer === String.fromCharCode(65 + optIdx) ? 'font-weight:bold; color:green;' : ''}">
-                                ${String.fromCharCode(65 + optIdx)}. ${opt}
-                            </li>
-                        `).join('')}
-                    </ul>
-                ` : ''}
+                ${renderOptionsHtml(q)}
             </div>`
         }).join('')
 
@@ -658,6 +734,7 @@ export default function BankSoalPage() {
                         correct_answer: q.correct_answer || null,
                         difficulty: q.difficulty || 'MEDIUM',
                         subject_id: selectedSubject || null,
+                        teacher_hots_claim: q.teacher_hots_claim || false,
                         content_format: 'html'
                     })))
                 })
@@ -678,6 +755,7 @@ export default function BankSoalPage() {
                             options: q.options || null,
                             correct_answer: q.correct_answer || null,
                             difficulty: q.difficulty || 'MEDIUM',
+                            teacher_hots_claim: q.teacher_hots_claim || false,
                             content_format: 'html'
                         }))
                     })
@@ -913,8 +991,8 @@ export default function BankSoalPage() {
                                         <p className="text-sm text-text-secondary dark:text-zinc-400 mt-2 line-clamp-3">{p.passage_text}</p>
                                         {p.audio_url && (
                                             <div className="mt-2 flex items-center gap-2">
-                                                <span className="px-2 py-0.5 text-xs rounded-full bg-violet-500/20 text-violet-600 dark:text-violet-400 font-medium">🎧 Listening</span>
-                                                <audio controls className="h-8" src={p.audio_url} />
+                                                <span className="px-2 py-0.5 text-xs rounded-full bg-violet-500/20 text-violet-600 dark:text-violet-400 font-medium flex-shrink-0">🎧 Listening</span>
+                                                <audio controls controlsList="nodownload" className="h-9 flex-1 min-w-0" src={p.audio_url} />
                                             </div>
                                         )}
                                     </div>
@@ -930,10 +1008,10 @@ export default function BankSoalPage() {
                                                         <div className="flex-1">
                                                             <div className="flex items-center gap-2 mb-2 flex-wrap">
                                                                 <span className={`px-2 py-0.5 text-xs font-bold rounded-full bg-secondary/10 text-text-main dark:text-white`}>
-                                                                    {q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : 
-                                                                     q.question_type === 'MULTIPLE_ANSWER' ? 'GK' : 
-                                                                     q.question_type === 'TRUE_FALSE' ? 'BS' : 
-                                                                     q.question_type === 'SHORT_ANSWER' ? 'IS' : 'Essay'}
+                                                                    {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
+                                                                     q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
+                                                                     q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
+                                                                     q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                                                 </span>
                                                                 <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${getDifficultyBadge(q.difficulty)}`}>
                                                                     {getDifficultyLabel(q.difficulty)}
@@ -1209,7 +1287,15 @@ export default function BankSoalPage() {
                                     value={questionForm.question_type}
                                     onChange={(e) => {
                                         const newType = e.target.value
-                                        const newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType) ? (questionForm.options?.length ? questionForm.options : ['', '', '', '']) : newType === 'TRUE_FALSE' ? ['Benar', 'Salah'] : []
+                                        const prevType = questionForm.question_type
+                                        let newOpts: string[] = []
+                                        if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)) {
+                                            newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && questionForm.options?.length
+                                                ? questionForm.options
+                                                : ['', '', '', '']
+                                        } else if (newType === 'TRUE_FALSE') {
+                                            newOpts = ['Benar', 'Salah']
+                                        }
                                         setQuestionForm({ ...questionForm, question_type: newType, options: newOpts, correct_answer: '' })
                                     }}
                                     className="w-full px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white"
@@ -1341,7 +1427,7 @@ export default function BankSoalPage() {
                                 <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-2">🎧 Audio Listening (Opsional)</label>
                                 {passageForm.audio_url ? (
                                     <div className="p-3 bg-violet-50 dark:bg-violet-900/20 border border-violet-300 dark:border-violet-700 rounded-xl space-y-2">
-                                        <audio controls className="w-full" src={passageForm.audio_url} />
+                                        <audio controls controlsList="nodownload" className="w-full" src={passageForm.audio_url} />
                                         <button onClick={() => setPassageForm({ ...passageForm, audio_url: '' })} className="text-sm text-red-500 hover:text-red-700 font-medium">✕ Hapus Audio</button>
                                     </div>
                                 ) : (
@@ -1400,8 +1486,18 @@ export default function BankSoalPage() {
                                                 <select
                                                     value={pq.question_type}
                                                     onChange={(e) => {
+                                                        const newType = e.target.value
+                                                        const prevType = pq.question_type
                                                         const newQuestions = [...passageForm.questions]
-                                                        newQuestions[idx].question_type = e.target.value as any
+                                                        let newOpts: string[] = []
+                                                        if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)) {
+                                                            newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && pq.options?.length
+                                                                ? pq.options
+                                                                : ['', '', '', '']
+                                                        } else if (newType === 'TRUE_FALSE') {
+                                                            newOpts = ['Benar', 'Salah']
+                                                        }
+                                                        newQuestions[idx] = { ...newQuestions[idx], question_type: newType as any, options: newOpts, correct_answer: '' }
                                                         setPassageForm({ ...passageForm, questions: newQuestions })
                                                     }}
                                                     className="px-3 py-2 bg-white dark:bg-surface-dark border border-secondary/20 rounded-lg text-sm"
@@ -1448,6 +1544,29 @@ export default function BankSoalPage() {
                                                     setPassageForm({ ...passageForm, questions: newQuestions })
                                                 }}
                                             />
+
+                                            {/* HOTS Claim Toggle */}
+                                            {aiReviewEnabled && (
+                                                <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl mt-2">
+                                                    <label className="relative inline-flex items-center cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={pq.teacher_hots_claim || false}
+                                                            onChange={e => {
+                                                                const newQuestions = [...passageForm.questions]
+                                                                newQuestions[idx] = { ...newQuestions[idx], teacher_hots_claim: e.target.checked }
+                                                                setPassageForm({ ...passageForm, questions: newQuestions })
+                                                            }}
+                                                            className="sr-only peer"
+                                                        />
+                                                        <div className="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                                                    </label>
+                                                    <div>
+                                                        <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">🧠 Klaim HOTS</p>
+                                                        <p className="text-xs text-emerald-600 dark:text-emerald-400">Tandai sebagai Higher-Order Thinking</p>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -1484,7 +1603,7 @@ export default function BankSoalPage() {
                     </div>
                     <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Konfirmasi Export</h3>
                     <p className="text-text-secondary mb-8">
-                        Kamu akan mengexport <span className="text-primary font-bold">{selectedIds.size} soal</span> terpilih ke dalam format Microsoft Word (.doc).
+                        Kamu akan mengexport <span className="text-primary font-bold">{selectedIds.size} soal{selectedPassageIds.size > 0 ? ` + ${selectedPassageIds.size} passage` : ''}</span> terpilih ke dalam format Microsoft Word (.doc).
                     </p>
                     <div className="flex gap-3">
                         <Button variant="secondary" onClick={() => setShowExportConfirm(false)} className="flex-1">
@@ -1509,7 +1628,20 @@ export default function BankSoalPage() {
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Tipe Soal</label>
                         <select
                             value={editQuestionForm.question_type}
-                            onChange={(e) => setEditQuestionForm({ ...editQuestionForm, question_type: e.target.value })}
+                            onChange={(e) => {
+                                const newType = e.target.value
+                                const prevType = editQuestionForm.question_type
+                                let newOpts: string[] = []
+                                if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)) {
+                                    // Keep existing options only if coming from MC/GK
+                                    newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && editQuestionForm.options?.length
+                                        ? editQuestionForm.options
+                                        : ['', '', '', '']
+                                } else if (newType === 'TRUE_FALSE') {
+                                    newOpts = ['Benar', 'Salah']
+                                }
+                                setEditQuestionForm({ ...editQuestionForm, question_type: newType, options: newOpts, correct_answer: '' })
+                            }}
                             className="w-full p-3 border border-secondary/30 rounded-xl bg-secondary/10 text-text-main"
                         >
                             <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
@@ -1618,7 +1750,7 @@ export default function BankSoalPage() {
                         <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-1">🎧 Audio Listening (Opsional)</label>
                         {editPassageForm.audio_url ? (
                             <div className="p-3 bg-violet-50 dark:bg-violet-900/20 border border-violet-300 dark:border-violet-700 rounded-xl space-y-2">
-                                <audio controls className="w-full" src={editPassageForm.audio_url} />
+                                <audio controls controlsList="nodownload" className="w-full" src={editPassageForm.audio_url} />
                                 <button onClick={() => setEditPassageForm({ ...editPassageForm, audio_url: '' })} className="text-sm text-red-500 hover:text-red-700 font-medium">✕ Hapus Audio</button>
                             </div>
                         ) : (
@@ -1680,8 +1812,18 @@ export default function BankSoalPage() {
                                         <select
                                             value={q.question_type}
                                             onChange={(e) => {
+                                                const newType = e.target.value
+                                                const prevType = q.question_type
                                                 const newQs = [...editPassageForm.questions]
-                                                newQs[idx].question_type = e.target.value
+                                                let newOpts: string[] = []
+                                                if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)) {
+                                                    newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && q.options?.length
+                                                        ? q.options
+                                                        : ['', '', '', '']
+                                                } else if (newType === 'TRUE_FALSE') {
+                                                    newOpts = ['Benar', 'Salah']
+                                                }
+                                                newQs[idx] = { ...newQs[idx], question_type: newType, options: newOpts, correct_answer: '' }
                                                 setEditPassageForm({ ...editPassageForm, questions: newQs })
                                             }}
                                             className="p-2 border border-secondary/30 rounded-lg bg-secondary/10 text-sm"

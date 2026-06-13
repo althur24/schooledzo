@@ -1095,13 +1095,14 @@ export default function EditQuizPage() {
                                         value={editForm.question_type} 
                                         onChange={(e) => {
                                             const type = e.target.value
-                                            const needsOptions = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(type)
+                                            const prevType = editForm.question_type
                                             if (type === 'ESSAY' || type === 'SHORT_ANSWER') {
                                                 setEditForm({ ...editForm, question_type: type, options: null, correct_answer: type === 'SHORT_ANSWER' ? '' : null })
                                             } else if (type === 'TRUE_FALSE') {
                                                 setEditForm({ ...editForm, question_type: type, options: ['Benar', 'Salah'], correct_answer: '' })
                                             } else {
-                                                setEditForm({ ...editForm, question_type: type, options: editForm.options || ['', '', '', ''], correct_answer: '' })
+                                                const keepOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && editForm.options && editForm.options.length >= 3
+                                                setEditForm({ ...editForm, question_type: type, options: keepOpts ? editForm.options : ['', '', '', ''], correct_answer: '' })
                                             }
                                         }}
                                         className="w-full px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm"
@@ -1262,11 +1263,13 @@ export default function EditQuizPage() {
                                             setIsPassageMode(true)
                                         } else {
                                             setIsPassageMode(false)
+                                            const prevType = manualForm.question_type
                                             const needsOptions = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(val)
+                                            const keepOpts = needsOptions && ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && manualForm.options && manualForm.options.length >= 3
                                             setManualForm({
                                                 ...manualForm,
                                                 question_type: val,
-                                                options: needsOptions ? (manualForm.options || ['', '', '', '']) : val === 'TRUE_FALSE' ? ['Benar', 'Salah'] : null,
+                                                options: needsOptions ? (keepOpts ? manualForm.options : ['', '', '', '']) : val === 'TRUE_FALSE' ? ['Benar', 'Salah'] : null,
                                                 correct_answer: val === 'ESSAY' ? null : ''
                                             })
                                         }
@@ -1302,7 +1305,7 @@ export default function EditQuizPage() {
                                     <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-2">🎧 Audio Listening (Opsional)</label>
                                     {passageAudioUrl ? (
                                         <div className="p-4 bg-violet-50 dark:bg-violet-900/20 border border-violet-300 dark:border-violet-700 rounded-xl space-y-3">
-                                            <audio controls className="w-full" src={passageAudioUrl} />
+                                            <audio controls controlsList="nodownload" className="w-full" src={passageAudioUrl} />
                                             <button
                                                 onClick={() => setPassageAudioUrl('')}
                                                 className="text-sm text-red-500 hover:text-red-700 font-medium"
@@ -1378,12 +1381,14 @@ export default function EditQuizPage() {
                                                                 value={pq.question_type}
                                                                 onChange={(e) => {
                                                                     const newType = e.target.value
+                                                                    const prevType = pq.question_type
                                                                     const updated = [...passageQuestions]
                                                                     const needsOptions = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)
+                                                                    const keepOpts = needsOptions && ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && updated[pqIdx].options && updated[pqIdx].options!.length >= 3
                                                                     updated[pqIdx] = {
                                                                         ...updated[pqIdx],
                                                                         question_type: newType,
-                                                                        options: needsOptions ? (updated[pqIdx].options || ['', '', '', '']) : newType === 'TRUE_FALSE' ? ['Benar', 'Salah'] : null,
+                                                                        options: needsOptions ? (keepOpts ? updated[pqIdx].options : ['', '', '', '']) : newType === 'TRUE_FALSE' ? ['Benar', 'Salah'] : null,
                                                                         correct_answer: ''
                                                                     }
                                                                     setPassageQuestions(updated)
@@ -1699,7 +1704,7 @@ export default function EditQuizPage() {
                                                     <div className="flex-1">
                                                         <div className="flex items-center gap-2 mb-1 flex-wrap">
                                                             <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400' : q.question_type === 'MULTIPLE_ANSWER' ? 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400' : q.question_type === 'TRUE_FALSE' ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400' : q.question_type === 'SHORT_ANSWER' ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-700 dark:text-cyan-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'}`}>
-                                                                {q.question_type === 'MULTIPLE_CHOICE' ? 'PG' : q.question_type === 'MULTIPLE_ANSWER' ? 'GK' : q.question_type === 'TRUE_FALSE' ? 'BS' : q.question_type === 'SHORT_ANSWER' ? 'IS' : 'Essay'}
+                                                                {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                                             </span>
                                                             <span className={`px-2 py-0.5 text-xs rounded ${q.difficulty === 'EASY' ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400' :
                                                                 q.difficulty === 'HARD' ? 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'

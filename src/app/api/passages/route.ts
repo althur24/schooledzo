@@ -8,6 +8,23 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
+// Helper: extract storage path from public URL and delete audio file
+async function deleteAudioFromStorage(audioUrl: string | null | undefined) {
+    if (!audioUrl) return
+    try {
+        // Extract path from public URL: .../storage/v1/object/public/materials/PATH
+        const marker = '/storage/v1/object/public/materials/'
+        const idx = audioUrl.indexOf(marker)
+        if (idx === -1) return
+        const storagePath = decodeURIComponent(audioUrl.substring(idx + marker.length))
+        if (storagePath) {
+            await supabase.storage.from('materials').remove([storagePath])
+        }
+    } catch (err) {
+        console.error('Error deleting audio from storage:', err)
+    }
+}
+
 // GET - List passages for teacher
 export async function GET(request: NextRequest) {
     try {
@@ -231,13 +248,27 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'Passage ID required' }, { status: 400 })
         }
 
+        // Get existing passage to check old audio URL
+        const { data: existingPassage } = await supabase
+            .from('question_passages')
+            .select('audio_url')
+            .eq('id', id)
+            .single()
+
+        // If audio changed, delete old audio from storage
+        const oldAudioUrl = existingPassage?.audio_url
+        const newAudioUrl = audio_url !== undefined ? (audio_url || null) : undefined
+        if (oldAudioUrl && newAudioUrl !== undefined && oldAudioUrl !== newAudioUrl) {
+            deleteAudioFromStorage(oldAudioUrl)
+        }
+
         // Update passage info
         const { data: passage, error: passageError } = await supabase
             .from('question_passages')
             .update({
                 title,
                 passage_text,
-                audio_url: audio_url !== undefined ? (audio_url || null) : undefined,
+                audio_url: newAudioUrl !== undefined ? newAudioUrl : undefined,
                 subject_id: subject_id || null,
                 updated_at: new Date().toISOString()
             })
@@ -343,6 +374,13 @@ export async function DELETE(request: NextRequest) {
             return NextResponse.json({ error: 'Passage ID required' }, { status: 400 })
         }
 
+        // Get passage first to retrieve audio_url for cleanup
+        const { data: existingPassage } = await supabase
+            .from('question_passages')
+            .select('audio_url')
+            .eq('id', id)
+            .single()
+
         // Delete questions first (or they'll be orphaned if ON DELETE SET NULL)
         await supabase
             .from('question_bank')
@@ -356,6 +394,11 @@ export async function DELETE(request: NextRequest) {
             .eq('id', id)
 
         if (error) throw error
+
+        // Cleanup audio file from storage
+        if (existingPassage?.audio_url) {
+            deleteAudioFromStorage(existingPassage.audio_url)
+        }
 
         return NextResponse.json({ success: true })
     } catch (error) {

@@ -9,6 +9,7 @@ import { ArrowLeft, Filter as Filter2, Search, User, Document as BookOpen, Folde
 import Link from 'next/link'
 import SmartText from '@/components/SmartText'
 import dynamic from 'next/dynamic'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 const AIReviewPanel = dynamic(() => import('@/components/AIReviewPanel'), { ssr: false })
 
 interface BankItem {
@@ -43,7 +44,12 @@ export default function AdminBankSoalPage() {
     const [teacherFilter, setTeacherFilter] = useState<string>('')
     const [subjectFilter, setSubjectFilter] = useState<string>('')
     const [difficultyFilter, setDifficultyFilter] = useState<string>('')
+    const [typeFilter, setTypeFilter] = useState<string>('')
     const [search, setSearch] = useState('')
+    
+    // Pagination
+    const [currentPage, setCurrentPage] = useState(1)
+    const ITEMS_PER_PAGE = 20
     
     // UI State
     const [expandedQuestion, setExpandedQuestion] = useState<string | null>(null)
@@ -79,19 +85,23 @@ export default function AdminBankSoalPage() {
             const res = await fetch(url)
             const data = await res.json()
             
-            // Apply client-side difficulty filter if needed
+            // Apply client-side filters
             let filteredData = data || []
             if (difficultyFilter) {
                 filteredData = filteredData.filter((q: any) => q.difficulty === difficultyFilter)
             }
+            if (typeFilter) {
+                filteredData = filteredData.filter((q: any) => q.question_type === typeFilter)
+            }
             
             setItems(filteredData)
+            setCurrentPage(1)
         } catch (error) {
             console.error('Error fetching question bank:', error)
         } finally {
             setLoading(false)
         }
-    }, [teacherFilter, subjectFilter, sourceFilter, search, difficultyFilter])
+    }, [teacherFilter, subjectFilter, sourceFilter, search, difficultyFilter, typeFilter])
 
     useEffect(() => {
         if (user) {
@@ -146,6 +156,13 @@ export default function AdminBankSoalPage() {
     const manualCount = items.filter(i => i.source_type === 'manual' || !i.source_type).length
     const examCount = items.filter(i => i.source_type === 'exam').length
     const quizCount = items.filter(i => i.source_type === 'quiz').length
+
+    // ---- Pagination ----
+    const totalPages = Math.ceil(totalQuestions / ITEMS_PER_PAGE)
+    const paginatedItems = items.slice(
+        (currentPage - 1) * ITEMS_PER_PAGE,
+        currentPage * ITEMS_PER_PAGE
+    )
 
     return (
         <div className="space-y-6">
@@ -245,6 +262,19 @@ export default function AdminBankSoalPage() {
                             <option value="MEDIUM">Sedang</option>
                             <option value="HARD">Sulit</option>
                         </select>
+
+                        <select
+                            value={typeFilter}
+                            onChange={(e) => setTypeFilter(e.target.value)}
+                            className="px-3 py-2 border rounded-lg bg-white dark:bg-zinc-800 dark:border-zinc-700 dark:text-white text-sm"
+                        >
+                            <option value="">Semua Tipe</option>
+                            <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
+                            <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
+                            <option value="TRUE_FALSE">Benar Salah</option>
+                            <option value="SHORT_ANSWER">Isian Singkat</option>
+                            <option value="ESSAY">Essay</option>
+                        </select>
                     </div>
                 </div>
             </Card>
@@ -268,9 +298,10 @@ export default function AdminBankSoalPage() {
                     </p>
                 </Card>
             ) : (
+                <>
                 <Card className="overflow-hidden">
                     <div className="divide-y dark:divide-zinc-800">
-                        {items.map((item, idx) => (
+                        {paginatedItems.map((item, idx) => (
                             <div key={item.id} className="group">
                                 <div
                                     className="px-5 py-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors"
@@ -279,7 +310,7 @@ export default function AdminBankSoalPage() {
                                     <div className="flex gap-4">
                                         <div className="flex-shrink-0 pt-1">
                                             <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">
-                                                {idx + 1}
+                                                {(currentPage - 1) * ITEMS_PER_PAGE + idx + 1}
                                             </div>
                                         </div>
                                         
@@ -308,10 +339,10 @@ export default function AdminBankSoalPage() {
                                                 {getStatusBadge(item.status)}
                                                 {getDifficultyBadge(item.difficulty)}
                                                 <span className="px-1.5 py-0.5 text-xs rounded bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 font-medium">
-                                                    {item.question_type === 'MULTIPLE_CHOICE' ? 'PG' : 
-                                                     item.question_type === 'MULTIPLE_ANSWER' ? 'GK' :
-                                                     item.question_type === 'TRUE_FALSE' ? 'BS' :
-                                                     item.question_type === 'SHORT_ANSWER' ? 'IS' : 'Esai'}
+                                                    {item.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
+                                                     item.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' :
+                                                     item.question_type === 'TRUE_FALSE' ? 'Benar Salah' :
+                                                     item.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                                 </span>
                                                 {item.teacher_hots_claim && (
                                                     <span className="px-1.5 py-0.5 text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 rounded font-medium">
@@ -392,6 +423,31 @@ export default function AdminBankSoalPage() {
                         ))}
                     </div>
                 </Card>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                    <div className="flex items-center justify-center gap-4 py-4">
+                        <button
+                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={currentPage === 1}
+                            className="p-2 rounded-lg hover:bg-secondary/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronLeft className="w-5 h-5" />
+                        </button>
+                        <span className="text-sm text-text-secondary">
+                            Halaman <span className="font-bold text-text-main dark:text-white">{currentPage}</span> dari <span className="font-bold text-text-main dark:text-white">{totalPages}</span>
+                            <span className="ml-2 text-xs">({totalQuestions} soal)</span>
+                        </span>
+                        <button
+                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                            disabled={currentPage === totalPages}
+                            className="p-2 rounded-lg hover:bg-secondary/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronRight className="w-5 h-5" />
+                        </button>
+                    </div>
+                )}
+                </>
             )}
         </div>
     )
