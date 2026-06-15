@@ -56,9 +56,9 @@ function LoginContent() {
                     {/* Logo/Title */}
                     <div className="text-center mb-8">
                         <div className="inline-flex items-center justify-center w-28 h-28 rounded-full overflow-hidden mb-6 shadow-lg shadow-emerald-500/20 ring-4 ring-white dark:ring-surface-dark hover:scale-110 transition-transform">
-                            <img src="/logoedzo.png" alt="HippoCampus Logo" className="w-full h-full object-cover scale-125" />
+                            <img src="/logoedzo.png" alt="HIPPOCAMPUS Logo" className="w-full h-full object-cover scale-125" />
                         </div>
-                        <h1 className="text-3xl font-bold text-slate-800 dark:text-white mb-1 tracking-tight">HippoCampus</h1>
+                        <h1 className="text-3xl font-bold text-slate-800 dark:text-white mb-1 tracking-tight">HIPPOCAMPUS</h1>
                         <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 mb-1">By Education Zone</p>
                         <p className="text-slate-500 dark:text-slate-400">Selamat datang kembali!</p>
                     </div>

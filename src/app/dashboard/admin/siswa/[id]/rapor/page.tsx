@@ -370,7 +370,7 @@ export default function RaporPage({ params }: { params: Promise<{ id: string }> 
 
                 {/* Print Footer */}
                 <div className="hidden print:block fixed bottom-0 left-0 w-full text-center text-[10px] text-slate-400 p-4 border-t border-slate-200">
-                    Dicetak melalui Sistem Informasi Akademik HippoCampus by Edzo pada {new Date().toLocaleString('id-ID')}
+                    Dicetak melalui Sistem Informasi Akademik HIPPOCAMPUS by Edzo pada {new Date().toLocaleString('id-ID')}
                 </div>
             </div>
         </div>
