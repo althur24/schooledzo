@@ -103,6 +103,7 @@ export default function Sidebar() {
                         <Link
                             key={item.path}
                             href={item.path}
+                            data-tutorial={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
                             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group ${active
                                 ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-emerald-400 font-bold'
                                 : 'text-text-secondary hover:bg-[#F2F7F1] dark:hover:bg-white/5 hover:text-text-main dark:hover:text-white font-medium'

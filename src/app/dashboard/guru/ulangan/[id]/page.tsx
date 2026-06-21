@@ -89,6 +89,33 @@ export default function EditExamPage() {
         }
     }, [highlightId, questions])
 
+    // Tutorial events: open dropdown / switch to manual mode
+    useEffect(() => {
+        const openDropdown = () => setShowAddDropdown(true)
+        const clickManual = () => {
+            setManualForm(prev => ({
+                ...prev,
+                points: 10,
+                question_text: '',
+                options: ['', '', '', ''],
+                correct_answer: '',
+                difficulty: undefined,
+                question_type: 'MULTIPLE_CHOICE',
+            }))
+            setMode('manual')
+            setShowAddDropdown(false)
+        }
+        const backToList = () => setMode('list')
+        window.addEventListener('tutorial:open-exam-dropdown', openDropdown)
+        window.addEventListener('tutorial:click-manual-exam', clickManual)
+        window.addEventListener('tutorial:exam-back-to-list', backToList)
+        return () => {
+            window.removeEventListener('tutorial:open-exam-dropdown', openDropdown)
+            window.removeEventListener('tutorial:click-manual-exam', clickManual)
+            window.removeEventListener('tutorial:exam-back-to-list', backToList)
+        }
+    }, [])
+
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [mode, setMode] = useState<Mode>('list')
@@ -825,6 +852,7 @@ export default function EditExamPage() {
                                 disabled={questions.length === 0 || (aiReviewEnabled && questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned'))}
                                 title={aiReviewEnabled && questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned') ? 'Tunggu proses AI selesai atau perbaiki soal yang dikembalikan sebelum publish' : ''}
                                 className="disabled:opacity-50 disabled:cursor-not-allowed"
+                                data-tutorial="exam-activate-btn"
                                 icon={
                                     <Upload set="bold" primaryColor="currentColor" size={20} />
                                 }
@@ -948,7 +976,7 @@ export default function EditExamPage() {
 
             {/* Mode Tabs */}
             {mode === 'list' && (
-                <div className="relative inline-block">
+                <div className="relative inline-block" data-tutorial="exam-add-section">
                     <button
                         onClick={() => setShowAddDropdown(!showAddDropdown)}
                         className="flex items-center gap-2 px-5 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 active:scale-95 transition-all shadow-md shadow-primary/20 cursor-pointer"
@@ -959,7 +987,7 @@ export default function EditExamPage() {
                     {showAddDropdown && (
                         <>
                             <div className="fixed inset-0 z-40" onClick={() => setShowAddDropdown(false)} />
-                            <div className="absolute left-0 top-full mt-2 z-50 w-64 bg-white rounded-xl shadow-xl border border-gray-200 py-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                            <div className="absolute left-0 top-full mt-2 z-50 w-64 bg-white rounded-xl shadow-xl border border-gray-200 py-2 animate-in fade-in slide-in-from-top-2 duration-200" data-tutorial="exam-add-dropdown">
                                 <button
                                     onClick={() => {
                                         setManualForm({
@@ -973,6 +1001,7 @@ export default function EditExamPage() {
                                         setShowAddDropdown(false)
                                     }}
                                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 transition-colors cursor-pointer"
+                                    data-tutorial="exam-add-manual"
                                 >
                                     <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
                                         <Edit set="bold" primaryColor="currentColor" size={16} />
@@ -985,6 +1014,7 @@ export default function EditExamPage() {
                                 <button
                                     onClick={() => { setMode('clean'); setShowAddDropdown(false) }}
                                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-purple-50 transition-colors cursor-pointer"
+                                    data-tutorial="exam-add-ai"
                                 >
                                     <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
                                         <Discovery set="bold" primaryColor="currentColor" size={16} />
@@ -1016,6 +1046,7 @@ export default function EditExamPage() {
                                         }
                                     }}
                                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 transition-colors cursor-pointer"
+                                    data-tutorial="exam-add-bank"
                                 >
                                     <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
                                         <Folder set="bold" primaryColor="currentColor" size={16} />
@@ -1033,7 +1064,7 @@ export default function EditExamPage() {
 
             {/* Question List */}
             {mode === 'list' && (
-                <div className="space-y-4">
+                <div className="space-y-4" data-tutorial="exam-question-list">
                     {/* "Under Review" Banner */}
                     {exam?.pending_publish && (
                         <div className="mb-6 p-4 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
@@ -1574,7 +1605,7 @@ export default function EditExamPage() {
                         </div>
                         <div className="space-y-6">
                             {/* Type selector: PG / Essay / Passage */}
-                            <div>
+                            <div data-tutorial="exam-manual-type">
                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Soal</label>
                                 <div className="flex gap-2">
                                     <select
@@ -1806,7 +1837,7 @@ export default function EditExamPage() {
                             ) : (
                                 /* === NORMAL MODE (PG / Essay) === */
                                 <>
-                                    <div>
+                                    <div data-tutorial="exam-manual-question">
                                         <div className="flex items-center justify-between mb-2">
                                             <label className="block text-sm font-bold text-text-main dark:text-white">Pertanyaan</label>
                                             <div className="flex gap-1">
@@ -1821,6 +1852,7 @@ export default function EditExamPage() {
                                             textDirection={manualForm.text_direction || 'ltr'}
                                         />
                                     </div>
+                                    <div data-tutorial="exam-manual-options">
                                     <QuestionOptionsEditor
                                         questionType={manualForm.question_type}
                                         options={manualForm.options}
@@ -1828,9 +1860,10 @@ export default function EditExamPage() {
                                         onChange={(newOptions, newCorrectAnswer) => setManualForm({ ...manualForm, options: newOptions, correct_answer: newCorrectAnswer })}
                                         textDirection={manualForm.text_direction || 'ltr'}
                                     />
+                                    </div>
 
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-tutorial="exam-manual-difficulty">
                                         <div>
                                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tingkat Kesulitan <span className="text-red-500">*</span></label>
                                             <select
@@ -1865,7 +1898,7 @@ export default function EditExamPage() {
                                             </label>
                                         </div>
                                     )}
-                                    <div className="flex gap-3 pt-6 border-t border-secondary/10">
+                                    <div className="flex gap-3 pt-6 border-t border-secondary/10" data-tutorial="exam-manual-submit">
                                         <Button variant="secondary" onClick={() => setMode('list')} className="flex-1">Batal</Button>
                                         <Button onClick={handleAddManualQuestion} disabled={saving || !manualForm.question_text || !manualForm.difficulty || (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(manualForm.question_type) && !manualForm.correct_answer)} loading={saving} className="flex-1">{saving ? 'Menyimpan...' : 'Tambah Soal'}</Button>
                                     </div>

@@ -497,10 +497,11 @@ export default function MateriPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {groupedSubjects.map((subject) => (
+                    {groupedSubjects.map((subject, _sIdx) => (
                         <Card
                             key={subject.subjectId}
                             className="group cursor-pointer hover:border-primary/50 transition-all hover:scale-[1.02]"
+                            {...(_sIdx === 0 ? { 'data-tutorial': 'materi-subject-card' } : {})}
                         >
                             <div onClick={() => setSelectedSubject(subject)}>
                                 <div className="flex items-center gap-4 mb-4">

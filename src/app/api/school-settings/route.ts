@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
         const settings = data?.settings || {}
         return NextResponse.json({
             ai_review_enabled: settings.ai_review_enabled !== false, // default true
+            tutorial_enabled: settings.tutorial_enabled === true, // default false
             ...settings
         })
     } catch (error) {
@@ -87,6 +88,7 @@ export async function PUT(request: NextRequest) {
         const settings = data?.settings || {}
         return NextResponse.json({
             ai_review_enabled: settings.ai_review_enabled !== false,
+            tutorial_enabled: settings.tutorial_enabled === true,
             ...settings
         })
     } catch (error) {

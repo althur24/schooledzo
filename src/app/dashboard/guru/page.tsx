@@ -181,7 +181,7 @@ export default function GuruDashboard() {
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
             {/* Header Area */}
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4" data-tutorial="dashboard-header">
                 <div>
                     <h1 className="text-2xl md:text-3xl lg:text-4xl font-black text-text-main dark:text-white tracking-tight">
                         Selamat Datang, <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-emerald-400">{user?.full_name?.split(' ')[0] || 'Guru'}</span>
@@ -258,7 +258,7 @@ export default function GuruDashboard() {
                         </div>
                     )}
 
-                    <div className="flex items-center gap-3 border-b-2 border-primary/20 pb-4">
+                    <div className="flex items-center gap-3 border-b-2 border-primary/20 pb-4" data-tutorial="dashboard-schedule">
                         <div className="p-2 bg-gradient-to-br from-blue-500 to-primary rounded-xl text-white shadow-lg shadow-primary/20">
                             <Clock set="bold" size={24} />
                         </div>
@@ -344,7 +344,7 @@ export default function GuruDashboard() {
                 </div>
 
                 {/* Right Column: Academic Warnings (Tabbed) */}
-                <div className="xl:col-span-5 space-y-6">
+                <div className="xl:col-span-5 space-y-6" data-tutorial="dashboard-warnings">
                     <div className="flex items-center justify-between border-b-2 border-red-500/20 pb-4">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-gradient-to-br from-red-500 to-orange-500 rounded-xl text-white shadow-lg shadow-red-500/20">
@@ -443,7 +443,7 @@ export default function GuruDashboard() {
 
             {/* My Classes Section (Bottom) */}
             {!loading && myClasses.length > 0 && (
-                <div className="space-y-4">
+                <div className="space-y-4" data-tutorial="dashboard-classes">
                     <div className="flex items-center gap-3 border-b-2 border-violet-500/20 pb-4">
                         <div className="p-2 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl text-white shadow-lg shadow-purple-500/20">
                             <Category set="bold" size={24} />

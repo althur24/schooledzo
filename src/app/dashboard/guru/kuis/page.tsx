@@ -79,6 +79,18 @@ export default function GuruKuisPage() {
     const [remedialLoading, setRemedialLoading] = useState(false)
     const [remedialKkm, setRemedialKkm] = useState(75)
 
+    // Tutorial event: open/close create modal when tutorial requests it
+    useEffect(() => {
+        const openHandler = () => setShowCreate(true)
+        const closeHandler = () => setShowCreate(false)
+        window.addEventListener('tutorial:open-quiz-modal', openHandler)
+        window.addEventListener('tutorial:close-quiz-modal', closeHandler)
+        return () => {
+            window.removeEventListener('tutorial:open-quiz-modal', openHandler)
+            window.removeEventListener('tutorial:close-quiz-modal', closeHandler)
+        }
+    }, [])
+
     useEffect(() => {
         fetchData()
     }, [user])
@@ -437,7 +449,7 @@ export default function GuruKuisPage() {
                 subtitle="Buat dan kelola kuis dengan AI"
                 backHref="/dashboard/guru"
                 action={
-                    <Button onClick={() => setShowCreate(true)} className="flex items-center gap-2">
+                    <Button onClick={() => setShowCreate(true)} className="flex items-center gap-2" data-tutorial="quiz-create-btn">
                         <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
                         Buat Kuis
                     </Button>
@@ -484,8 +496,8 @@ export default function GuruKuisPage() {
                 />
             ) : (
                 <div className="grid gap-4">
-                    {quizzes.map((quiz) => (
-                        <Card key={quiz.id} className="p-4">
+                    {quizzes.map((quiz, _qIdx) => (
+                        <Card key={quiz.id} className="p-4" {...(_qIdx === 0 ? { 'data-tutorial': 'quiz-card-first' } : {})}>
                             <div className="flex items-start justify-between">
                                 <div className="flex-1">
                                     <div className="flex items-center gap-2 mb-1">
@@ -548,7 +560,7 @@ export default function GuruKuisPage() {
                                         )
                                     })()}
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2" {...(_qIdx === 0 ? { 'data-tutorial': 'quiz-card-actions' } : {})}>
                                     {quiz.is_active && (
                                         <Link
                                             href={`/dashboard/guru/kuis/${quiz.id}/hasil`}
@@ -599,7 +611,7 @@ export default function GuruKuisPage() {
                 title="Buat Kuis Baru"
             >
                 <div className="space-y-4">
-                    <div>
+                    <div data-tutorial="quiz-form-class">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran</label>
                         <MultiClassSelector
                             teachingAssignments={teachingAssignments}
@@ -609,7 +621,7 @@ export default function GuruKuisPage() {
                             disabled={teachingAssignments.length === 0}
                         />
                     </div>
-                    <div>
+                    <div data-tutorial="quiz-form-title">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Kuis</label>
                         <input
                             type="text"
@@ -619,7 +631,7 @@ export default function GuruKuisPage() {
                             placeholder="Contoh: Kuis Bab 1 - Bilangan Bulat"
                         />
                     </div>
-                    <div>
+                    <div data-tutorial="quiz-form-desc">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Deskripsi (Opsional)</label>
                         <textarea
                             value={form.description}
@@ -629,7 +641,7 @@ export default function GuruKuisPage() {
                         />
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
+                        <div data-tutorial="quiz-form-duration">
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
                             <input
                                 type="number"
@@ -639,7 +651,7 @@ export default function GuruKuisPage() {
                                 min={5}
                             />
                         </div>
-                        <div className="flex items-end">
+                        <div className="flex items-end" data-tutorial="quiz-form-randomize">
                             <label className="flex items-center gap-2 cursor-pointer p-3 bg-secondary/5 border border-secondary/20 rounded-xl w-full">
                                 <input
                                     type="checkbox"
@@ -651,8 +663,7 @@ export default function GuruKuisPage() {
                             </label>
                         </div>
                     </div>
-                    {/* Deadline Toggle */}
-                    <div>
+                    <div data-tutorial="quiz-form-deadline">
                         <label className="flex items-center gap-2 cursor-pointer mb-2">
                             <input
                                 type="checkbox"
@@ -677,7 +688,7 @@ export default function GuruKuisPage() {
                             {hasDeadline ? 'Siswa tidak bisa mengerjakan kuis setelah waktu ini.' : 'Tanpa batas waktu — siswa bisa mengerjakan kapan saja selama kuis aktif.'}
                         </p>
                     </div>
-                    <div className="flex gap-3 pt-4">
+                    <div className="flex gap-3 pt-4" data-tutorial="quiz-form-submit">
                         <Button
                             variant="secondary"
                             onClick={() => setShowCreate(false)}

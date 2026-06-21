@@ -81,6 +81,33 @@ export default function EditQuizPage() {
             }
         }
     }, [highlightId, questions])
+
+    // Tutorial events: open dropdown / switch to manual mode
+    useEffect(() => {
+        const openDropdown = () => setShowAddDropdown(true)
+        const clickManual = () => {
+            setManualForm(prev => ({
+                ...prev,
+                points: 10,
+                question_text: '',
+                options: ['', '', '', ''],
+                correct_answer: '',
+                difficulty: undefined,
+                question_type: 'MULTIPLE_CHOICE',
+            }))
+            setMode('manual')
+            setShowAddDropdown(false)
+        }
+        const backToList = () => setMode('list')
+        window.addEventListener('tutorial:open-quiz-dropdown', openDropdown)
+        window.addEventListener('tutorial:click-manual-quiz', clickManual)
+        window.addEventListener('tutorial:quiz-back-to-list', backToList)
+        return () => {
+            window.removeEventListener('tutorial:open-quiz-dropdown', openDropdown)
+            window.removeEventListener('tutorial:click-manual-quiz', clickManual)
+            window.removeEventListener('tutorial:quiz-back-to-list', backToList)
+        }
+    }, [])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [mode, setMode] = useState<Mode>('list')
@@ -544,6 +571,7 @@ export default function EditQuizPage() {
                                 disabled={questions.length === 0 || (aiReviewEnabled && questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned'))}
                                 title={aiReviewEnabled && questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned') ? 'Tunggu proses AI selesai atau perbaiki soal yang dikembalikan sebelum publish' : ''}
                                 className="bg-gradient-to-r from-green-500 to-emerald-600 text-white flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                data-tutorial="quiz-activate-btn"
                             >
                                 <Upload set="bold" primaryColor="currentColor" size={20} />
                                 Publish Kuis
@@ -654,7 +682,7 @@ export default function EditQuizPage() {
 
             {/* Mode Tabs */}
             {mode === 'list' && (
-                <div className="relative inline-block">
+                <div className="relative inline-block" data-tutorial="quiz-add-section">
                     <button
                         onClick={() => setShowAddDropdown(!showAddDropdown)}
                         className="flex items-center gap-2 px-5 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 active:scale-95 transition-all shadow-md shadow-primary/20 cursor-pointer"
@@ -665,7 +693,7 @@ export default function EditQuizPage() {
                     {showAddDropdown && (
                         <>
                             <div className="fixed inset-0 z-40" onClick={() => setShowAddDropdown(false)} />
-                            <div className="absolute left-0 top-full mt-2 z-50 w-64 bg-white rounded-xl shadow-xl border border-gray-200 py-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                            <div className="absolute left-0 top-full mt-2 z-50 w-64 bg-white rounded-xl shadow-xl border border-gray-200 py-2 animate-in fade-in slide-in-from-top-2 duration-200" data-tutorial="quiz-add-dropdown">
                                 <button
                                     onClick={() => {
                                         setManualForm({
@@ -679,6 +707,7 @@ export default function EditQuizPage() {
                                         setShowAddDropdown(false)
                                     }}
                                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 transition-colors cursor-pointer"
+                                    data-tutorial="quiz-add-manual"
                                 >
                                     <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
                                         <Edit set="bold" primaryColor="currentColor" size={16} />
@@ -691,6 +720,7 @@ export default function EditQuizPage() {
                                 <button
                                     onClick={() => { setMode('clean'); setShowAddDropdown(false) }}
                                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-purple-50 transition-colors cursor-pointer"
+                                    data-tutorial="quiz-add-ai"
                                 >
                                     <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
                                         <Discovery set="bold" primaryColor="currentColor" size={16} />
@@ -722,6 +752,7 @@ export default function EditQuizPage() {
                                         }
                                     }}
                                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 transition-colors cursor-pointer"
+                                    data-tutorial="quiz-add-bank"
                                 >
                                     <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
                                         <Folder set="bold" primaryColor="currentColor" size={16} />
@@ -739,7 +770,7 @@ export default function EditQuizPage() {
 
             {/* Question List */}
             {mode === 'list' && (
-                <div className="space-y-4">
+                <div className="space-y-4" data-tutorial="quiz-question-list">
                     {/* Simplified Selection Toolbar */}
                     {/* "Under Review" Banner */}
                     {quiz?.pending_publish && (
@@ -1252,7 +1283,7 @@ export default function EditQuizPage() {
 
                     <div className="space-y-6">
                         {/* Type selector: PG / Essay / Passage */}
-                        <div>
+                        <div data-tutorial="quiz-manual-type">
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Soal</label>
                             <div className="flex gap-2 items-center">
                                 <select
@@ -1485,7 +1516,7 @@ export default function EditQuizPage() {
                         ) : (
                             /* === NORMAL MODE (PG / Essay) === */
                             <>
-                                <div>
+                                <div data-tutorial="quiz-manual-question">
                                     <div className="flex items-center justify-between mb-2">
                                         <label className="block text-sm font-bold text-text-main dark:text-white">Pertanyaan</label>
                                         <div className="flex gap-1">
@@ -1501,6 +1532,7 @@ export default function EditQuizPage() {
                                     />
                                 </div>
 
+                                <div data-tutorial="quiz-manual-options">
                                 <QuestionOptionsEditor
                                     questionType={manualForm.question_type}
                                     options={manualForm.options}
@@ -1508,8 +1540,9 @@ export default function EditQuizPage() {
                                     onChange={(newOptions, newCorrectAnswer) => setManualForm({ ...manualForm, options: newOptions, correct_answer: newCorrectAnswer })}
                                     textDirection={manualForm.text_direction || 'ltr'}
                                 />
+                                </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-tutorial="quiz-manual-difficulty">
                                     <div>
                                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tingkat Kesulitan <span className="text-red-500">*</span></label>
                                         <select
@@ -1552,7 +1585,7 @@ export default function EditQuizPage() {
                                     </div>
                                 )}
 
-                                <div className="flex gap-3 pt-4">
+                                <div className="flex gap-3 pt-4" data-tutorial="quiz-manual-submit">
                                     <Button variant="secondary" onClick={() => setMode('list')} className="flex-1">
                                         Batal
                                     </Button>

@@ -109,6 +109,22 @@ export default function TugasPage() {
         }
     }
 
+    // Tutorial event: open/close create modal when tutorial requests it
+    useEffect(() => {
+        const openHandler = () => setShowModal(true)
+        const closeHandler = () => {
+            setShowModal(false)
+            setEditingId(null)
+            setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '' })
+        }
+        window.addEventListener('tutorial:open-task-modal', openHandler)
+        window.addEventListener('tutorial:close-task-modal', closeHandler)
+        return () => {
+            window.removeEventListener('tutorial:open-task-modal', openHandler)
+            window.removeEventListener('tutorial:close-task-modal', closeHandler)
+        }
+    }, [])
+
     useEffect(() => {
         if (user) fetchData()
     }, [user])
@@ -303,7 +319,7 @@ export default function TugasPage() {
                 icon={<div className="text-amber-500"><PenTool set="bold" primaryColor="currentColor" size={24} /></div>}
                 backHref="/dashboard/guru"
                 action={
-                    <Button onClick={() => setShowModal(true)} icon={
+                    <Button onClick={() => setShowModal(true)} data-tutorial="task-create-btn" icon={
                         <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
                     }>
                         Buat Tugas
@@ -312,7 +328,7 @@ export default function TugasPage() {
             />
 
             {/* Filters */}
-            <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex flex-col sm:flex-row gap-4" data-tutorial="task-filters">
                 <div className="relative flex-1">
                     <div className="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary">
                         <Search set="light" primaryColor="currentColor" size={20} />
@@ -367,7 +383,7 @@ export default function TugasPage() {
             ) : (
                 <div className="space-y-4">
                     <div className="grid grid-cols-1 gap-4">
-                        {paginatedAssignments.map((assignment) => {
+                        {paginatedAssignments.map((assignment, index) => {
                             const now = new Date()
                             const dueDate = assignment.due_date ? new Date(assignment.due_date) : null
                             const isOverdue = dueDate && dueDate < now
@@ -379,7 +395,7 @@ export default function TugasPage() {
                             const totalStudents = classId ? (studentCounts[classId] || 0) : 0
 
                             return (
-                                <Card key={assignment.id} className={`group transition-all hover:shadow-md ${borderClass}`}>
+                                <Card key={assignment.id} className={`group transition-all hover:shadow-md ${borderClass}`} {...(index === 0 ? { 'data-tutorial': 'task-card-first' } : {})}>
                                     <div className="flex items-start justify-between gap-4">
                                         <div className="flex-1">
                                             <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -430,7 +446,7 @@ export default function TugasPage() {
                                                 )}
                                             </div>
                                         </div>
-                                        <div className="flex flex-col gap-2 min-w-[120px]">
+                                        <div className="flex flex-col gap-2 min-w-[120px]" {...(index === 0 ? { 'data-tutorial': 'task-card-actions' } : {})}>
                                             <Link href={`/dashboard/guru/tugas/${assignment.id}/hasil`}>
                                                 {(assignment.need_grading_count || 0) > 0 ? (
                                                     <Button variant="primary" size="sm" className="w-full justify-center bg-orange-500 hover:bg-orange-600 text-white border-orange-500">
@@ -504,7 +520,7 @@ export default function TugasPage() {
                 title={editingId ? "Edit Tugas" : "Buat Tugas Baru"}
             >
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
+                    <div data-tutorial="task-form-class">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran</label>
                         <MultiClassSelector
                             teachingAssignments={teachingAssignments}
@@ -514,7 +530,7 @@ export default function TugasPage() {
                             disabled={!!editingId}
                         />
                     </div>
-                    <div>
+                    <div data-tutorial="task-form-title">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Tugas</label>
                         <input
                             type="text"
@@ -525,7 +541,7 @@ export default function TugasPage() {
                             required
                         />
                     </div>
-                    <div>
+                    <div data-tutorial="task-form-desc">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Deskripsi (Opsional)</label>
                         <textarea
                             value={formData.description}
@@ -535,7 +551,7 @@ export default function TugasPage() {
                         />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
+                        <div data-tutorial="task-form-type">
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe</label>
                             <div className="relative">
                                 <select
@@ -551,7 +567,7 @@ export default function TugasPage() {
                                 <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary"><ChevronDown set="bold" primaryColor="currentColor" size={20} /></div>
                             </div>
                         </div>
-                        <div>
+                        <div data-tutorial="task-form-deadline">
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Batas Waktu (Deadline)</label>
                             <input
                                 type="datetime-local"
@@ -562,7 +578,7 @@ export default function TugasPage() {
                         </div>
                     </div>
 
-                    <div className="flex gap-3 pt-4 border-t border-secondary/10 mt-4">
+                    <div className="flex gap-3 pt-4 border-t border-secondary/10 mt-4" data-tutorial="task-form-submit">
                         <Button type="button" variant="secondary" onClick={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '' }) }} className="flex-1">
                             Batal
                         </Button>

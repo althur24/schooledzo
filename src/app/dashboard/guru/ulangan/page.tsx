@@ -98,6 +98,18 @@ export default function GuruUlanganPage() {
     const [remedialStartTime, setRemedialStartTime] = useState('')
     const [remedialKkm, setRemedialKkm] = useState(75)
 
+    // Tutorial event: open/close create modal when tutorial requests it
+    useEffect(() => {
+        const openHandler = () => setShowCreate(true)
+        const closeHandler = () => setShowCreate(false)
+        window.addEventListener('tutorial:open-exam-modal', openHandler)
+        window.addEventListener('tutorial:close-exam-modal', closeHandler)
+        return () => {
+            window.removeEventListener('tutorial:open-exam-modal', openHandler)
+            window.removeEventListener('tutorial:close-exam-modal', closeHandler)
+        }
+    }, [])
+
     useEffect(() => {
         fetchData()
     }, [user])
@@ -520,7 +532,7 @@ export default function GuruUlanganPage() {
                 backHref="/dashboard/guru"
                 subtitle="Ulangan harian & ujian UTS/UAS"
                 action={
-                    <Button onClick={() => setShowCreate(true)} icon={
+                    <Button onClick={() => setShowCreate(true)} data-tutorial="exam-create-btn" icon={
                         <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
                     }>
                         Buat Ulangan
@@ -528,7 +540,7 @@ export default function GuruUlanganPage() {
                 }
             />
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4" data-tutorial="exam-feature-cards">
                 <Card padding="p-4" className="bg-gradient-to-br from-purple-500/5 to-purple-600/5 border-purple-200/50">
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-xl bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-purple-600 dark:text-purple-400 shadow-sm">
@@ -929,7 +941,7 @@ export default function GuruUlanganPage() {
                 title="Buat Ulangan Baru"
             >
                 <div className="space-y-4">
-                    <div>
+                    <div data-tutorial="exam-form-class">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran</label>
                         <MultiClassSelector
                             teachingAssignments={teachingAssignments}
@@ -939,7 +951,7 @@ export default function GuruUlanganPage() {
                             disabled={teachingAssignments.length === 0}
                         />
                     </div>
-                    <div>
+                    <div data-tutorial="exam-form-title">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ulangan</label>
                         <input
                             type="text"
@@ -949,7 +961,7 @@ export default function GuruUlanganPage() {
                             placeholder="Contoh: UTS Matematika Bab 1-3"
                         />
                     </div>
-                    <div>
+                    <div data-tutorial="exam-form-desc">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Deskripsi (Opsional)</label>
                         <textarea
                             value={form.description}
@@ -960,7 +972,7 @@ export default function GuruUlanganPage() {
                         />
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
+                        <div data-tutorial="exam-form-start">
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
                             <input
                                 type="datetime-local"
@@ -969,7 +981,7 @@ export default function GuruUlanganPage() {
                                 className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
                             />
                         </div>
-                        <div>
+                        <div data-tutorial="exam-form-duration">
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
                             <input
                                 type="number"
@@ -994,7 +1006,7 @@ export default function GuruUlanganPage() {
                             </span>
                         </div>
                     )}
-                    <div>
+                    <div data-tutorial="exam-form-violations">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran (auto-submit)</label>
                         <input
                             type="number"
@@ -1005,7 +1017,7 @@ export default function GuruUlanganPage() {
                             max={10}
                         />
                     </div>
-                    <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
+                    <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10" data-tutorial="exam-form-randomize">
                         <input
                             type="checkbox"
                             id="randomize"
@@ -1016,7 +1028,7 @@ export default function GuruUlanganPage() {
                         <label htmlFor="randomize" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none">Acak urutan soal per siswa</label>
                     </div>
 
-                    <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
+                    <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10" data-tutorial="exam-form-show-results">
                         <input
                             type="checkbox"
                             id="showResults"
@@ -1029,7 +1041,7 @@ export default function GuruUlanganPage() {
                         </label>
                     </div>
 
-                    <div className="flex gap-3 pt-4 border-t border-secondary/10 mt-2">
+                    <div className="flex gap-3 pt-4 border-t border-secondary/10 mt-2" data-tutorial="exam-form-submit">
                         <Button variant="secondary" onClick={() => setShowCreate(false)} className="flex-1">
                             Batal
                         </Button>

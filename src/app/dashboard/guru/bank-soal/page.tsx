@@ -790,6 +790,7 @@ export default function BankSoalPage() {
                             <button
                                 onClick={() => setShowAddDropdown(!showAddDropdown)}
                                 className="flex items-center gap-2 px-5 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 active:scale-95 transition-all shadow-md shadow-primary/20 cursor-pointer"
+                                data-tutorial="bank-add-btn"
                             >
                                 <Plus set="bold" primaryColor="currentColor" size={20} />
                                 Tambah Soal
@@ -819,6 +820,7 @@ export default function BankSoalPage() {
                                                 setShowAddDropdown(false)
                                             }}
                                             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors cursor-pointer"
+                                            data-tutorial="bank-ai-btn"
                                         >
                                             <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0">
                                                 <Discovery set="bold" primaryColor="currentColor" size={20} />
@@ -858,7 +860,7 @@ export default function BankSoalPage() {
                         className="w-full pl-10 pr-4 py-3 bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary"
                     />
                 </div>
-                <div className="flex flex-col sm:flex-row gap-3 items-center">
+                <div className="flex flex-col lg:flex-row gap-4" data-tutorial="bank-filters">
                     <select
                         value={selectedSubject}
                         onChange={(e) => { setSelectedSubject(e.target.value); setCurrentPage(1) }}

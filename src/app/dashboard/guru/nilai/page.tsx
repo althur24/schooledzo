@@ -459,12 +459,13 @@ export default function NilaiPage() {
                         />
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {filteredTAs.map((ta) => (
+                            {filteredTAs.map((ta, _tIdx) => (
                                 <Card
                                     key={ta.id}
                                     padding="p-4 md:p-6"
                                     className="hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 transition-all duration-200 cursor-pointer group"
                                     onClick={() => { setSelectedTA(ta.id); setActiveTab('rekap'); setSearchQuery('') }}
+                                    {...(_tIdx === 0 ? { 'data-tutorial': 'nilai-class-card' } : {})}
                                 >
                                     <div className="flex items-start justify-between mb-4">
                                         <div className="flex-1">
