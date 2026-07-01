@@ -622,8 +622,9 @@ export default function GuruUlanganPage() {
                                 {exams.map((exam) => {
                                     const status = getExamStatus(exam as any)
                                     return (
-                                        <Card key={exam.id} padding="p-5" className="group hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all">
-                                            <div className="flex flex-col h-full gap-4">
+                                        <Card key={exam.id} padding="p-0" className="group hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all">
+                                            <div className="flex flex-col h-full">
+                                                <div className="p-5 flex flex-col gap-4 flex-1">
                                                 <div className="flex items-start justify-between">
                                                     <div className="flex-1">
                                                         <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -689,8 +690,10 @@ export default function GuruUlanganPage() {
                                                         )
                                                     })()}
                                                 </div>
+                                                </div>
 
-                                                <div className="flex flex-col gap-2 mt-auto pt-2">
+                                                {/* Button footer — inside card but with its own padding */}
+                                                <div className="px-5 pb-5 flex flex-col gap-2">
                                                     <div className="flex gap-2 w-full">
                                                         {exam.is_active ? (
                                                             <>
@@ -719,25 +722,25 @@ export default function GuruUlanganPage() {
 
                                                     <div className="flex gap-2 w-full">
                                                         <Link href={`/dashboard/guru/ulangan/${exam.id}`} className="flex-1">
-                                                            <Button variant="outline" size="sm" className="w-full justify-center border-primary/20 text-primary hover:bg-primary/5">
+                                                            <Button variant="secondary" size="sm" className="w-full justify-center text-primary bg-primary/10 hover:bg-primary/20 border-0">
                                                                 <Edit set="bold" primaryColor="currentColor" size={16} /> Edit
                                                             </Button>
                                                         </Link>
                                                         {exam.is_active && (
                                                             <Button
-                                                                variant="outline"
+                                                                variant="secondary"
                                                                 size="sm"
                                                                 onClick={() => openCopyModal(exam)}
-                                                                className="flex-1 justify-center border-blue-200/50 dark:border-blue-500/20 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10"
+                                                                className="flex-1 justify-center text-blue-600 bg-blue-100 hover:bg-blue-200 dark:bg-blue-500/20 dark:hover:bg-blue-500/30 border-0"
                                                             >
                                                                 <Copy className="w-4 h-4 mr-1 hidden sm:inline" /> Pakai Ulang
                                                             </Button>
                                                         )}
                                                         <Button
-                                                            variant="outline"
+                                                            variant="secondary"
                                                             size="sm"
                                                             onClick={() => handleDelete(exam.id)}
-                                                            className="flex-1 justify-center text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-900/30"
+                                                            className="flex-1 justify-center text-red-500 bg-red-100 hover:bg-red-200 dark:bg-red-500/20 dark:hover:bg-red-500/30 border-0"
                                                         >
                                                             <span className="text-red-500"><Delete set="bold" primaryColor="currentColor" size={16} /></span> Hapus
                                                         </Button>

@@ -1,5 +1,16 @@
-const CACHE_NAME = 'lms-ypp-v1';
+const CACHE_NAME = 'lms-ypp-v2';
 const OFFLINE_URL = '/offline.html';
+
+// Safe cache.put wrapper — prevents "Entry already exists" and "Unexpected internal error"
+async function safeCachePut(request, response) {
+  try {
+    if (response.type === 'opaque') return;
+    const cache = await caches.open(CACHE_NAME);
+    await cache.put(request, response);
+  } catch (e) {
+    // Silently ignore cache errors — the app works fine without caching
+  }
+}
 
 // Pre-cache on install
 self.addEventListener('install', (event) => {
@@ -10,7 +21,7 @@ self.addEventListener('install', (event) => {
         '/manifest.json',
         '/icons/icon-192.png',
         '/icons/icon-512.png',
-      ])
+      ]).catch(() => {})
     )
   );
   self.skipWaiting();
@@ -31,8 +42,8 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET requests
   if (request.method !== 'GET') return;
+  if (!url.protocol.startsWith('http')) return;
 
   // Strategy 1: CacheFirst for static assets
   if (
@@ -44,10 +55,7 @@ self.addEventListener('fetch', (event) => {
       caches.match(request).then((cached) => {
         if (cached) return cached;
         return fetch(request).then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
+          if (response.ok) safeCachePut(request, response.clone());
           return response;
         });
       })
@@ -61,10 +69,7 @@ self.addEventListener('fetch', (event) => {
       caches.match(request).then((cached) => {
         if (cached) return cached;
         return fetch(request).then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
+          if (response.ok) safeCachePut(request, response.clone());
           return response;
         });
       })
@@ -78,10 +83,7 @@ self.addEventListener('fetch', (event) => {
       caches.match(request).then((cached) => {
         if (cached) return cached;
         return fetch(request).then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
+          if (response.ok) safeCachePut(request, response.clone());
           return response;
         });
       })
@@ -89,15 +91,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Strategy 4: NetworkFirst for API  
+  // Strategy 4: NetworkFirst for API
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
+          if (response.ok) safeCachePut(request, response.clone());
           return response;
         })
         .catch(() => caches.match(request))
@@ -110,10 +109,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
+          if (response.ok) safeCachePut(request, response.clone());
           return response;
         })
         .catch(() =>
