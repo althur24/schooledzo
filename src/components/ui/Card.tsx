@@ -18,7 +18,6 @@ export default function Card({
             rounded-2xl
             shadow-card
             border border-slate-200 dark:border-slate-700
-            overflow-hidden
             ${padding}
             ${className}
         `}

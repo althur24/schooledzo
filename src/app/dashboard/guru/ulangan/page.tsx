@@ -622,7 +622,7 @@ export default function GuruUlanganPage() {
                                 {exams.map((exam) => {
                                     const status = getExamStatus(exam as any)
                                     return (
-                                        <Card key={exam.id} padding="p-0" className="group hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all">
+                                        <Card key={exam.id} padding="p-0" className="group overflow-hidden hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all">
                                             <div className="flex flex-col h-full">
                                                 <div className="p-5 flex flex-col gap-4 flex-1">
                                                 <div className="flex items-start justify-between">
