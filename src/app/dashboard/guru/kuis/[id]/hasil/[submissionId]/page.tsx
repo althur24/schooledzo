@@ -184,7 +184,7 @@ export default function GradingPage() {
                     return (
                         <Card
                             key={q.id}
-                            className={`p-6 transition-all ${q.question_type === 'ESSAY'
+                            className={`p-6 transition-all ${(q.question_type === 'ESSAY' || q.question_type === 'SHORT_ANSWER')
                                 ? 'border-amber-500/30'
                                 : ''
                                 }`}
@@ -238,7 +238,7 @@ export default function GradingPage() {
                                                 const val = Math.min(q.points, Math.max(0, parseInt(e.target.value) || 0))
                                                 handleGradeChange(q.id, 'score', val)
                                             }}
-                                            className={`w-24 px-3 py-2 bg-secondary/5 dark:bg-white/5 border rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 ${q.question_type === 'ESSAY' ? 'border-amber-500 focus:ring-amber-500' : 'border-secondary/30 dark:border-white/20 focus:ring-primary'} ${isAutoGradeable(q.question_type) ? 'opacity-50 cursor-not-allowed bg-secondary/10' : ''}`}
+                                            className={`w-24 px-3 py-2 bg-secondary/5 dark:bg-white/5 border rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 ${(q.question_type === 'ESSAY' || q.question_type === 'SHORT_ANSWER') ? 'border-amber-500 focus:ring-amber-500' : 'border-secondary/30 dark:border-white/20 focus:ring-primary'} ${isAutoGradeable(q.question_type) ? 'opacity-50 cursor-not-allowed bg-secondary/10' : ''}`}
                                             max={q.points}
                                             min={0}
                                             disabled={isAutoGradeable(q.question_type)}

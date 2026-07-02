@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { needsManualGrading } from '@/lib/questionTypeUtils'
 
 export async function GET(request: NextRequest) {
     try {
@@ -176,7 +177,7 @@ export async function GET(request: NextRequest) {
                 .from('official_exam_questions')
                 .select('question_type')
                 .eq('exam_id', examId)
-            const hasEssays = examQuestions?.some(q => q.question_type === 'ESSAY') || false
+            const hasEssays = examQuestions?.some(q => needsManualGrading(q.question_type)) || false
 
             for (const subId of expiredSubmissionIds) {
                 const sub = submissions!.find(s => s.id === subId)

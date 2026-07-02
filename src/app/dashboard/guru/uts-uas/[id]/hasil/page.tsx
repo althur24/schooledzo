@@ -300,11 +300,11 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
             )}
 
             {/* Grading Modal */}
-            <Modal open={showGrading} onClose={() => setShowGrading(false)} title={`Koreksi Essay — ${gradingStudentName}`}>
+            <Modal open={showGrading} onClose={() => setShowGrading(false)} title={`Koreksi Jawaban — ${gradingStudentName}`}>
                 {gradingSubmission && (
                     <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
                         {gradingSubmission.answers
-                            ?.filter((a: any) => a.question?.question_type === 'ESSAY')
+                            ?.filter((a: any) => a.question?.question_type === 'ESSAY' || a.question?.question_type === 'SHORT_ANSWER')
                             .map((answer: any, idx: number) => (
                                 <Card key={answer.id} padding="p-4" className="space-y-3">
                                     <div>

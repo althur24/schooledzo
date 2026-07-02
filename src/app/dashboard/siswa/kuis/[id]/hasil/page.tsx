@@ -181,8 +181,8 @@ export default function HasilKuisPage() {
                             </div>
                         )}
 
-                        {/* Feedback for Essay */}
-                        {q.question_type === 'ESSAY' && userAnswer?.feedback && (
+                        {/* Feedback for Essay & Isian Singkat */}
+                        {(q.question_type === 'ESSAY' || q.question_type === 'SHORT_ANSWER') && userAnswer?.feedback && (
                             <div className="pt-2 border-t border-secondary/20">
                                 <p className="text-primary text-xs mb-1">Feedback Guru:</p>
                                 <p className="text-text-main dark:text-white">{userAnswer.feedback}</p>

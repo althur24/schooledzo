@@ -9,7 +9,14 @@ export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
 }
 
 export function isAutoGradeable(type: string | QuestionType): boolean {
-    return type !== 'ESSAY'
+    return type !== 'ESSAY' && type !== 'SHORT_ANSWER'
+}
+
+/**
+ * Checks if a question type requires manual grading by teacher.
+ */
+export function needsManualGrading(type: string | QuestionType): boolean {
+    return type === 'ESSAY' || type === 'SHORT_ANSWER'
 }
 
 /**

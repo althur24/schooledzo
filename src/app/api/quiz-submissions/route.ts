@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
-import { gradeAnswer, isAutoGradeable } from '@/lib/questionTypeUtils'
+import { gradeAnswer, isAutoGradeable, needsManualGrading } from '@/lib/questionTypeUtils'
 
 // Helper function for sending notifications
 async function sendQuizSubmissionNotification(quizId: string, userFullName: string) {
@@ -106,6 +106,7 @@ export async function GET(request: NextRequest) {
                                     })
 
                                     const examMaxScore = questions.reduce((acc, q) => acc + q.points, 0)
+                                    const hasManualGrading = questions.some(q => needsManualGrading(q.question_type))
 
                                     await supabase
                                         .from('quiz_submissions')
@@ -114,7 +115,7 @@ export async function GET(request: NextRequest) {
                                             submitted_at: new Date().toISOString(),
                                             total_score: totalScore,
                                             max_score: examMaxScore,
-                                            is_graded: true
+                                            is_graded: !hasManualGrading
                                         })
                                         .eq('id', sub.id)
                                 }))
@@ -358,8 +359,8 @@ export async function POST(request: NextRequest) {
         let maxScore = 0
         // Check if there are any essay questions in the quiz
         // If there's an essay, the quiz can NEVER be fully auto-graded
-        const hasEssays = questions.some(q => q.question_type === 'ESSAY')
-        let allGraded = !hasEssays
+        const hasManualGrading = questions.some(q => needsManualGrading(q.question_type))
+        let allGraded = !hasManualGrading
         let gradedAnswers: any[] = []
 
         // Only process answers if they exist

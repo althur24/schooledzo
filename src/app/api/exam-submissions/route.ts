@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
-import { gradeAnswer } from '@/lib/questionTypeUtils'
+import { gradeAnswer, needsManualGrading } from '@/lib/questionTypeUtils'
 
 // Helper: send notification to teacher when student submits exam
 async function notifyTeacherExamSubmission(examId: string, studentName: string, isForceSubmit: boolean = false) {
@@ -86,6 +86,14 @@ export async function GET(request: NextRequest) {
 
                                 const score = answers?.reduce((sum, a) => sum + (a.points_earned || 0), 0) || 0
 
+                                // Check if exam has essays
+                                const { data: examQuestions } = await supabase
+                                    .from('exam_questions')
+                                    .select('question_type')
+                                    .eq('exam_id', examId)
+
+                                const hasManualGrading = examQuestions?.some(q => needsManualGrading(q.question_type)) || false
+
                                 // force close
                                 await supabase
                                     .from('exam_submissions')
@@ -93,7 +101,7 @@ export async function GET(request: NextRequest) {
                                         is_submitted: true,
                                         submitted_at: new Date().toISOString(),
                                         total_score: score,
-                                        violations_log: undefined // optional: log auto-close reason?
+                                        is_graded: !hasManualGrading
                                     })
                                     .eq('id', sub.id)
                             }))
@@ -506,15 +514,16 @@ export async function PUT(request: NextRequest) {
                 existingAnswers?.forEach(ans => {
                     const q = Array.isArray(ans.question) ? ans.question[0] : (ans.question as any);
                     if (q) {
-                        const graded = gradeAnswer(
-                            q.question_type,
-                            ans.answer,
-                            q.correct_answer,
-                            null,
-                            q.points || 1
-                        )
-                        totalScore += graded.pointsEarned
-                        if (q.question_type === 'ESSAY') {
+                        if (!needsManualGrading(q.question_type)) {
+                            const graded = gradeAnswer(
+                                q.question_type,
+                                ans.answer,
+                                q.correct_answer,
+                                null,
+                                q.points || 1
+                            )
+                            totalScore += graded.pointsEarned
+                        } else {
                             hasEssays = true
                         }
                     }
@@ -525,7 +534,7 @@ export async function PUT(request: NextRequest) {
                     .from('exam_questions')
                     .select('question_type')
                     .eq('exam_id', currentSubmission.exam_id)
-                hasEssays = hasEssays || (examQuestions?.some(q => q.question_type === 'ESSAY') || false)
+                hasEssays = hasEssays || (examQuestions?.some(q => needsManualGrading(q.question_type)) || false)
 
                 await supabase
                     .from('exam_submissions')
@@ -621,7 +630,7 @@ export async function PUT(request: NextRequest) {
                 .select('question_type')
                 .eq('exam_id', currentSubmission.exam_id)
 
-            const hasEssays = examQuestions?.some(q => q.question_type === 'ESSAY') || false;
+            const hasEssays = examQuestions?.some(q => needsManualGrading(q.question_type)) || false;
             const isGraded = !hasEssays
 
             const { data: updatedSubmission, error } = await supabase

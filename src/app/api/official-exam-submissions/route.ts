@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
-import { gradeAnswer } from '@/lib/questionTypeUtils'
+import { gradeAnswer, needsManualGrading } from '@/lib/questionTypeUtils'
 
 // GET official exam submissions
 export async function GET(request: NextRequest) {
@@ -129,7 +129,7 @@ export async function GET(request: NextRequest) {
                         .from('official_exam_questions')
                         .select('question_type')
                         .eq('exam_id', sub.exam_id)
-                    const hasEssays = examQuestions?.some((q: any) => q.question_type === 'ESSAY') || false
+                    const hasEssays = examQuestions?.some((q: any) => needsManualGrading(q.question_type)) || false
 
                     await supabase
                         .from('official_exam_submissions')
@@ -482,15 +482,18 @@ export async function PUT(request: NextRequest) {
                 existingAnswers?.forEach((ans: any) => {
                     const q = Array.isArray(ans.question) ? ans.question[0] : ans.question
                     if (q) {
-                        const graded = gradeAnswer(
-                            q.question_type,
-                            ans.answer,
-                            q.correct_answer,
-                            null,
-                            q.points || 10
-                        )
-                        totalScore += graded.pointsEarned
-                        if (q.question_type === 'ESSAY') hasEssays = true
+                        if (!needsManualGrading(q.question_type)) {
+                            const graded = gradeAnswer(
+                                q.question_type,
+                                ans.answer,
+                                q.correct_answer,
+                                null,
+                                q.points || 10
+                            )
+                            totalScore += graded.pointsEarned
+                        } else {
+                            hasEssays = true
+                        }
                     }
                 })
 
@@ -498,7 +501,7 @@ export async function PUT(request: NextRequest) {
                     .from('official_exam_questions')
                     .select('question_type')
                     .eq('exam_id', currentSubmission.exam_id)
-                hasEssays = hasEssays || (examQuestions?.some((q: any) => q.question_type === 'ESSAY') || false)
+                hasEssays = hasEssays || (examQuestions?.some((q: any) => needsManualGrading(q.question_type)) || false)
 
                 await supabase
                     .from('official_exam_submissions')
@@ -582,7 +585,7 @@ export async function PUT(request: NextRequest) {
                 .select('question_type')
                 .eq('exam_id', currentSubmission.exam_id)
 
-            const hasEssays = examQuestions?.some((q: any) => q.question_type === 'ESSAY') || false
+            const hasEssays = examQuestions?.some((q: any) => needsManualGrading(q.question_type)) || false
 
             const { data: updatedSubmission, error } = await supabase
                 .from('official_exam_submissions')
