@@ -68,11 +68,15 @@ export async function GET(request: NextRequest) {
 
         let result = entries || []
 
-        // JavaScript: 0=Sunday, 1=Monday, ... 6=Saturday
-        // Our DB: 1=Monday, 2=Tuesday, ... 6=Saturday, 7=Sunday
-        const jsDay = new Date().getDay()
-        const dbDay = jsDay === 0 ? 7 : jsDay
-        result = result.filter((e: any) => e.day_of_week === dbDay)
+        // Only filter to today if ?all=true is NOT set
+        const showAll = request.nextUrl.searchParams.get('all') === 'true'
+        if (!showAll) {
+            // JavaScript: 0=Sunday, 1=Monday, ... 6=Saturday
+            // Our DB: 1=Monday, 2=Tuesday, ... 6=Saturday, 7=Sunday
+            const jsDay = new Date().getDay()
+            const dbDay = jsDay === 0 ? 7 : jsDay
+            result = result.filter((e: any) => e.day_of_week === dbDay)
+        }
 
         return NextResponse.json(result)
     } catch (error) {

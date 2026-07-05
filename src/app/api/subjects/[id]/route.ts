@@ -55,6 +55,19 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        // Clean up related data before deleting subject
+        // 1. Set schedule_entries.subject_id to null where this subject is used
+        await supabase
+            .from('schedule_entries')
+            .update({ subject_id: null })
+            .eq('subject_id', id)
+
+        // 2. Delete subject_kkm entries
+        await supabase
+            .from('subject_kkm')
+            .delete()
+            .eq('subject_id', id)
+
         let deleteQuery = supabase
             .from('subjects')
             .delete()

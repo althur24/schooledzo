@@ -246,20 +246,42 @@ export default function AdminJadwalPage() {
     }
 
     // Check for teacher conflict when selecting teacher
-    const checkConflict = (teacherId: string, day: number, period: number) => {
+    const checkConflict = async (teacherId: string, day: number, period: number) => {
         if (!teacherId) {
             setConflictWarning('')
             return
         }
-        // Check in current edit entries
-        const conflict = editEntries.find(
+        // Check in current edit entries (same class)
+        const localConflict = editEntries.find(
             e => e.teacher_id === teacherId && e.day_of_week === day && e.period === period
                 && !(e.day_of_week === editingSlot?.day && e.period === editingSlot?.period)
         )
-        if (conflict) {
-            const subjectName = conflict.subject?.name || 'mapel lain'
+        if (localConflict) {
+            const subjectName = localConflict.subject?.name || 'mapel lain'
             setConflictWarning(`⚠️ Guru ini sudah mengajar ${subjectName} di jam yang sama!`)
-        } else {
+            return
+        }
+
+        // Check cross-class conflicts via API
+        try {
+            const res = await fetch(`/api/schedules?academic_year_id=${selectedYearId}`)
+            const allSchedules = await res.json()
+            if (Array.isArray(allSchedules)) {
+                for (const sched of allSchedules) {
+                    if (!sched.is_active || sched.class?.id === selectedClassId) continue
+                    const crossConflict = (sched.entries || []).find(
+                        (e: any) => e.teacher_id === teacherId && e.day_of_week === day && e.period === period
+                    )
+                    if (crossConflict) {
+                        const subjectName = crossConflict.subject?.name || 'mapel lain'
+                        const className = sched.class?.name || 'kelas lain'
+                        setConflictWarning(`⚠️ Guru ini sudah mengajar ${subjectName} di ${className} pada jam yang sama!`)
+                        return
+                    }
+                }
+            }
+            setConflictWarning('')
+        } catch {
             setConflictWarning('')
         }
     }
