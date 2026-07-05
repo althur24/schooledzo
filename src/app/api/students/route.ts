@@ -54,7 +54,6 @@ export async function GET(request: NextRequest) {
             // Flatten and filter by school
             const result = (enrollments || [])
                 .filter((e: any) => e.student)
-                .filter((e: any) => !schoolId || e.student?.user?.school_id === schoolId || true) // chain filter
                 .map((e: any) => ({
                     ...e.student,
                     class: e.enrollment_class || e.student.class,

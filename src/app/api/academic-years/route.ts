@@ -52,6 +52,28 @@ export async function POST(request: NextRequest) {
 
         // If setting as active, deactivate others in the SAME school
         if (finalIsActive) {
+            // Check if old active year has pending (unprocessed) enrollments
+            let activeYearQuery = supabase
+                .from('academic_years')
+                .select('id, name')
+                .eq('is_active', true)
+            if (schoolId) activeYearQuery = activeYearQuery.eq('school_id', schoolId)
+            const { data: currentActiveYear } = await activeYearQuery.maybeSingle()
+
+            if (currentActiveYear) {
+                const { count: pendingCount } = await supabase
+                    .from('student_enrollments')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('academic_year_id', currentActiveYear.id)
+                    .eq('status', 'ACTIVE')
+
+                if (pendingCount && pendingCount > 0) {
+                    return NextResponse.json({
+                        error: `Tahun ${currentActiveYear.name} masih memiliki ${pendingCount} siswa yang belum diproses kenaikan kelasnya. Selesaikan proses kenaikan kelas terlebih dahulu, atau gunakan Wizard Pergantian Tahun.`
+                    }, { status: 400 })
+                }
+            }
+
             let deactivateQuery = supabase
                 .from('academic_years')
                 .update({ is_active: false, status: 'COMPLETED' })

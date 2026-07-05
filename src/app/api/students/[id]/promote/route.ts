@@ -92,6 +92,25 @@ export async function PUT(
             return NextResponse.json({ error: 'Target academic year not found' }, { status: 404 })
         }
 
+        // Check if student already has an ACTIVE enrollment in the target year
+        // Skip this check if the enrollment we're about to end IS the target year enrollment
+        // (this happens when promoting a retained student to a different class in the same year)
+        if (activeEnrollment.academic_year_id !== to_academic_year_id) {
+            const { data: existingTargetEnrollment } = await supabase
+                .from('student_enrollments')
+                .select('id')
+                .eq('student_id', id)
+                .eq('academic_year_id', to_academic_year_id)
+                .eq('status', 'ACTIVE')
+                .maybeSingle()
+
+            if (existingTargetEnrollment) {
+                return NextResponse.json({
+                    error: 'Siswa sudah memiliki enrollment aktif di tahun ajaran tujuan'
+                }, { status: 400 })
+            }
+        }
+
         // Transaction: End current enrollment and create new one
         const now = new Date().toISOString()
 

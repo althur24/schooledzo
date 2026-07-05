@@ -414,7 +414,14 @@ export default function KenaikanKelasPage() {
                                 c.grade_level === group.sourceClass.grade_level &&
                                 c.school_level === group.sourceClass.school_level
                             )
-                            const targetRetainedClassId = newYearClass?.id || group.sourceClass.id // Fallback to old class if really nothing matches
+
+                            if (!newYearClass) {
+                                errors.push(`${student.user.full_name}: Kelas ${group.sourceClass.name} belum ada di tahun ${targetYear?.name}. Buat kelas dulu.`)
+                                processedCount++
+                                setProcessProgress({ current: processedCount, total: toProcess.length })
+                                continue
+                            }
+                            const targetRetainedClassId = newYearClass.id
 
                             const res = await fetch(`/api/students/${student.id}/promote`, {
                                 method: 'PUT',

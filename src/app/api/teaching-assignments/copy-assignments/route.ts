@@ -90,9 +90,25 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Filter out duplicates and remap class_ids (skip if no mapped class found)
+        // Get active teacher IDs to filter out locked/inactive teachers
+        const teacherIds = [...new Set(sourceAssignments.map(a => a.teacher_id))]
+        const { data: activeTeachers } = await supabase
+            .from('teachers')
+            .select('id, user:users(is_locked)')
+            .in('id', teacherIds)
+
+        const activeTeacherIds = new Set(
+            (activeTeachers || [])
+                .filter((t: any) => {
+                    const user = Array.isArray(t.user) ? t.user[0] : t.user
+                    return !user?.is_locked
+                })
+                .map((t: any) => t.id)
+        )
+
+        // Filter out duplicates, remap class_ids, and skip inactive teachers
         const newAssignments = sourceAssignments
-            .filter(a => classMapping[a.class_id])
+            .filter(a => classMapping[a.class_id] && activeTeacherIds.has(a.teacher_id))
             .map(a => {
                 const mappedClassId = classMapping[a.class_id]
                 return {
