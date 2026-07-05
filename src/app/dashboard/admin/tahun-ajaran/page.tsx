@@ -360,11 +360,12 @@ export default function TahunAjaranPage() {
                 })
             })
             if (res.ok) {
-                // Auto-copy classes from last completed year to new year
-                await fetchData()
-                const updatedYears = await (await fetch('/api/academic-years')).json()
-                const newYear = (updatedYears as AcademicYear[]).find((y: AcademicYear) => y.is_active)
-                const fromYear = lastCompletedYear || years.find(y => y.status === 'COMPLETED')
+                // Fetch fresh data from API (not stale React state)
+                const updatedYears: AcademicYear[] = await (await fetch('/api/academic-years')).json()
+                const newYear = updatedYears.find((y: AcademicYear) => y.is_active)
+                const fromYear = updatedYears
+                    .filter((y: AcademicYear) => y.status === 'COMPLETED')
+                    .sort((a, b) => new Date(b.end_date || b.created_at).getTime() - new Date(a.end_date || a.created_at).getTime())[0]
 
                 if (fromYear && newYear) {
                     try {
@@ -376,10 +377,15 @@ export default function TahunAjaranPage() {
                         const copyData = await copyRes.json()
                         if (copyRes.ok && copyData.copied > 0) {
                             console.log(`Auto-copied ${copyData.copied} classes to new year`)
+                        } else if (!copyRes.ok) {
+                            alert(`Tahun baru berhasil dibuat, tapi gagal menyalin kelas: ${copyData.error || 'Unknown error'}. Silakan salin kelas secara manual.`)
                         }
                     } catch (e) {
                         console.error('Auto-copy classes failed:', e)
+                        alert('Tahun baru berhasil dibuat, tapi gagal menyalin kelas secara otomatis. Silakan salin kelas secara manual dari menu Wizard.')
                     }
+                } else {
+                    console.warn('No completed year found to copy classes from')
                 }
 
                 setShowWizardCreateModal(false)
