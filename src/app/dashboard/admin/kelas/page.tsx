@@ -133,7 +133,8 @@ export default function KelasPage() {
         setShowStudentsModal(true)
         setLoadingStudents(true)
         try {
-            const res = await fetch(`/api/students?class_id=${cls.id}`)
+            // Query via enrollments (source of truth) instead of students.class_id
+            const res = await fetch(`/api/students?enrollment_year_id=${cls.academic_year_id}&class_id=${cls.id}&status=ACTIVE`)
             const data = await res.json()
             setStudents(Array.isArray(data) ? data : [])
         } catch (error) {

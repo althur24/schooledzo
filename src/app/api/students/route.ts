@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
 
         // If enrollment_year_id is provided, fetch students with their enrollment in that specific year
         if (enrollment_year_id) {
-            let enrollQuery = supabase
+             let enrollQuery = supabase
                 .from('student_enrollments')
                 .select(`
                     id,
@@ -46,6 +46,11 @@ export async function GET(request: NextRequest) {
                 .eq('academic_year_id', enrollment_year_id)
                 .order('created_at', { ascending: false })
                 .range(0, 4999)
+
+            // Optional: filter by enrollment class_id
+            if (class_id) enrollQuery = enrollQuery.eq('class_id', class_id)
+            // Optional: filter by enrollment status
+            if (status) enrollQuery = enrollQuery.eq('status', status)
 
             const { data: enrollments, error: enrollError } = await enrollQuery
 
