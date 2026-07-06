@@ -92,15 +92,22 @@ export async function PUT(
             return NextResponse.json({ error: 'Target academic year not found' }, { status: 404 })
         }
 
+        // Safety: ensure enrollment year matches the target class's year
+        // This prevents data corruption where enrollment and class are in different years
+        const correctYearId = targetClass.academic_year_id || to_academic_year_id
+        if (correctYearId !== to_academic_year_id) {
+            console.warn(`Promote: to_academic_year_id mismatch. Sent: ${to_academic_year_id}, Class year: ${correctYearId}. Using class year.`)
+        }
+
         // Check if student already has an ACTIVE enrollment in the target year
         // Skip this check if the enrollment we're about to end IS the target year enrollment
         // (this happens when promoting a retained student to a different class in the same year)
-        if (activeEnrollment.academic_year_id !== to_academic_year_id) {
+        if (activeEnrollment.academic_year_id !== correctYearId) {
             const { data: existingTargetEnrollment } = await supabase
                 .from('student_enrollments')
                 .select('id')
                 .eq('student_id', id)
-                .eq('academic_year_id', to_academic_year_id)
+                .eq('academic_year_id', correctYearId)
                 .eq('status', 'ACTIVE')
                 .maybeSingle()
 
@@ -137,7 +144,7 @@ export async function PUT(
             .insert({
                 student_id: id,
                 class_id: to_class_id,
-                academic_year_id: to_academic_year_id,
+                academic_year_id: correctYearId,
                 status: 'ACTIVE',
                 notes: notes || 'Promoted from previous grade'
             })
