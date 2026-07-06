@@ -99,7 +99,6 @@ export async function POST(request: NextRequest) {
                 name: c.name,
                 grade_level: c.grade_level,
                 school_level: c.school_level,
-                school_id: schoolId,
                 academic_year_id: to_year_id,
                 ...(copy_homeroom && c.homeroom_teacher_id ? { homeroom_teacher_id: c.homeroom_teacher_id } : {})
             }))

@@ -82,6 +82,8 @@ export default function TahunAjaranPage() {
     const [sourceYearId, setSourceYearId] = useState<string>('')
     const [copyingWali, setCopyingWali] = useState(false)
     const [copyWaliResult, setCopyWaliResult] = useState<{ copied: number; skipped: number; total: number } | null>(null)
+    const [copyingClasses, setCopyingClasses] = useState(false)
+    const [activeYearClassCount, setActiveYearClassCount] = useState<number | null>(null)
 
     // Wizard confirmation modal states
     const [showWizardCompleteModal, setShowWizardCompleteModal] = useState(false)
@@ -130,6 +132,19 @@ export default function TahunAjaranPage() {
                 : hasActiveYear
                     ? `⏳ ${activeYear?.name} masih aktif`
                     : '⚠️ Tidak ada tahun ajaran'
+        }
+
+        // Check if classes exist in active year
+        let classCount = 0
+        if (hasActiveYear) {
+            try {
+                const classRes = await fetch(`/api/classes?academic_year_id=${activeYear?.id}`)
+                const classData = await classRes.json()
+                classCount = Array.isArray(classData) ? classData.length : 0
+                setActiveYearClassCount(classCount)
+            } catch {
+                setActiveYearClassCount(0)
+            }
         }
 
         newSteps[1] = {
@@ -604,8 +619,37 @@ export default function TahunAjaranPage() {
                             <div className="flex-1">
                                 <h3 className="text-sm font-bold text-text-main dark:text-white">Buat & Aktifkan Tahun Baru</h3>
                                 <p className="text-xs text-text-secondary mt-0.5">{steps[1].detail}</p>
-                                {steps[1].completed && (
-                                    <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">📋 Kelas otomatis disalin dari tahun sebelumnya</p>
+                                {steps[1].completed && activeYearClassCount !== null && activeYearClassCount > 0 && (
+                                    <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">📋 {activeYearClassCount} kelas tersedia di tahun baru</p>
+                                )}
+                                {steps[1].completed && (activeYearClassCount === 0 || activeYearClassCount === null) && (
+                                    <div className="mt-2">
+                                        <p className="text-[10px] text-amber-600 dark:text-amber-400 mb-1">⚠️ Belum ada kelas di tahun baru</p>
+                                        <Button
+                                            onClick={async () => {
+                                                const fromId = sourceYearId || lastCompletedYear?.id
+                                                if (!fromId || !activeYear) { alert('Tidak ada tahun sumber'); return }
+                                                setCopyingClasses(true)
+                                                try {
+                                                    const res = await fetch('/api/classes/copy-classes', {
+                                                        method: 'POST',
+                                                        headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify({ from_year_id: fromId, to_year_id: activeYear.id })
+                                                    })
+                                                    const data = await res.json()
+                                                    if (res.ok) {
+                                                        alert(`✅ ${data.copied} kelas berhasil disalin!`)
+                                                        await detectStepStatuses()
+                                                    } else {
+                                                        alert(`Gagal: ${data.error}`)
+                                                    }
+                                                } catch { alert('Terjadi error') } finally { setCopyingClasses(false) }
+                                            }}
+                                            disabled={copyingClasses}
+                                        >
+                                            {copyingClasses ? 'Menyalin...' : '📋 Salin Kelas dari Tahun Lama'}
+                                        </Button>
+                                    </div>
                                 )}
                                 {steps[0].completed && !steps[1].completed && (
                                     <div className="flex items-center gap-2 mt-2 flex-wrap">
