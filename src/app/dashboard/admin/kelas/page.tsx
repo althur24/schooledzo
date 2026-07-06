@@ -17,10 +17,20 @@ const inferSchoolLevel = (gradeLevel?: number | null): 'SMP' | 'SMA' | null => {
 interface Student {
     id: string
     nisn: string
+    nis?: string
+    class?: {
+        id: string
+        name: string
+        grade_level?: number
+        school_level?: string
+        academic_year_id?: string
+    }
     user: {
         full_name: string
-        email: string
+        email?: string
+        username?: string
     }
+    enrollment_status?: string
 }
 
 export default function KelasPage() {
@@ -133,10 +143,34 @@ export default function KelasPage() {
         setShowStudentsModal(true)
         setLoadingStudents(true)
         try {
-            // Query via enrollments (source of truth) instead of students.class_id
-            const res = await fetch(`/api/students?enrollment_year_id=${cls.academic_year_id}&class_id=${cls.id}&status=ACTIVE`)
-            const data = await res.json()
-            setStudents(Array.isArray(data) ? data : [])
+            let result: Student[] = []
+
+            // Strategy 1: Query via enrollment (source of truth)
+            if (cls.academic_year_id) {
+                const enrollRes = await fetch(`/api/students?enrollment_year_id=${cls.academic_year_id}`)
+                const enrollData = await enrollRes.json()
+                const allEnrolled: any[] = Array.isArray(enrollData) ? enrollData : []
+                
+                // Filter: only ACTIVE enrollments, matched by class name + grade
+                result = allEnrolled.filter((s: any) => {
+                    if (s.enrollment_status && s.enrollment_status !== 'ACTIVE') return false
+                    const sc = s.class
+                    if (!sc) return false
+                    // Match by class attributes (IDs may differ between copies)
+                    return sc.name === cls.name && 
+                           sc.grade_level === cls.grade_level && 
+                           sc.school_level === cls.school_level
+                })
+            }
+
+            // Strategy 2: Fallback to direct class_id query if enrollment returned nothing
+            if (result.length === 0) {
+                const directRes = await fetch(`/api/students?class_id=${cls.id}`)
+                const directData = await directRes.json()
+                result = Array.isArray(directData) ? directData : []
+            }
+
+            setStudents(result)
         } catch (error) {
             console.error('Error fetching students:', error)
             setStudents([])
