@@ -145,25 +145,31 @@ export default function KelasPage() {
         try {
             let result: Student[] = []
 
-            // Strategy 1: Query via enrollment (source of truth)
+            // Strategy 1: Direct enrollment query by year + class_id (fastest, most accurate)
             if (cls.academic_year_id) {
+                const res = await fetch(`/api/students?enrollment_year_id=${cls.academic_year_id}&class_id=${cls.id}&status=ACTIVE`)
+                const data = await res.json()
+                result = Array.isArray(data) ? data : []
+            }
+
+            // Strategy 2: If direct match found nothing, try matching by class attributes
+            // (handles case where enrollment class_id differs from displayed class id)
+            if (result.length === 0 && cls.academic_year_id) {
                 const enrollRes = await fetch(`/api/students?enrollment_year_id=${cls.academic_year_id}`)
                 const enrollData = await enrollRes.json()
                 const allEnrolled: any[] = Array.isArray(enrollData) ? enrollData : []
                 
-                // Filter: only ACTIVE enrollments, matched by class name + grade
                 result = allEnrolled.filter((s: any) => {
                     if (s.enrollment_status && s.enrollment_status !== 'ACTIVE') return false
                     const sc = s.class
                     if (!sc) return false
-                    // Match by class attributes (IDs may differ between copies)
                     return sc.name === cls.name && 
                            sc.grade_level === cls.grade_level && 
                            sc.school_level === cls.school_level
                 })
             }
 
-            // Strategy 2: Fallback to direct class_id query if enrollment returned nothing
+            // Strategy 3: Fallback to students.class_id (legacy)
             if (result.length === 0) {
                 const directRes = await fetch(`/api/students?class_id=${cls.id}`)
                 const directData = await directRes.json()
