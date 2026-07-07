@@ -34,19 +34,42 @@ interface Student {
     enrollment_notes?: string | null
 }
 
+type StudentDecision = 'PROMOTE' | 'SKIP' | 'RETAIN'
+
 interface ClassGroup {
     sourceClass: Class
     students: Student[]
     targetClassId: string
     targetClassName: string
     action: 'PROMOTE' | 'GRADUATE' | 'TRANSITION'
-    excludedStudents: Set<string>
+    excludedStudents: Set<string>   // SKIP — left pending, NOT processed this run
+    retainedStudents: Set<string>   // RETAIN — tinggal kelas (repeat same grade)
     studentTargetOverrides: Map<string, string> // studentId -> targetClassId
     isCompleted: boolean
     completedCount: number
 }
 
 type FilterMode = 'ALL' | 'PENDING' | 'DONE'
+
+/**
+ * Extract the parallel-class "section" from a class name by stripping the leading
+ * grade marker. The remainder identifies the parallel group across grades, so a
+ * class can be matched to its next-grade peer during promotion.
+ *   "X IPA 1" -> "IPA 1",  "XI IPA 1" -> "IPA 1"   (match — numeric/program section)
+ *   "X-A"     -> "A",      "XI-A"     -> "A"       (match — letter section)
+ *   "VII-1"   -> "1",      "VIII-1"   -> "1"       (match — numeric section)
+ * Handles roman grades (VII/VIII/IX/X/XI/XII) and numeric (7-12), an optional
+ * "Kelas" prefix, and the separator after it (-, ., space). Returns '' when the
+ * name is only a grade (no section) — callers then treat all same-grade candidates.
+ */
+function classSectionOf(name?: string | null): string {
+    if (!name) return ''
+    return String(name).trim()
+        .replace(/^\s*Kelas\s+/i, '')
+        .replace(/^\s*(?:XII|XI|IX|VIII|VII|X|[7-9]|1[0-2])\s*[-.]?\s*/i, '')
+        .trim()
+        .toUpperCase()
+}
 
 export default function KenaikanKelasPage() {
     const router = useRouter()
@@ -133,11 +156,13 @@ export default function KenaikanKelasPage() {
 
             const nextGrade = grade === 3 && school === 'SMP' ? 1 : grade + 1
             const nextSchool = grade === 3 && school === 'SMP' ? 'SMA' : school
-            const classSection = src.name.replace(/[^A-Za-z]/g, '').slice(-1) || '1'
+            const classSection = classSectionOf(src.name)
 
-            // Check if target class exists
+            // Check if a target class with the same section exists. When the source
+            // name has no section (single class per grade), any same-grade target counts.
             const exists = targetClasses.some(c =>
-                c.grade_level === nextGrade && c.school_level === nextSchool && c.name.includes(classSection)
+                c.grade_level === nextGrade && c.school_level === nextSchool &&
+                (classSection === '' || classSectionOf(c.name) === classSection)
             )
             if (!exists) {
                 // Also check if the SAME class exists for retained students
@@ -288,7 +313,7 @@ export default function KenaikanKelasPage() {
                 s.enrollment_status === 'RETAINED'
             )
 
-            // Determine target based on grade level
+            // Determine target based on grade level (STRICT match — no silent auto-pick)
             let action: 'PROMOTE' | 'GRADUATE' | 'TRANSITION' = 'PROMOTE'
             let targetClassName = ''
             let targetClassId = ''
@@ -296,37 +321,36 @@ export default function KenaikanKelasPage() {
             const gradeLevel = cls.grade_level || 0
             const schoolLevel = cls.school_level
 
-            if (gradeLevel === 3) {
-                if (schoolLevel === 'SMP') {
-                    action = 'TRANSITION'
-                    const classSection = cls.name.replace(/[^A-Za-z]/g, '').slice(-1) || 'A'
-                    const nextClass = targetClasses.find(c =>
-                        c.grade_level === 1 && c.school_level === 'SMA' && c.name.includes(classSection)
-                    ) || targetClasses.find(c => c.grade_level === 1 && c.school_level === 'SMA')
-                    if (nextClass) {
-                        targetClassId = nextClass.id
-                        targetClassName = nextClass.name
-                    } else {
-                        targetClassName = `Kelas SMA 1 (belum ada)`
-                    }
-                } else {
-                    action = 'GRADUATE'
-                    targetClassName = 'Lulus (Alumni)'
-                }
+            if (gradeLevel === 3 && schoolLevel === 'SMA') {
+                action = 'GRADUATE'
+                targetClassName = 'Lulus (Alumni)'
             } else {
-                action = 'PROMOTE'
-                const nextGrade = gradeLevel + 1
-                const classSection = cls.name.replace(/[^A-Za-z]/g, '').slice(-1) || 'A'
-                const nextClass = targetClasses.find(c =>
-                    c.grade_level === nextGrade && c.school_level === schoolLevel && c.name.includes(classSection)
-                ) || targetClasses.find(c =>
-                    c.grade_level === nextGrade && c.school_level === schoolLevel
+                // PROMOTE (naik 1 jenjang) atau TRANSITION (SMP 3 -> SMA 1)
+                action = gradeLevel === 3 && schoolLevel === 'SMP' ? 'TRANSITION' : 'PROMOTE'
+                const nextGrade = gradeLevel === 3 && schoolLevel === 'SMP' ? 1 : gradeLevel + 1
+                const nextSchool = gradeLevel === 3 && schoolLevel === 'SMP' ? 'SMA' : schoolLevel
+                const srcSection = classSectionOf(cls.name)
+
+                // Candidates at the next grade/school level. When the source name has
+                // a section, narrow by section equality; when it has none (single class
+                // per grade), consider all candidates. Ambiguity (more than one) is NOT
+                // resolved by picking the first match — the admin must choose manually.
+                const candidates = targetClasses.filter(c =>
+                    c.grade_level === nextGrade && c.school_level === nextSchool
                 )
-                if (nextClass) {
-                    targetClassId = nextClass.id
-                    targetClassName = nextClass.name
+                const matches = srcSection !== ''
+                    ? candidates.filter(c => classSectionOf(c.name) === srcSection)
+                    : candidates
+
+                if (matches.length === 1) {
+                    targetClassId = matches[0].id
+                    targetClassName = matches[0].name
+                } else if (matches.length > 1) {
+                    targetClassName = `${matches.length} kelas cocok — pilih manual`
                 } else {
-                    targetClassName = `Kelas ${schoolLevel === 'SMP' ? 'MP' : 'MA'}${nextGrade} (belum ada)`
+                    targetClassName = srcSection
+                        ? `Kelas ${nextSchool === 'SMP' ? 'MP' : 'MA'}${nextGrade} ${srcSection} (belum ada)`
+                        : `Kelas ${nextSchool === 'SMP' ? 'MP' : 'MA'}${nextGrade} (belum ada)`
                 }
             }
 
@@ -339,6 +363,7 @@ export default function KenaikanKelasPage() {
                 targetClassName,
                 action,
                 excludedStudents: new Set(),
+                retainedStudents: new Set(),
                 studentTargetOverrides: new Map(),
                 isCompleted,
                 completedCount: processedInGroup.length
@@ -399,12 +424,25 @@ export default function KenaikanKelasPage() {
         setExpandedGroups(newExpanded)
     }
 
-    const toggleStudentExclusion = (classId: string, studentId: string) => {
+    const decisionOf = (g: ClassGroup, studentId: string): StudentDecision => {
+        if (g.retainedStudents.has(studentId)) return 'RETAIN'
+        if (g.excludedStudents.has(studentId)) return 'SKIP'
+        return 'PROMOTE'
+    }
+
+    // Set a student's promotion decision. The two sets are kept MUTUALLY EXCLUSIVE:
+    // a student is in at most one of excludedStudents (SKIP) / retainedStudents (RETAIN),
+    // or in neither (PROMOTE = default).
+    const setStudentDecision = (classId: string, studentId: string, decision: StudentDecision) => {
         setClassGroups(prev => prev.map(g => {
             if (g.sourceClass.id !== classId) return g
-            const newExcluded = new Set(g.excludedStudents)
-            if (newExcluded.has(studentId)) { newExcluded.delete(studentId) } else { newExcluded.add(studentId) }
-            return { ...g, excludedStudents: newExcluded }
+            const excluded = new Set(g.excludedStudents)
+            const retained = new Set(g.retainedStudents)
+            excluded.delete(studentId)
+            retained.delete(studentId)
+            if (decision === 'SKIP') excluded.add(studentId)
+            else if (decision === 'RETAIN') retained.add(studentId)
+            return { ...g, excludedStudents: excluded, retainedStudents: retained }
         }))
     }
 
@@ -465,121 +503,137 @@ export default function KenaikanKelasPage() {
     const handleConfirmProcess = async () => {
         setShowConfirmModal(false)
         setProcessing(true)
-        const successIds: string[] = []
-        const errors: string[] = []
 
-        const toProcess = classGroups
-            .filter(g => selectedGroups.has(g.sourceClass.id))
-            .flatMap(g => getPendingStudents(g))
+        // Build a single batch payload. The whole batch is processed in ONE server-side
+        // RPC transaction (per-student sub-transactions), so a failure/interruption can
+        // never leave students half-processed (unlike the previous per-student loop).
+        const targets: {
+            student_id: string; to_class_id: string;
+            from_academic_year_id?: string; enrollment_status: string; note?: string
+        }[] = []
+        const graduations: { student_id: string; note?: string }[] = []
+        const preflightErrors: string[] = []
 
-        setProcessProgress({ current: 0, total: toProcess.length })
+        const sourceYearId = sourceYear?.id
 
-        try {
-            let processedCount = 0
+        const targetYearId = targetYear?.id
+        const targetClasses = targetYearId ? classes.filter(c => c.academic_year_id === targetYearId) : []
 
-            for (const group of classGroups) {
-                if (!selectedGroups.has(group.sourceClass.id)) continue
+        for (const group of classGroups) {
+            if (!selectedGroups.has(group.sourceClass.id)) continue
+            const studentsToProcess = getPendingStudents(group)
 
-                const studentsToProcess = getPendingStudents(group)
-
-                for (const student of studentsToProcess) {
-                    const isExcluded = group.excludedStudents.has(student.id)
-                    try {
-                        if (isExcluded) {
-                            // "Tinggal Kelas"
-                            // FIX: Use the equivalent class from the NEW target year
-                            const targetClasses = classes.filter(c => c.academic_year_id === targetYear?.id)
-                            const newYearClass = targetClasses.find(c =>
-                                c.name === group.sourceClass.name &&
-                                c.grade_level === group.sourceClass.grade_level &&
-                                c.school_level === group.sourceClass.school_level
-                            ) || targetClasses.find(c =>
-                                c.grade_level === group.sourceClass.grade_level &&
-                                c.school_level === group.sourceClass.school_level
-                            )
-
-                            if (!newYearClass) {
-                                errors.push(`${student.user.full_name}: Kelas ${group.sourceClass.name} belum ada di tahun ${targetYear?.name}. Buat kelas dulu.`)
-                                processedCount++
-                                setProcessProgress({ current: processedCount, total: toProcess.length })
-                                continue
-                            }
-                            const targetRetainedClassId = newYearClass.id
-
-                            const res = await fetch(`/api/students/${student.id}/promote`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    to_class_id: targetRetainedClassId,
-                                    to_academic_year_id: targetYear?.id,
-                                    from_academic_year_id: sourceYear?.id,
-                                    notes: `Tinggal di kelas ${group.sourceClass.name} - ${sourceYear?.name}`,
-                                    enrollment_status: 'RETAINED'
-                                })
-                            })
-                            if (res.ok) { successIds.push(student.id) }
-                            else {
-                                const errData = await res.json()
-                                errors.push(`Gagal memproses (Tinggal) ${student.user.full_name}: ${errData.error}`)
-                            }
-                        } else if (group.action === 'GRADUATE') {
-                            const res = await fetch(`/api/students/${student.id}/graduate`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    notes: `Lulus dari ${group.sourceClass.name} - ${sourceYear?.name}`,
-                                    academic_year_id: sourceYear?.id
-                                })
-                            })
-                            if (res.ok) { successIds.push(student.id) }
-                            else {
-                                const errData = await res.json()
-                                errors.push(`Gagal memproses ${student.user.full_name}: ${errData.error}`)
-                            }
-                        } else if (group.action === 'TRANSITION' || group.action === 'PROMOTE') {
-                            const overrideTargetId = group.studentTargetOverrides.get(student.id)
-                            const finalTargetId = overrideTargetId || group.targetClassId
-
-                            if (finalTargetId) {
-                                const finalTargetClass = overrideTargetId
-                                    ? classes.find(c => c.id === finalTargetId)
-                                    : null
-                                const finalTargetName = finalTargetClass?.name || group.targetClassName
-
-                                const actionName = group.action === 'TRANSITION' ? 'Transisi SMA' : 'Naik kelas'
-                                const res = await fetch(`/api/students/${student.id}/promote`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        to_class_id: finalTargetId,
-                                        to_academic_year_id: targetYear?.id,
-                                        from_academic_year_id: sourceYear?.id,
-                                        notes: `${actionName} dari ${group.sourceClass.name} ke ${finalTargetName} - ${sourceYear?.name}`
-                                    })
-                                })
-                                if (res.ok) { successIds.push(student.id) }
-                                else {
-                                    const errData = await res.json()
-                                    errors.push(`Gagal memproses ${student.user.full_name}: ${errData.error}`)
-                                }
-                            } else {
-                                errors.push(`${student.user.full_name}: Target kelas belum tersedia`)
-                            }
-                        }
-                    } catch {
-                        errors.push(`${student.user.full_name}: Error tidak terduga`)
-                    }
-                    processedCount++
-                    setProcessProgress({ current: processedCount, total: toProcess.length })
-                }
+            // Resolve the RETAINED target class (same name/grade/school in the target year)
+            // once per group — used for any student explicitly marked "Tinggal Kelas".
+            let retainedClassId = ''
+            if (studentsToProcess.some(s => group.retainedStudents.has(s.id))) {
+                const retainedClass = targetClasses.find(c =>
+                    c.name === group.sourceClass.name &&
+                    c.grade_level === group.sourceClass.grade_level &&
+                    c.school_level === group.sourceClass.school_level
+                )
+                if (retainedClass) retainedClassId = retainedClass.id
             }
 
-            setResults({ success: successIds.length, failed: errors.length, errors })
+            for (const student of studentsToProcess) {
+                // SKIP: left ACTIVE (pending) — NOT processed this run, not counted as done.
+                if (group.excludedStudents.has(student.id)) continue
+
+                // RETAIN (Tinggal Kelas): enroll in the same-grade class in the target year.
+                if (group.retainedStudents.has(student.id)) {
+                    if (retainedClassId) {
+                        targets.push({
+                            student_id: student.id,
+                            to_class_id: retainedClassId,
+                            from_academic_year_id: sourceYearId,
+                            enrollment_status: 'RETAINED',
+                            note: `Tinggal di kelas ${group.sourceClass.name} - ${sourceYear?.name}`
+                        })
+                    } else {
+                        preflightErrors.push(`${student.user.full_name}: Kelas ${group.sourceClass.name} belum ada di tahun ${targetYear?.name}. Buat kelas dulu untuk 'Tinggal Kelas'.`)
+                    }
+                    continue
+                }
+
+                if (group.action === 'GRADUATE') {
+                    graduations.push({
+                        student_id: student.id,
+                        note: `Lulus dari ${group.sourceClass.name} - ${sourceYear?.name}`
+                    })
+                } else {
+                    // PROMOTE / TRANSITION
+                    const overrideTargetId = group.studentTargetOverrides.get(student.id)
+                    const finalTargetId = overrideTargetId || group.targetClassId
+                    if (finalTargetId) {
+                        const finalTargetClass = overrideTargetId ? classes.find(c => c.id === finalTargetId) : null
+                        const finalTargetName = finalTargetClass?.name || group.targetClassName
+                        const actionName = group.action === 'TRANSITION' ? 'Transisi SMA' : 'Naik kelas'
+                        targets.push({
+                            student_id: student.id,
+                            to_class_id: finalTargetId,
+                            from_academic_year_id: sourceYearId,
+                            enrollment_status: 'PROMOTED',
+                            note: `${actionName} dari ${group.sourceClass.name} ke ${finalTargetName} - ${sourceYear?.name}`
+                        })
+                    } else {
+                        preflightErrors.push(`${student.user.full_name}: Target kelas belum dipilih — pilih manual dulu.`)
+                    }
+                }
+            }
+        }
+
+        // Pre-flight: if any student lacks a resolvable target, do NOT call the API.
+        if (preflightErrors.length > 0) {
+            setResults({ success: 0, failed: preflightErrors.length, errors: preflightErrors })
+            setShowResultModal(true)
+            setProcessing(false)
+            return
+        }
+
+        const total = targets.length + graduations.length
+        setProcessProgress({ current: 0, total })
+
+        try {
+            const res = await fetch('/api/batch/promote-students', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    targets,
+                    graduations,
+                    notes: `Kenaikan kelas ${sourceYear?.name || ''} → ${targetYear?.name || ''}`
+                })
+            })
+
+            let successCount = 0
+            let failedCount = 0
+            let errorLines: string[] = []
+
+            if (res.ok) {
+                const data = await res.json()
+                successCount = (data.promoted || 0) + (data.graduated || 0)
+                failedCount = data.failed || 0
+                errorLines = (data.errors || []).map((e: { student_name?: string; error?: string }) =>
+                    `${e.student_name || 'Siswa'}: ${e.error || 'gagal'}`
+                )
+            } else {
+                const errData = await res.json().catch(() => ({}))
+                failedCount = total
+                errorLines = [errData.error || 'Gagal memproses kenaikan kelas']
+            }
+
+            setResults({ success: successCount, failed: failedCount, errors: errorLines })
             setShowResultModal(true)
 
             // Refresh data from source year
             if (sourceYear) await fetchStudents(sourceYear.id)
             setSelectedGroups(new Set())
+        } catch {
+            setResults({
+                success: 0,
+                failed: total,
+                errors: ['Terjadi error tidak terduga saat memproses kenaikan kelas']
+            })
+            setShowResultModal(true)
         } finally {
             setProcessing(false)
             setProcessProgress({ current: 0, total: 0 })
@@ -824,7 +878,10 @@ export default function KenaikanKelasPage() {
                                 <span className="text-red-500 font-medium">{pending.length} belum</span>
                                 {done.length > 0 && <span className="text-green-500 ml-1.5">• {done.length} selesai</span>}
                                 {group.excludedStudents.size > 0 && (
-                                    <span className="text-amber-500 ml-1">({group.excludedStudents.size} dikecualikan)</span>
+                                    <span className="text-amber-500 ml-1">({group.excludedStudents.size} dilewati)</span>
+                                )}
+                                {group.retainedStudents.size > 0 && (
+                                    <span className="text-orange-500 ml-1">({group.retainedStudents.size} tinggal)</span>
                                 )}
                             </p>
                         </div>
@@ -890,7 +947,9 @@ export default function KenaikanKelasPage() {
                                 <div className="flex gap-2">
                                     <button
                                         onClick={() => setClassGroups(prev => prev.map(g =>
-                                            g.sourceClass.id === group.sourceClass.id ? { ...g, excludedStudents: new Set() } : g
+                                            g.sourceClass.id === group.sourceClass.id
+                                                ? { ...g, excludedStudents: new Set(), retainedStudents: new Set() }
+                                                : g
                                         ))}
                                         className="text-xs text-primary hover:underline"
                                     >Pilih Semua</button>
@@ -898,7 +957,7 @@ export default function KenaikanKelasPage() {
                                     <button
                                         onClick={() => setClassGroups(prev => prev.map(g =>
                                             g.sourceClass.id === group.sourceClass.id
-                                                ? { ...g, excludedStudents: new Set(pending.map(s => s.id)) }
+                                                ? { ...g, excludedStudents: new Set(pending.map(s => s.id)), retainedStudents: new Set() }
                                                 : g
                                         ))}
                                         className="text-xs text-red-500 hover:underline"
@@ -950,7 +1009,7 @@ export default function KenaikanKelasPage() {
                                     {getStudentStatusBadge(student)}
                                     {isExcluded && isPending && (
                                         <span className="text-xs text-amber-500 font-medium flex items-center gap-1">
-                                            <UserX className="w-3 h-3" /> Tinggal
+                                            <UserX className="w-3 h-3" /> Dilewati
                                         </span>
                                     )}
                                 </div>
@@ -1281,7 +1340,7 @@ export default function KenaikanKelasPage() {
                             title={sourceEqualsTarget ? 'Buat tahun ajaran baru dulu' : missingTargetClasses.length > 0 ? 'Buat kelas tujuan yang kurang dulu' : ''}
                         >
                             {processing
-                                ? `Memproses ${processProgress.current}/${processProgress.total}...`
+                                ? `Memproses ${processProgress.total} siswa...`
                                 : `Proses Kenaikan Kelas (${totalSelectedStudents} siswa)`
                             }
                         </Button>
@@ -1348,7 +1407,7 @@ export default function KenaikanKelasPage() {
                         {confirmStats.excluded > 0 && (
                             <div className="flex items-center justify-between text-sm border-t border-secondary/10 pt-2">
                                 <span className="flex items-center gap-2 text-amber-500">
-                                    <UserX className="w-4 h-4" /> Dikecualikan (tinggal kelas)
+                                    <UserX className="w-4 h-4" /> Dilewati (tidak diproses kali ini)
                                 </span>
                                 <span className="font-bold text-amber-500">{confirmStats.excluded} siswa</span>
                             </div>

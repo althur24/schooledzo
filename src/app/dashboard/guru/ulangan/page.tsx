@@ -412,7 +412,7 @@ export default function GuruUlanganPage() {
             if (!classId) throw new Error('Class ID missing')
 
             const [studentsRes, subsRes] = await Promise.all([
-                fetch(`/api/students?class_id=${classId}`),
+                fetch(`/api/students?class_id=${classId}&enrollment_year_id=${(exam.teaching_assignment as any)?.academic_year_id || ''}`),
                 fetch(`/api/exam-submissions?exam_id=${exam.id}&teacher_view=true`)
             ])
             const studentsData = await studentsRes.json()

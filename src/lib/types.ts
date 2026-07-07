@@ -286,31 +286,6 @@ export interface QuestionBank {
 }
 
 // Batch Operation Types for Student Lifecycle Management
-
-export interface BatchPromotionRequest {
-    academic_year_from: string
-    academic_year_to: string
-    class_mappings: {
-        from_class_id: string
-        to_class_id: string
-    }[]
-    student_ids?: string[]  // Optional: specific students only, if empty process all
-}
-
-export interface BatchPromotionResult {
-    success: boolean
-    promoted_count: number
-    failed_count: number
-    errors: {
-        student_id: string
-        student_name: string
-        error: string
-    }[]
-}
-
-export interface BatchGraduateRequest {
-    student_ids: string[]
-    academic_year_id: string
-    notes?: string
-}
+// (The legacy /api/batch/promote and /api/batch/graduate endpoints were removed;
+//  kenaikan kelas now uses /api/batch/promote-students -> promote_students_batch RPC.)
 

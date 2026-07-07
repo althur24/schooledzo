@@ -87,6 +87,12 @@ export async function PUT(
             .eq('id', id)
 
         if (updateStudentError) {
+            // Rollback step 1: reopen the enrollment we just closed as GRADUATED,
+            // so the student is not left with a closed enrollment but non-GRADUATED status.
+            await supabase
+                .from('student_enrollments')
+                .update({ status: 'ACTIVE', ended_at: null, updated_at: now })
+                .eq('id', activeEnrollment.id)
             return NextResponse.json({
                 error: 'Failed to update student status',
                 details: updateStudentError.message

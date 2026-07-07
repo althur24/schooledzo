@@ -133,12 +133,9 @@ export default function TugasPage() {
         e.preventDefault()
         setSaving(true)
         try {
-            // Convert local datetime-local string to UTC for backend
-            let formattedDueDate = null;
-            if (formData.due_date) {
-                const localDate = new Date(formData.due_date);
-                formattedDueDate = localDate.toISOString();
-            }
+            // Pass datetime-local string directly (already local time)
+            // Supabase column is 'timestamp without time zone' so no UTC conversion needed
+            const formattedDueDate = formData.due_date || null;
 
             if (editingId) {
                 const res = await fetch(`/api/assignments/${editingId}`, {
@@ -194,12 +191,8 @@ export default function TugasPage() {
     const openCopyModal = (assignment: Assignment) => {
         setCopySourceAssignment(assignment)
 
-        let localDueStr = '';
-        if (assignment.due_date) {
-            const d = new Date(assignment.due_date);
-            d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-            localDueStr = d.toISOString().slice(0, 16);
-        }
+        // due_date from DB is already local time (no timezone), just slice for datetime-local input
+        const localDueStr = assignment.due_date ? assignment.due_date.slice(0, 16) : '';
 
         setCopyForm({
             teaching_assignment_ids: [],
@@ -215,11 +208,8 @@ export default function TugasPage() {
         if (!copySourceAssignment || copyForm.teaching_assignment_ids.length === 0 || !copyForm.title) return
         setCopying(true)
         try {
-            let formattedDueDate = null;
-            if (copyForm.due_date) {
-                const localDate = new Date(copyForm.due_date);
-                formattedDueDate = localDate.toISOString();
-            }
+            // Pass datetime-local string directly (already local time)
+            const formattedDueDate = copyForm.due_date || null;
 
             const createResults = await Promise.allSettled(
                 copyForm.teaching_assignment_ids.map(taId => 
@@ -261,13 +251,8 @@ export default function TugasPage() {
     const openEditModal = (assignment: Assignment) => {
         setEditingId(assignment.id)
 
-        let localDueStr = '';
-        if (assignment.due_date) {
-            const d = new Date(assignment.due_date);
-            // Adjust to local timezone for datetime-local input
-            d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-            localDueStr = d.toISOString().slice(0, 16);
-        }
+        // due_date from DB is already local time (no timezone), just slice for datetime-local input
+        const localDueStr = assignment.due_date ? assignment.due_date.slice(0, 16) : '';
 
         setFormData({
             teaching_assignment_ids: [assignment.teaching_assignment.id],

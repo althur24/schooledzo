@@ -97,8 +97,9 @@ export default function RekapNilaiPage() {
 
         setLoadingData(true)
         try {
-            // Fetch students in the class
-            const studentsRes = await fetch(`/api/students?class_id=${selectedClass}`)
+            // Fetch students in the class — year-aware so historical years show the
+            // students who were actually enrolled then (not just current roster).
+            const studentsRes = await fetch(`/api/students?class_id=${selectedClass}&enrollment_year_id=${selectedYear}`)
             const studentsData = await studentsRes.json()
             const students: Student[] = Array.isArray(studentsData) ? studentsData : []
 

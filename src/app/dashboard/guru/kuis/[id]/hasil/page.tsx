@@ -64,9 +64,11 @@ export default function QuizSubmissionsPage() {
                 setQuiz(quizData)
                 setSubmissions(subsData)
 
-                // Fetch students in this class
+                // Fetch students in this class — year-aware so a past quiz shows the
+                // students who were enrolled then (not the current roster).
                 if (quizData.teaching_assignment?.class?.id) {
-                    const studentsRes = await fetch(`/api/students?class_id=${quizData.teaching_assignment.class.id}`)
+                    const taYear = (quizData.teaching_assignment as any)?.academic_year_id
+                    const studentsRes = await fetch(`/api/students?class_id=${quizData.teaching_assignment.class.id}&enrollment_year_id=${taYear || ''}`)
                     const studentsData = await studentsRes.json()
                     setClassStudents(studentsData)
                 }

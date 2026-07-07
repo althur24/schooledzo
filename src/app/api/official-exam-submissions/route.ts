@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user, schoolId } = ctx
+        const { user } = ctx
 
         const examId = request.nextUrl.searchParams.get('exam_id')
         const studentId = request.nextUrl.searchParams.get('student_id')
@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
                 student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name), class:classes(id, school_level, grade_level)),
                 exam:official_exams(
                     id, title, exam_type, duration_minutes, is_active, subject_id,
+                    academic_year_id, target_class_ids,
                     show_results_immediately, results_released,
                     subject:subjects(id, name, kkm)
                 )
@@ -53,7 +54,10 @@ export async function GET(request: NextRequest) {
                 result = []
             }
         } else if (user.role === 'GURU') {
-            // Guru can only see submissions of students in their assigned classes for their subjects
+            // A guru sees submissions for official exams they teach: the exam's subject in
+            // one of the exam's target classes. target_class_ids are unique per academic
+            // year, so this is correct across years — unlike the old check on
+            // student.class_id (current class), which dropped students who had moved up.
             const { data: teacher } = await supabase
                 .from('teachers')
                 .select('id')
@@ -61,40 +65,57 @@ export async function GET(request: NextRequest) {
                 .single()
 
             if (teacher) {
-                const { data: activeYear } = await supabase
-                    .from('academic_years')
-                    .select('id')
-                    .eq('is_active', true)
-                    .eq('school_id', schoolId)
-                    .single()
+                const examIds = [...new Set(result.map((s: any) => s.exam_id))]
+                const { data: exams } = await supabase
+                    .from('official_exams')
+                    .select('id, subject_id, target_class_ids')
+                    .in('id', examIds.length ? examIds : ['00000000-0000-0000-0000-000000000000'])
+                const examById = new Map((exams || []).map((e: any) => [e.id, e]))
 
-                const { data: assignments } = await supabase
+                const targetClassIds = [...new Set((exams || []).flatMap((e: any) => e.target_class_ids || []))]
+                const { data: taught } = await supabase
                     .from('teaching_assignments')
                     .select('subject_id, class_id')
                     .eq('teacher_id', teacher.id)
-                    .eq('academic_year_id', activeYear?.id || '')
+                    .in('class_id', targetClassIds.length ? targetClassIds : ['00000000-0000-0000-0000-000000000000'])
+                const taughtKey = new Set((taught || []).map((a: any) => `${a.subject_id}|${a.class_id}`))
 
-                if (assignments && assignments.length > 0) {
-                    const teacherClassIds = [...new Set(assignments.map(a => a.class_id))]
-                    const teacherSubjectIds = [...new Set(assignments.map(a => a.subject_id))]
-
-                    result = result.filter((sub: any) => {
-                        const studentClassId = sub.student?.class_id
-                        const examSubjectId = sub.exam?.subject_id
-                        return teacherClassIds.includes(studentClassId) &&
-                               teacherSubjectIds.includes(examSubjectId)
-                    })
-                } else {
-                    result = []
-                }
+                result = result.filter((sub: any) => {
+                    const ex = examById.get(sub.exam_id)
+                    if (!ex) return false
+                    return (ex.target_class_ids || []).some((cid: string) =>
+                        taughtKey.has(`${ex.subject_id}|${cid}`)
+                    )
+                })
             } else {
                 result = []
             }
         }
 
-        // Additional class filter
+        // Additional class filter — resolve the student's class IN THE EXAM'S YEAR via
+        // enrollment (not current class_id), so filtering works for past exams too.
         if (classId) {
-            result = result.filter((sub: any) => sub.student?.class_id === classId)
+            const studentIds = [...new Set(result.map((s: any) => s.student_id))]
+            const examYears = new Set<string>()
+            result.forEach((s: any) => {
+                const ex: any = Array.isArray(s.exam) ? s.exam[0] : s.exam
+                if (ex?.academic_year_id) examYears.add(ex.academic_year_id)
+            })
+            const { data: enrollments } = await supabase
+                .from('student_enrollments')
+                .select('student_id, class_id, academic_year_id')
+                .in('student_id', studentIds.length ? studentIds : ['00000000-0000-0000-0000-000000000000'])
+                .in('academic_year_id', examYears.size ? [...examYears] : ['00000000-0000-0000-0000-000000000000'])
+            const studentYearClass = new Map<string, string>()
+            ;(enrollments || []).forEach((e: any) =>
+                studentYearClass.set(`${e.student_id}|${e.academic_year_id}`, e.class_id)
+            )
+            result = result.filter((sub: any) => {
+                const ex: any = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
+                const year = ex?.academic_year_id
+                const sc = year ? studentYearClass.get(`${sub.student_id}|${year}`) : undefined
+                return sc === classId
+            })
         }
 
         // Server-side auto-submit: detect and submit expired but unsubmitted entries

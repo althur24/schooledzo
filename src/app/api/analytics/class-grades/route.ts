@@ -44,13 +44,38 @@ export async function GET(request: NextRequest) {
 
         if (subjectsError) throw subjectsError
 
-        // Get all students with their classes
+        // Get all students (used for name/nis lookups in the result)
         const { data: students, error: studentsError } = await supabase
             .from('students')
             .select('id, nis, class_id, user:users!students_user_id_fkey(full_name)')
             .eq('school_id', schoolId)
 
         if (studentsError) throw studentsError
+
+        // SOURCE OF TRUTH for "who was in which class during this year": student_enrollments.
+        // We must NOT use students.class_id (current class) here, otherwise students who have
+        // since been promoted/graduated disappear from their old class's historical analytics.
+        const yearClassIds = classes?.map(c => c.id) || []
+        const { data: enrollments, error: enrollError } = yearClassIds.length > 0
+            ? await supabase
+                .from('student_enrollments')
+                .select('student_id, class_id')
+                .eq('academic_year_id', academicYearId)
+                .in('class_id', yearClassIds)
+            : { data: [] as any[], error: null }
+
+        if (enrollError) throw enrollError
+
+        // classRoster: class_id -> Set(student_id) enrolled in that class this year
+        // studentClassByYear: student_id -> class_id (for official-exam attribution)
+        const classRoster = new Map<string, Set<string>>()
+        const studentClassByYear = new Map<string, string>()
+        ;(enrollments || []).forEach((e: any) => {
+            if (!e.class_id || !e.student_id) return
+            if (!classRoster.has(e.class_id)) classRoster.set(e.class_id, new Set())
+            classRoster.get(e.class_id)!.add(e.student_id)
+            studentClassByYear.set(e.student_id, e.class_id)
+        })
 
         // Get teaching assignments for this academic year (scoped by school via academic_year)
         const { data: teachingAssignments, error: taError } = await supabase
@@ -205,8 +230,8 @@ export async function GET(request: NextRequest) {
             const ta = teachingAssignments?.find(t => t.id === assignment.teaching_assignment_id)
             if (!ta) return
 
-            const student = students?.find(s => s.id === sub.student_id)
-            if (!student || student.class_id !== ta.class_id) return
+            // Year-aware membership: was this student enrolled in this class this year?
+            if (!classRoster.get(ta.class_id)?.has(sub.student_id)) return
 
             addGrade(ta.class_id, ta.subject_id, sub.student_id, grade.score)
         })
@@ -226,8 +251,8 @@ export async function GET(request: NextRequest) {
             const ta = teachingAssignments?.find(t => t.id === quiz.teaching_assignment_id)
             if (!ta) return
 
-            const student = students?.find(s => s.id === qs.student_id)
-            if (!student || student.class_id !== ta.class_id) return
+            // Year-aware membership: was this student enrolled in this class this year?
+            if (!classRoster.get(ta.class_id)?.has(qs.student_id)) return
 
             addGrade(ta.class_id, ta.subject_id, qs.student_id, quizScore)
         })
@@ -247,8 +272,8 @@ export async function GET(request: NextRequest) {
             const ta = teachingAssignments?.find(t => t.id === exam.teaching_assignment_id)
             if (!ta) return
 
-            const student = students?.find(s => s.id === es.student_id)
-            if (!student || student.class_id !== ta.class_id) return
+            // Year-aware membership: was this student enrolled in this class this year?
+            if (!classRoster.get(ta.class_id)?.has(es.student_id)) return
 
             addGrade(ta.class_id, ta.subject_id, es.student_id, examScore)
         })
@@ -264,19 +289,22 @@ export async function GET(request: NextRequest) {
             const officialExam = officialExams?.find(oe => oe.id === os.exam_id)
             if (!officialExam) return
 
-            const student = students?.find(s => s.id === os.student_id)
-            if (!student) return
+            // Resolve the student's class IN THIS YEAR (not their current class), so a
+            // student who has since moved up is still attributed to the right class.
+            const studentClass = studentClassByYear.get(os.student_id)
+            if (!studentClass) return
 
-            // Only process if student's class is in the exam's target classes
-            if (!officialExam.target_class_ids?.includes(student.class_id)) return
+            // Only process if the student's class that year is among the exam's target classes
+            if (!officialExam.target_class_ids?.includes(studentClass)) return
 
-            // Use student's class_id + exam's subject_id to add grade
-            addGrade(student.class_id, officialExam.subject_id, os.student_id, score)
+            // Attribute the grade to that class + the exam's subject
+            addGrade(studentClass, officialExam.subject_id, os.student_id, score)
         })
 
         // Build result
         const result = classes?.map(cls => {
-            const classStudents = students?.filter(s => s.class_id === cls.id) || []
+            // Total students = how many were enrolled in this class THIS year (year-aware).
+            const totalStudents = classRoster.get(cls.id)?.size || 0
 
             const subjectAverages = subjects?.map(sub => {
                 const studentGrades = classSubjectGrades[cls.id]?.[sub.id] || []
@@ -331,7 +359,7 @@ export async function GET(request: NextRequest) {
                 class_name: cls.name,
                 school_level: (cls as any).school_level,
                 grade_level: (cls as any).grade_level,
-                total_students: classStudents.length,
+                total_students: totalStudents,
                 subjects: subjectAverages
             }
         }) || []

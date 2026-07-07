@@ -32,6 +32,13 @@ export async function PUT(
             }, { status: 400 })
         }
 
+        // Clamp enrollment_status: only 'PROMOTED'/'RETAINED' are valid end-statuses here
+        // (graduate is a separate endpoint). The student_enrollments CHECK constraint only
+        // allows ACTIVE/PROMOTED/GRADUATED/RETAINED/TRANSFERRED_OUT, so any other value
+        // (e.g. a caller misusing 'TRANSITION', which is a frontend action category, not a
+        // status) would crash the UPDATE below. Default invalid input to 'PROMOTED'.
+        const finalEnrollmentStatus = enrollment_status === 'RETAINED' ? 'RETAINED' : 'PROMOTED'
+
         // Get current student data with enrollments (scoped by school)
         let studentQuery = supabase
             .from('students')
@@ -92,12 +99,16 @@ export async function PUT(
             return NextResponse.json({ error: 'Target academic year not found' }, { status: 404 })
         }
 
-        // Safety: ensure enrollment year matches the target class's year
-        // This prevents data corruption where enrollment and class are in different years
-        const correctYearId = targetClass.academic_year_id || to_academic_year_id
-        if (correctYearId !== to_academic_year_id) {
-            console.warn(`Promote: to_academic_year_id mismatch. Sent: ${to_academic_year_id}, Class year: ${correctYearId}. Using class year.`)
+        // Reject (do NOT silently override) when the requested academic year does not
+        // match the target class's year. Previously the backend silently used the
+        // class's year, which masked wizard/stale-state bugs and could place a student
+        // in the wrong academic year without any error to the admin.
+        if (targetClass.academic_year_id !== to_academic_year_id) {
+            return NextResponse.json({
+                error: 'Tahun ajaran tujuan tidak cocok dengan kelas tujuan (kelas ini milik tahun ajaran lain).'
+            }, { status: 400 })
         }
+        const correctYearId = to_academic_year_id
 
         // Check if student already has an ACTIVE enrollment in the target year
         // Skip this check if the enrollment we're about to end IS the target year enrollment
@@ -124,10 +135,10 @@ export async function PUT(
         const { error: endEnrollmentError } = await supabase
             .from('student_enrollments')
             .update({
-                status: enrollment_status,
+                status: finalEnrollmentStatus,
                 ended_at: now,
                 updated_at: now,
-                notes: notes || (enrollment_status === 'RETAINED' ? 'Tinggal di kelas yang sama' : 'Promoted to next grade')
+                notes: notes || (finalEnrollmentStatus === 'RETAINED' ? 'Tinggal di kelas yang sama' : 'Promoted to next grade')
             })
             .eq('id', activeEnrollment.id)
 
@@ -174,6 +185,14 @@ export async function PUT(
             .eq('id', id)
 
         if (updateStudentError) {
+            // Rollback steps 1 & 2 so the student is not left half-processed:
+            // delete the new ACTIVE enrollment and reactivate the old one.
+            await supabase.from('student_enrollments').delete().eq('id', newEnrollment.id)
+            await supabase
+                .from('student_enrollments')
+                .update({ status: 'ACTIVE', ended_at: null, updated_at: now })
+                .eq('id', activeEnrollment.id)
+
             return NextResponse.json({
                 error: 'Failed to update student class',
                 details: updateStudentError.message

@@ -82,6 +82,7 @@ interface TeachingAssignment {
     id: string
     subject: { id: string; name: string; kkm?: number }
     class: { id: string; name: string; school_level?: string; grade_level?: number }
+    academic_year?: { id: string; name: string; is_active?: boolean }
 }
 
 type TabType = 'rekap' | 'tugas' | 'kuis' | 'ulangan' | 'uts-uas' | 'export'
@@ -174,8 +175,9 @@ export default function NilaiPage() {
                 const ta = teachingAssignments.find(t => t.id === selectedTA)
                 if (!ta) return
 
-                // Fetch students in the class
-                const studentsRes = await fetch(`/api/students?class_id=${ta.class.id}`)
+                // Fetch students in the class — year-aware so a past TA shows the
+                // students who were enrolled then (not the current roster).
+                const studentsRes = await fetch(`/api/students?class_id=${ta.class.id}&enrollment_year_id=${ta.academic_year?.id || ''}`)
                 const studentsData = await studentsRes.json()
                 setStudents(Array.isArray(studentsData) ? studentsData : [])
 

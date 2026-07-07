@@ -99,11 +99,14 @@ export async function GET(
 
         const allSubmissions = submissions || []
 
-        // 4) Fetch all students in the class (for participation count)
+        // 4) Total students in class — count by ENROLLMENT. class_id is unique per
+        //    (class, academic year) and enrollment records persist after promotion/
+        //    graduation, so this stays correct for historical quizzes. Counting
+        //    students.class_id (current) would drop students who have since moved up.
         let totalStudentsInClass = 0
         if (classId) {
             const { count } = await supabase
-                .from('students')
+                .from('student_enrollments')
                 .select('id', { count: 'exact', head: true })
                 .eq('class_id', classId)
             totalStudentsInClass = count || 0

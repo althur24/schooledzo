@@ -93,15 +93,36 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        // 4. Fetch all students in the allowed target classes
-        const { data: students } = await supabase
-            .from('students')
+        // 4. Fetch students enrolled in the allowed target classes (year-aware).
+        //    target_class_ids are unique per academic year, and enrollment records persist
+        //    after promotion/graduation — so this returns the correct roster even for past
+        //    exams. students.class_id (current) would drop students who have since moved up.
+        const { data: rosterEnrollments } = await supabase
+            .from('student_enrollments')
             .select(`
-                id, nis, class_id,
-                user:users!students_user_id_fkey(full_name),
-                class:classes(name)
+                class_id,
+                student:students!student_enrollments_student_id_fkey(
+                    id, nis,
+                    user:users!students_user_id_fkey(full_name)
+                ),
+                class:classes!student_enrollments_class_id_fkey(id, name)
             `)
             .in('class_id', allowedClassIds)
+
+        const seenStudent = new Set<string>()
+        const students: any[] = []
+        for (const e of (rosterEnrollments || [])) {
+            const s = e.student as any
+            if (!s || seenStudent.has(s.id)) continue
+            seenStudent.add(s.id)
+            students.push({
+                id: s.id,
+                nis: s.nis,
+                class_id: e.class_id,
+                user: s.user,
+                class: e.class
+            })
+        }
 
         if (!students || students.length === 0) {
             return NextResponse.json({

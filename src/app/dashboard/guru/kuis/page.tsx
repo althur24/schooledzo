@@ -369,7 +369,7 @@ export default function GuruKuisPage() {
             if (!classId) throw new Error('Class ID missing')
 
             const [studentsRes, subsRes] = await Promise.all([
-                fetch(`/api/students?class_id=${classId}`),
+                fetch(`/api/students?class_id=${classId}&enrollment_year_id=${(quiz.teaching_assignment as any)?.academic_year_id || ''}`),
                 fetch(`/api/quiz-submissions?quiz_id=${quiz.id}`)
             ])
             const studentsData = await studentsRes.json()

@@ -21,6 +21,7 @@ export async function GET(
                 *,
                 teaching_assignment:teaching_assignments(
                     id,
+                    academic_year_id,
                     subject:subjects(id, name),
                     class:classes(id, name, school_level, grade_level)
                 ),
