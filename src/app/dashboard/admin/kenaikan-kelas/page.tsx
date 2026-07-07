@@ -87,6 +87,9 @@ export default function KenaikanKelasPage() {
     // Processing progress
     const [processProgress, setProcessProgress] = useState({ current: 0, total: 0 })
 
+    // Pre-flight: missing target classes
+    const [creatingMissingClasses, setCreatingMissingClasses] = useState(false)
+
     const completedYears = useMemo(() =>
         academicYears
             .filter(y => y.status === 'COMPLETED')
@@ -115,6 +118,84 @@ export default function KenaikanKelasPage() {
     const progressPercent = students.length > 0
         ? Math.round((processedStudents.length / students.length) * 100)
         : 0
+
+    // Pre-flight: detect missing target classes
+    const missingTargetClasses = useMemo(() => {
+        if (!targetYear || !sourceYear || sourceYear.id === targetYear.id) return []
+        const targetClasses = classes.filter(c => c.academic_year_id === targetYear.id)
+        const sourceClasses = classes.filter(c => c.academic_year_id === sourceYear.id)
+        const missing: { name: string; grade_level: number; school_level: string; forClass: string }[] = []
+
+        for (const src of sourceClasses) {
+            const grade = src.grade_level || 0
+            const school = src.school_level || 'SMA'
+            if (grade === 3 && school === 'SMA') continue // kelas 12 SMA → lulus, tidak perlu target
+
+            const nextGrade = grade === 3 && school === 'SMP' ? 1 : grade + 1
+            const nextSchool = grade === 3 && school === 'SMP' ? 'SMA' : school
+            const classSection = src.name.replace(/[^A-Za-z]/g, '').slice(-1) || '1'
+
+            // Check if target class exists
+            const exists = targetClasses.some(c =>
+                c.grade_level === nextGrade && c.school_level === nextSchool && c.name.includes(classSection)
+            )
+            if (!exists) {
+                // Also check if the SAME class exists for retained students
+                const sameExists = targetClasses.some(c =>
+                    c.grade_level === grade && c.school_level === school && c.name === src.name
+                )
+                const targetName = school === 'SMP' && grade === 3
+                    ? `X IPA ${classSection}`
+                    : `${['', 'X', 'XI', 'XII'][nextGrade] || nextGrade} ${src.name.replace(/^[XIVL]+\s*/i, '')}`
+                if (!missing.find(m => m.name === targetName)) {
+                    missing.push({ name: targetName, grade_level: nextGrade, school_level: nextSchool, forClass: src.name })
+                }
+                if (!sameExists && !missing.find(m => m.name === src.name)) {
+                    missing.push({ name: src.name, grade_level: grade, school_level: school, forClass: `${src.name} (tinggal kelas)` })
+                }
+            }
+        }
+        return missing
+    }, [classes, sourceYear, targetYear])
+
+    const sourceEqualsTarget = sourceYear?.id === targetYear?.id
+
+    // Auto-create missing classes
+    const createMissingClasses = async () => {
+        if (!targetYear || missingTargetClasses.length === 0) return
+        setCreatingMissingClasses(true)
+        try {
+            let created = 0
+            for (const cls of missingTargetClasses) {
+                // Double check doesn't already exist
+                const existing = classes.find(c =>
+                    c.academic_year_id === targetYear.id &&
+                    c.name === cls.name && c.grade_level === cls.grade_level
+                )
+                if (existing) continue
+
+                const res = await fetch('/api/classes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: cls.name,
+                        grade_level: cls.grade_level,
+                        school_level: cls.school_level,
+                        academic_year_id: targetYear.id
+                    })
+                })
+                if (res.ok) created++
+            }
+            // Refresh data
+            alert(`✅ ${created} kelas berhasil dibuat di tahun ${targetYear.name}`)
+            await fetchYears()
+        } catch (error) {
+            console.error('Error creating classes:', error)
+            alert('Terjadi error saat membuat kelas')
+        } finally {
+            setCreatingMissingClasses(false)
+        }
+    }
 
     // === Data fetching ===
     const fetchYears = async () => {
@@ -951,6 +1032,64 @@ export default function KenaikanKelasPage() {
                 )}
             </Card>
 
+            {/* Pre-flight Validation Warnings */}
+            {sourceEqualsTarget && sourceYear && (
+                <Card className="p-4 border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20">
+                    <div className="flex items-start gap-3">
+                        <div className="text-amber-500 mt-0.5"><AlertTriangle set="bold" primaryColor="currentColor" size={20} /></div>
+                        <div>
+                            <p className="text-sm font-bold text-amber-700 dark:text-amber-400">Tahun Sumber dan Tujuan Sama</p>
+                            <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
+                                Sumber dan tujuan = <strong>{sourceYear.name}</strong>. Untuk kenaikan kelas, buat tahun ajaran baru terlebih dahulu.
+                            </p>
+                            <Button
+                                variant="secondary"
+                                onClick={() => router.push('/dashboard/admin/tahun-ajaran')}
+                                className="mt-2 text-xs"
+                            >
+                                Ke Halaman Tahun Ajaran →
+                            </Button>
+                        </div>
+                    </div>
+                </Card>
+            )}
+
+            {!sourceEqualsTarget && missingTargetClasses.length > 0 && (
+                <Card className="p-4 border-2 border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20">
+                    <div className="flex items-start gap-3">
+                        <div className="text-red-500 mt-0.5"><ShieldAlert set="bold" primaryColor="currentColor" size={20} /></div>
+                        <div className="flex-1">
+                            <p className="text-sm font-bold text-red-700 dark:text-red-400">
+                                {missingTargetClasses.length} Kelas Tujuan Belum Ada di {targetYear?.name}
+                            </p>
+                            <p className="text-xs text-red-600 dark:text-red-500 mt-1">
+                                Kelas berikut harus dibuat di tahun tujuan sebelum proses kenaikan:
+                            </p>
+                            <ul className="mt-2 space-y-1">
+                                {missingTargetClasses.map((cls, i) => (
+                                    <li key={i} className="text-xs text-red-600 dark:text-red-400 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
+                                        <strong>{cls.name}</strong>
+                                        <span className="text-red-500/70">← untuk siswa dari {cls.forClass}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                            <Button
+                                onClick={createMissingClasses}
+                                disabled={creatingMissingClasses}
+                                className="mt-3 text-xs"
+                            >
+                                {creatingMissingClasses ? (
+                                    <><Loader2 className="w-3 h-3 animate-spin mr-1" /> Membuat Kelas...</>
+                                ) : (
+                                    <>🔧 Buat Semua Kelas yang Kurang ({missingTargetClasses.length})</>
+                                )}
+                            </Button>
+                        </div>
+                    </div>
+                </Card>
+            )}
+
             {/* Empty states */}
             {noCompletedYear ? (
                 <Card className="p-6">
@@ -1136,9 +1275,10 @@ export default function KenaikanKelasPage() {
                         <Button
                             onClick={handleProcessClick}
                             loading={processing}
-                            disabled={selectedGroups.size === 0 || processing}
+                            disabled={selectedGroups.size === 0 || processing || sourceEqualsTarget || missingTargetClasses.length > 0}
                             icon={<CheckCircle set="bold" primaryColor="currentColor" size={20} />}
                             className="px-8"
+                            title={sourceEqualsTarget ? 'Buat tahun ajaran baru dulu' : missingTargetClasses.length > 0 ? 'Buat kelas tujuan yang kurang dulu' : ''}
                         >
                             {processing
                                 ? `Memproses ${processProgress.current}/${processProgress.total}...`
