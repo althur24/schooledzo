@@ -146,8 +146,9 @@ export default function KenaikanKelasPage() {
             setSourceYear(lastCompleted)
 
             // If we have a source year, fetch students
+            // Pass active year ID directly (don't rely on stale React state)
             if (lastCompleted) {
-                await fetchStudents(lastCompleted.id, classList)
+                await fetchStudents(lastCompleted.id, classList, active?.id)
             }
         } catch (error) {
             console.error('Error:', error)
@@ -156,7 +157,7 @@ export default function KenaikanKelasPage() {
         }
     }
 
-    const fetchStudents = async (yearId: string, classList?: Class[]) => {
+    const fetchStudents = async (yearId: string, classList?: Class[], overrideTargetYearId?: string) => {
         try {
             const res = await fetch(`/api/students?enrollment_year_id=${yearId}`)
             const data = await res.json()
@@ -164,13 +165,15 @@ export default function KenaikanKelasPage() {
             setStudents(studentList)
 
             const classListToUse = classList || classes
-            generateClassGroups(classListToUse, studentList, yearId)
+            // Use overrideTargetYearId if provided (to avoid stale React state)
+            const effectiveTargetYearId = overrideTargetYearId || targetYear?.id
+            generateClassGroups(classListToUse, studentList, yearId, effectiveTargetYearId)
         } catch (error) {
             console.error('Error fetching students:', error)
         }
     }
 
-    const generateClassGroups = (classList: Class[], studentList: Student[], sourceYearId: string) => {
+    const generateClassGroups = (classList: Class[], studentList: Student[], sourceYearId: string, passedTargetYearId?: string) => {
         // Group students by their enrollment class 
         const classStudentMap = new Map<string, Student[]>()
 
@@ -185,11 +188,10 @@ export default function KenaikanKelasPage() {
 
         const groups: ClassGroup[] = []
 
-        // IMPORTANT: Filter target classes to only those in the TARGET year (active year)
-        // This prevents mapping students to old-year classes
-        const targetYearId = academicYears.find(y => y.is_active || y.status === 'ACTIVE')?.id
-        const targetClasses = targetYearId
-            ? classList.filter(c => c.academic_year_id === targetYearId)
+        // Use passed targetYearId to avoid stale React state
+        const effectiveTargetYearId = passedTargetYearId || targetYear?.id || academicYears.find(y => y.is_active || y.status === 'ACTIVE')?.id
+        const targetClasses = effectiveTargetYearId
+            ? classList.filter(c => c.academic_year_id === effectiveTargetYearId)
             : classList
 
         for (const [classId, classStudents] of classStudentMap) {
