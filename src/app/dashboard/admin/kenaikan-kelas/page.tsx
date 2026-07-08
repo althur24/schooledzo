@@ -110,9 +110,6 @@ export default function KenaikanKelasPage() {
     // Processing progress
     const [processProgress, setProcessProgress] = useState({ current: 0, total: 0 })
 
-    // Pre-flight: missing target classes
-    const [creatingMissingClasses, setCreatingMissingClasses] = useState(false)
-
     const completedYears = useMemo(() =>
         academicYears
             .filter(y => y.status === 'COMPLETED')
@@ -142,85 +139,7 @@ export default function KenaikanKelasPage() {
         ? Math.round((processedStudents.length / students.length) * 100)
         : 0
 
-    // Pre-flight: detect missing target classes
-    const missingTargetClasses = useMemo(() => {
-        if (!targetYear || !sourceYear || sourceYear.id === targetYear.id) return []
-        const targetClasses = classes.filter(c => c.academic_year_id === targetYear.id)
-        const sourceClasses = classes.filter(c => c.academic_year_id === sourceYear.id)
-        const missing: { name: string; grade_level: number; school_level: string; forClass: string }[] = []
-
-        for (const src of sourceClasses) {
-            const grade = src.grade_level || 0
-            const school = src.school_level || 'SMA'
-            if (grade === 3 && school === 'SMA') continue // kelas 12 SMA → lulus, tidak perlu target
-
-            const nextGrade = grade === 3 && school === 'SMP' ? 1 : grade + 1
-            const nextSchool = grade === 3 && school === 'SMP' ? 'SMA' : school
-            const classSection = classSectionOf(src.name)
-
-            // Check if a target class with the same section exists. When the source
-            // name has no section (single class per grade), any same-grade target counts.
-            const exists = targetClasses.some(c =>
-                c.grade_level === nextGrade && c.school_level === nextSchool &&
-                (classSection === '' || classSectionOf(c.name) === classSection)
-            )
-            if (!exists) {
-                // Also check if the SAME class exists for retained students
-                const sameExists = targetClasses.some(c =>
-                    c.grade_level === grade && c.school_level === school && c.name === src.name
-                )
-                const targetName = school === 'SMP' && grade === 3
-                    ? `X IPA ${classSection}`
-                    : `${['', 'X', 'XI', 'XII'][nextGrade] || nextGrade} ${src.name.replace(/^[XIVL]+\s*/i, '')}`
-                if (!missing.find(m => m.name === targetName)) {
-                    missing.push({ name: targetName, grade_level: nextGrade, school_level: nextSchool, forClass: src.name })
-                }
-                if (!sameExists && !missing.find(m => m.name === src.name)) {
-                    missing.push({ name: src.name, grade_level: grade, school_level: school, forClass: `${src.name} (tinggal kelas)` })
-                }
-            }
-        }
-        return missing
-    }, [classes, sourceYear, targetYear])
-
     const sourceEqualsTarget = sourceYear?.id === targetYear?.id
-
-    // Auto-create missing classes
-    const createMissingClasses = async () => {
-        if (!targetYear || missingTargetClasses.length === 0) return
-        setCreatingMissingClasses(true)
-        try {
-            let created = 0
-            for (const cls of missingTargetClasses) {
-                // Double check doesn't already exist
-                const existing = classes.find(c =>
-                    c.academic_year_id === targetYear.id &&
-                    c.name === cls.name && c.grade_level === cls.grade_level
-                )
-                if (existing) continue
-
-                const res = await fetch('/api/classes', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name: cls.name,
-                        grade_level: cls.grade_level,
-                        school_level: cls.school_level,
-                        academic_year_id: targetYear.id
-                    })
-                })
-                if (res.ok) created++
-            }
-            // Refresh data
-            alert(`✅ ${created} kelas berhasil dibuat di tahun ${targetYear.name}`)
-            await fetchYears()
-        } catch (error) {
-            console.error('Error creating classes:', error)
-            alert('Terjadi error saat membuat kelas')
-        } finally {
-            setCreatingMissingClasses(false)
-        }
-    }
 
     // === Data fetching ===
     const fetchYears = async () => {
@@ -646,13 +565,15 @@ export default function KenaikanKelasPage() {
         let no = 1
         classGroups.forEach(group => {
             group.students.forEach(student => {
-                const isExcluded = group.excludedStudents.has(student.id)
+                const decision = decisionOf(group, student.id)
                 const actionLabel = group.action === 'PROMOTE' ? 'Naik Kelas'
                     : group.action === 'GRADUATE' ? 'Lulus' : 'Transisi SMA'
                 const statusLabel = student.enrollment_status === 'PROMOTED' ? 'Sudah Dinaikkan'
                     : student.enrollment_status === 'GRADUATED' ? 'Sudah Lulus'
-                        : student.enrollment_status === 'RETAINED' ? 'Tinggal Kelas'
-                            : isExcluded ? 'Akan Tinggal Kelas' : 'Belum Diproses'
+                        : student.enrollment_status === 'RETAINED' ? 'Sudah Tinggal'
+                            : decision === 'SKIP' ? 'Dilewati'
+                                : decision === 'RETAIN' ? 'Akan Tinggal Kelas'
+                                    : 'Akan Naik Kelas'
                 rows.push([
                     String(no++),
                     student.user.full_name || student.user.username,
@@ -808,16 +729,26 @@ export default function KenaikanKelasPage() {
 
     const confirmStats = useMemo(() => {
         const groups = classGroups.filter(g => selectedGroups.has(g.sourceClass.id))
-        const getPending = (g: ClassGroup) => getPendingStudents(g).filter(s => !g.excludedStudents.has(s.id))
+        // Students that will be promoted/graduated/transitioned — excludes SKIP and RETAIN.
+        const getPromotePending = (g: ClassGroup) => getPendingStudents(g).filter(s =>
+            !g.excludedStudents.has(s.id) && !g.retainedStudents.has(s.id)
+        )
+        const countRetained = (g: ClassGroup) =>
+            getPendingStudents(g).filter(s => g.retainedStudents.has(s.id)).length
+        const promote = groups.filter(g => g.action === 'PROMOTE').reduce((a, g) => a + getPromotePending(g).length, 0)
+        const graduate = groups.filter(g => g.action === 'GRADUATE').reduce((a, g) => a + getPromotePending(g).length, 0)
+        const transition = groups.filter(g => g.action === 'TRANSITION').reduce((a, g) => a + getPromotePending(g).length, 0)
+        const retained = groups.reduce((a, g) => a + countRetained(g), 0)
         return {
-            promote: groups.filter(g => g.action === 'PROMOTE').reduce((a, g) => a + getPending(g).length, 0),
-            graduate: groups.filter(g => g.action === 'GRADUATE').reduce((a, g) => a + getPending(g).length, 0),
-            transition: groups.filter(g => g.action === 'TRANSITION').reduce((a, g) => a + getPending(g).length, 0),
+            promote,
+            graduate,
+            transition,
+            retained,
             excluded: groups.reduce((a, g) => {
                 const pending = getPendingStudents(g)
                 return a + [...g.excludedStudents].filter(id => pending.some(s => s.id === id)).length
             }, 0),
-            total: groups.reduce((a, g) => a + getPending(g).length, 0),
+            total: promote + graduate + transition + retained,
             classes: groups.length
         }
     }, [classGroups, selectedGroups])
@@ -966,30 +897,19 @@ export default function KenaikanKelasPage() {
                             )}
                         </div>
                         {visibleStudents.map((student, idx) => {
-                            const isExcluded = group.excludedStudents.has(student.id)
                             const isPending = student.enrollment_status === 'ACTIVE'
+                            const decision = decisionOf(group, student.id)
                             return (
                                 <div
                                     key={student.id}
-                                    className={`flex items-center gap-3 px-6 py-2.5 hover:bg-secondary/5 transition-colors ${isPending ? 'cursor-pointer' : ''} ${isExcluded ? 'opacity-50' : ''}`}
-                                    onClick={() => isPending && toggleStudentExclusion(group.sourceClass.id, student.id)}
+                                    className={`flex items-center gap-3 px-6 py-2.5 hover:bg-secondary/5 transition-colors ${decision === 'SKIP' ? 'opacity-50' : ''}`}
                                 >
-                                    {isPending ? (
-                                        <input
-                                            type="checkbox"
-                                            checked={!isExcluded}
-                                            onChange={() => { }}
-                                            className="w-4 h-4 rounded border-secondary text-primary focus:ring-primary/50 cursor-pointer"
-                                        />
-                                    ) : (
-                                        <div className="w-4" />
-                                    )}
                                     <span className="text-xs text-text-secondary w-6 text-right">{idx + 1}.</span>
                                     <div className="flex-1 flex items-center justify-between pr-4">
-                                        <span className={`text-sm ${isExcluded ? 'line-through text-text-secondary' : 'text-text-main dark:text-white'}`}>
+                                        <span className={`text-sm ${decision === 'SKIP' ? 'line-through text-text-secondary' : 'text-text-main dark:text-white'}`}>
                                             {student.user.full_name || student.user.username}
                                         </span>
-                                        {isPending && !isExcluded && (group.action === 'PROMOTE' || group.action === 'TRANSITION') && targetOptions.length > 0 && (
+                                        {isPending && decision === 'PROMOTE' && (group.action === 'PROMOTE' || group.action === 'TRANSITION') && targetOptions.length > 0 && (
                                             <div className="w-48 ml-2">
                                                 <select
                                                     value={group.studentTargetOverrides.get(student.id) || ''}
@@ -1007,11 +927,24 @@ export default function KenaikanKelasPage() {
                                     </div>
                                     <span className="text-xs text-text-secondary">{student.nis || '-'}</span>
                                     {getStudentStatusBadge(student)}
-                                    {isExcluded && isPending && (
-                                        <span className="text-xs text-amber-500 font-medium flex items-center gap-1">
-                                            <UserX className="w-3 h-3" /> Dilewati
-                                        </span>
-                                    )}
+                                    {isPending ? (
+                                        <select
+                                            value={decision}
+                                            onChange={(e) => setStudentDecision(group.sourceClass.id, student.id, e.target.value as StudentDecision)}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className={`text-xs px-2 py-1 rounded border focus:outline-none focus:ring-1 ${
+                                                decision === 'RETAIN'
+                                                    ? 'border-orange-300 text-orange-600 bg-orange-50 dark:bg-orange-900/20 focus:ring-orange-400'
+                                                    : decision === 'SKIP'
+                                                        ? 'border-amber-300 text-amber-600 bg-amber-50 dark:bg-amber-900/20 focus:ring-amber-400'
+                                                        : 'border-emerald-300 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 focus:ring-emerald-400'
+                                            }`}
+                                        >
+                                            <option value="PROMOTE">{group.action === 'GRADUATE' ? 'Lulus' : 'Naik Kelas'}</option>
+                                            <option value="SKIP">Dilewati</option>
+                                            <option value="RETAIN">Tinggal Kelas</option>
+                                        </select>
+                                    ) : null}
                                 </div>
                             )
                         })}
@@ -1107,42 +1040,6 @@ export default function KenaikanKelasPage() {
                                 className="mt-2 text-xs"
                             >
                                 Ke Halaman Tahun Ajaran →
-                            </Button>
-                        </div>
-                    </div>
-                </Card>
-            )}
-
-            {!sourceEqualsTarget && missingTargetClasses.length > 0 && (
-                <Card className="p-4 border-2 border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20">
-                    <div className="flex items-start gap-3">
-                        <div className="text-red-500 mt-0.5"><ShieldAlert set="bold" primaryColor="currentColor" size={20} /></div>
-                        <div className="flex-1">
-                            <p className="text-sm font-bold text-red-700 dark:text-red-400">
-                                {missingTargetClasses.length} Kelas Tujuan Belum Ada di {targetYear?.name}
-                            </p>
-                            <p className="text-xs text-red-600 dark:text-red-500 mt-1">
-                                Kelas berikut harus dibuat di tahun tujuan sebelum proses kenaikan:
-                            </p>
-                            <ul className="mt-2 space-y-1">
-                                {missingTargetClasses.map((cls, i) => (
-                                    <li key={i} className="text-xs text-red-600 dark:text-red-400 flex items-center gap-2">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
-                                        <strong>{cls.name}</strong>
-                                        <span className="text-red-500/70">← untuk siswa dari {cls.forClass}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                            <Button
-                                onClick={createMissingClasses}
-                                disabled={creatingMissingClasses}
-                                className="mt-3 text-xs"
-                            >
-                                {creatingMissingClasses ? (
-                                    <><Loader2 className="w-3 h-3 animate-spin mr-1" /> Membuat Kelas...</>
-                                ) : (
-                                    <>🔧 Buat Semua Kelas yang Kurang ({missingTargetClasses.length})</>
-                                )}
                             </Button>
                         </div>
                     </div>
@@ -1334,10 +1231,10 @@ export default function KenaikanKelasPage() {
                         <Button
                             onClick={handleProcessClick}
                             loading={processing}
-                            disabled={selectedGroups.size === 0 || processing || sourceEqualsTarget || missingTargetClasses.length > 0}
+                            disabled={selectedGroups.size === 0 || processing || sourceEqualsTarget}
                             icon={<CheckCircle set="bold" primaryColor="currentColor" size={20} />}
                             className="px-8"
-                            title={sourceEqualsTarget ? 'Buat tahun ajaran baru dulu' : missingTargetClasses.length > 0 ? 'Buat kelas tujuan yang kurang dulu' : ''}
+                            title={sourceEqualsTarget ? 'Buat tahun ajaran baru dulu' : ''}
                         >
                             {processing
                                 ? `Memproses ${processProgress.total} siswa...`
@@ -1402,6 +1299,14 @@ export default function KenaikanKelasPage() {
                                     <ArrowRight set="bold" primaryColor="currentColor" size={16} /> Transisi SMA
                                 </span>
                                 <span className="font-bold text-text-main dark:text-white">{confirmStats.transition} siswa</span>
+                            </div>
+                        )}
+                        {confirmStats.retained > 0 && (
+                            <div className="flex items-center justify-between text-sm">
+                                <span className="flex items-center gap-2 text-orange-500">
+                                    <UserX className="w-4 h-4" /> Tinggal Kelas
+                                </span>
+                                <span className="font-bold text-orange-500">{confirmStats.retained} siswa</span>
                             </div>
                         )}
                         {confirmStats.excluded > 0 && (

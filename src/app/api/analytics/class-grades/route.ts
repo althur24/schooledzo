@@ -9,6 +9,19 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
+// Helper: batch .in() queries to avoid URL overflow (max ~100 UUIDs per request)
+async function batchedIn<T>(table: string, column: string, ids: string[], select: string): Promise<T[]> {
+    if (ids.length === 0) return []
+    const BATCH = 100
+    const results: T[] = []
+    for (let i = 0; i < ids.length; i += BATCH) {
+        const chunk = ids.slice(i, i + BATCH)
+        const { data, error } = await supabase.from(table).select(select).in(column, chunk)
+        if (error) throw error
+        if (data) results.push(...(data as T[]))
+    }
+    return results
+}
 // GET analytics data per class per subject
 export async function GET(request: NextRequest) {
     try {
@@ -91,33 +104,18 @@ export async function GET(request: NextRequest) {
             return NextResponse.json([])
         }
 
-        // Get all assignments (scoped by school's TAs)
-        const { data: assignments, error: assignmentsError } = await supabase
-            .from('assignments')
-            .select('id, teaching_assignment_id')
-            .in('teaching_assignment_id', taIds)
+        // Get all assignments (scoped by school's TAs) — batched to avoid URL overflow
+        const assignments = await batchedIn<{id: string, teaching_assignment_id: string}>('assignments', 'teaching_assignment_id', taIds, 'id, teaching_assignment_id')
 
-        if (assignmentsError) throw assignmentsError
+        const assignmentIds = assignments.map(a => a.id)
 
-        const assignmentIds = assignments?.map(a => a.id) || []
+        // Get student submissions for tugas — batched
+        const studentSubmissions = await batchedIn<{id: string, student_id: string, assignment_id: string}>('student_submissions', 'assignment_id', assignmentIds, 'id, student_id, assignment_id')
 
-        // Get student submissions for tugas (scoped by school's assignments)
-        const { data: studentSubmissions, error: ssError } = assignmentIds.length > 0
-            ? await supabase
-                .from('student_submissions')
-                .select('id, student_id, assignment_id')
-                .in('assignment_id', assignmentIds)
-            : { data: [] as any[], error: null }
+        const submissionIds = studentSubmissions.map(s => s.id)
 
-        const submissionIds = studentSubmissions?.map(s => s.id) || []
-
-        // Get grades for student submissions (scoped by school's submissions)
-        const { data: grades, error: gradesError } = submissionIds.length > 0
-            ? await supabase
-                .from('grades')
-                .select('id, submission_id, score')
-                .in('submission_id', submissionIds)
-            : { data: [] as any[], error: null }
+        // Get grades for student submissions — batched
+        const grades = await batchedIn<{id: string, submission_id: string, score: number}>('grades', 'submission_id', submissionIds, 'id, submission_id, score')
 
         // Get quizzes (scoped by school's TAs)
         const { data: quizzes, error: quizzesError } = await supabase
