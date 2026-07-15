@@ -105,7 +105,15 @@ export default function AdminUtsUasPage() {
 
             setExams(Array.isArray(examsData) ? examsData : [])
             setSubjects(Array.isArray(subjectsData) ? subjectsData : [])
-            setClasses(Array.isArray(classesData) ? classesData : [])
+            // Scope classes to the active academic year only — UTS/UAS exams are always
+            // created in the active year, so target classes must be from it too. Without
+            // this, copy-classes creates same-named classes across years → duplicates.
+            const allClasses = Array.isArray(classesData) ? classesData : []
+            const activeClasses = allClasses.filter(c => {
+                const ay = Array.isArray(c.academic_year) ? c.academic_year[0] : c.academic_year
+                return ay?.is_active === true || ay?.status === 'ACTIVE'
+            })
+            setClasses(activeClasses)
 
             // Fetch submission counts for each exam
             const examsList = Array.isArray(examsData) ? examsData : []

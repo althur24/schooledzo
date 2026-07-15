@@ -41,7 +41,6 @@ export default function RaporPage({ params }: { params: Promise<{ id: string }> 
     const [student, setStudent] = useState<Student | null>(null)
     const [summary, setSummary] = useState<SubjectSummary[]>([])
     const [loading, setLoading] = useState(true)
-    const [debugGradeCount, setDebugGradeCount] = useState<number>(0)
 
     useEffect(() => {
         const fetchData = async () => {
@@ -59,7 +58,6 @@ export default function RaporPage({ params }: { params: Promise<{ id: string }> 
                 }
 
                 if (gradesRes.ok && Array.isArray(gradesData)) {
-                    setDebugGradeCount(gradesData.length)
                     processGrades(gradesData)
                 }
             } catch (error) {
@@ -166,23 +164,7 @@ export default function RaporPage({ params }: { params: Promise<{ id: string }> 
     return (
         <div className="min-h-screen bg-slate-100 dark:bg-slate-900 p-8 print:p-0 print:bg-white font-sans text-slate-900">
 
-            {/* DEBUG INFO */}
-            <div className="fixed bottom-4 right-4 p-4 bg-slate-900/90 text-white text-xs rounded-xl shadow-lg z-50 max-w-xs border border-slate-700/50 backdrop-blur-sm print:hidden">
-                <div className="flex justify-between items-center mb-2 border-b border-slate-700 pb-2">
-                    <span className="font-bold text-emerald-400">DEBUG</span>
-                    <span className="text-slate-400">{id.slice(0, 8)}...</span>
-                </div>
-                <div className="space-y-1">
-                    <div className="flex justify-between">
-                        <span className="text-slate-400">Raw Grades:</span>
-                        <span className="font-mono">{debugGradeCount}</span>
-                    </div>
-                    <div className="flex justify-between">
-                        <span className="text-slate-400">Subjects:</span>
-                        <span className="font-mono">{summary.length}</span>
-                    </div>
-                </div>
-            </div>
+
 
             {/* Toolbar - Hidden when printing */}
             <div className="max-w-[210mm] mx-auto mb-6 flex justify-between items-center print:hidden">

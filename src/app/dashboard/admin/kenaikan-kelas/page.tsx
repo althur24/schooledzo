@@ -71,6 +71,17 @@ function classSectionOf(name?: string | null): string {
         .toUpperCase()
 }
 
+/** Check if a student matches the search query (name, username, or NIS) */
+function isStudentMatch(student: Student, query: string): boolean {
+    if (!query.trim()) return false
+    const q = query.toLowerCase()
+    return (
+        (student.user.full_name || '').toLowerCase().includes(q) ||
+        student.user.username.toLowerCase().includes(q) ||
+        (student.nis || '').toLowerCase().includes(q)
+    )
+}
+
 export default function KenaikanKelasPage() {
     const router = useRouter()
     const [loading, setLoading] = useState(true)
@@ -300,6 +311,20 @@ export default function KenaikanKelasPage() {
     }
 
     useEffect(() => { fetchYears() }, [])
+
+    // Auto-expand groups that contain students matching the search query
+    useEffect(() => {
+        if (!searchQuery.trim()) return
+        const matchedGroupIds = new Set<string>()
+        classGroups.forEach(g => {
+            if (g.students.some(s => isStudentMatch(s, searchQuery))) {
+                matchedGroupIds.add(g.sourceClass.id)
+            }
+        })
+        if (matchedGroupIds.size > 0) {
+            setExpandedGroups(prev => new Set([...prev, ...matchedGroupIds]))
+        }
+    }, [searchQuery, classGroups])
 
     // Change source year
     const handleSourceYearChange = async (yearId: string) => {
@@ -706,7 +731,8 @@ export default function KenaikanKelasPage() {
             const q = searchQuery.toLowerCase()
             groups = groups.filter(g =>
                 g.sourceClass.name.toLowerCase().includes(q) ||
-                g.targetClassName.toLowerCase().includes(q)
+                g.targetClassName.toLowerCase().includes(q) ||
+                g.students.some(s => isStudentMatch(s, searchQuery))
             )
         }
         if (filterMode === 'PENDING') {
@@ -906,7 +932,13 @@ export default function KenaikanKelasPage() {
                                 >
                                     <span className="text-xs text-text-secondary w-6 text-right">{idx + 1}.</span>
                                     <div className="flex-1 flex items-center justify-between pr-4">
-                                        <span className={`text-sm ${decision === 'SKIP' ? 'line-through text-text-secondary' : 'text-text-main dark:text-white'}`}>
+                                        <span className={`text-sm ${
+                                            decision === 'SKIP'
+                                                ? 'line-through text-text-secondary'
+                                                : isStudentMatch(student, searchQuery)
+                                                    ? 'text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded'
+                                                    : 'text-text-main dark:text-white'
+                                        }`}>
                                             {student.user.full_name || student.user.username}
                                         </span>
                                         {isPending && decision === 'PROMOTE' && (group.action === 'PROMOTE' || group.action === 'TRANSITION') && targetOptions.length > 0 && (
@@ -1100,11 +1132,18 @@ export default function KenaikanKelasPage() {
                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary"><Search set="bold" primaryColor="currentColor" size={16} /></span>
                                 <input
                                     type="text"
-                                    placeholder="Cari kelas..."
+                                    placeholder="Cari nama siswa, NIS, atau kelas..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                 />
+                                {searchQuery.trim() && (
+                                    <p className="absolute -bottom-5 left-0 text-[11px] text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                                        🔍 {filteredGroups.reduce((acc, g) =>
+                                            acc + g.students.filter(s => isStudentMatch(s, searchQuery)).length, 0
+                                        )} siswa ditemukan di {filteredGroups.length} kelas
+                                    </p>
+                                )}
                             </div>
                             {/* Filter toggle */}
                             <div className="flex bg-slate-100 dark:bg-slate-800 rounded-xl p-0.5 border border-slate-200 dark:border-slate-700">

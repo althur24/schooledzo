@@ -236,7 +236,7 @@ export async function PUT(
     }
 }
 
-// DELETE student
+// DELETE student (transactional via RPC)
 export async function DELETE(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -247,108 +247,37 @@ export async function DELETE(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'ADMIN') {
+        if (!['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Get student to find user_id and parent_user_id (scoped by school)
-        let delQuery = supabase
+        // Validate student exists and belongs to school
+        let checkQuery = supabase
             .from('students')
-            .select('user_id, parent_user_id')
+            .select('id')
             .eq('id', id)
-        if (schoolId) delQuery = delQuery.eq('school_id', schoolId)
-        const { data: student } = await delQuery.single()
+        if (schoolId) checkQuery = checkQuery.eq('school_id', schoolId)
+        const { data: student } = await checkQuery.single()
 
         if (!student) {
             return NextResponse.json({ error: 'Siswa tidak ditemukan' }, { status: 404 })
         }
 
-        // === STEP 1: Clear parent_user_id FK reference ===
-        if (student.parent_user_id) {
-            await supabase
-                .from('students')
-                .update({ parent_user_id: null })
-                .eq('id', id)
-        }
+        // Call transactional RPC — atomic: all-or-nothing
+        // SUPER_ADMIN passes null schoolId to skip school scope check in RPC
+        const { data: rpcResult, error: rpcError } = await supabase.rpc('delete_student', {
+            p_student_id: id,
+            p_school_id: schoolId || null
+        })
 
-        // === STEP 2: Delete all student-related records ===
-        // These tables reference students(id) - some may not have ON DELETE CASCADE
-        const studentCleanupTables = [
-            'student_enrollments',
-            'quiz_submissions',
-            'exam_submissions',
-            'official_exam_submissions',
-            'student_submissions',
-            'material_chat_history',
-        ]
-
-        for (const table of studentCleanupTables) {
-            const { error } = await supabase
-                .from(table)
-                .delete()
-                .eq('student_id', id)
-            if (error) {
-                console.warn(`Cleanup ${table}: ${error.message} (may not exist, continuing)`)
-            }
-        }
-
-        // === STEP 3: Delete the student record ===
-        const { error: studentDelError } = await supabase
-            .from('students')
-            .delete()
-            .eq('id', id)
-        if (studentDelError) {
-            console.error('Delete student record failed:', studentDelError)
+        if (rpcError) {
+            console.error('RPC delete_student failed:', rpcError)
             return NextResponse.json({
-                error: `Gagal menghapus data siswa: ${studentDelError.message}`
+                error: `Gagal menghapus siswa: ${rpcError.message}`
             }, { status: 500 })
         }
 
-        // === STEP 4: Delete user-related records ===
-        // These tables reference users(id) - clean up before deleting user
-        const userIds = [student.user_id, student.parent_user_id].filter(Boolean) as string[]
-        const userCleanupTables = [
-            'sessions',
-            'notifications',
-        ]
-
-        for (const userId of userIds) {
-            for (const table of userCleanupTables) {
-                const { error } = await supabase
-                    .from(table)
-                    .delete()
-                    .eq('user_id', userId)
-                if (error) {
-                    console.warn(`Cleanup ${table} for user ${userId}: ${error.message}`)
-                }
-            }
-        }
-
-        // === STEP 5: Delete the .wali user (if exists) ===
-        if (student.parent_user_id) {
-            const { error: waliError } = await supabase
-                .from('users')
-                .delete()
-                .eq('id', student.parent_user_id)
-            if (waliError) {
-                console.warn('Delete wali user failed (non-fatal):', waliError.message)
-            }
-        }
-
-        // === STEP 6: Delete the student user ===
-        const { error: userDelError } = await supabase
-            .from('users')
-            .delete()
-            .eq('id', student.user_id)
-
-        if (userDelError) {
-            console.error('Delete student user failed:', userDelError)
-            return NextResponse.json({
-                error: `Siswa dihapus, tapi gagal menghapus akun user: ${userDelError.message}`
-            }, { status: 500 })
-        }
-
-        return NextResponse.json({ success: true })
+        return NextResponse.json(rpcResult || { success: true })
     } catch (error: any) {
         console.error('Error deleting student:', error)
         return NextResponse.json({

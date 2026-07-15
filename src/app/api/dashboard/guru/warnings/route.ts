@@ -4,6 +4,23 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 
 const DEFAULT_KKM = 75
 
+// Batch .in() queries to avoid URL overflow (max ~100 UUIDs per request).
+// Same pattern as analytics route. Needed because a teacher with many classes
+// can produce hundreds of submission_ids -> a raw .in() exceeds Supabase's URL
+// limit and silently fails (grades come back empty -> tugas not counted).
+async function batchedIn<T>(table: string, column: string, ids: string[], select: string): Promise<T[]> {
+    if (ids.length === 0) return []
+    const BATCH = 100
+    const results: T[] = []
+    for (let i = 0; i < ids.length; i += BATCH) {
+        const chunk = ids.slice(i, i + BATCH)
+        const { data, error } = await supabase.from(table).select(select).in(column, chunk)
+        if (error) throw error
+        if (data) results.push(...(data as T[]))
+    }
+    return results
+}
+
 export async function GET(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
@@ -120,7 +137,7 @@ export async function GET(request: NextRequest) {
         if (examIds.length > 0) {
             const { data } = await supabase
                 .from('exam_submissions')
-                .select('exam_id, student_id, total_score')
+                .select('exam_id, student_id, total_score, max_score')
                 .in('exam_id', examIds)
                 .in('student_id', studentIds)
                 .eq('is_submitted', true)
@@ -132,22 +149,24 @@ export async function GET(request: NextRequest) {
         const taskIds = (tasks || []).map(t => t.id)
         let taskSubsWithGrades: any[] = []
         if (taskIds.length > 0) {
-            const { data: submissions } = await supabase
-                .from('student_submissions')
-                .select('id, student_id, assignment_id')
-                .in('assignment_id', taskIds)
-                .in('student_id', studentIds)
+            // Batched to avoid URL overflow — a teacher with many classes yields many
+            // assignment_ids / submission_ids that exceed Supabase's URL limit and make
+            // the grades query silently fail (=> tugas not counted). See batchedIn helper.
+            const allSubs = await batchedIn<{ id: string; student_id: string; assignment_id: string }>(
+                'student_submissions', 'assignment_id', taskIds, 'id, student_id, assignment_id'
+            )
+            const studentSet = new Set(studentIds)
+            const submissions = allSubs.filter(s => studentSet.has(s.student_id))
 
-            if (submissions && submissions.length > 0) {
+            if (submissions.length > 0) {
                 const subIds = submissions.map(s => s.id)
-                const { data: gradesData } = await supabase
-                    .from('grades')
-                    .select('submission_id, score')
-                    .in('submission_id', subIds)
+                const gradesData = await batchedIn<{ submission_id: string; score: number }>(
+                    'grades', 'submission_id', subIds, 'submission_id, score'
+                )
 
                 // Merge grades with submissions
                 taskSubsWithGrades = submissions.map(sub => {
-                    const grade = (gradesData || []).find(g => g.submission_id === sub.id)
+                    const grade = gradesData.find(g => g.submission_id === sub.id)
                     return { ...sub, score: grade ? grade.score : null }
                 }).filter(sub => sub.score !== null)
             }
@@ -163,10 +182,11 @@ export async function GET(request: NextRequest) {
             for (const qs of quizSubs.filter(s => s.student_id === studentId && relatedQuizzes.includes(s.quiz_id))) {
                 if (qs.max_score > 0) scores.push((qs.total_score / qs.max_score) * 100)
             }
-            // Exams
+            // Exams — normalize to percentage (total_score is raw points; max_score varies per exam)
             const relatedExams = (exams || []).filter(e => e.teaching_assignment_id === taId).map(e => e.id)
             for (const es of examSubs.filter(s => s.student_id === studentId && relatedExams.includes(s.exam_id))) {
-                scores.push(es.total_score || 0)
+                const raw = es.total_score || 0
+                scores.push(es.max_score > 0 ? (raw / es.max_score) * 100 : raw)
             }
             // Tasks
             const relatedTasks = (tasks || []).filter(t => t.teaching_assignment_id === taId).map(t => t.id)

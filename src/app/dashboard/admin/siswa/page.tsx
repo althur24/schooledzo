@@ -98,6 +98,10 @@ export default function SiswaPage() {
     const [expandedClasses, setExpandedClasses] = useState<Set<string>>(new Set())
     const [expandedLevels, setExpandedLevels] = useState<Set<string>>(new Set())
 
+    // Bulk Selection State
+    const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set())
+    const [bulkDeleting, setBulkDeleting] = useState(false)
+
     const [confirmDialog, setConfirmDialog] = useState<{
         isOpen: boolean;
         title: string;
@@ -130,6 +134,7 @@ export default function SiswaPage() {
             setStudents(studentList)
             setFilteredStudents(studentList)
             setClasses(Array.isArray(classesData) ? classesData : [])
+            setSelectedStudentIds(new Set()) // Clear selection on refresh
         } catch (error) {
             console.error('Error:', error)
         } finally {
@@ -322,30 +327,144 @@ export default function SiswaPage() {
         }
     }
 
-    const handleDelete = (id: string) => {
+    const handleDelete = (student: Student) => {
+        const studentName = student.user.full_name || 'Tanpa Nama'
+        const studentNIS = student.nis || '-'
+        const studentClass = student.class?.name || 'Belum Masuk Kelas'
+
         setConfirmDialog({
             isOpen: true,
-            title: 'Hapus Siswa',
-            message: 'Yakin ingin menghapus siswa ini? Data tidak dapat dikembalikan.',
-            confirmText: 'Ya, Hapus',
+            title: 'Hapus Siswa Permanen',
+            message: (
+                <div className="space-y-3">
+                    <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                        <p className="font-bold text-slate-800 dark:text-white">{studentName}</p>
+                        <p className="text-sm text-slate-600 dark:text-slate-400">NIS: {studentNIS} • Kelas: {studentClass}</p>
+                    </div>
+                    <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+                        Siswa, akun login (siswa & wali), dan <strong>semua nilai, submission, riwayat enrollment</strong> akan dihapus permanen. Tindakan ini <strong>tidak dapat dikembalikan</strong>.
+                    </p>
+                </div>
+            ),
+            confirmText: 'Ya, Hapus Permanen',
             cancelText: 'Batal',
             isDanger: true,
             onConfirm: async () => {
                 setConfirmDialog(prev => ({ ...prev, isOpen: false }));
                 try {
-                    const res = await fetch(`/api/students/${id}`, { method: 'DELETE' })
+                    const res = await fetch(`/api/students/${student.id}`, { method: 'DELETE' })
                     if (!res.ok) {
                         const data = await res.json()
                         setError(data.error || 'Gagal menghapus siswa')
                         return
                     }
-                    setSuccessMessage('Siswa berhasil dihapus')
+                    setSuccessMessage(`Siswa ${studentName} berhasil dihapus`)
+                    setTimeout(() => setSuccessMessage(''), 5000)
                     fetchData()
                 } catch (err) {
                     setError('Terjadi kesalahan jaringan')
                 }
             }
         });
+    }
+
+    // Bulk selection helpers
+    const toggleStudentSelection = (studentId: string) => {
+        setSelectedStudentIds(prev => {
+            const next = new Set(prev)
+            if (next.has(studentId)) {
+                next.delete(studentId)
+            } else {
+                next.add(studentId)
+            }
+            return next
+        })
+    }
+
+    const toggleGroupSelection = (groupStudents: Student[]) => {
+        const ids = groupStudents.map(s => s.id)
+        const allSelected = ids.every(id => selectedStudentIds.has(id))
+        setSelectedStudentIds(prev => {
+            const next = new Set(prev)
+            if (allSelected) {
+                ids.forEach(id => next.delete(id))
+            } else {
+                ids.forEach(id => next.add(id))
+            }
+            return next
+        })
+    }
+
+    const toggleAllSelection = () => {
+        if (selectedStudentIds.size === filteredStudents.length && filteredStudents.length > 0) {
+            setSelectedStudentIds(new Set())
+        } else {
+            setSelectedStudentIds(new Set(filteredStudents.map(s => s.id)))
+        }
+    }
+
+    const handleBulkDelete = () => {
+        const count = selectedStudentIds.size
+        if (count === 0) return
+
+        const selectedStudents = students.filter(s => selectedStudentIds.has(s.id))
+        const previewList = selectedStudents.slice(0, 5)
+        const remaining = count - previewList.length
+
+        setConfirmDialog({
+            isOpen: true,
+            title: `Hapus ${count} Siswa Permanen`,
+            message: (
+                <div className="space-y-3">
+                    <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 max-h-40 overflow-y-auto">
+                        {previewList.map(s => (
+                            <div key={s.id} className="flex justify-between py-1 text-sm border-b last:border-b-0 border-red-100 dark:border-red-800/50">
+                                <span className="font-medium text-slate-800 dark:text-white">{s.user.full_name || 'Tanpa Nama'}</span>
+                                <span className="text-slate-500 dark:text-slate-400 text-xs">{s.class?.name || '-'}</span>
+                            </div>
+                        ))}
+                        {remaining > 0 && (
+                            <p className="text-xs text-red-500 dark:text-red-400 pt-1 font-medium">...dan {remaining} siswa lainnya</p>
+                        )}
+                    </div>
+                    <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+                        <strong>{count} siswa</strong>, akun login (siswa & wali), dan <strong>semua nilai, submission, riwayat enrollment</strong> akan dihapus permanen. Tindakan ini <strong>tidak dapat dikembalikan</strong>.
+                    </p>
+                </div>
+            ),
+            confirmText: `Ya, Hapus ${count} Siswa`,
+            cancelText: 'Batal',
+            isDanger: true,
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, isOpen: false }))
+                setBulkDeleting(true)
+                try {
+                    const res = await fetch('/api/students/bulk-delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ student_ids: Array.from(selectedStudentIds) })
+                    })
+                    const data = await res.json()
+                    if (!res.ok) {
+                        setError(data.error || 'Gagal menghapus siswa')
+                        return
+                    }
+                    const msg = data.failed > 0
+                        ? `${data.deleted} siswa berhasil dihapus, ${data.failed} gagal.`
+                        : `${data.deleted} siswa berhasil dihapus.`
+                    setSuccessMessage(msg)
+                    setTimeout(() => setSuccessMessage(''), 5000)
+                    if (data.failed > 0) {
+                        console.warn('Bulk delete errors:', data.errors)
+                    }
+                    fetchData()
+                } catch (err) {
+                    setError('Terjadi kesalahan jaringan')
+                } finally {
+                    setBulkDeleting(false)
+                }
+            }
+        })
     }
 
     const handleToggleLock = (id: string, currentStatus: boolean | undefined) => {
@@ -625,8 +744,18 @@ export default function SiswaPage() {
 
             <Card className="overflow-hidden p-0 bg-transparent border-none shadow-none">
                 <div className="flex justify-between items-center mb-4 px-1">
-                    <div className="text-sm font-medium text-text-secondary">
-                        Total: <span className="text-text-main dark:text-white font-bold">{filteredStudents.length}</span> Siswa
+                    <div className="flex items-center gap-3">
+                        <div className="text-sm font-medium text-text-secondary">
+                            Total: <span className="text-text-main dark:text-white font-bold">{filteredStudents.length}</span> Siswa
+                        </div>
+                        {filteredStudents.length > 0 && (
+                            <button
+                                onClick={toggleAllSelection}
+                                className="text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                            >
+                                {selectedStudentIds.size === filteredStudents.length ? 'Batal Pilih Semua' : 'Pilih Semua'}
+                            </button>
+                        )}
                     </div>
                     {sortedGroups.length > 0 && (
                         <button
@@ -711,7 +840,15 @@ export default function SiswaPage() {
                                                                     <table className="w-full">
                                                                         <thead className="bg-white dark:bg-slate-800/50 border-b border-secondary/10 dark:border-white/5">
                                                                             <tr>
-                                                                                <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider w-12">No</th>
+                                                                                <th className="px-3 py-3 w-10">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={group.students.every(s => selectedStudentIds.has(s.id))}
+                                                                                        onChange={() => toggleGroupSelection(group.students)}
+                                                                                        className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-violet-600 focus:ring-violet-500 cursor-pointer"
+                                                                                    />
+                                                                                </th>
+                                                                                <th className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider w-12">No</th>
                                                                                 <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">Nama</th>
                                                                                 <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">L/P</th>
                                                                                 <th className="px-6 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">NIS</th>
@@ -723,8 +860,16 @@ export default function SiswaPage() {
                                                                         </thead>
                                                                         <tbody className="divide-y divide-secondary/5 dark:divide-white/5">
                                                                             {[...group.students].sort((a, b) => (a.user.full_name || '').localeCompare(b.user.full_name || '', 'id')).map((student, index) => (
-                                                                                <tr key={student.id} className={`hover:bg-white dark:hover:bg-slate-800 transition-colors ${student.user.is_locked ? 'opacity-60 bg-red-50/20 dark:bg-red-900/10' : ''}`}>
-                                                                                    <td className="px-6 py-3 text-xs font-bold text-text-secondary">{index + 1}</td>
+                                                                                <tr key={student.id} className={`hover:bg-white dark:hover:bg-slate-800 transition-colors ${student.user.is_locked ? 'opacity-60 bg-red-50/20 dark:bg-red-900/10' : ''} ${selectedStudentIds.has(student.id) ? 'bg-violet-50/50 dark:bg-violet-900/10' : ''}`}>
+                                                                                    <td className="px-3 py-3">
+                                                                                        <input
+                                                                                            type="checkbox"
+                                                                                            checked={selectedStudentIds.has(student.id)}
+                                                                                            onChange={() => toggleStudentSelection(student.id)}
+                                                                                            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-violet-600 focus:ring-violet-500 cursor-pointer"
+                                                                                        />
+                                                                                    </td>
+                                                                                    <td className="px-4 py-3 text-xs font-bold text-text-secondary">{index + 1}</td>
                                                                                     <td className="px-6 py-3">
                                                                                         <div className="flex items-center gap-3">
                                                                                             <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold shadow-sm text-xs relative flex-shrink-0">
@@ -798,7 +943,7 @@ export default function SiswaPage() {
                                                                                             <button onClick={() => openEdit(student)} className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors" title="Edit">
                                                                                                 <Pencil set="bold" primaryColor="currentColor" size={16} />
                                                                                             </button>
-                                                                                            <button onClick={() => handleDelete(student.id)} className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors" title="Hapus">
+                                                                                            <button onClick={() => handleDelete(student)} className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors" title="Hapus">
                                                                                                 <Trash2 set="bold" primaryColor="currentColor" size={16} />
                                                                                             </button>
                                                                                         </div>
@@ -1125,7 +1270,7 @@ export default function SiswaPage() {
                 title={confirmDialog.title}
             >
                 <div>
-                    <p className="text-slate-700 dark:text-slate-300 font-medium">{confirmDialog.message}</p>
+                    <div className="text-slate-700 dark:text-slate-300 font-medium">{confirmDialog.message}</div>
                     <div className="flex gap-3 pt-4 border-t border-secondary/10 mt-6">
                         <Button
                             variant="secondary"
@@ -1135,14 +1280,48 @@ export default function SiswaPage() {
                             {confirmDialog.cancelText}
                         </Button>
                         <Button
+                            variant={confirmDialog.isDanger ? 'danger' : 'primary'}
                             onClick={confirmDialog.onConfirm}
-                            className={`flex-1 ${confirmDialog.isDanger ? "bg-red-600 hover:bg-red-700 border-none !text-white" : ""}`}
+                            className="flex-1"
                         >
                             {confirmDialog.confirmText}
                         </Button>
                     </div>
                 </div>
             </Modal>
+
+            {/* Floating Bulk Action Bar */}
+            {selectedStudentIds.size > 0 && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 duration-300">
+                    <div className="flex items-center gap-4 px-6 py-3 bg-slate-900 dark:bg-slate-800 text-white rounded-2xl shadow-2xl shadow-slate-900/30 border border-slate-700/50">
+                        <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-violet-500 flex items-center justify-center font-bold text-sm">
+                                {selectedStudentIds.size}
+                            </div>
+                            <span className="text-sm font-medium text-slate-300">siswa dipilih</span>
+                        </div>
+                        <div className="w-px h-8 bg-slate-700"></div>
+                        <button
+                            onClick={() => setSelectedStudentIds(new Set())}
+                            className="px-3 py-1.5 text-sm font-medium text-slate-400 hover:text-white transition-colors"
+                        >
+                            Batal
+                        </button>
+                        <Button
+                            variant="danger"
+                            onClick={handleBulkDelete}
+                            disabled={bulkDeleting}
+                            className="!py-2 !px-4 !text-sm"
+                        >
+                            {bulkDeleting ? (
+                                <><Loader2 className="w-4 h-4 animate-spin mr-1.5" /> Menghapus...</>
+                            ) : (
+                                <><Trash2 set="bold" primaryColor="currentColor" size={16} /> Hapus {selectedStudentIds.size} Siswa</>
+                            )}
+                        </Button>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
