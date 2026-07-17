@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
+import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 
 // GET questions for an official exam
 export async function GET(
@@ -72,6 +73,12 @@ export async function POST(
 
         const body = await request.json()
         const questions = Array.isArray(body) ? body : (Array.isArray(body.questions) ? body.questions : [body])
+
+        // Validate correct_answer for objective question types
+        for (const q of questions) {
+            const v = validateCorrectAnswer(q.question_type || 'MULTIPLE_CHOICE', q.correct_answer, q.options)
+            if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
+        }
 
         // Get current max order_index
         const { data: existing } = await supabase
@@ -171,15 +178,36 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { question_id, ...updates } = body
+        const { question_id, question_text, question_type, options, correct_answer, difficulty, points, image_url, passage_text, passage_audio_url, teacher_hots_claim, text_direction, content_format } = body
 
         if (!question_id) {
             return NextResponse.json({ error: 'question_id required' }, { status: 400 })
         }
 
+        // Validate correct_answer for objective types
+        if (correct_answer !== undefined && question_type !== undefined) {
+            const v = validateCorrectAnswer(question_type, correct_answer, options)
+            if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
+        }
+
+        // Build filtered update (fix mass-assignment vulnerability — don't spread entire body)
+        const updateData: any = {}
+        if (question_text !== undefined) updateData.question_text = question_text
+        if (question_type !== undefined) updateData.question_type = question_type
+        if (options !== undefined) updateData.options = options
+        if (correct_answer !== undefined) updateData.correct_answer = correct_answer
+        if (difficulty !== undefined) updateData.difficulty = difficulty
+        if (points !== undefined) updateData.points = points
+        if (image_url !== undefined) updateData.image_url = image_url
+        if (passage_text !== undefined) updateData.passage_text = passage_text
+        if (passage_audio_url !== undefined) updateData.passage_audio_url = passage_audio_url
+        if (teacher_hots_claim !== undefined) updateData.teacher_hots_claim = teacher_hots_claim
+        if (text_direction !== undefined) updateData.text_direction = text_direction
+        if (content_format !== undefined) updateData.content_format = content_format
+
         const { data, error } = await supabase
             .from('official_exam_questions')
-            .update(updates)
+            .update(updateData)
             .eq('id', question_id)
             .select()
             .single()

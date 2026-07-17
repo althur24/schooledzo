@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
-import { isCorrectOption } from '@/lib/questionTypeUtils'
+import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
 // Dynamic imports for heavy components
 const MathTextarea = dynamic(() => import('@/components/MathTextarea'), {
     ssr: false,
@@ -1585,7 +1585,7 @@ export default function EditExamPage() {
                                 </Button>
                                 <Button
                                     onClick={handleSaveEdit}
-                                    disabled={saving || !editQuestionForm.question_text}
+                                    disabled={saving || !editQuestionForm.question_text || !validateCorrectAnswer(editQuestionForm.question_type, editQuestionForm.correct_answer, editQuestionForm.options).valid}
                                 >
                                     {saving ? '⏳ Menyimpan...' : '💾 Simpan Perubahan'}
                                 </Button>

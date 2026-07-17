@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
+import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 
 // GET questions for a quiz
 export async function GET(
@@ -92,6 +93,14 @@ export async function POST(
 
         // Check AI review status ONCE before any insert
         const aiEnabled = await isAIReviewEnabled(schoolId)
+
+        // Validate correct_answer for objective question types (bulk)
+        if (Array.isArray(body)) {
+            for (const q of body) {
+                const v = validateCorrectAnswer(q.question_type || 'MULTIPLE_CHOICE', q.correct_answer, q.options)
+                if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
+            }
+        }
 
         // Handle bulk insert
         if (Array.isArray(body)) {
@@ -202,6 +211,10 @@ export async function POST(
 
         // Single insert
         const { question_text, question_type, options, correct_answer, difficulty, points, order_index, image_url, passage_text, passage_audio_url, teacher_hots_claim, content_format } = body
+
+        // Validate correct_answer for objective types (single insert)
+        const v = validateCorrectAnswer(question_type || 'MULTIPLE_CHOICE', correct_answer, options)
+        if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
 
         const { data, error } = await supabase
             .from('quiz_questions')
@@ -321,6 +334,12 @@ export async function PUT(
 
         if (!question_id) {
             return NextResponse.json({ error: 'question_id required' }, { status: 400 })
+        }
+
+        // Validate correct_answer for objective types (edit flow always sends question_type)
+        if (correct_answer !== undefined && question_type !== undefined) {
+            const v = validateCorrectAnswer(question_type, correct_answer, options)
+            if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
         }
 
         const updateData: any = {}

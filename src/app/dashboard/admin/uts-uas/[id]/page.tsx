@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic'
 import { Button, Modal, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
-import { isCorrectOption } from '@/lib/questionTypeUtils'
+import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { Edit, Discovery, Folder, Plus, Delete, Document } from 'react-iconly'
 import {
     Loader2, ArrowLeft, Trash2, Save, Eye, EyeOff,
@@ -1360,7 +1360,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         )}
                         <div className="flex gap-3 pt-4 border-t border-secondary/10">
                             <Button variant="secondary" onClick={() => { setEditingQuestionId(null); setEditQuestionForm(null) }} className="flex-1">Batal</Button>
-                            <Button onClick={handleSaveEdit} loading={saving} disabled={!editQuestionForm.question_text} className="flex-1">Simpan Perubahan</Button>
+                            <Button onClick={handleSaveEdit} loading={saving} disabled={!editQuestionForm.question_text || !validateCorrectAnswer(editQuestionForm.question_type, editQuestionForm.correct_answer, editQuestionForm.options).valid} className="flex-1">Simpan Perubahan</Button>
                         </div>
                     </div>
                 )}

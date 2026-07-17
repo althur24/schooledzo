@@ -1069,12 +1069,13 @@ export default function SiswaPage() {
                         <div className="relative">
                             <select
                                 value={formData.class_id}
+                                disabled={!!editingStudent}
                                 onChange={(e) => {
                                     const selectedClass = classes.find(c => c.id === e.target.value)
                                     const autoLevel = selectedClass?.school_level || inferSchoolLevel(selectedClass?.grade_level) || formData.school_level
                                     setFormData({ ...formData, class_id: e.target.value, school_level: autoLevel })
                                 }}
-                                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none"
+                                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                                 <option value="">Pilih Kelas</option>
                                 {classes
@@ -1085,6 +1086,11 @@ export default function SiswaPage() {
                             </select>
                             <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary">▼</div>
                         </div>
+                        {editingStudent && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1.5">
+                                ℹ️ Untuk pindah kelas, gunakan tombol <strong>"Pindah Kelas"</strong> di halaman Kelas. Mengubah kelas di sini tidak akan memperbarui enrollment.
+                            </p>
+                        )}
                     </div>
 
                     <div>

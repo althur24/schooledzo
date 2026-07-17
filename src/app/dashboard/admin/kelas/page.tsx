@@ -53,6 +53,9 @@ export default function KelasPage() {
     const [selectedClass, setSelectedClass] = useState<Class | null>(null)
     const [students, setStudents] = useState<Student[]>([])
     const [loadingStudents, setLoadingStudents] = useState(false)
+    const [moveStudent, setMoveStudent] = useState<any>(null)
+    const [moveTargetClassId, setMoveTargetClassId] = useState('')
+    const [moveLoading, setMoveLoading] = useState(false)
 
     const fetchData = async () => {
         try {
@@ -182,6 +185,31 @@ export default function KelasPage() {
             setStudents([])
         } finally {
             setLoadingStudents(false)
+        }
+    }
+
+    // Move student to a different class
+    const handleMoveStudent = async () => {
+        if (!moveStudent || !moveTargetClassId) return
+        setMoveLoading(true)
+        try {
+            const res = await fetch(`/api/students/${moveStudent.id}/move-class`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ to_class_id: moveTargetClassId })
+            })
+            if (!res.ok) {
+                const data = await res.json()
+                alert(data.error || 'Gagal memindahkan siswa')
+                return
+            }
+            setMoveStudent(null)
+            setMoveTargetClassId('')
+            if (selectedClass) await viewStudents(selectedClass)
+        } catch {
+            alert('Terjadi error')
+        } finally {
+            setMoveLoading(false)
         }
     }
 
@@ -567,6 +595,12 @@ export default function KelasPage() {
                                             ID: {student.id.substring(0, 6)}...
                                         </span>
                                     </div>
+                                    <button
+                                        onClick={() => { setMoveStudent(student); setMoveTargetClassId('') }}
+                                        className="px-3 py-1.5 text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 rounded-lg transition-colors whitespace-nowrap"
+                                    >
+                                        Pindah Kelas
+                                    </button>
                                 </div>
                             ))}
                         </div>
@@ -576,6 +610,33 @@ export default function KelasPage() {
                     <Button variant="secondary" onClick={() => setShowStudentsModal(false)} className="w-full">
                         Tutup
                     </Button>
+                </div>
+            </Modal>
+
+            {/* Move Student Modal */}
+            <Modal open={!!moveStudent} onClose={() => setMoveStudent(null)} title="Pindah Kelas" maxWidth="md">
+                <div className="space-y-4">
+                    <div className="p-3 rounded-xl bg-secondary/5">
+                        <p className="font-bold text-text-main dark:text-white">{moveStudent?.user?.full_name || 'Tanpa Nama'}</p>
+                        <p className="text-sm text-text-secondary">Dari: {selectedClass?.name}</p>
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium text-text-main dark:text-white mb-2 block">Pindah ke kelas:</label>
+                        <select
+                            value={moveTargetClassId}
+                            onChange={(e) => setMoveTargetClassId(e.target.value)}
+                            className="w-full px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white"
+                        >
+                            <option value="">Pilih kelas tujuan...</option>
+                            {classes.filter(c => c.id !== selectedClass?.id).map(c => (
+                                <option key={c.id} value={c.id}>{c.name} ({c.school_level || '-'} - Grade {c.grade_level || '-'})</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="flex gap-3 pt-2">
+                        <Button variant="secondary" onClick={() => setMoveStudent(null)} className="flex-1">Batal</Button>
+                        <Button variant="primary" loading={moveLoading} disabled={!moveTargetClassId} onClick={handleMoveStudent} className="flex-1">Pindahkan</Button>
+                    </div>
                 </div>
             </Modal>
         </div>

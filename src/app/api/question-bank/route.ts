@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
+import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 
 // GET question bank
 export async function GET(request: NextRequest) {
@@ -136,6 +137,12 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 })
         }
 
+        // Validate correct_answer for objective types
+        if (correct_answer !== undefined && question_type !== undefined) {
+            const v = validateCorrectAnswer(question_type, correct_answer, options)
+            if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
+        }
+
         const updateData: any = {}
         if (question_text !== undefined) updateData.question_text = question_text
         if (question_type !== undefined) updateData.question_type = question_type
@@ -219,6 +226,13 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json()
+
+        // Validate correct_answer for objective question types
+        const questionsToValidate = Array.isArray(body) ? body : [body]
+        for (const q of questionsToValidate) {
+            const v = validateCorrectAnswer(q.question_type || 'MULTIPLE_CHOICE', q.correct_answer, q.options)
+            if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
+        }
 
         // Handle bulk insert
         if (Array.isArray(body)) {

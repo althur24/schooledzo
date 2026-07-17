@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
+import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 
 // GET questions for exam
 export async function GET(
@@ -93,6 +94,12 @@ export async function POST(
 
         if (!questions || !Array.isArray(questions)) {
             return NextResponse.json({ error: 'Questions array required' }, { status: 400 })
+        }
+
+        // Validate correct_answer for objective question types
+        for (const q of questions) {
+            const v = validateCorrectAnswer(q.question_type || 'MULTIPLE_CHOICE', q.correct_answer, q.options)
+            if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
         }
 
         // Check AI review status ONCE before any insert
@@ -235,6 +242,12 @@ export async function PUT(
 
         if (!question_id) {
             return NextResponse.json({ error: 'question_id required' }, { status: 400 })
+        }
+
+        // Validate correct_answer for objective types (edit flow always sends question_type)
+        if (correct_answer !== undefined && question_type !== undefined) {
+            const v = validateCorrectAnswer(question_type, correct_answer, options)
+            if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
         }
 
         const updateData: any = {}
