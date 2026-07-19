@@ -82,6 +82,13 @@ function isStudentMatch(student: Student, query: string): boolean {
     )
 }
 
+/** Sort students alphabetically by full name (fallback username) */
+function sortByName(students: Student[]): Student[] {
+    return [...students].sort((a, b) =>
+        (a.user.full_name || a.user.username).localeCompare(b.user.full_name || b.user.username, 'id')
+    )
+}
+
 export default function KenaikanKelasPage() {
     const router = useRouter()
     const [loading, setLoading] = useState(true)
@@ -135,11 +142,11 @@ export default function KenaikanKelasPage() {
 
     // === Stats ===
     const processedStudents = useMemo(() => {
-        return students.filter(s =>
+        return sortByName(students.filter(s =>
             s.enrollment_status === 'PROMOTED' ||
             s.enrollment_status === 'GRADUATED' ||
             s.enrollment_status === 'RETAINED'
-        )
+        ))
     }, [students])
 
     const pendingStudents = useMemo(() => {
@@ -288,7 +295,7 @@ export default function KenaikanKelasPage() {
 
             groups.push({
                 sourceClass: cls,
-                students: classStudents,
+                students: sortByName(classStudents),
                 targetClassId,
                 targetClassName,
                 action,
