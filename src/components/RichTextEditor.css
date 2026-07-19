@@ -273,3 +273,16 @@
 :is(.dark) .rte-preview-content {
     color: #e2e8f0;
 }
+
+/* ─── Compact mode (per-option answer editors) ─── */
+.rte-compact .rte-content .tiptap {
+    padding: 8px 12px;
+    min-height: 44px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.rte-compact .rte-content .tiptap img {
+    max-height: 120px;
+    width: auto;
+}

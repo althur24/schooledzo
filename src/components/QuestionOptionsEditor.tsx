@@ -1,10 +1,11 @@
 import React from 'react'
 import dynamic from 'next/dynamic'
 import { Plus } from 'react-iconly'
+import { plainToHtml } from '@/lib/richTextUtils'
 
-const MathTextarea = dynamic(() => import('@/components/MathTextarea'), {
+const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
     ssr: false,
-    loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={1} readOnly />
+    loading: () => <div className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-secondary text-sm">Memuat editor...</div>
 })
 
 interface QuestionOptionsEditorProps {
@@ -22,6 +23,11 @@ export default function QuestionOptionsEditor({
     onChange,
     textDirection = 'ltr'
 }: QuestionOptionsEditorProps) {
+    // --- Image upload state (hooks must be before any early return) ---
+    const [uploadingIdx, setUploadingIdx] = React.useState<number | null>(null)
+    const fileInputRef = React.useRef<HTMLInputElement>(null)
+    const pendingUploadIdx = React.useRef<number | null>(null)
+
     if (questionType === 'ESSAY') {
         return (
             <div>
@@ -109,9 +115,65 @@ export default function QuestionOptionsEditor({
         }
     }
 
+    // --- Image upload handlers for options ---
+    const triggerImageUpload = (idx: number) => {
+        pendingUploadIdx.current = idx
+        fileInputRef.current?.click()
+    }
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file || pendingUploadIdx.current === null) return
+        const idx = pendingUploadIdx.current
+        setUploadingIdx(idx)
+        try {
+            const formData = new FormData()
+            formData.append('file', file)
+            const res = await fetch('/api/questions/upload-image', { method: 'POST', body: formData })
+            const data = await res.json()
+            if (data.url) {
+                const letter = String.fromCharCode(65 + idx)
+                const imgTag = `<img src="${data.url}" alt="Opsi ${letter}" style="max-width:100%;border-radius:8px;" />`
+                const newOptions = [...safeOptions]
+                // Append (never wipe existing text); wrap plain text so it stays valid HTML
+                const current = safeOptions[idx] || ''
+                newOptions[idx] = (current ? plainToHtml(current) : '') + imgTag
+                onChange(newOptions, correctAnswer)
+            } else {
+                alert('Gagal upload gambar: ' + (data.error || 'Terjadi kesalahan'))
+            }
+        } catch {
+            alert('Gagal upload gambar')
+        } finally {
+            setUploadingIdx(null)
+            pendingUploadIdx.current = null
+            if (fileInputRef.current) fileInputRef.current.value = ''
+        }
+    }
+
+    // Extract full <img ...> tags from an option's HTML (for the delete-✕ thumbnails)
+    const extractImgTags = (html: string): string[] => {
+        if (!html) return []
+        return Array.from(html.matchAll(/<img[^>]*>/g)).map(m => m[0])
+    }
+
+    const extractImgSrc = (tag: string): string => {
+        const match = tag.match(/src="([^"]+)"/)
+        return match ? match[1] : ''
+    }
+
+    const removeImageFromOption = (idx: number, tag: string) => {
+        const newOptions = [...safeOptions]
+        const cleaned = (safeOptions[idx] || '').replace(tag, '')
+        // Removing an inline image can leave an empty paragraph behind
+        newOptions[idx] = (cleaned === '<p></p>' || cleaned.trim() === '') ? '' : cleaned
+        onChange(newOptions, correctAnswer)
+    }
+
     return (
         <div>
             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pilihan Jawaban</label>
+            <p className="text-xs text-text-secondary mb-2">💡 Gambar bisa ditempel (Ctrl+V) atau diseret langsung ke kolom opsi, atau lewat tombol 🖼️.</p>
             {isMultipleAnswer && <p className="text-xs text-text-secondary mb-2">Pilih lebih dari satu opsi sebagai jawaban benar.</p>}
             <div className="space-y-2">
                 {safeOptions.map((opt, optIdx) => {
@@ -125,15 +187,17 @@ export default function QuestionOptionsEditor({
                                     {letter}
                                 </span>
                                 <div className="flex-1">
-                                    <MathTextarea
+                                    <RichTextEditor
                                         value={opt}
                                         onChange={(val: string) => {
                                             const newOptions = [...safeOptions]
-                                            newOptions[optIdx] = val
+                                            // Normalize empty TipTap doc back to empty string
+                                            newOptions[optIdx] = val === '<p></p>' ? '' : val
                                             onChange(newOptions, correctAnswer)
                                         }}
                                         placeholder={`Pilihan ${letter}`}
-                                        rows={1}
+                                        textDirection={textDirection}
+                                        compact
                                     />
                                 </div>
                                 <button
@@ -141,6 +205,14 @@ export default function QuestionOptionsEditor({
                                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex-shrink-0 ${isCorrect ? 'bg-green-500 text-white' : 'bg-secondary/10 text-text-main dark:text-zinc-300 hover:bg-green-500/20'}`}
                                 >
                                     {isCorrect ? '✓ Benar' : 'Set Benar'}
+                                </button>
+                                <button
+                                    onClick={() => triggerImageUpload(optIdx)}
+                                    disabled={uploadingIdx === optIdx}
+                                    className="px-2.5 py-2 rounded-lg text-sm transition-colors flex-shrink-0 bg-secondary/10 text-text-main dark:text-zinc-300 hover:bg-primary/10 disabled:opacity-50"
+                                    title="Sisipkan Gambar"
+                                >
+                                    {uploadingIdx === optIdx ? '⏳' : '🖼️'}
                                 </button>
                                 {safeOptions.length > 2 && (
                                     <button
@@ -172,6 +244,28 @@ export default function QuestionOptionsEditor({
                                     </button>
                                 )}
                             </div>
+                            {/* Thumbnails gambar di opsi ini — tombol ✕ untuk menghapus gambar */}
+                            {extractImgTags(opt).length > 0 && (
+                                <div className="ml-10 mt-3 flex flex-wrap items-center gap-3">
+                                    {extractImgTags(opt).map((tag, imgIdx) => (
+                                        <div key={imgIdx} className="relative">
+                                            <img
+                                                src={extractImgSrc(tag)}
+                                                alt={`Gambar opsi ${letter}`}
+                                                className="h-14 w-auto object-contain rounded-md border border-secondary/20 bg-white p-0.5"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => removeImageFromOption(optIdx, tag)}
+                                                title="Hapus gambar ini"
+                                                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow hover:bg-red-600"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )
                 })}
@@ -184,6 +278,14 @@ export default function QuestionOptionsEditor({
                     </button>
                 )}
             </div>
+            {/* Hidden file input for option image upload */}
+            <input
+                type="file"
+                accept="image/*"
+                ref={fileInputRef}
+                className="hidden"
+                onChange={handleFileChange}
+            />
         </div>
     )
 }

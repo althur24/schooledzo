@@ -15,6 +15,7 @@ interface RichTextEditorProps {
     placeholder?: string
     disabled?: boolean
     textDirection?: 'ltr' | 'rtl'
+    compact?: boolean
 }
 
 export default function RichTextEditor({
@@ -22,7 +23,8 @@ export default function RichTextEditor({
     onChange,
     placeholder = 'Tulis di sini...',
     disabled = false,
-    textDirection = 'ltr'
+    textDirection = 'ltr',
+    compact = false
 }: RichTextEditorProps) {
     const [isUploading, setIsUploading] = useState(false)
     const [showPreview, setShowPreview] = useState(false)
@@ -190,8 +192,9 @@ export default function RichTextEditor({
     }
 
     return (
-        <div className={`rich-text-editor ${disabled ? 'opacity-70 pointer-events-none' : ''}`}>
-            {/* Toolbar */}
+        <div className={`rich-text-editor ${disabled ? 'opacity-70 pointer-events-none' : ''} ${compact ? 'rte-compact' : ''}`}>
+            {/* Toolbar — hidden in compact mode (drag/paste/upload still work without it) */}
+            {!compact && (
             <div className="rte-toolbar">
                 <button
                     type="button"
@@ -297,6 +300,7 @@ export default function RichTextEditor({
                     </div>
                 )}
             </div>
+            )}
 
             {/* Editor Content Area */}
             <div className="rte-content" dir={textDirection}>

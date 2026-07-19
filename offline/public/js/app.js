@@ -274,12 +274,12 @@ function renderQuiz(data) {
             if (q.passage_text !== prevPassage) {
                 html += `<div class="passage-block">
                     <div class="passage-label">📖 Bacaan</div>
-                    <div class="passage-text">${escapeHtml(q.passage_text)}</div>
+                    <div class="passage-text">${renderRichContent(q.passage_text)}</div>
                 </div>`;
             }
         }
 
-        html += `<div class="question-text">${escapeHtml(q.question_text)}</div>`;
+        html += `<div class="question-text">${renderRichContent(q.question_text)}</div>`;
 
         // E30/E31: Show image if available, with error fallback
         if (q.image_url) {
@@ -296,7 +296,7 @@ function renderQuiz(data) {
                 html += `
                     <div class="option" data-answer-question="${q.id}" data-answer-value="${letter}">
                         <input type="radio" name="q_${q.id}" id="q_${q.id}_${letter}" value="${letter}">
-                        <label for="q_${q.id}_${letter}">${escapeHtml(opt)}</label>
+                        <label for="q_${q.id}_${letter}">${renderRichContent(opt)}</label>
                     </div>
                 `;
             });
@@ -505,6 +505,20 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Question text, passages and options may contain rich HTML (images)
+// from the online editor. Render HTML as-is (sanitized), plain text escaped.
+function renderRichContent(text) {
+    const t = (text || '').trim();
+    if (/^<(p|div|img|ul|ol|table|h[1-6])\b/i.test(t)) {
+        return t
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+            .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+            .replace(/on\w+="[^"]*"/gi, '')
+            .replace(/on\w+='[^']*'/gi, '');
+    }
+    return escapeHtml(text);
 }
 
 function showError(el, message) {
