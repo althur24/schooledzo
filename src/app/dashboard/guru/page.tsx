@@ -54,6 +54,8 @@ export default function GuruDashboard() {
     const [activeWarningTab, setActiveWarningTab] = useState<'teaching' | 'homeroom'>('teaching')
     const [warningVisibleCount, setWarningVisibleCount] = useState(5)
     const [activeOfficialExams, setActiveOfficialExams] = useState<any[]>([])
+    // undefined = belum termuat, null = tidak ada tahun aktif
+    const [activeYearInfo, setActiveYearInfo] = useState<{ name: string } | null | undefined>(undefined)
 
     const handleTabChange = (tab: 'teaching' | 'homeroom') => {
         setActiveWarningTab(tab)
@@ -93,14 +95,21 @@ export default function GuruDashboard() {
     useEffect(() => {
         const fetchDashboardData = async () => {
             try {
-                const [warnRes, scheduleRes, examsRes] = await Promise.all([
+                const [warnRes, scheduleRes, examsRes, yearsRes] = await Promise.all([
                     fetch('/api/dashboard/guru/warnings'),
                     fetch('/api/schedules/my-schedule?today=true'),
-                    fetch('/api/official-exams')
+                    fetch('/api/official-exams'),
+                    fetch('/api/academic-years')
                 ])
                 const warnData = await warnRes.json()
                 const scheduleData = await scheduleRes.json()
                 const examsData = await examsRes.json()
+                const yearsData = await yearsRes.json()
+
+                if (Array.isArray(yearsData)) {
+                    const active = yearsData.find((y: { is_active?: boolean; name?: string }) => y.is_active)
+                    setActiveYearInfo(active?.name ? { name: active.name } : null)
+                }
 
                 if (!warnData.error) setWarnings(warnData)
                 setTodaySchedule(Array.isArray(scheduleData) ? scheduleData : [])
@@ -200,6 +209,25 @@ export default function GuruDashboard() {
                     </div>
                 </div>
             </div>
+
+            {/* Academic Year Banner */}
+            {activeYearInfo === null && (
+                <div className="flex items-center gap-3 p-4 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                    <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center text-amber-500 flex-shrink-0">
+                        <Danger set="bold" size={20} />
+                    </div>
+                    <div>
+                        <p className="font-bold text-amber-800 dark:text-amber-200 text-sm">Belum ada tahun ajaran aktif</p>
+                        <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">Admin sedang memproses pergantian tahun ajaran. Daftar kelas &amp; penugasan akan muncul setelah tahun ajaran baru diaktifkan.</p>
+                    </div>
+                </div>
+            )}
+            {activeYearInfo && (
+                <div className="flex items-center gap-3 p-3 rounded-2xl bg-emerald-50/70 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-900/30 w-max">
+                    <Calendar set="bold" size={16} primaryColor="currentColor" />
+                    <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">Tahun Ajaran Aktif: {activeYearInfo.name}</p>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 md:gap-8">
                 {/* Left Column: Schedule (Timeline Style) & Active Exams */}

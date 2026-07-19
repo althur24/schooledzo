@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 
 // GET single assignment
 export async function GET(
@@ -71,6 +72,17 @@ export async function DELETE(
             }
         }
 
+        // Block writes to archived (COMPLETED) academic years
+        const { data: assignmentForYear } = await supabase
+            .from('assignments')
+            .select('teaching_assignment_id')
+            .eq('id', id)
+            .single()
+        if (assignmentForYear?.teaching_assignment_id) {
+            const yearStatus = await getYearStatusByTA(assignmentForYear.teaching_assignment_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
+        }
+
         const { error } = await supabase
             .from('assignments')
             .delete()
@@ -118,6 +130,17 @@ export async function PUT(
             if (assignmentTeacherId && assignmentTeacherId !== teacher.id) {
                 return NextResponse.json({ error: 'Anda tidak memiliki akses untuk mengubah tugas ini' }, { status: 403 })
             }
+        }
+
+        // Block writes to archived (COMPLETED) academic years
+        const { data: assignmentForYear } = await supabase
+            .from('assignments')
+            .select('teaching_assignment_id')
+            .eq('id', id)
+            .single()
+        if (assignmentForYear?.teaching_assignment_id) {
+            const yearStatus = await getYearStatusByTA(assignmentForYear.teaching_assignment_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         const { title, description, type, due_date } = await request.json()

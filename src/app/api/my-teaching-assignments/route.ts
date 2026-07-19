@@ -48,6 +48,11 @@ export async function GET(request: NextRequest) {
             if (activeYear) filterYearId = activeYear.id
         }
 
+        // No active year: return empty instead of leaking assignments across years
+        if (!filterYearId && allYears !== 'true') {
+            return NextResponse.json([])
+        }
+
         // Get teaching assignments for this teacher
         let assignmentsQuery = supabase
             .from('teaching_assignments')

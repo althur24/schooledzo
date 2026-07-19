@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 
 // DELETE material
 export async function DELETE(
@@ -15,6 +16,17 @@ export async function DELETE(
 
         if (user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Block writes to archived (COMPLETED) academic years
+        const { data: materialForYear } = await supabase
+            .from('materials')
+            .select('teaching_assignment_id')
+            .eq('id', id)
+            .single()
+        if (materialForYear?.teaching_assignment_id) {
+            const yearStatus = await getYearStatusByTA(materialForYear.teaching_assignment_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         const { error } = await supabase

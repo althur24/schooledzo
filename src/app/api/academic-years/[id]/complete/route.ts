@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { notifyAllTeachers } from '@/lib/academicYear'
 
 // PUT - Complete/End an academic year
 export async function PUT(
@@ -46,6 +47,14 @@ export async function PUT(
             .single()
 
         if (error) throw error
+
+        // Notify all teachers that this year has been completed
+        await notifyAllTeachers(schoolId, {
+            type: 'TAHUN_AJARAN',
+            title: '📅 Tahun Ajaran Diselesaikan',
+            message: `Tahun ajaran ${data.name} telah diselesaikan oleh admin. Konten tahun ini kini menjadi arsip.`,
+            link: '/dashboard/guru'
+        })
 
         return NextResponse.json({
             success: true,

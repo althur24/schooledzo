@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
+import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 
 // GET single exam
 export async function GET(
@@ -50,6 +51,17 @@ export async function PUT(
 
         if (user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Block writes to archived (COMPLETED) academic years
+        const { data: examForYear } = await supabase
+            .from('exams')
+            .select('teaching_assignment_id')
+            .eq('id', id)
+            .single()
+        if (examForYear?.teaching_assignment_id) {
+            const yearStatus = await getYearStatusByTA(examForYear.teaching_assignment_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         const body = await request.json()
@@ -229,6 +241,17 @@ export async function DELETE(
 
         if (user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Block writes to archived (COMPLETED) academic years
+        const { data: examForYear } = await supabase
+            .from('exams')
+            .select('teaching_assignment_id')
+            .eq('id', id)
+            .single()
+        if (examForYear?.teaching_assignment_id) {
+            const yearStatus = await getYearStatusByTA(examForYear.teaching_assignment_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         const { error } = await supabase

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 
 // POST - Bulk create assignments
 export async function POST(request: NextRequest) {
@@ -19,6 +20,10 @@ export async function POST(request: NextRequest) {
         if (!teacher_id || !subject_id || !academic_year_id || !class_ids?.length) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
         }
+
+        // Block writes to archived (COMPLETED) academic years
+        const yearStatus = await getYearStatusById(academic_year_id)
+        if (yearStatus === 'COMPLETED') return archivedYearResponse()
 
         // Check for existing assignments to avoid duplicates
         const { data: existingAssignments } = await supabase
@@ -82,6 +87,28 @@ export async function DELETE(request: NextRequest) {
 
         if (!teacher_id && !assignment_ids?.length) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
+        }
+
+        // Block writes to archived (COMPLETED) academic years
+        let affectedYearIds: string[] = []
+        if (assignment_ids?.length) {
+            const { data: tas } = await supabase
+                .from('teaching_assignments')
+                .select('academic_year_id')
+                .in('id', assignment_ids)
+            affectedYearIds = [...new Set((tas || []).map((t: any) => t.academic_year_id).filter(Boolean))] as string[]
+        } else if (academic_year_id) {
+            affectedYearIds = [academic_year_id]
+        } else {
+            const { data: tas } = await supabase
+                .from('teaching_assignments')
+                .select('academic_year_id')
+                .eq('teacher_id', teacher_id)
+            affectedYearIds = [...new Set((tas || []).map((t: any) => t.academic_year_id).filter(Boolean))] as string[]
+        }
+        for (const yearId of affectedYearIds) {
+            const yearStatus = await getYearStatusById(yearId)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         let deleteQuery = supabase.from('teaching_assignments').delete()

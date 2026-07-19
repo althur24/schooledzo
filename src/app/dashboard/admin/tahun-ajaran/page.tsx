@@ -52,7 +52,6 @@ export default function TahunAjaranPage() {
     const [years, setYears] = useState<AcademicYear[]>([])
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
-    const [showCompleteModal, setShowCompleteModal] = useState(false)
     const [completingYear, setCompletingYear] = useState<AcademicYear | null>(null)
     const [editingYear, setEditingYear] = useState<AcademicYear | null>(null)
     const [formData, setFormData] = useState<FormData>(defaultFormData)
@@ -75,7 +74,8 @@ export default function TahunAjaranPage() {
         { completed: false, loading: false, detail: '' },
     ])
     const [wizardCompletingYear, setWizardCompletingYear] = useState(false)
-    const [newYearName, setNewYearName] = useState('')
+    // Pilihan di wizard step 2: 'planned:<id>' (aktifkan tahun yg direncanakan) atau 'new:<nama>' (buat baru)
+    const [wizardSelection, setWizardSelection] = useState('')
     const [creatingYear, setCreatingYear] = useState(false)
     const [copyingAssignments, setCopyingAssignments] = useState(false)
     const [copyResult, setCopyResult] = useState<{ copied: number; skipped: number; total: number } | null>(null)
@@ -93,11 +93,25 @@ export default function TahunAjaranPage() {
     const [showWizardCreateModal, setShowWizardCreateModal] = useState(false)
     const [wizardCreateChecklist, setWizardCreateChecklist] = useState<boolean[]>([false, false, false])
 
+    // Siswa pending kenaikan kelas (peringatan setelah aktivasi tahun baru)
+    const [pendingWarning, setPendingWarning] = useState<number | null>(null)
+    const [pendingSourceCount, setPendingSourceCount] = useState<number | null>(null)
+
     const activeYear = years.find(y => y.is_active)
     const completedYears = years.filter(y => y.status === 'COMPLETED').sort((a, b) =>
         new Date(b.end_date || b.created_at).getTime() - new Date(a.end_date || a.created_at).getTime()
     )
     const lastCompletedYear = completedYears[0]
+
+    // Tahun berstatus PLANNED yang bisa diaktifkan dari wizard step 2
+    const plannedYears = years
+        .filter(y => !y.is_active && (y.status || 'PLANNED') === 'PLANNED')
+        .sort((a, b) => a.name.localeCompare(b.name))
+    const selectedPlannedYear = wizardSelection.startsWith('planned:')
+        ? plannedYears.find(y => y.id === wizardSelection.slice(8)) || null
+        : null
+    const selectedNewName = wizardSelection.startsWith('new:') ? wizardSelection.slice(4) : ''
+    const wizardTargetName = selectedPlannedYear?.name || selectedNewName
 
     const fetchYears = async () => {
         try {
@@ -155,6 +169,22 @@ export default function TahunAjaranPage() {
                 : hasActiveYear && !hasCompletedYear
                     ? `⏳ Selesaikan tahun lama dulu`
                     : '⬜ Buat tahun ajaran baru'
+        }
+
+        // Count students still pending kenaikan kelas in the last completed year
+        if (hasCompletedYear && lastCompletedYear) {
+            try {
+                const pendingRes = await fetch(`/api/students?enrollment_year_id=${lastCompletedYear.id}`)
+                const pendingData = await pendingRes.json()
+                const pendingCount = Array.isArray(pendingData)
+                    ? pendingData.filter((s: { enrollment_status?: string }) => s.enrollment_status === 'ACTIVE').length
+                    : 0
+                setPendingSourceCount(pendingCount)
+            } catch {
+                setPendingSourceCount(null)
+            }
+        } else {
+            setPendingSourceCount(null)
         }
 
         if (hasActiveYear && hasCompletedYear) {
@@ -222,26 +252,17 @@ export default function TahunAjaranPage() {
                 body: JSON.stringify(submitData)
             })
 
+            const data = await res.json()
             if (res.ok) {
                 setShowModal(false)
                 setEditingYear(null)
                 setFormData(defaultFormData)
                 fetchYears()
-            }
-        } finally {
-            setSaving(false)
-        }
-    }
-
-    const handleComplete = async () => {
-        if (!completingYear) return
-        setSaving(true)
-        try {
-            const res = await fetch(`/api/academic-years/${completingYear.id}/complete`, { method: 'PUT' })
-            if (res.ok) {
-                setShowCompleteModal(false)
-                setCompletingYear(null)
-                fetchYears()
+                if (data?.warning?.pendingCount > 0) {
+                    setPendingWarning(data.warning.pendingCount)
+                }
+            } else {
+                alert('Gagal menyimpan: ' + (data?.error || 'Terjadi kesalahan'))
             }
         } finally {
             setSaving(false)
@@ -316,19 +337,17 @@ export default function TahunAjaranPage() {
         setShowModal(true)
     }
 
-    const openComplete = (year: AcademicYear) => {
-        setCompletingYear(year)
-        setShowCompleteModal(true)
-    }
-
     // === Wizard Handlers ===
-    const openWizardCompleteModal = async () => {
-        if (!activeYear) return
+    // Modal "Selesaikan" dengan checklist — dipakai wizard step 1 dan tombol Selesaikan di tabel
+    const openWizardCompleteModal = async (year?: AcademicYear) => {
+        const target = year || activeYear
+        if (!target) return
+        setCompletingYear(target)
         setShowWizardCompleteModal(true)
         setWizardChecklist([false, false, false, false])
         setLoadingWizardRelated(true)
         try {
-            const res = await fetch(`/api/academic-years/${activeYear.id}/related`)
+            const res = await fetch(`/api/academic-years/${target.id}/related`)
             const data = await res.json()
             setWizardRelatedData(data)
         } catch { setWizardRelatedData(null) }
@@ -336,14 +355,15 @@ export default function TahunAjaranPage() {
     }
 
     const executeWizardComplete = async () => {
-        if (!activeYear) return
+        if (!completingYear) return
         setWizardCompletingYear(true)
         try {
-            const res = await fetch(`/api/academic-years/${activeYear.id}/complete`, {
+            const res = await fetch(`/api/academic-years/${completingYear.id}/complete`, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' }
             })
             if (res.ok) {
                 setShowWizardCompleteModal(false)
+                setCompletingYear(null)
                 await fetchData()
             } else { const err = await res.json(); alert(`Error: ${err.error}`) }
         } catch { alert('Terjadi error') } finally { setWizardCompletingYear(false) }
@@ -352,7 +372,7 @@ export default function TahunAjaranPage() {
     const allCompleteChecked = wizardChecklist.every(Boolean)
 
     const openWizardCreateModal = () => {
-        if (!newYearName) { alert('Pilih nama tahun ajaran baru'); return }
+        if (!wizardSelection) { alert('Pilih tahun ajaran yang akan diaktifkan'); return }
         setWizardCreateChecklist([false, false, false])
         setShowWizardCreateModal(true)
     }
@@ -360,21 +380,35 @@ export default function TahunAjaranPage() {
     const executeWizardCreate = async () => {
         setCreatingYear(true)
         try {
-            const startDate = new Date()
-            const endDate = new Date(startDate)
-            endDate.setFullYear(endDate.getFullYear() + 1)
-
-            const res = await fetch('/api/academic-years', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: newYearName,
-                    start_date: startDate.toISOString().split('T')[0],
-                    end_date: endDate.toISOString().split('T')[0],
-                    status: 'ACTIVE', is_active: true
+            let res: Response
+            if (selectedPlannedYear) {
+                // Aktifkan tahun yang sudah direncanakan (tanggal mengikuti yang sudah diisi admin)
+                res = await fetch(`/api/academic-years/${selectedPlannedYear.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'ACTIVE', is_active: true })
                 })
-            })
+            } else {
+                const startDate = new Date()
+                const endDate = new Date(startDate)
+                endDate.setFullYear(endDate.getFullYear() + 1)
+
+                res = await fetch('/api/academic-years', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: selectedNewName,
+                        start_date: startDate.toISOString().split('T')[0],
+                        end_date: endDate.toISOString().split('T')[0],
+                        status: 'ACTIVE', is_active: true
+                    })
+                })
+            }
+            const resData = await res.json()
             if (res.ok) {
+                if (resData?.warning?.pendingCount > 0) {
+                    setPendingWarning(resData.warning.pendingCount)
+                }
                 // Fetch fresh data from API (not stale React state)
                 const updatedYears: AcademicYear[] = await (await fetch('/api/academic-years')).json()
                 const newYear = updatedYears.find((y: AcademicYear) => y.is_active)
@@ -393,11 +427,11 @@ export default function TahunAjaranPage() {
                         if (copyRes.ok && copyData.copied > 0) {
                             console.log(`Auto-copied ${copyData.copied} classes to new year`)
                         } else if (!copyRes.ok) {
-                            alert(`Tahun baru berhasil dibuat, tapi gagal menyalin kelas: ${copyData.error || 'Unknown error'}. Silakan salin kelas secara manual.`)
+                            alert(`Tahun baru berhasil diaktifkan, tapi gagal menyalin kelas: ${copyData.error || 'Unknown error'}. Silakan salin kelas secara manual.`)
                         }
                     } catch (e) {
                         console.error('Auto-copy classes failed:', e)
-                        alert('Tahun baru berhasil dibuat, tapi gagal menyalin kelas secara otomatis. Silakan salin kelas secara manual dari menu Wizard.')
+                        alert('Tahun baru berhasil diaktifkan, tapi gagal menyalin kelas secara otomatis. Silakan salin kelas secara manual dari menu Wizard.')
                     }
                 } else {
                     console.warn('No completed year found to copy classes from')
@@ -405,8 +439,8 @@ export default function TahunAjaranPage() {
 
                 setShowWizardCreateModal(false)
                 await fetchData()
-                setNewYearName('')
-            } else { const err = await res.json(); alert(`Error: ${err.error}`) }
+                setWizardSelection('')
+            } else { alert(`Error: ${resData?.error || 'Gagal mengaktifkan tahun ajaran'}`) }
         } catch { alert('Terjadi error') } finally { setCreatingYear(false) }
     }
 
@@ -437,7 +471,7 @@ export default function TahunAjaranPage() {
         setCopyingWali(true)
         setCopyWaliResult(null)
         try {
-            // copy-classes with copy_homeroom=true will copy wali kelas assignments
+            // Satu panggilan: kelas baru dibuat + wali kelas kelas lama ikut tersalin (server-side)
             const res = await fetch('/api/classes/copy-classes', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -445,39 +479,11 @@ export default function TahunAjaranPage() {
             })
             const data = await res.json()
             if (res.ok) {
-                // For classes that already exist, update their homeroom_teacher_id
-                const { data: sourceClasses } = await fetch(`/api/classes?academic_year_id=${fromId}`).then(r => r.json()).then(classes => ({ data: classes })).catch(() => ({ data: [] }))
-                const { data: targetClasses } = await fetch(`/api/classes?academic_year_id=${activeYear.id}`).then(r => r.json()).then(classes => ({ data: classes })).catch(() => ({ data: [] }))
-
-                let updatedCount = 0
-                if (Array.isArray(sourceClasses) && Array.isArray(targetClasses)) {
-                    for (const src of sourceClasses) {
-                        if (!src.homeroom_teacher_id) continue
-                        const target = targetClasses.find((t: any) =>
-                            t.name === src.name && t.grade_level === src.grade_level && t.school_level === src.school_level
-                        )
-                        if (target && target.homeroom_teacher_id !== src.homeroom_teacher_id) {
-                            const updateRes = await fetch(`/api/classes/${target.id}`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    name: target.name,
-                                    academic_year_id: target.academic_year_id,
-                                    grade_level: target.grade_level,
-                                    school_level: target.school_level,
-                                    homeroom_teacher_id: src.homeroom_teacher_id
-                                })
-                            })
-                            if (updateRes.ok) updatedCount++
-                        }
-                    }
-                }
-
-                const totalCopied = (data.copied || 0) + updatedCount
+                const totalCopied = (data.copied || 0) + (data.homeroom_updated || 0)
                 setCopyWaliResult({
                     copied: totalCopied,
-                    skipped: (sourceClasses?.length || 0) - totalCopied,
-                    total: sourceClasses?.length || 0
+                    skipped: (data.total || 0) - totalCopied,
+                    total: data.total || 0
                 })
             } else { alert(`Error: ${data.error}`) }
         } catch { alert('Terjadi error') } finally { setCopyingWali(false) }
@@ -556,6 +562,26 @@ export default function TahunAjaranPage() {
             />
 
             {/* ═══════════════════════════════════════
+                INFO: Cara kerja tahun ajaran
+               ═══════════════════════════════════════ */}
+            <Card className="border border-blue-200 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-900/10">
+                <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-blue-500">
+                        <Calendar set="bold" primaryColor="currentColor" size={18} />
+                    </div>
+                    <div className="flex-1 text-xs leading-relaxed text-blue-900 dark:text-blue-200 space-y-2">
+                        <p className="font-bold text-sm">Cara kerja tahun ajaran (singkat)</p>
+                        <ol className="list-decimal list-inside space-y-1">
+                            <li><strong>Tambah</strong> = membuat tahun baru berstatus <strong>Direncanakan</strong> (sekadar rencana, belum dipakai).</li>
+                            <li><strong>Pergantian Tahun</strong> = pindah ke tahun baru lewat 4 langkah terpandu: selesaikan tahun lama → aktifkan tahun baru (bisa pilih yang sudah direncanakan) → kenaikan kelas → salin penugasan.</li>
+                            <li>Hanya ada <strong>satu tahun Aktif</strong>. Tahun yang digantikan otomatis berstatus <strong>Selesai</strong> dan datanya tersimpan sebagai arsip.</li>
+                            <li>Guru <strong>otomatis menerima notifikasi</strong> setiap ada tahun yang diselesaikan atau diaktifkan — tidak perlu diumumkan manual.</li>
+                        </ol>
+                    </div>
+                </div>
+            </Card>
+
+            {/* ═══════════════════════════════════════
                 PERGANTIAN TAHUN WIZARD (Collapsible)
                ═══════════════════════════════════════ */}
             {showWizard && (
@@ -599,7 +625,7 @@ export default function TahunAjaranPage() {
                                             <span className="px-3 py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg text-xs font-medium text-indigo-600 dark:text-indigo-400">
                                                 📅 {activeYear.name}
                                             </span>
-                                            <Button onClick={openWizardCompleteModal}>
+                                            <Button onClick={() => openWizardCompleteModal()}>
                                                 ⚠️ Selesaikan Tahun Ini
                                             </Button>
                                         </div>
@@ -617,7 +643,7 @@ export default function TahunAjaranPage() {
                                 {steps[1].completed ? <CheckCircle set="bold" primaryColor="currentColor" size={16} /> : '2'}
                             </div>
                             <div className="flex-1">
-                                <h3 className="text-sm font-bold text-text-main dark:text-white">Buat & Aktifkan Tahun Baru</h3>
+                                <h3 className="text-sm font-bold text-text-main dark:text-white">Aktifkan Tahun Ajaran Baru</h3>
                                 <p className="text-xs text-text-secondary mt-0.5">{steps[1].detail}</p>
                                 {steps[1].completed && activeYearClassCount !== null && activeYearClassCount > 0 && (
                                     <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">📋 {activeYearClassCount} kelas tersedia di tahun baru</p>
@@ -652,20 +678,36 @@ export default function TahunAjaranPage() {
                                     </div>
                                 )}
                                 {steps[0].completed && !steps[1].completed && (
-                                    <div className="flex items-center gap-2 mt-2 flex-wrap">
-                                        <select
-                                            value={newYearName}
-                                            onChange={(e) => setNewYearName(e.target.value)}
-                                            className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white min-w-[150px]"
-                                        >
-                                            <option value="">Pilih tahun...</option>
-                                            {getYearNameOptions().map(name => (
-                                                <option key={name} value={name}>📅 {name}</option>
-                                            ))}
-                                        </select>
-                                        <Button onClick={openWizardCreateModal} disabled={!newYearName}>
-                                            Buat & Aktifkan →
-                                        </Button>
+                                    <div className="space-y-2 mt-2">
+                                        {plannedYears.length > 0 && (
+                                            <p className="text-[10px] text-blue-600 dark:text-blue-400">
+                                                💡 Ada {plannedYears.length} tahun yang sudah direncanakan — bisa langsung diaktifkan tanpa membuat baru.
+                                            </p>
+                                        )}
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <select
+                                                value={wizardSelection}
+                                                onChange={(e) => setWizardSelection(e.target.value)}
+                                                className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white min-w-[200px]"
+                                            >
+                                                <option value="">Pilih tahun...</option>
+                                                {plannedYears.length > 0 && (
+                                                    <optgroup label="📌 Sudah Direncanakan">
+                                                        {plannedYears.map(y => (
+                                                            <option key={y.id} value={`planned:${y.id}`}>📅 {y.name}</option>
+                                                        ))}
+                                                    </optgroup>
+                                                )}
+                                                <optgroup label="✨ Buat Baru">
+                                                    {getYearNameOptions().map(name => (
+                                                        <option key={name} value={`new:${name}`}>📅 {name}</option>
+                                                    ))}
+                                                </optgroup>
+                                            </select>
+                                            <Button onClick={openWizardCreateModal} disabled={!wizardSelection}>
+                                                {selectedPlannedYear ? 'Aktifkan →' : 'Buat & Aktifkan →'}
+                                            </Button>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -681,6 +723,11 @@ export default function TahunAjaranPage() {
                             <div className="flex-1">
                                 <h3 className="text-sm font-bold text-text-main dark:text-white">Proses Kenaikan Kelas</h3>
                                 <p className="text-xs text-text-secondary mt-0.5">{steps[2].detail}</p>
+                                {pendingSourceCount !== null && pendingSourceCount > 0 && (
+                                    <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                                        ⚠️ {pendingSourceCount} siswa di {lastCompletedYear?.name} belum diproses kenaikan kelasnya
+                                    </p>
+                                )}
                                 {steps[1].completed && (
                                     <Link href="/dashboard/admin/kenaikan-kelas" className="inline-block mt-2">
                                         <Button variant="secondary">
@@ -810,7 +857,7 @@ export default function TahunAjaranPage() {
                                             <div className="flex items-center justify-end gap-2">
                                                 {(year.status === 'ACTIVE' || year.is_active) && (
                                                     <button
-                                                        onClick={() => openComplete(year)}
+                                                        onClick={() => openWizardCompleteModal(year)}
                                                         className="px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:hover:bg-emerald-900/50 text-xs font-medium transition-colors"
                                                     >
                                                         Selesaikan
@@ -855,16 +902,9 @@ export default function TahunAjaranPage() {
                             <select value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all" required>
                                 <option value="">Pilih tahun ajaran...</option>
-                                {(() => {
-                                    const currentYear = new Date().getFullYear()
-                                    const existingNames = years.map(y => y.name)
-                                    const options = []
-                                    for (let y = currentYear + 5; y >= 2020; y--) {
-                                        const name = `${y}/${y + 1}`
-                                        if (!existingNames.includes(name)) options.push(<option key={name} value={name}>📅 {name}</option>)
-                                    }
-                                    return options
-                                })()}
+                                {getYearNameOptions().map(name => (
+                                    <option key={name} value={name}>📅 {name}</option>
+                                ))}
                             </select>
                         )}
                     </div>
@@ -898,7 +938,7 @@ export default function TahunAjaranPage() {
                         {years.length > 0 && !(editingYear?.status === 'ACTIVE' || editingYear?.status === 'COMPLETED') && (
                             <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                                 <p className="text-xs text-blue-700 dark:text-blue-300">
-                                    💡 Untuk <strong>mengaktifkan</strong> tahun ajaran, gunakan tombol <strong>&quot;Pergantian Tahun&quot;</strong> di atas.
+                                    💡 Untuk <strong>mengaktifkan</strong> tahun ajaran (termasuk yang berstatus Direncanakan), gunakan tombol <strong>&quot;Pergantian Tahun&quot;</strong> di atas.
                                     Ini memastikan semua langkah (selesaikan tahun lama, kenaikan kelas, salin penugasan) dilakukan dengan benar.
                                 </p>
                             </div>
@@ -909,27 +949,6 @@ export default function TahunAjaranPage() {
                         <Button type="submit" loading={saving} className="flex-1">Simpan Perubahan</Button>
                     </div>
                 </form>
-            </Modal>
-
-            {/* Complete Confirmation Modal */}
-            <Modal open={showCompleteModal} onClose={() => setShowCompleteModal(false)} title="⚠️ Selesaikan Tahun Ajaran">
-                <div className="space-y-4">
-                    <p className="text-text-main dark:text-white">
-                        Apakah Anda yakin ingin menyelesaikan tahun ajaran <strong>{completingYear?.name}</strong>?
-                    </p>
-                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 rounded-xl">
-                        <p className="text-sm text-amber-800 dark:text-amber-200"><strong>Perhatian:</strong> Setelah diselesaikan:</p>
-                        <ul className="text-sm text-amber-700 dark:text-amber-300 mt-2 list-disc list-inside space-y-1">
-                            <li>Status akan berubah menjadi &quot;Selesai&quot;</li>
-                            <li>Tanggal selesai akan diset ke hari ini</li>
-                            <li>Tidak ada tahun ajaran aktif sampai Anda membuat yang baru</li>
-                        </ul>
-                    </div>
-                    <div className="flex gap-3 pt-2">
-                        <Button type="button" variant="secondary" onClick={() => setShowCompleteModal(false)} className="flex-1">Batal</Button>
-                        <Button onClick={handleComplete} loading={saving} className="flex-1">Ya, Selesaikan</Button>
-                    </div>
-                </div>
             </Modal>
 
             {/* Delete Modal Step 1 */}
@@ -996,12 +1015,12 @@ export default function TahunAjaranPage() {
             {/* ═══════════════════════════════════════
                 WIZARD: Complete Year Confirmation Modal
                ═══════════════════════════════════════ */}
-            <Modal open={showWizardCompleteModal} onClose={() => setShowWizardCompleteModal(false)} title="⚠️ Selesaikan Tahun Ajaran">
+            <Modal open={showWizardCompleteModal} onClose={() => { setShowWizardCompleteModal(false); setCompletingYear(null) }} title="⚠️ Selesaikan Tahun Ajaran">
                 <div className="space-y-4">
                     <div className="bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-700 p-4 rounded-xl text-center">
                         <div className="text-amber-500 mb-2"><AlertTriangle set="bold" primaryColor="currentColor" size={40} /></div>
                         <p className="text-base font-bold text-amber-800 dark:text-amber-200">
-                            Anda akan menyelesaikan tahun ajaran <span className="text-red-600">{activeYear?.name}</span>
+                            Anda akan menyelesaikan tahun ajaran <span className="text-red-600">{completingYear?.name}</span>
                         </p>
                         <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">Tindakan ini tidak dapat dibatalkan</p>
                     </div>
@@ -1067,7 +1086,7 @@ export default function TahunAjaranPage() {
                     </div>
 
                     <div className="flex gap-3 pt-2">
-                        <Button type="button" variant="secondary" onClick={() => setShowWizardCompleteModal(false)} className="flex-1">Batal</Button>
+                        <Button type="button" variant="secondary" onClick={() => { setShowWizardCompleteModal(false); setCompletingYear(null) }} className="flex-1">Batal</Button>
                         <Button
                             onClick={executeWizardComplete}
                             loading={wizardCompletingYear}
@@ -1087,7 +1106,10 @@ export default function TahunAjaranPage() {
                 <div className="space-y-4">
                     <div className="bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-300 dark:border-emerald-700 p-4 rounded-xl text-center">
                         <p className="text-base font-bold text-emerald-800 dark:text-emerald-200">
-                            Tahun ajaran <span className="text-primary">{newYearName}</span> akan dibuat dan langsung diaktifkan
+                            {selectedPlannedYear
+                                ? <>Tahun ajaran <span className="text-primary">{wizardTargetName}</span> yang sudah direncanakan akan diaktifkan</>
+                                : <>Tahun ajaran <span className="text-primary">{wizardTargetName}</span> akan dibuat dan langsung diaktifkan</>
+                            }
                         </p>
                     </div>
 
@@ -1104,7 +1126,7 @@ export default function TahunAjaranPage() {
                         <p className="text-sm font-bold text-text-main dark:text-white">✅ Konfirmasi:</p>
                         {[
                             `Tahun ajaran lama sudah diselesaikan`,
-                            `Nama tahun ajaran "${newYearName}" sudah benar`,
+                            `Nama tahun ajaran "${wizardTargetName}" sudah benar`,
                             'Saya siap untuk melanjutkan proses pergantian tahun'
                         ].map((label, i) => (
                             <label key={i} className="flex items-start gap-3 cursor-pointer">
@@ -1133,8 +1155,37 @@ export default function TahunAjaranPage() {
                             disabled={!allCreateChecked}
                             className={`flex-1 ${allCreateChecked ? '' : 'bg-gray-300 cursor-not-allowed border-0'}`}
                         >
-                            {allCreateChecked ? `🚀 Buat & Aktifkan ${newYearName}` : `Centang semua (${wizardCreateChecklist.filter(Boolean).length}/3)`}
+                            {allCreateChecked
+                                ? (selectedPlannedYear ? `🚀 Aktifkan ${wizardTargetName}` : `🚀 Buat & Aktifkan ${wizardTargetName}`)
+                                : `Centang semua (${wizardCreateChecklist.filter(Boolean).length}/3)`}
                         </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* ═══════════════════════════════════════
+                MODAL: Peringatan Siswa Pending
+               ═══════════════════════════════════════ */}
+            <Modal open={pendingWarning !== null} onClose={() => setPendingWarning(null)} title="⚠️ Siswa Belum Diproses">
+                <div className="space-y-4">
+                    <p className="text-text-main dark:text-white">
+                        Tahun ajaran berhasil diaktifkan, tetapi masih ada <strong className="text-amber-600">{pendingWarning} siswa</strong> yang
+                        belum diproses kenaikan kelasnya.
+                    </p>
+                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 rounded-xl">
+                        <p className="text-sm text-amber-800 dark:text-amber-200">
+                            Siswa-siswa ini belum memiliki kelas di tahun ajaran aktif. Mereka tetap bisa diproses kapan saja
+                            lewat halaman <strong>Kenaikan Kelas</strong>.
+                        </p>
+                    </div>
+                    <div className="flex gap-3 pt-2">
+                        <Button type="button" variant="secondary" onClick={() => setPendingWarning(null)} className="flex-1">Nanti Saja</Button>
+                        <Link href="/dashboard/admin/kenaikan-kelas" className="flex-1">
+                            <Button className="w-full">
+                                <GraduationCap set="bold" primaryColor="currentColor" size={14} />
+                                <span className="ml-1">Buka Kenaikan Kelas</span>
+                            </Button>
+                        </Link>
                     </div>
                 </div>
             </Modal>

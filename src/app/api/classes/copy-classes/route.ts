@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
         // Check existing classes in target year
         let existingQuery = supabase
             .from('classes')
-            .select('id, name, grade_level, school_level')
+            .select('id, name, grade_level, school_level, homeroom_teacher_id')
             .eq('academic_year_id', to_year_id)
         // classes scoped via academic_year_id (which is already verified above)
         const { data: existingClasses, error: existingError } = await existingQuery
@@ -92,6 +92,25 @@ export async function POST(request: NextRequest) {
             }
         }
 
+        // Server-side: sync homeroom teacher to classes that ALREADY exist in target year
+        // (previously done via N separate PUT calls from the browser)
+        let homeroomUpdated = 0
+        if (copy_homeroom) {
+            for (const src of sourceClasses) {
+                if (!src.homeroom_teacher_id) continue
+                const target = (existingClasses || []).find(c =>
+                    c.name === src.name && c.grade_level === src.grade_level && c.school_level === src.school_level
+                )
+                if (target && target.homeroom_teacher_id !== src.homeroom_teacher_id) {
+                    const { error: updateError } = await supabase
+                        .from('classes')
+                        .update({ homeroom_teacher_id: src.homeroom_teacher_id })
+                        .eq('id', target.id)
+                    if (!updateError) homeroomUpdated++
+                }
+            }
+        }
+
         // Filter classes that need to be created
         const classesToCreate = sourceClasses
             .filter(c => !existingKeys.has(`${c.name}_${c.grade_level}_${c.school_level}`))
@@ -110,6 +129,7 @@ export async function POST(request: NextRequest) {
                 copied: 0,
                 skipped: sourceClasses.length,
                 total: sourceClasses.length,
+                homeroom_updated: homeroomUpdated,
                 class_mapping: existingMapping
             })
         }
@@ -143,6 +163,7 @@ export async function POST(request: NextRequest) {
             copied: newClasses?.length || 0,
             skipped: sourceClasses.length - (newClasses?.length || 0),
             total: sourceClasses.length,
+            homeroom_updated: homeroomUpdated,
             class_mapping: classMapping
         })
 

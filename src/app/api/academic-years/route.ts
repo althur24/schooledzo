@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getPendingEnrollmentInfo, notifyAllTeachers } from '@/lib/academicYear'
 
 // GET all academic years
 export async function GET(request: NextRequest) {
@@ -51,27 +52,14 @@ export async function POST(request: NextRequest) {
         const finalIsActive = is_active || status === 'ACTIVE'
 
         // If setting as active, deactivate others in the SAME school
+        let warning: { pendingCount: number } | null = null
+        let deactivatedNames: string[] = []
         if (finalIsActive) {
-            // Check if old active year has pending (unprocessed) enrollments
-            let activeYearQuery = supabase
-                .from('academic_years')
-                .select('id, name')
-                .eq('is_active', true)
-            if (schoolId) activeYearQuery = activeYearQuery.eq('school_id', schoolId)
-            const { data: currentActiveYear } = await activeYearQuery.maybeSingle()
-
-            if (currentActiveYear) {
-                const { count: pendingCount } = await supabase
-                    .from('student_enrollments')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('academic_year_id', currentActiveYear.id)
-                    .eq('status', 'ACTIVE')
-
-                if (pendingCount && pendingCount > 0) {
-                    return NextResponse.json({
-                        error: `Tahun ${currentActiveYear.name} masih memiliki ${pendingCount} siswa yang belum diproses kenaikan kelasnya. Selesaikan proses kenaikan kelas terlebih dahulu, atau gunakan Wizard Pergantian Tahun.`
-                    }, { status: 400 })
-                }
+            // Count students still pending kenaikan kelas in the year being
+            // replaced. Warning only — activation is NOT blocked.
+            const pending = await getPendingEnrollmentInfo(schoolId)
+            if (pending.pendingCount > 0) {
+                warning = { pendingCount: pending.pendingCount }
             }
 
             let deactivateQuery = supabase
@@ -81,7 +69,8 @@ export async function POST(request: NextRequest) {
 
             if (schoolId) deactivateQuery = deactivateQuery.eq('school_id', schoolId)
 
-            await deactivateQuery
+            const { data: deactivated } = await deactivateQuery.select('name')
+            deactivatedNames = (deactivated || []).map((y: { name: string }) => y.name)
         }
 
         const { data, error } = await supabase
@@ -99,7 +88,20 @@ export async function POST(request: NextRequest) {
 
         if (error) throw error
 
-        return NextResponse.json(data)
+        // Notify all teachers when the new year is activated
+        if (finalIsActive) {
+            const completedNote = deactivatedNames.length > 0
+                ? ` Tahun ajaran ${deactivatedNames.join(', ')} telah diselesaikan.`
+                : ''
+            await notifyAllTeachers(schoolId, {
+                type: 'TAHUN_AJARAN',
+                title: '📅 Tahun Ajaran Baru Aktif',
+                message: `Tahun ajaran ${data.name} sekarang aktif.${completedNote}`,
+                link: '/dashboard/guru'
+            })
+        }
+
+        return NextResponse.json(warning ? { ...data, warning } : data)
     } catch (error) {
         console.error('Error creating academic year:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

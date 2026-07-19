@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getPendingEnrollmentInfo, notifyAllTeachers } from '@/lib/academicYear'
 
 // GET single academic year
 export async function GET(
@@ -54,8 +55,28 @@ export async function PUT(
         const finalStatus = status || (is_active ? 'ACTIVE' : undefined)
         const finalIsActive = is_active !== undefined ? is_active : (status === 'ACTIVE')
 
-        // If setting as active, deactivate others in same school first
+        // Only treat as "activation" when the year was NOT already active —
+        // editing the currently active year must not re-trigger side effects
+        let wasActive = false
         if (finalIsActive) {
+            const { data: current } = await supabase
+                .from('academic_years')
+                .select('is_active')
+                .eq('id', id)
+                .single()
+            wasActive = current?.is_active === true
+        }
+
+        // If newly set as active, deactivate others in same school first
+        let warning: { pendingCount: number } | null = null
+        if (finalIsActive && !wasActive) {
+            // Count students still pending kenaikan kelas in the year being
+            // replaced. Warning only — activation is NOT blocked.
+            const pending = await getPendingEnrollmentInfo(schoolId, id)
+            if (pending.pendingCount > 0) {
+                warning = { pendingCount: pending.pendingCount }
+            }
+
             let deactivateQuery = supabase
                 .from('academic_years')
                 .update({ is_active: false, status: 'COMPLETED' })
@@ -84,7 +105,17 @@ export async function PUT(
 
         if (error) throw error
 
-        return NextResponse.json(data)
+        // Notify all teachers when a year is newly activated via this endpoint
+        if (finalIsActive && !wasActive) {
+            await notifyAllTeachers(schoolId, {
+                type: 'TAHUN_AJARAN',
+                title: '📅 Tahun Ajaran Baru Aktif',
+                message: `Tahun ajaran ${data.name} sekarang aktif.`,
+                link: '/dashboard/guru'
+            })
+        }
+
+        return NextResponse.json(warning ? { ...data, warning } : data)
     } catch (error) {
         console.error('Error updating academic year:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
@@ -119,104 +150,22 @@ export async function DELETE(
             }
         }
 
-        // Get all classes in this academic year
-        const { data: classes } = await supabase
-            .from('classes')
-            .select('id')
-            .eq('academic_year_id', id)
+        // Atomic cascade delete via RPC (migration 017):
+        // all related rows are removed in a single DB transaction —
+        // a failure anywhere rolls back everything, no orphan data.
+        const { data: result, error } = await supabase.rpc('delete_academic_year_cascade', { p_year_id: id })
 
-        const classIds = classes?.map(c => c.id) || []
-
-        // Get all teaching assignments in this academic year
-        const { data: teachingAssignments } = await supabase
-            .from('teaching_assignments')
-            .select('id')
-            .eq('academic_year_id', id)
-
-        const taIds = teachingAssignments?.map(ta => ta.id) || []
-
-        // Delete children of teaching assignments
-        if (taIds.length > 0) {
-            // Get assignments to delete their submissions
-            const { data: assignments } = await supabase
-                .from('assignments')
-                .select('id')
-                .in('teaching_assignment_id', taIds)
-
-            if (assignments && assignments.length > 0) {
-                const assignmentIds = assignments.map(a => a.id)
-
-                // Get submissions to delete their grades
-                const { data: submissions } = await supabase
-                    .from('student_submissions')
-                    .select('id')
-                    .in('assignment_id', assignmentIds)
-
-                if (submissions && submissions.length > 0) {
-                    const submissionIds = submissions.map(s => s.id)
-                    await supabase.from('grades').delete().in('submission_id', submissionIds)
-                }
-
-                await supabase.from('student_submissions').delete().in('assignment_id', assignmentIds)
+        if (error) {
+            // PGRST202 = function not found → migration 017 not applied yet
+            if ((error as any).code === 'PGRST202') {
+                return NextResponse.json({
+                    error: 'Fitur hapus tahun belum siap: jalankan migrasi 017_delete_year_rpc.sql di Supabase SQL Editor terlebih dahulu.'
+                }, { status: 503 })
             }
-
-            // Get quizzes to delete their submissions
-            const { data: quizzes } = await supabase
-                .from('quizzes')
-                .select('id')
-                .in('teaching_assignment_id', taIds)
-
-            if (quizzes && quizzes.length > 0) {
-                const quizIds = quizzes.map(q => q.id)
-                await supabase.from('quiz_submissions').delete().in('quiz_id', quizIds)
-                await supabase.from('quiz_questions').delete().in('quiz_id', quizIds)
-            }
-
-            // Get exams to delete their submissions
-            const { data: exams } = await supabase
-                .from('exams')
-                .select('id')
-                .in('teaching_assignment_id', taIds)
-
-            if (exams && exams.length > 0) {
-                const examIds = exams.map(e => e.id)
-                await supabase.from('exam_submissions').delete().in('exam_id', examIds)
-                await supabase.from('exam_questions').delete().in('exam_id', examIds)
-            }
-
-            // Delete materials, assignments, quizzes, exams
-            await supabase.from('materials').delete().in('teaching_assignment_id', taIds)
-            await supabase.from('assignments').delete().in('teaching_assignment_id', taIds)
-            await supabase.from('quizzes').delete().in('teaching_assignment_id', taIds)
-            await supabase.from('exams').delete().in('teaching_assignment_id', taIds)
+            throw error
         }
 
-        // Delete teaching assignments
-        await supabase.from('teaching_assignments').delete().eq('academic_year_id', id)
-
-        // Delete student enrollments
-        await supabase.from('student_enrollments').delete().eq('academic_year_id', id)
-
-        // Clear class_id from students that belong to classes being deleted
-        if (classIds.length > 0) {
-            await supabase
-                .from('students')
-                .update({ class_id: null })
-                .in('class_id', classIds)
-        }
-
-        // Delete classes
-        await supabase.from('classes').delete().eq('academic_year_id', id)
-
-        // Finally delete the academic year
-        const { error } = await supabase
-            .from('academic_years')
-            .delete()
-            .eq('id', id)
-
-        if (error) throw error
-
-        return NextResponse.json({ success: true })
+        return NextResponse.json({ success: true, ...(result || {}) })
     } catch (error) {
         console.error('Error deleting academic year:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 
 // PUT update class
 export async function PUT(
@@ -31,6 +32,17 @@ export async function PUT(
             if (!['SMP', 'SMA'].includes(school_level)) {
                 return NextResponse.json({ error: 'Jenjang sekolah harus SMP atau SMA' }, { status: 400 })
             }
+        }
+
+        // Block writes to archived (COMPLETED) academic years
+        const { data: classForYear } = await supabase
+            .from('classes')
+            .select('academic_year_id')
+            .eq('id', id)
+            .single()
+        if (classForYear?.academic_year_id) {
+            const yearStatus = await getYearStatusById(classForYear.academic_year_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         const updateData: Record<string, unknown> = { name, academic_year_id, grade_level, school_level }
@@ -69,6 +81,17 @@ export async function DELETE(
 
         if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Block writes to archived (COMPLETED) academic years
+        const { data: classForYear } = await supabase
+            .from('classes')
+            .select('academic_year_id')
+            .eq('id', id)
+            .single()
+        if (classForYear?.academic_year_id) {
+            const yearStatus = await getYearStatusById(classForYear.academic_year_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         let deleteQuery = supabase

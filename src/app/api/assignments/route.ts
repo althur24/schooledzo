@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 
 // GET all assignments
 export async function GET(request: NextRequest) {
@@ -77,6 +78,9 @@ export async function GET(request: NextRequest) {
                 } else {
                     return NextResponse.json([])
                 }
+            } else {
+                // No active year: return empty instead of leaking content across years
+                return NextResponse.json([])
             }
         }
 
@@ -138,6 +142,10 @@ export async function POST(request: NextRequest) {
         if (!teaching_assignment_id || !title || !type) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
         }
+
+        // Block writes to archived (COMPLETED) academic years
+        const yearStatus = await getYearStatusByTA(teaching_assignment_id)
+        if (yearStatus === 'COMPLETED') return archivedYearResponse()
 
         const { data, error } = await supabase
             .from('assignments')

@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
+import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 
 // GET questions for exam
 export async function GET(
@@ -87,6 +88,17 @@ export async function POST(
 
         if (user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Block writes to archived (COMPLETED) academic years
+        const { data: examForYear } = await supabase
+            .from('exams')
+            .select('teaching_assignment_id')
+            .eq('id', id)
+            .single()
+        if (examForYear?.teaching_assignment_id) {
+            const yearStatus = await getYearStatusByTA(examForYear.teaching_assignment_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         const body = await request.json()
@@ -237,6 +249,17 @@ export async function PUT(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        // Block writes to archived (COMPLETED) academic years
+        const { data: examForYear } = await supabase
+            .from('exams')
+            .select('teaching_assignment_id')
+            .eq('id', id)
+            .single()
+        if (examForYear?.teaching_assignment_id) {
+            const yearStatus = await getYearStatusByTA(examForYear.teaching_assignment_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
+        }
+
         const body = await request.json()
         const { question_id, question_text, question_type, options, correct_answer, difficulty, points, image_url, passage_text, passage_audio_url, teacher_hots_claim, text_direction, content_format } = body
 
@@ -318,6 +341,17 @@ export async function DELETE(
 
         if (user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Block writes to archived (COMPLETED) academic years
+        const { data: examForYear } = await supabase
+            .from('exams')
+            .select('teaching_assignment_id')
+            .eq('id', id)
+            .single()
+        if (examForYear?.teaching_assignment_id) {
+            const yearStatus = await getYearStatusByTA(examForYear.teaching_assignment_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         const questionId = request.nextUrl.searchParams.get('question_id')

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -25,6 +26,19 @@ export async function POST(req: NextRequest) {
                 { error: 'source_exam_id and target_exam_ids (array) are required' },
                 { status: 400 }
             )
+        }
+
+        // Block writes to archived (COMPLETED) academic years (checked per target exam)
+        const { data: targetExams } = await supabase
+            .from('exams')
+            .select('teaching_assignment:teaching_assignments(academic_year_id)')
+            .in('id', target_exam_ids)
+        const targetYearIds = [...new Set(
+            (targetExams || []).map((e: any) => e.teaching_assignment?.academic_year_id).filter(Boolean)
+        )] as string[]
+        for (const yearId of targetYearIds) {
+            const yearStatus = await getYearStatusById(yearId)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         // 1. Fetch source questions

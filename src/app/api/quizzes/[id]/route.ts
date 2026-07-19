@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
+import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 
 // GET single quiz with questions
 export async function GET(
@@ -73,6 +74,17 @@ export async function PUT(
             }
         } else if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Block writes to archived (COMPLETED) academic years
+        const { data: quizForYear } = await supabase
+            .from('quizzes')
+            .select('teaching_assignment_id')
+            .eq('id', id)
+            .single()
+        if (quizForYear?.teaching_assignment_id) {
+            const yearStatus = await getYearStatusByTA(quizForYear.teaching_assignment_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         const body = await request.json()
@@ -292,6 +304,17 @@ export async function DELETE(
             }
         } else if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Block writes to archived (COMPLETED) academic years
+        const { data: quizForYear } = await supabase
+            .from('quizzes')
+            .select('teaching_assignment_id')
+            .eq('id', id)
+            .single()
+        if (quizForYear?.teaching_assignment_id) {
+            const yearStatus = await getYearStatusByTA(quizForYear.teaching_assignment_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
         const { error } = await supabase

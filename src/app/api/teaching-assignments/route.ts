@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 
 // GET all teaching assignments
 export async function GET(request: NextRequest) {
@@ -22,6 +23,11 @@ export async function GET(request: NextRequest) {
             if (schoolId) yearQuery = yearQuery.eq('school_id', schoolId)
             const { data: activeYear } = await yearQuery.single()
             if (activeYear) filterYearId = activeYear.id
+        }
+
+        // No active year: return empty instead of leaking assignments across years
+        if (!filterYearId && allYears !== 'true') {
+            return NextResponse.json([])
         }
 
         let query = supabase
@@ -70,6 +76,10 @@ export async function POST(request: NextRequest) {
         if (!teacher_id || !subject_id || !class_id || !academic_year_id) {
             return NextResponse.json({ error: 'Semua field harus diisi' }, { status: 400 })
         }
+
+        // Block writes to archived (COMPLETED) academic years
+        const yearStatus = await getYearStatusById(academic_year_id)
+        if (yearStatus === 'COMPLETED') return archivedYearResponse()
 
         // Check for duplicate
         const { data: existing } = await supabase

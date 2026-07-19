@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 
 // GET all classes
 export async function GET(request: NextRequest) {
@@ -69,6 +70,10 @@ export async function POST(request: NextRequest) {
         if (!name || !academic_year_id) {
             return NextResponse.json({ error: 'Nama kelas dan tahun ajaran harus diisi' }, { status: 400 })
         }
+
+        // Block writes to archived (COMPLETED) academic years
+        const yearStatus = await getYearStatusById(academic_year_id)
+        if (yearStatus === 'COMPLETED') return archivedYearResponse()
 
         // Verify academic year belongs to this school
         if (schoolId) {
