@@ -25,6 +25,8 @@ export default function TutorialFAB() {
     const menuRef = useRef<HTMLDivElement>(null)
     const fabRef = useRef<HTMLButtonElement>(null)
     const driverRef = useRef<Driver | null>(null)
+    // Guards the pre-start window (mobile start is delayed ~600ms) against double-starts
+    const startingRef = useRef(false)
     const isGuru = user?.role === 'GURU'
 
     // Fetch school settings
@@ -88,6 +90,11 @@ export default function TutorialFAB() {
     const runTutorialRef = useRef<(tutorial: TutorialDef, startIndex?: number) => void>(() => {})
 
     const runTutorial = useCallback((tutorial: TutorialDef, startIndex = 0) => {
+        // Block double-starts (a tutorial is already running, or a delayed
+        // mobile start is still within its ~600ms pre-start window)
+        if (driverRef.current || startingRef.current) return
+        startingRef.current = true
+
         setMenuOpen(false)
         setIsRunning(true)
         setActiveTutorialId(tutorial.id)
@@ -99,59 +106,73 @@ export default function TutorialFAB() {
             setFabSeen(true)
         }
 
-        // Build Driver.js steps from our interactive step definitions
-        const driverSteps = buildDriverSteps(tutorial.steps, driverRef)
+        const start = () => {
+            // Build Driver.js steps from our interactive step definitions
+            const driverSteps = buildDriverSteps(tutorial.steps, driverRef)
 
-        const driverObj = driver({
-            showProgress: true,
-            showButtons: ['next', 'previous'],
-            nextBtnText: 'Lanjut →',
-            prevBtnText: '← Kembali',
-            doneBtnText: 'Selesai ✓',
-            progressText: '{{current}} / {{total}}',
-            allowClose: false,
-            overlayColor: 'black',
-            overlayOpacity: 0.5,
-            stagePadding: 4,
-            stageRadius: 12,
-            popoverClass: 'tutorial-popover',
-            disableActiveInteraction: false,
-            onPopoverRender: (popover) => {
-                // Add "Akhiri Tutorial" footer link to every popover
-                const footer = document.createElement('div')
-                footer.className = 'tutorial-exit-footer'
-                footer.innerHTML = '<button class="tutorial-exit-btn">✕ Akhiri Tutorial</button>'
-                footer.querySelector('button')!.addEventListener('click', (e) => {
-                    e.stopPropagation()
-                    const currentStepIndex = driverObj.getActiveIndex() ?? 0
-                    // DESTROY driver first — remove ALL overlays
-                    driverObj.destroy()
-                    driverRef.current = null
-                    document.body.classList.remove('driver-active')
-                    // Show exit dialog on clean screen
-                    showExitConfirm(tutorial, currentStepIndex)
-                })
-                popover.wrapper.appendChild(footer)
-            },
-            onDestroyStarted: () => {
-                if (driverObj.isLastStep()) {
-                    markComplete(tutorial.id)
-                    driverObj.destroy()
-                    driverRef.current = null
-                    setIsRunning(false)
-                    setActiveTutorialId(null)
-                    document.body.classList.remove('driver-active')
-                }
-                // Otherwise: block — only allow close via custom "Akhiri Tutorial" button
-            },
-            steps: driverSteps,
-        })
+            const driverObj = driver({
+                showProgress: true,
+                showButtons: ['next', 'previous'],
+                nextBtnText: 'Lanjut →',
+                prevBtnText: '← Kembali',
+                doneBtnText: 'Selesai ✓',
+                progressText: '{{current}} / {{total}}',
+                allowClose: false,
+                overlayColor: 'black',
+                overlayOpacity: 0.5,
+                stagePadding: 4,
+                stageRadius: 12,
+                popoverClass: 'tutorial-popover',
+                disableActiveInteraction: false,
+                onPopoverRender: (popover) => {
+                    // Add "Akhiri Tutorial" footer link to every popover
+                    const footer = document.createElement('div')
+                    footer.className = 'tutorial-exit-footer'
+                    footer.innerHTML = '<button class="tutorial-exit-btn">✕ Akhiri Tutorial</button>'
+                    footer.querySelector('button')!.addEventListener('click', (e) => {
+                        e.stopPropagation()
+                        const currentStepIndex = driverObj.getActiveIndex() ?? 0
+                        // DESTROY driver first — remove ALL overlays
+                        driverObj.destroy()
+                        driverRef.current = null
+                        document.body.classList.remove('driver-active')
+                        // Show exit dialog on clean screen
+                        showExitConfirm(tutorial, currentStepIndex)
+                    })
+                    popover.wrapper.appendChild(footer)
+                },
+                onDestroyStarted: () => {
+                    if (driverObj.isLastStep()) {
+                        markComplete(tutorial.id)
+                        driverObj.destroy()
+                        driverRef.current = null
+                        setIsRunning(false)
+                        setActiveTutorialId(null)
+                        document.body.classList.remove('driver-active')
+                        window.dispatchEvent(new CustomEvent('tutorial:close-bottom-nav'))
+                    }
+                    // Otherwise: block — only allow close via custom "Akhiri Tutorial" button
+                },
+                steps: driverSteps,
+            })
 
-        driverRef.current = driverObj
-        if (startIndex > 0) {
-            driverObj.drive(startIndex)
+            driverRef.current = driverObj
+            startingRef.current = false // pre-start window over; driverRef now guards
+            if (startIndex > 0) {
+                driverObj.drive(startIndex)
+            } else {
+                driverObj.drive()
+            }
+        }
+
+        // On mobile, the dashboard-intro nav steps highlight BottomNavigation items —
+        // some live inside the collapsed arc menu, so open it first and wait for the animation
+        const isMobile = window.innerWidth < 1024
+        if (isMobile && tutorial.id === 'dashboard-intro' && startIndex === 0) {
+            window.dispatchEvent(new CustomEvent('tutorial:open-bottom-nav'))
+            setTimeout(start, 600)
         } else {
-            driverObj.drive()
+            start()
         }
     }, [fabSeen, markComplete])
 
@@ -201,6 +222,7 @@ export default function TutorialFAB() {
             overlay.remove()
             setIsRunning(false)
             setActiveTutorialId(null)
+            window.dispatchEvent(new CustomEvent('tutorial:close-bottom-nav'))
         })
 
         document.body.appendChild(overlay)
@@ -415,11 +437,43 @@ export default function TutorialFAB() {
                 }
                 .tutorial-fab { bottom: calc(80px + 8px); }
                 .tutorial-menu { bottom: calc(80px + 60px); }
+                .tutorial-welcome { bottom: calc(80px + 70px); }
                 @media (min-width: 1024px) {
                     .tutorial-fab { bottom: 24px; }
                     .tutorial-menu { bottom: 90px; }
+                    .tutorial-welcome { bottom: 96px; }
                 }
             `}</style>
+
+            {/* Welcome banner — one-time nudge for new teachers (dashboard only) */}
+            {!fabSeen && !isRunning && !menuOpen && pathname === '/dashboard/guru' && (
+                <div
+                    className="tutorial-welcome fixed z-[55] bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-black/10 dark:border-white/10 p-4 animate-in slide-in-from-bottom-2 fade-in duration-300"
+                    style={{ right: '16px', width: '300px' }}
+                >
+                    <p className="font-bold text-zinc-800 dark:text-white text-sm">👋 Baru di sini?</p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
+                        Ikuti tutorial singkat untuk mengenal fitur-fitur aplikasi — mulai dari dashboard sampai membuat kuis.
+                    </p>
+                    <div className="flex gap-2 mt-3">
+                        <button
+                            onClick={() => {
+                                try { localStorage.setItem(FAB_SEEN_KEY, 'true') } catch { /* private browsing */ }
+                                setFabSeen(true)
+                            }}
+                            className="flex-1 px-3 py-2 text-xs font-bold text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors"
+                        >
+                            Nanti Saja
+                        </button>
+                        <button
+                            onClick={() => runTutorial(tutorialDefinitions[0])}
+                            className="flex-1 px-3 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors"
+                        >
+                            Mulai Tutorial 📚
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Menu Popup */}
             {menuOpen && (

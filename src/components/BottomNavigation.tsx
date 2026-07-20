@@ -15,6 +15,18 @@ interface NavItem {
     path: string
 }
 
+// Tutorial anchor ids (guru only) — must match tutorialSteps.ts nav-* selectors.
+// Keyed by path so other roles (with different labels) never get the attributes.
+const TUTORIAL_NAV_IDS: Record<string, string> = {
+    '/dashboard/guru/materi': 'nav-materi',
+    '/dashboard/guru/tugas': 'nav-tugas',
+    '/dashboard/guru/ulangan': 'nav-ulangan',
+    '/dashboard/guru/kuis': 'nav-kuis',
+    '/dashboard/guru/bank-soal': 'nav-bank-soal',
+    '/dashboard/guru/nilai': 'nav-nilai',
+    '/dashboard/guru/wali-kelas': 'nav-wali-kelas',
+}
+
 // --- SISWA ---
 const siswaBarLeft: NavItem[] = [
     { icon: Home, label: 'Home', path: '/dashboard/siswa' },
@@ -89,6 +101,19 @@ export default function BottomNavigation() {
         setIsOpen(false)
     }, [pathname])
 
+    // Tutorial integration: let the tutorial open/close the arc menu
+    // so nav steps can highlight Materi/Bank Soal/Nilai/Wali on mobile
+    useEffect(() => {
+        const open = () => setIsOpen(true)
+        const close = () => setIsOpen(false)
+        window.addEventListener('tutorial:open-bottom-nav', open)
+        window.addEventListener('tutorial:close-bottom-nav', close)
+        return () => {
+            window.removeEventListener('tutorial:open-bottom-nav', open)
+            window.removeEventListener('tutorial:close-bottom-nav', close)
+        }
+    }, [])
+
     if (!user) return null
 
     let barLeft: NavItem[], barRight: NavItem[], arcItems: NavItem[]
@@ -140,6 +165,7 @@ export default function BottomNavigation() {
                 href={item.path}
                 className="relative flex flex-col items-center justify-center w-14"
                 onClick={() => setIsOpen(false)}
+                data-tutorial={TUTORIAL_NAV_IDS[item.path]}
             >
                 <div className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-300 ${active
                     ? 'bg-gradient-to-br from-primary to-emerald-500 text-white shadow-lg shadow-primary/30 scale-105 -translate-y-0.5'
@@ -205,6 +231,7 @@ export default function BottomNavigation() {
                                     href={item.path}
                                     onClick={() => setIsOpen(false)}
                                     className="flex flex-col items-center"
+                                    data-tutorial={TUTORIAL_NAV_IDS[item.path]}
                                 >
                                     <div className={`w-[46px] h-[46px] rounded-full flex items-center justify-center transition-all duration-200 ${active
                                         ? 'bg-gradient-to-br from-primary to-emerald-500 text-white shadow-xl shadow-primary/40 ring-2 ring-white/30'

@@ -24,6 +24,27 @@ export interface InteractiveStep {
 }
 
 /**
+ * Resolve a selector to a concrete element ONLY when it matches multiple nodes
+ * (e.g. nav-* exists in both the desktop Sidebar — display:none on mobile — and
+ * the mobile BottomNavigation). Picks the first effectively visible match so the
+ * highlight lands on the element the user can actually see.
+ * Single-match selectors stay as strings so driver.js resolves them lazily
+ * (elements that only appear later, e.g. inside modals, keep working).
+ */
+function resolveVisibleElement(selector: string): string | Element {
+    if (typeof document === 'undefined') return selector
+    const matches = Array.from(document.querySelectorAll(selector))
+    if (matches.length <= 1) return selector
+    const visible = matches.find(el => {
+        const htmlEl = el as HTMLElement
+        if (htmlEl.offsetParent === null) return false
+        const rect = htmlEl.getBoundingClientRect()
+        return rect.width > 0 && rect.height > 0
+    })
+    return visible || selector
+}
+
+/**
  * Convert interactive steps to Driver.js steps.
  * driverRef is used to programmatically advance from event handlers.
  */
@@ -35,7 +56,7 @@ export function buildDriverSteps(
         const driveStep: DriveStep = {}
 
         if (step.element) {
-            driveStep.element = step.element
+            driveStep.element = resolveVisibleElement(step.element)
         }
 
         driveStep.popover = {
@@ -91,7 +112,14 @@ export function buildDriverSteps(
                 }
             }
         } else if (step.element) {
-            // Non-interactive step with element — still scroll into view
+            // Non-interactive step with element — skip gracefully if the element is
+            // not on the page (e.g. "first card" steps when the list is still empty),
+            // otherwise just scroll it into view
+            driveStep.onHighlightStarted = () => {
+                if (!document.querySelector(step.element!)) {
+                    setTimeout(() => driverRef.current?.moveNext(), 50)
+                }
+            }
             driveStep.onHighlighted = () => {
                 const el = document.querySelector(step.element!)
                 el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
