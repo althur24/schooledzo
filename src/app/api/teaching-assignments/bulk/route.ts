@@ -25,6 +25,22 @@ export async function POST(request: NextRequest) {
         const yearStatus = await getYearStatusById(academic_year_id)
         if (yearStatus === 'COMPLETED') return archivedYearResponse()
 
+        // Guard: every class_id must actually belong to the given academic year
+        // (prevents assignments pointing at classes from other years)
+        const { data: validClasses } = await supabase
+            .from('classes')
+            .select('id')
+            .in('id', class_ids)
+            .eq('academic_year_id', academic_year_id)
+
+        const validClassIds = new Set(validClasses?.map(c => c.id) || [])
+        const invalidClassIds = class_ids.filter((id: string) => !validClassIds.has(id))
+        if (invalidClassIds.length > 0) {
+            return NextResponse.json({
+                error: `${invalidClassIds.length} kelas tidak termasuk dalam tahun ajaran yang dipilih. Muat ulang halaman dan coba lagi.`
+            }, { status: 400 })
+        }
+
         // Check for existing assignments to avoid duplicates
         const { data: existingAssignments } = await supabase
             .from('teaching_assignments')

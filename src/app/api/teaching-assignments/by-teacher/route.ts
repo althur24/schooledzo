@@ -43,6 +43,16 @@ export async function GET(request: NextRequest) {
             assignmentsQuery = assignmentsQuery.eq('academic_year_id', academicYearId)
         }
 
+        // Multi-tenant guard: never return assignments from other schools' years
+        if (schoolId) {
+            const { data: schoolYears } = await supabase
+                .from('academic_years')
+                .select('id')
+                .eq('school_id', schoolId)
+            const yearIds = schoolYears?.map(y => y.id) || []
+            assignmentsQuery = assignmentsQuery.in('academic_year_id', yearIds.length > 0 ? yearIds : ['__none__'])
+        }
+
         const { data: assignments, error: assignmentsError } = await assignmentsQuery
 
         if (assignmentsError) throw assignmentsError

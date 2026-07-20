@@ -143,27 +143,18 @@ export function AssignmentWizard({
             .map(a => a.class_id)
     }
 
-    // Group classes by school level
+    // Group classes by school level (classes without a level go to "Lainnya")
     const smpClasses = classes.filter(c => c.school_level === 'SMP').sort((a, b) => a.name.localeCompare(b.name))
     const smaClasses = classes.filter(c => c.school_level === 'SMA').sort((a, b) => a.name.localeCompare(b.name))
+    const otherClasses = classes.filter(c => c.school_level !== 'SMP' && c.school_level !== 'SMA').sort((a, b) => a.name.localeCompare(b.name))
 
-    const handleSelectAllSMP = () => {
-        const smpIds = smpClasses.map(c => c.id)
-        const allSelected = smpIds.every(id => selectedClassIds.includes(id))
+    const makeToggleAll = (group: Class[]) => () => {
+        const ids = group.map(c => c.id)
+        const allSelected = ids.every(id => selectedClassIds.includes(id))
         if (allSelected) {
-            setSelectedClassIds(selectedClassIds.filter(id => !smpIds.includes(id)))
+            setSelectedClassIds(selectedClassIds.filter(id => !ids.includes(id)))
         } else {
-            setSelectedClassIds([...new Set([...selectedClassIds, ...smpIds])])
-        }
-    }
-
-    const handleSelectAllSMA = () => {
-        const smaIds = smaClasses.map(c => c.id)
-        const allSelected = smaIds.every(id => selectedClassIds.includes(id))
-        if (allSelected) {
-            setSelectedClassIds(selectedClassIds.filter(id => !smaIds.includes(id)))
-        } else {
-            setSelectedClassIds([...new Set([...selectedClassIds, ...smaIds])])
+            setSelectedClassIds([...new Set([...selectedClassIds, ...ids])])
         }
     }
 
@@ -185,20 +176,9 @@ export function AssignmentWizard({
         setError('')
 
         try {
-            // If editing with subjectId, first delete existing assignments for this teacher+subject
-            if (editMode?.subjectId) {
-                await fetch('/api/teaching-assignments/bulk', {
-                    method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        teacher_id: selectedTeacherId,
-                        subject_id: selectedSubjectId,
-                        academic_year_id: academicYearId
-                    })
-                })
-            }
-
-            // Create new assignments
+            // Create new assignments FIRST (API skips ones that already exist).
+            // Old assignments are only deleted AFTER this succeeds, so a failed
+            // save never wipes the teacher's existing assignments.
             const res = await fetch('/api/teaching-assignments/bulk', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -214,6 +194,31 @@ export function AssignmentWizard({
 
             if (!res.ok) {
                 throw new Error(data.error || 'Gagal menyimpan')
+            }
+
+            // In edit mode, remove assignments for classes that were un-checked
+            if (editMode?.subjectId) {
+                const listRes = await fetch(`/api/teaching-assignments?academic_year_id=${academicYearId}`)
+                const allAssignments = await listRes.json()
+                const staleIds = (Array.isArray(allAssignments) ? allAssignments : [])
+                    .filter((a: any) =>
+                        a.teacher_id === selectedTeacherId &&
+                        a.subject_id === selectedSubjectId &&
+                        !selectedClassIds.includes(a.class_id)
+                    )
+                    .map((a: any) => a.id)
+
+                if (staleIds.length > 0) {
+                    const delRes = await fetch('/api/teaching-assignments/bulk', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ assignment_ids: staleIds })
+                    })
+                    if (!delRes.ok) {
+                        const delData = await delRes.json().catch(() => ({}))
+                        throw new Error(delData.error || 'Gagal menghapus kelas yang tidak dipilih')
+                    }
+                }
             }
 
             // Show success screen
@@ -242,6 +247,76 @@ export function AssignmentWizard({
 
     const selectedTeacher = teachers.find(t => t.id === selectedTeacherId)
     const selectedSubject = subjects.find(s => s.id === selectedSubjectId)
+
+    // Render one class group (SMP / SMA / Lainnya). Returns null for empty groups.
+    const renderClassGroup = (title: string, group: Class[], accent: 'blue' | 'green' | 'slate') => {
+        if (group.length === 0) return null
+        const allSelected = group.every(c => selectedClassIds.includes(c.id))
+        const styles = {
+            blue: {
+                label: 'text-blue-600 dark:text-blue-400',
+                selected: 'bg-blue-500/10 border-blue-500 text-blue-700 dark:text-blue-400',
+                checkbox: 'bg-blue-500 border-blue-500'
+            },
+            green: {
+                label: 'text-green-600 dark:text-green-400',
+                selected: 'bg-green-500/10 border-green-500 text-green-700 dark:text-green-400',
+                checkbox: 'bg-green-500 border-green-500'
+            },
+            slate: {
+                label: 'text-slate-600 dark:text-slate-400',
+                selected: 'bg-slate-500/10 border-slate-500 text-slate-700 dark:text-slate-300',
+                checkbox: 'bg-slate-500 border-slate-500'
+            }
+        }[accent]
+
+        return (
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <span className={`text-sm font-bold ${styles.label}`}>{title}</span>
+                    <button
+                        type="button"
+                        onClick={makeToggleAll(group)}
+                        className="text-xs text-primary hover:underline"
+                    >
+                        {allSelected ? 'Hapus Semua' : 'Pilih Semua'}
+                    </button>
+                </div>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {group.map((cls) => {
+                        const conflict = getClassConflictInfo(cls.id)
+                        const isSelected = selectedClassIds.includes(cls.id)
+
+                        return (
+                            <button
+                                key={cls.id}
+                                onClick={() => toggleClass(cls.id)}
+                                className={`w-full flex items-center gap-2 p-2 rounded-lg border text-left transition-all ${isSelected
+                                    ? styles.selected
+                                    : conflict
+                                        ? 'bg-amber-500/10 border-amber-500/30'
+                                        : 'bg-secondary/5 border-secondary/20 hover:bg-secondary/10'
+                                    }`}
+                            >
+                                <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? `${styles.checkbox} text-white` : 'border-secondary/40'
+                                    }`}>
+                                    {isSelected && <Check className="w-3 h-3" />}
+                                </div>
+                                <div className="flex-1">
+                                    <span className="text-sm font-medium text-text-main dark:text-white">{cls.name}</span>
+                                    {conflict && (
+                                        <span className="text-xs text-amber-600 ml-1">
+                                            ({conflict.teacher_name || 'Guru lain'})
+                                        </span>
+                                    )}
+                                </div>
+                            </button>
+                        )
+                    })}
+                </div>
+            </div>
+        )
+    }
 
     return (
         <Modal
@@ -393,97 +468,9 @@ export function AssignmentWizard({
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">
-                                    {/* SMP */}
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm font-bold text-blue-600 dark:text-blue-400">📘 SMP</span>
-                                            <button
-                                                type="button"
-                                                onClick={handleSelectAllSMP}
-                                                className="text-xs text-primary hover:underline"
-                                            >
-                                                {smpClasses.every(c => selectedClassIds.includes(c.id)) ? 'Hapus Semua' : 'Pilih Semua'}
-                                            </button>
-                                        </div>
-                                        <div className="space-y-1 max-h-48 overflow-y-auto">
-                                            {smpClasses.map((cls) => {
-                                                const conflict = getClassConflictInfo(cls.id)
-                                                const isSelected = selectedClassIds.includes(cls.id)
-
-                                                return (
-                                                    <button
-                                                        key={cls.id}
-                                                        onClick={() => toggleClass(cls.id)}
-                                                        className={`w-full flex items-center gap-2 p-2 rounded-lg border text-left transition-all ${isSelected
-                                                            ? 'bg-blue-500/10 border-blue-500 text-blue-700 dark:text-blue-400'
-                                                            : conflict
-                                                                ? 'bg-amber-500/10 border-amber-500/30'
-                                                                : 'bg-secondary/5 border-secondary/20 hover:bg-secondary/10'
-                                                            }`}
-                                                    >
-                                                        <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? 'bg-blue-500 border-blue-500 text-white' : 'border-secondary/40'
-                                                            }`}>
-                                                            {isSelected && <Check className="w-3 h-3" />}
-                                                        </div>
-                                                        <div className="flex-1">
-                                                            <span className="text-sm font-medium text-text-main dark:text-white">{cls.name}</span>
-                                                            {conflict && (
-                                                                <span className="text-xs text-amber-600 ml-1">
-                                                                    ({conflict.teacher_name || 'Guru lain'})
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </button>
-                                                )
-                                            })}
-                                        </div>
-                                    </div>
-
-                                    {/* SMA */}
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm font-bold text-green-600 dark:text-green-400">📗 SMA</span>
-                                            <button
-                                                type="button"
-                                                onClick={handleSelectAllSMA}
-                                                className="text-xs text-primary hover:underline"
-                                            >
-                                                {smaClasses.every(c => selectedClassIds.includes(c.id)) ? 'Hapus Semua' : 'Pilih Semua'}
-                                            </button>
-                                        </div>
-                                        <div className="space-y-1 max-h-48 overflow-y-auto">
-                                            {smaClasses.map((cls) => {
-                                                const conflict = getClassConflictInfo(cls.id)
-                                                const isSelected = selectedClassIds.includes(cls.id)
-
-                                                return (
-                                                    <button
-                                                        key={cls.id}
-                                                        onClick={() => toggleClass(cls.id)}
-                                                        className={`w-full flex items-center gap-2 p-2 rounded-lg border text-left transition-all ${isSelected
-                                                            ? 'bg-green-500/10 border-green-500 text-green-700 dark:text-green-400'
-                                                            : conflict
-                                                                ? 'bg-amber-500/10 border-amber-500/30'
-                                                                : 'bg-secondary/5 border-secondary/20 hover:bg-secondary/10'
-                                                            }`}
-                                                    >
-                                                        <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? 'bg-green-500 border-green-500 text-white' : 'border-secondary/40'
-                                                            }`}>
-                                                            {isSelected && <Check className="w-3 h-3" />}
-                                                        </div>
-                                                        <div className="flex-1">
-                                                            <span className="text-sm font-medium text-text-main dark:text-white">{cls.name}</span>
-                                                            {conflict && (
-                                                                <span className="text-xs text-amber-600 ml-1">
-                                                                    ({conflict.teacher_name || 'Guru lain'})
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </button>
-                                                )
-                                            })}
-                                        </div>
-                                    </div>
+                                    {renderClassGroup('📘 SMP', smpClasses, 'blue')}
+                                    {renderClassGroup('📗 SMA', smaClasses, 'green')}
+                                    {renderClassGroup('📙 Lainnya', otherClasses, 'slate')}
                                 </div>
 
                                 <div className="text-sm text-text-secondary">

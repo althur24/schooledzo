@@ -136,7 +136,7 @@ export default function PenugasanPage() {
             const cls = classes.find(c => c.id === classId)
             if (!cls) return
 
-            await fetch(`/api/classes/${classId}`, {
+            const res = await fetch(`/api/classes/${classId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -147,6 +147,11 @@ export default function PenugasanPage() {
                     homeroom_teacher_id: teacherId
                 })
             })
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}))
+                alert(`Gagal menyimpan wali kelas: ${data.error || 'Server error'}`)
+                return
+            }
             // Update saved state to reflect the new DB truth
             setSavedWaliMap(prev => {
                 const next = { ...prev }
@@ -165,6 +170,7 @@ export default function PenugasanPage() {
             })
         } catch (error) {
             console.error('Error saving wali kelas:', error)
+            alert('Gagal menyimpan wali kelas: masalah jaringan')
         } finally {
             setSavingWali(null)
         }
@@ -194,8 +200,12 @@ export default function PenugasanPage() {
         return assigned
     }
 
+    // Filter classes for the selected year (classes from /api/classes span ALL academic years)
+    const filteredClasses = classes.filter((c: any) =>
+        !selectedYearId || c.academic_year_id === selectedYearId
+    )
+
     // Calculate stats
-    const totalSlots = classes.length * subjects.length
     const assignedCount = teacherGroups.reduce((sum, g) => sum + g.total_classes, 0)
     const unassignedTeachers = teacherGroups.filter(g => g.total_classes === 0)
 
@@ -215,7 +225,7 @@ export default function PenugasanPage() {
     const assignedSlots = new Set(
         existingAssignments.map(a => `${a.class_id}-${a.subject_id}`)
     )
-    const unassignedSlots = classes.flatMap(cls =>
+    const unassignedSlots = filteredClasses.flatMap(cls =>
         subjects.map(subj => ({
             classId: cls.id,
             className: cls.name,
@@ -239,10 +249,14 @@ export default function PenugasanPage() {
         const group = teacherGroups.find(g => g.teacher.id === teacherId)
         const subjectData = group?.subjects.find(s => s.subject.id === subjectId)
         if (subjectData) {
+            // Only pre-select classes that belong to the selected year. Legacy bad data
+            // (assignment pointing at a class from another year) is excluded here so the
+            // server guard won't reject the save; the wizard's stale-cleanup then removes it.
+            const yearClassIds = new Set(filteredClasses.map((c: any) => c.id))
             setEditMode({
                 teacherId,
                 subjectId,
-                selectedClassIds: subjectData.classes.map(c => c.id)
+                selectedClassIds: subjectData.classes.map(c => c.id).filter(id => yearClassIds.has(id))
             })
             setShowWizard(true)
         }
@@ -302,9 +316,18 @@ export default function PenugasanPage() {
     // Copy classes from another year to the selected year
     const handleCopyClasses = async () => {
         if (!selectedYearId) return
-        // Find the most recent completed year, or any other year that has classes
-        const otherYears = academicYears.filter(y => y.id !== selectedYearId)
-        const sourceYear = otherYears.find(y => y.status === 'COMPLETED') || otherYears[0]
+        // Pick the chronologically nearest year BEFORE the selected one (names like "2026/2027" sort correctly);
+        // fall back to the most recent COMPLETED year, then the most recent other year
+        const selectedYear = academicYears.find(y => y.id === selectedYearId)
+        const otherYears = academicYears
+            .filter(y => y.id !== selectedYearId)
+            .sort((a, b) => a.name.localeCompare(b.name))
+        const earlierYears = selectedYear
+            ? otherYears.filter(y => y.name.localeCompare(selectedYear.name) < 0)
+            : []
+        const sourceYear = earlierYears[earlierYears.length - 1]
+            || [...otherYears].reverse().find(y => y.status === 'COMPLETED')
+            || otherYears[otherYears.length - 1]
         if (!sourceYear) { alert('Tidak ada tahun ajaran lain untuk disalin'); return }
 
         setCopyingClasses(true)
@@ -327,11 +350,6 @@ export default function PenugasanPage() {
             }
         } catch { alert('Terjadi error') } finally { setCopyingClasses(false) }
     }
-
-    // Filter classes for active year
-    const filteredClasses = classes.filter((c: any) =>
-        !selectedYearId || c.academic_year_id === selectedYearId
-    )
 
     return (
         <div className="space-y-6">
@@ -667,7 +685,7 @@ export default function PenugasanPage() {
                     onSuccess={fetchAssignments}
                     teachers={teachers}
                     subjects={subjects}
-                    classes={classes}
+                    classes={filteredClasses}
                     existingAssignments={existingAssignments}
                     academicYearId={selectedYearId}
                     editMode={editMode}
