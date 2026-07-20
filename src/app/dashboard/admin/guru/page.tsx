@@ -311,11 +311,11 @@ export default function GuruPage() {
                                 <tr>
                                     <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider w-16">No</th>
                                     <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Nama</th>
-                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">L/P</th>
+                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider whitespace-nowrap">L/P</th>
                                     <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Username</th>
                                     <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">NIP</th>
-                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Status Password</th>
-                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Penugasan</th>
+                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider whitespace-nowrap">Status Password</th>
+                                    <th className="px-6 py-4 text-left text-sm font-bold text-text-main dark:text-white uppercase tracking-wider whitespace-nowrap">Penugasan</th>
                                     <th className="px-6 py-4 text-right text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Aksi</th>
                                 </tr>
                             </thead>
@@ -325,7 +325,7 @@ export default function GuruPage() {
                                         <td className="px-6 py-4 text-sm font-bold text-text-secondary">{index + 1}</td>
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-center text-white font-bold shadow-sm text-sm">
+                                                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-center text-white font-bold shadow-sm text-sm flex-shrink-0">
                                                     {teacher.user.full_name?.[0] || '?'}
                                                 </div>
                                                 <span className="text-text-main dark:text-white font-bold">{teacher.user.full_name || '-'}</span>
@@ -333,7 +333,7 @@ export default function GuruPage() {
                                         </td>
                                         <td className="px-6 py-4">
                                             {teacher.gender ? (
-                                                <span className={`px-2.5 py-1 text-xs font-bold rounded-full border ${teacher.gender === 'L'
+                                                <span className={`inline-flex items-center gap-1 whitespace-nowrap px-2.5 py-1 text-xs font-bold rounded-full border ${teacher.gender === 'L'
                                                     ? 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20'
                                                     : 'bg-pink-50 text-pink-600 border-pink-200 dark:bg-pink-500/10 dark:text-pink-400 dark:border-pink-500/20'
                                                     }`}>
@@ -343,16 +343,16 @@ export default function GuruPage() {
                                                 <span className="text-text-secondary dark:text-zinc-500">-</span>
                                             )}
                                         </td>
-                                        <td className="px-6 py-4 text-text-secondary dark:text-zinc-300 font-mono text-sm">{teacher.user.username}</td>
-                                        <td className="px-6 py-4 text-text-secondary dark:text-zinc-300">{teacher.nip || '-'}</td>
+                                        <td className="px-6 py-4 text-text-secondary dark:text-zinc-300 font-mono text-sm whitespace-nowrap">{teacher.user.username}</td>
+                                        <td className="px-6 py-4 text-text-secondary dark:text-zinc-300 whitespace-nowrap">{teacher.nip || '-'}</td>
                                         <td className="px-6 py-4">
                                             {teacher.user.must_change_password ? (
-                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200/50 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20">
+                                                <span className="inline-flex items-center gap-1.5 whitespace-nowrap px-2.5 py-1 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200/50 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20">
                                                     <Lock className="w-3.5 h-3.5" />
                                                     Belum Diganti
                                                 </span>
                                             ) : (
-                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/50 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20">
+                                                <span className="inline-flex items-center gap-1.5 whitespace-nowrap px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/50 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20">
                                                     <CheckCircle2 className="w-3.5 h-3.5" />
                                                     Sudah Diganti
                                                 </span>
@@ -360,7 +360,7 @@ export default function GuruPage() {
                                         </td>
                                         <td className="px-6 py-4">
                                             {teacher.teaching_assignments && teacher.teaching_assignments.length > 0 ? (
-                                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20">
+                                                <span className="inline-flex items-center whitespace-nowrap px-2.5 py-1 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20">
                                                     {teacher.teaching_assignments.length} Kelas
                                                 </span>
                                             ) : (
