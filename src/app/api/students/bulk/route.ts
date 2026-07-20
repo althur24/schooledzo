@@ -41,13 +41,16 @@ export async function POST(request: NextRequest) {
             classMap.set(c.name.trim().toLowerCase(), c.id)
         })
 
-        // Fetch active academic year once for enrollment creation
+        // Fetch active academic year once for enrollment creation (+ angkatan default)
         const { data: activeYear } = await supabase
             .from('academic_years')
-            .select('id')
+            .select('id, name')
             .eq('is_active', true)
             .eq('school_id', schoolId)
             .single()
+
+        // Default angkatan = start year of the active academic year ("2026/2027" -> "2026")
+        const defaultAngkatan = activeYear?.name?.match(/\d{4}/)?.[0] || null
 
         const results = []
 
@@ -75,10 +78,14 @@ export async function POST(request: NextRequest) {
         const usedInBatch = new Set<string>()
 
         // PARALLEL OPTIMIZATION: Hash ALL passwords at once (~150ms total instead of 50 × 150ms = 7.5s)
+        // Password optional: empty -> fall back to NIS (or explicit username) as the initial password.
+        // must_change_password=true already forces a change on first login.
         const passwordHashes = await Promise.all(
-            payload.map((item: any) =>
-                item.password ? hashPassword(String(item.password)) : Promise.resolve('')
-            )
+            payload.map((item: any) => {
+                const fallback = (item.nis ? String(item.nis).trim() : '') || (item.username ? String(item.username).trim() : '')
+                const pw = item.password ? String(item.password) : fallback
+                return pw ? hashPassword(pw) : Promise.resolve('')
+            })
         )
 
         // Process sequentially (inserts need IDs from previous steps)
@@ -100,10 +107,7 @@ export async function POST(request: NextRequest) {
                 continue
             }
 
-            if (!password) {
-                results.push({ item, success: false, error: 'Password harus diisi' })
-                continue
-            }
+            // Password optional — empty falls back to NIS/username (hashed above)
 
             // Map Class Name to ID if provided
             let mapped_class_id = null
@@ -144,6 +148,11 @@ export async function POST(request: NextRequest) {
                 if (userError) throw userError
 
                 // Create student record
+                // Gender: accept L/Laki-laki/P/Perempuan (case-insensitive)
+                const genderNorm = String(gender || '').trim().toLowerCase()
+                const mappedGender = ['l', 'laki-laki'].includes(genderNorm) ? 'L'
+                    : ['p', 'perempuan'].includes(genderNorm) ? 'P' : null
+
                 const { data: newStudent, error: studentError } = await supabase
                     .from('students')
                     .insert({
@@ -151,8 +160,8 @@ export async function POST(request: NextRequest) {
                         nis: nis ? String(nis) : null,
                         class_id: mapped_class_id,
                         school_id: schoolId,
-                        gender: gender === 'L' || gender === 'P' ? gender : null,
-                        angkatan: angkatan ? String(angkatan) : null,
+                        gender: mappedGender,
+                        angkatan: angkatan ? String(angkatan) : defaultAngkatan,
                         status: 'ACTIVE'
                     })
                     .select('id')
@@ -176,7 +185,7 @@ export async function POST(request: NextRequest) {
                         })
                 }
 
-                results.push({ item, success: true })
+                results.push({ item, success: true, no_class: !mapped_class_id })
             } catch (err: any) {
                 console.error(`Error processing student ${username}:`, err)
                 results.push({ item, success: false, error: err.message || 'Terjadi kesalahan sistem' })

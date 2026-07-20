@@ -83,7 +83,8 @@ export default function SiswaPage() {
     // Bulk Upload States
     const [showBulkModal, setShowBulkModal] = useState(false)
     const [bulkSaving, setBulkSaving] = useState(false)
-    const [bulkResults, setBulkResults] = useState<{ success: number, failed: number, errors: any[] } | null>(null)
+    const [bulkResults, setBulkResults] = useState<{ success: number, failed: number, noClass: number, errors: any[], failedRows: any[] } | null>(null)
+    const [bulkPreview, setBulkPreview] = useState<{ rows: any[], issues: Map<number, string[]> } | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     // Filter & Search states
@@ -541,7 +542,7 @@ export default function SiswaPage() {
     const downloadTemplate = () => {
         const headers = ['Nama Lengkap', 'L/P', 'NIS', 'Angkatan', 'Kelas', 'Password']
         const csvContent = headers.join(',') + '\n' +
-            'Muhammad Rizki,L,0012345001,2022,X IPA 1,pass123\n' +
+            'Muhammad Rizki,L,0012345001,2022,X IPA 1,\n' +
             'Siti Hawa,P,0012345002,2022,X IPS 1,pass123'
 
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -585,24 +586,57 @@ export default function SiswaPage() {
 
         setBulkSaving(true)
         setBulkResults(null)
+        setError('')
 
         try {
             const parsedData = await parseSpreadsheet(file)
-            
+
             const payload = parsedData.map((row: any) => ({
                 full_name: row['Nama Lengkap'] || row['nama lengkap'] || '',
-                gender: row['L/P']?.toUpperCase() === 'L' || row['L/P']?.toUpperCase() === 'P' ? row['L/P'].toUpperCase() : null,
+                gender: row['L/P'] || row['l/p'] || '',  // raw — server normalizes (L/Laki-laki/P/Perempuan)
                 nis: row['NIS'] || row['nis'] || row['NISN'] || row['nisn'] || '',
                 angkatan: row['Angkatan'] || row['angkatan'] || '',
                 kelas: row['Kelas'] || row['kelas'] || '',
                 username: row['Username'] || row['username'] || '',  // optional, NIS used if empty
-                password: row['Password'] || row['password'] || ''
+                password: row['Password'] || row['password'] || ''   // optional, NIS used if empty
             }))
 
+            // Client-side pre-validation per row (server still decides the final result)
+            const classNames = new Set(classes.map(c => c.name.trim().toLowerCase()))
+            const seenKeys = new Map<string, number>()
+            const issues = new Map<number, string[]>()
+            payload.forEach((row: any, idx: number) => {
+                const rowIssues: string[] = []
+                if (!row.full_name) rowIssues.push('Nama kosong')
+                // Same precedence as the server: explicit username > NIS
+                const key = String(row.username || row.nis || '').trim().toLowerCase()
+                if (!key) rowIssues.push('NIS/Username kosong')
+                else if (seenKeys.has(key)) rowIssues.push(`Duplikat dengan baris ${(seenKeys.get(key) || 0) + 1}`)
+                else seenKeys.set(key, idx)
+                if (row.kelas && !classNames.has(String(row.kelas).trim().toLowerCase())) rowIssues.push('Kelas tidak dikenal')
+                if (rowIssues.length > 0) issues.set(idx, rowIssues)
+            })
+
+            setBulkPreview({ rows: payload, issues })
+        } catch (err: any) {
+            console.error(err)
+            setError(err.message || 'Gagal memproses file')
+        } finally {
+            setBulkSaving(false)
+            if (fileInputRef.current) fileInputRef.current.value = ''
+        }
+    }
+
+    const processBulkUpload = async () => {
+        if (!bulkPreview) return
+        setBulkSaving(true)
+        setError('')
+
+        try {
             const res = await fetch('/api/students/bulk', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(bulkPreview.rows)
             })
 
             const responseData = await res.json()
@@ -611,25 +645,52 @@ export default function SiswaPage() {
 
             let successCount = 0
             let failedCount = 0
+            let noClassCount = 0
             const errors: any[] = []
+            const failedRows: any[] = []
 
             responseData.results.forEach((r: any) => {
-                if (r.success) successCount++
-                else {
+                if (r.success) {
+                    successCount++
+                    if (r.no_class) noClassCount++
+                } else {
                     failedCount++
                     errors.push({ name: r.item.full_name || r.item.nis || r.item.username, error: r.error })
+                    failedRows.push({ ...r.item, error: r.error })
                 }
             })
 
-            setBulkResults({ success: successCount, failed: failedCount, errors })
+            setBulkResults({ success: successCount, failed: failedCount, noClass: noClassCount, errors, failedRows })
+            setBulkPreview(null)
             fetchData()
         } catch (err: any) {
             console.error(err)
-            setError(err.message || 'Gagal memproses file')
+            setError(err.message || 'Gagal memproses data')
         } finally {
             setBulkSaving(false)
-            if (fileInputRef.current) fileInputRef.current.value = ''
         }
+    }
+
+    const downloadFailedRows = () => {
+        if (!bulkResults || bulkResults.failedRows.length === 0) return
+        const rows = bulkResults.failedRows.map((r: any) => ({
+            'Nama Lengkap': r.full_name || '',
+            'L/P': r.gender || '',
+            'NIS': r.nis || '',
+            'Angkatan': r.angkatan || '',
+            'Kelas': r.kelas || '',
+            'Username': r.username || '',
+            'Password': r.password || '',
+            'Error': r.error || ''
+        }))
+        const csv = Papa.unparse(rows)
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+        const link = document.createElement('a')
+        link.href = URL.createObjectURL(blob)
+        link.setAttribute('download', 'Baris_Gagal_Upload_Siswa.csv')
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
     }
 
     // Get unique angkatan values from students
@@ -650,7 +711,7 @@ export default function SiswaPage() {
                         <Button variant="secondary" onClick={() => setShowFilters(!showFilters)} icon={<Filter set="bold" primaryColor="currentColor" size={20} />}>
                             Filter
                         </Button>
-                        <Button variant="secondary" onClick={() => { setBulkResults(null); setShowBulkModal(true); }} icon={<Upload className="w-5 h-5" />}>
+                        <Button variant="secondary" onClick={() => { setBulkResults(null); setBulkPreview(null); setShowBulkModal(true); }} icon={<Upload className="w-5 h-5" />}>
                             Upload Massal
                         </Button>
                         <Button onClick={openAdd} icon={<UserPlus set="bold" primaryColor="currentColor" size={20} />}>
@@ -1174,10 +1235,10 @@ export default function SiswaPage() {
             {/* Bulk Upload Modal */}
             <Modal
                 open={showBulkModal}
-                onClose={() => setShowBulkModal(false)}
+                onClose={() => { setShowBulkModal(false); setBulkPreview(null) }}
                 title="Upload Massal Siswa"
             >
-                {!bulkResults ? (
+                {!bulkResults && !bulkPreview ? (
                     <div className="space-y-6">
                         <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-xl text-sm">
                             <h4 className="font-bold text-blue-800 dark:text-blue-300 mb-2">Petunjuk Upload</h4>
@@ -1185,7 +1246,9 @@ export default function SiswaPage() {
                                 <li>File harus berupa format <b>.csv</b>, <b>.xlsx</b>, atau <b>.xls</b></li>
                                 <li>Pastikan menggunakan template yang telah disediakan</li>
                                 <li>Nama Kelas harus <b>sama persis</b> dengan nama kelas di sistem (tidak case-sensitive)</li>
-                                <li>Kolom <b>Nama Lengkap</b>, <b>NIS</b>, dan <b>Password</b> wajib diisi</li>
+                                <li>Kolom <b>Nama Lengkap</b> dan <b>NIS</b> wajib diisi</li>
+                                <li><b>Password</b> opsional — kosongkan agar password awal sama dengan <b>NIS</b> (siswa wajib ganti saat login pertama)</li>
+                                <li><b>Angkatan</b> opsional — kosongkan untuk memakai tahun ajaran aktif</li>
                                 <li><b>NIS/NISN</b> akan otomatis digunakan sebagai <b>username login</b> siswa</li>
                             </ul>
                             <div className="mt-4">
@@ -1223,7 +1286,52 @@ export default function SiswaPage() {
                             )}
                         </div>
                     </div>
-                ) : (
+                ) : bulkPreview ? (
+                    <div className="space-y-4">
+                        <p className="text-sm text-text-secondary">
+                            {bulkPreview.rows.length} baris terbaca
+                            {bulkPreview.issues.size > 0 && (
+                                <> — <span className="text-amber-600 dark:text-amber-400 font-bold">{bulkPreview.issues.size} baris perlu dicek</span></>
+                            )}
+                        </p>
+                        <div className="max-h-64 overflow-y-auto border border-secondary/20 rounded-lg">
+                            <table className="w-full text-xs">
+                                <thead className="bg-secondary/5 sticky top-0">
+                                    <tr>
+                                        <th className="px-2 py-2 text-left font-bold text-text-secondary">No</th>
+                                        <th className="px-2 py-2 text-left font-bold text-text-secondary">Nama</th>
+                                        <th className="px-2 py-2 text-left font-bold text-text-secondary">NIS</th>
+                                        <th className="px-2 py-2 text-left font-bold text-text-secondary">Kelas</th>
+                                        <th className="px-2 py-2 text-left font-bold text-text-secondary">Catatan</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-secondary/10">
+                                    {bulkPreview.rows.map((row, i) => {
+                                        const rowIssues = bulkPreview.issues.get(i)
+                                        return (
+                                            <tr key={i} className={rowIssues ? 'bg-amber-50 dark:bg-amber-900/10' : ''}>
+                                                <td className="px-2 py-1.5 text-text-secondary">{i + 1}</td>
+                                                <td className="px-2 py-1.5 text-text-main dark:text-white">{row.full_name || <span className="text-red-500">—</span>}</td>
+                                                <td className="px-2 py-1.5 text-text-secondary">{row.nis || row.username || '—'}</td>
+                                                <td className="px-2 py-1.5 text-text-secondary">{row.kelas || '—'}</td>
+                                                <td className="px-2 py-1.5 text-amber-600 dark:text-amber-400">{rowIssues?.join('; ') || ''}</td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                        {error && <p className="text-center text-sm text-red-500">{error}</p>}
+                        <div className="flex gap-3">
+                            <Button variant="secondary" className="flex-1" onClick={() => setBulkPreview(null)} disabled={bulkSaving}>
+                                Ganti File
+                            </Button>
+                            <Button className="flex-1" onClick={processBulkUpload} loading={bulkSaving}>
+                                Proses {bulkPreview.rows.length} Siswa
+                            </Button>
+                        </div>
+                    </div>
+                ) : bulkResults && (
                     <div className="space-y-6">
                         <div className="flex gap-4 p-4 bg-secondary/5 rounded-xl border border-secondary/10">
                             <div className="flex-1 text-center">
@@ -1238,6 +1346,12 @@ export default function SiswaPage() {
                                 <div className="text-sm text-text-secondary">Gagal</div>
                             </div>
                         </div>
+
+                        {bulkResults.noClass > 0 && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 text-center">
+                                ⚠️ {bulkResults.noClass} siswa dibuat tanpa kelas — atur kelasnya nanti lewat edit siswa.
+                            </p>
+                        )}
 
                         {bulkResults.errors.length > 0 && (
                             <div className="max-h-48 overflow-y-auto border border-red-200 dark:border-red-900/30 rounded-lg">
@@ -1260,8 +1374,13 @@ export default function SiswaPage() {
                             </div>
                         )}
 
-                        <div className="pt-2">
-                            <Button className="w-full" onClick={() => setShowBulkModal(false)}>
+                        <div className="flex gap-3 pt-2">
+                            {bulkResults.failedRows.length > 0 && (
+                                <Button variant="secondary" className="flex-1" onClick={downloadFailedRows} icon={<FileDown className="w-4 h-4" />}>
+                                    Unduh Baris Gagal
+                                </Button>
+                            )}
+                            <Button className="flex-1" onClick={() => setShowBulkModal(false)}>
                                 Selesai
                             </Button>
                         </div>
