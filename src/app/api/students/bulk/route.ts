@@ -153,6 +153,13 @@ export async function POST(request: NextRequest) {
                 const mappedGender = ['l', 'laki-laki'].includes(genderNorm) ? 'L'
                     : ['p', 'perempuan'].includes(genderNorm) ? 'P' : null
 
+                // Angkatan: normalize "26/27" or "2026/2027" -> start year "2026"; otherwise as-is
+                const angkatanRaw = String(angkatan || '').trim()
+                const angkatanMatch = angkatanRaw.match(/^(\d{2,4})\s*\/\s*\d{2,4}$/)
+                const mappedAngkatan = angkatanMatch
+                    ? (angkatanMatch[1].length === 2 ? `20${angkatanMatch[1]}` : angkatanMatch[1])
+                    : angkatanRaw || null
+
                 const { data: newStudent, error: studentError } = await supabase
                     .from('students')
                     .insert({
@@ -161,7 +168,7 @@ export async function POST(request: NextRequest) {
                         class_id: mapped_class_id,
                         school_id: schoolId,
                         gender: mappedGender,
-                        angkatan: angkatan ? String(angkatan) : defaultAngkatan,
+                        angkatan: mappedAngkatan || defaultAngkatan,
                         status: 'ACTIVE'
                     })
                     .select('id')
