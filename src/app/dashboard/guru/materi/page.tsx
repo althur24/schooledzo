@@ -7,6 +7,7 @@ import Card from '@/components/ui/Card'
 import { Document as BookOpen, Paper as FileText, Video, Document as Type, Discovery as LinkIcon, Plus, Show as Eye, Delete as Trash, Download, ArrowRight, TickSquare as CheckCircle, Danger as AlertTriangle } from 'react-iconly'
 import { Loader2, WifiOff, CheckSquare } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import ClassChipsSelector from '@/components/ClassChipsSelector'
 import {
     formatToOfflineMaterial,
     saveMaterialOffline,
@@ -50,7 +51,7 @@ export default function MateriPage() {
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
     const [formData, setFormData] = useState({
-        teaching_assignment_id: '',
+        teaching_assignment_ids: [] as string[],
         title: '',
         description: '',
         type: 'TEXT',
@@ -348,6 +349,11 @@ export default function MateriPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
+        if (formData.teaching_assignment_ids.length === 0) {
+            setToast({ message: 'Pilih minimal 1 kelas tujuan', type: 'error' })
+            return
+        }
+
         // Close modal immediately so user can see the progress
         setShowModal(false)
         setSaving(true)
@@ -384,9 +390,13 @@ export default function MateriPage() {
                 throw new Error(data.error || 'Gagal menyimpan materi')
             }
 
-            setToast({ message: 'Materi berhasil disimpan!', type: 'success' })
+            const classCount = formData.teaching_assignment_ids.length
+            setToast({
+                message: classCount > 1 ? `Materi terkirim ke ${classCount} kelas!` : 'Materi berhasil disimpan!',
+                type: 'success'
+            })
             setFormData({
-                teaching_assignment_id: '',
+                teaching_assignment_ids: [],
                 title: '',
                 description: '',
                 type: 'TEXT',
@@ -478,16 +488,24 @@ export default function MateriPage() {
         )
     }
 
-    if (!selectedSubject) {
-        return (
-            <div className="space-y-6">
+    return (
+        <div className="space-y-6">
+            {!selectedSubject ? (
+                <>
                 <div className="flex items-center justify-between gap-4">
                     <PageHeader
                         title="Materi Pembelajaran"
                         subtitle="Pilih mata pelajaran untuk mengelola materi"
                         backHref="/dashboard/guru"
+                        action={
+                            <Button disabled={isOffline} onClick={handleAddMaterial} icon={
+                                <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
+                            }>
+                                Tambah Materi
+                            </Button>
+                        }
                     />
-                    
+
                     {isOffline && (
                         <div className="flex items-center gap-2 bg-red-100/50 text-red-600 px-4 py-2 rounded-xl font-bold border border-red-200 mt-6">
                             <WifiOff size={20} />
@@ -521,12 +539,9 @@ export default function MateriPage() {
                         </Card>
                     ))}
                 </div>
-            </div>
-        )
-    }
-
-    return (
-        <div className="space-y-6">
+                </>
+            ) : (
+                <>
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <PageHeader
                     title={selectedSubject.subjectName}
@@ -680,27 +695,19 @@ export default function MateriPage() {
                     ))}
                 </div>
             )}
+                </>
+            )}
 
             <Modal open={showModal} onClose={() => setShowModal(false)} title="Tambah Materi Baru">
                 <form onSubmit={handleSubmit} className="space-y-5">
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran</label>
-                        <div className="relative">
-                            <select
-                                value={formData.teaching_assignment_id}
-                                onChange={(e) => setFormData({ ...formData, teaching_assignment_id: e.target.value })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none"
-                                required
-                            >
-                                <option value="">Pilih Target Kelas...</option>
-                                {assignments.map((a) => (
-                                    <option key={a.id} value={a.id}>{a.class.name} - {a.subject.name}</option>
-                                ))}
-                            </select>
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary">
-                                ▼
-                            </div>
-                        </div>
+                        <ClassChipsSelector
+                            assignments={assignments}
+                            selectedIds={formData.teaching_assignment_ids}
+                            onChange={(ids) => setFormData({ ...formData, teaching_assignment_ids: ids })}
+                            defaultSubjectId={selectedSubject?.subjectId}
+                        />
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Materi</label>

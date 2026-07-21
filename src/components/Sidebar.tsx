@@ -43,6 +43,7 @@ export const adminNav: NavItem[] = [
     { icon: Graph, label: 'Kenaikan', path: '/dashboard/admin/kenaikan-kelas' },
     { icon: Folder, label: 'Alumni', path: '/dashboard/admin/alumni' },
     { icon: Bookmark, label: 'Mapel', path: '/dashboard/admin/mapel' },
+    { icon: DocumentIcon, label: 'Materi', path: '/dashboard/admin/materi' },
     { icon: Calendar, label: 'Tahun', path: '/dashboard/admin/tahun-ajaran' },
     { icon: Chart, label: 'UTS/UAS', path: '/dashboard/admin/uts-uas' },
     { icon: Chart, label: 'Analitik', path: '/dashboard/admin/analitik' },

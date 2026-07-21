@@ -69,6 +69,7 @@ const adminBarRight: NavItem[] = [
 const adminArc: NavItem[] = [
     { icon: Graph, label: 'Kenaikan', path: '/dashboard/admin/kenaikan-kelas' },
     { icon: Bookmark, label: 'Mapel', path: '/dashboard/admin/mapel' },
+    { icon: DocumentIcon, label: 'Materi', path: '/dashboard/admin/materi' },
     { icon: Calendar, label: 'Tahun', path: '/dashboard/admin/tahun-ajaran' },
     { icon: Chart, label: 'Analitik', path: '/dashboard/admin/analitik' },
     { icon: Ticket, label: 'Penugasan', path: '/dashboard/admin/penugasan' },

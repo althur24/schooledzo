@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
-import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
+import { archivedYearResponse } from '@/lib/academicYear'
 
 // M2: Service Role Key required because app uses custom auth (not Supabase Auth),
 // so RLS policies depending on auth.uid() won't work. Role checks enforce authorization.
@@ -74,42 +74,70 @@ export async function GET(request: NextRequest) {
     }
 }
 
-// POST new material
+// POST new material (supports one or many teaching assignments)
 export async function POST(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'GURU') {
+        if (!['GURU', 'ADMIN'].includes(user.role)) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { teaching_assignment_id, title, description, type, content_url, content_text } = await request.json()
+        const body = await request.json()
+        const { title, description, type, content_url, content_text } = body
 
-        if (!teaching_assignment_id || !title || !type) {
+        // Accept teaching_assignment_ids[] (new) or legacy single teaching_assignment_id
+        const taIds: string[] = Array.isArray(body.teaching_assignment_ids) && body.teaching_assignment_ids.length > 0
+            ? body.teaching_assignment_ids
+            : body.teaching_assignment_id ? [body.teaching_assignment_id] : []
+
+        if (taIds.length === 0 || !title || !type) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
         }
 
-        // Block writes to archived (COMPLETED) academic years
-        const yearStatus = await getYearStatusByTA(teaching_assignment_id)
-        if (yearStatus === 'COMPLETED') return archivedYearResponse()
+        // Verify every assignment exists, belongs to this school, and is not in an archived year
+        const { data: tas, error: taError } = await supabase
+            .from('teaching_assignments')
+            .select('id, academic_year:academic_years(school_id, status)')
+            .in('id', taIds)
 
-        // Use supabase to bypass RLS for insert
+        if (taError) throw taError
+
+        const foundIds = new Set((tas || []).map((t: any) => t.id))
+        if (foundIds.size !== taIds.length) {
+            return NextResponse.json({ error: 'Penugasan tidak valid' }, { status: 400 })
+        }
+        for (const ta of tas || []) {
+            const year = (ta as any).academic_year
+            if (schoolId && year?.school_id !== schoolId) {
+                return NextResponse.json({ error: 'Penugasan bukan milik sekolah Anda' }, { status: 403 })
+            }
+            if (year?.status === 'COMPLETED') return archivedYearResponse()
+        }
+
+        // One material row per class (teaching assignment)
+        const rows = taIds.map((taId) => ({
+            teaching_assignment_id: taId,
+            title,
+            description,
+            type,
+            content_url,
+            content_text
+        }))
+
         const { data, error } = await supabase
             .from('materials')
-            .insert({ teaching_assignment_id, title, description, type, content_url, content_text })
+            .insert(rows)
             .select()
-            .single()
 
         if (error) {
             console.error('Supabase Insert Error:', error)
             return NextResponse.json({ error: error.message }, { status: 500 })
         }
 
-
-
-        return NextResponse.json(data)
+        return NextResponse.json({ created: data?.length || 0, items: data })
     } catch (error: any) {
         console.error('Error creating material:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

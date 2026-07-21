@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'GURU') {
+        if (!['GURU', 'ADMIN'].includes(user.role)) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
