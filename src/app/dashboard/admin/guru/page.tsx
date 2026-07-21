@@ -38,7 +38,8 @@ export default function GuruPage() {
     // Bulk Upload States
     const [showBulkModal, setShowBulkModal] = useState(false)
     const [bulkSaving, setBulkSaving] = useState(false)
-    const [bulkResults, setBulkResults] = useState<{ success: number, failed: number, errors: any[] } | null>(null)
+    const [bulkResults, setBulkResults] = useState<{ success: number, failed: number, errors: any[], failedRows: any[] } | null>(null)
+    const [bulkPreview, setBulkPreview] = useState<{ rows: any[], issues: Map<number, string[]> } | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     // Delete confirmation state
@@ -128,7 +129,7 @@ export default function GuruPage() {
     const downloadTemplate = () => {
         const headers = ['Nama Lengkap', 'L/P', 'NIP', 'Username', 'Password']
         const csvContent = headers.join(',') + '\n' +
-            'Budi Santoso,L,198001012010011001,budi_guru,pass123\n' +
+            'Budi Santoso,L,198001012010011001,budi_guru,\n' +
             'Siti Aminah,P,198502022015022002,siti_guru,pass123'
 
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -167,23 +168,53 @@ export default function GuruPage() {
 
         setBulkSaving(true)
         setBulkResults(null)
+        setError('')
 
         try {
             const parsedData = await parseSpreadsheet(file)
-            
+
             // Map headers to payload format
             const payload = parsedData.map((row: any) => ({
                 full_name: row['Nama Lengkap'] || row['nama lengkap'] || '',
-                gender: row['L/P']?.toUpperCase() === 'L' || row['L/P']?.toUpperCase() === 'P' ? row['L/P'].toUpperCase() : null,
+                gender: row['L/P'] || row['l/p'] || '',  // raw — server normalizes (L/Laki-laki/P/Perempuan)
                 nip: row['NIP'] || row['nip'] || '',
                 username: row['Username'] || row['username'] || '',
-                password: row['Password'] || row['password'] || ''
+                password: row['Password'] || row['password'] || ''   // optional, NIP used if empty
             }))
 
+            // Client-side pre-validation per row (server still decides the final result)
+            const seenKeys = new Map<string, number>()
+            const issues = new Map<number, string[]>()
+            payload.forEach((row: any, idx: number) => {
+                const rowIssues: string[] = []
+                if (!row.full_name) rowIssues.push('Nama kosong')
+                const key = String(row.username || '').trim().toLowerCase()
+                if (!key) rowIssues.push('Username kosong')
+                else if (seenKeys.has(key)) rowIssues.push(`Duplikat dengan baris ${(seenKeys.get(key) || 0) + 1}`)
+                else seenKeys.set(key, idx)
+                if (rowIssues.length > 0) issues.set(idx, rowIssues)
+            })
+
+            setBulkPreview({ rows: payload, issues })
+        } catch (err: any) {
+            console.error(err)
+            setError(err.message || 'Gagal memproses file')
+        } finally {
+            setBulkSaving(false)
+            if (fileInputRef.current) fileInputRef.current.value = ''
+        }
+    }
+
+    const processBulkUpload = async () => {
+        if (!bulkPreview) return
+        setBulkSaving(true)
+        setError('')
+
+        try {
             const res = await fetch('/api/teachers/bulk', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(bulkPreview.rows)
             })
 
             const responseData = await res.json()
@@ -193,24 +224,46 @@ export default function GuruPage() {
             let successCount = 0
             let failedCount = 0
             const errors: any[] = []
+            const failedRows: any[] = []
 
             responseData.results.forEach((r: any) => {
                 if (r.success) successCount++
                 else {
                     failedCount++
                     errors.push({ name: r.item.full_name || r.item.username, error: r.error })
+                    failedRows.push({ ...r.item, error: r.error })
                 }
             })
 
-            setBulkResults({ success: successCount, failed: failedCount, errors })
+            setBulkResults({ success: successCount, failed: failedCount, errors, failedRows })
+            setBulkPreview(null)
             fetchTeachers()
         } catch (err: any) {
             console.error(err)
-            setError(err.message || 'Gagal memproses file')
+            setError(err.message || 'Gagal memproses data')
         } finally {
             setBulkSaving(false)
-            if (fileInputRef.current) fileInputRef.current.value = ''
         }
+    }
+
+    const downloadFailedRows = () => {
+        if (!bulkResults || bulkResults.failedRows.length === 0) return
+        const rows = bulkResults.failedRows.map((r: any) => ({
+            'Nama Lengkap': r.full_name || '',
+            'L/P': r.gender || '',
+            'NIP': r.nip || '',
+            'Username': r.username || '',
+            'Password': r.password || '',
+            'Error': r.error || ''
+        }))
+        const csv = Papa.unparse(rows)
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+        const link = document.createElement('a')
+        link.href = URL.createObjectURL(blob)
+        link.setAttribute('download', 'Baris_Gagal_Upload_Guru.csv')
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
     }
 
     const filteredTeachers = teachers.filter(teacher => {
@@ -239,7 +292,7 @@ export default function GuruPage() {
                         <Button variant="secondary" onClick={downloadExcel} icon={<FileDown className="w-5 h-5" />}>
                             Download Excel
                         </Button>
-                        <Button variant="secondary" onClick={() => { setBulkResults(null); setShowBulkModal(true); }} icon={<Upload className="w-5 h-5" />}>
+                        <Button variant="secondary" onClick={() => { setBulkResults(null); setBulkPreview(null); setError(''); setShowBulkModal(true); }} icon={<Upload className="w-5 h-5" />}>
                             Upload Massal
                         </Button>
                         <Button onClick={openAdd} icon={<UserPlus className="w-5 h-5" />}>
@@ -496,17 +549,19 @@ export default function GuruPage() {
             {/* Bulk Upload Modal */}
             <Modal
                 open={showBulkModal}
-                onClose={() => setShowBulkModal(false)}
+                onClose={() => { setShowBulkModal(false); setBulkPreview(null) }}
                 title="Upload Massal Guru"
             >
-                {!bulkResults ? (
+                {!bulkResults && !bulkPreview ? (
                     <div className="space-y-6">
                         <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-xl text-sm">
                             <h4 className="font-bold text-blue-800 dark:text-blue-300 mb-2">Petunjuk Upload</h4>
                             <ul className="list-disc pl-5 space-y-1 text-blue-700 dark:text-blue-400">
                                 <li>File harus berupa format <b>.csv</b>, <b>.xlsx</b>, atau <b>.xls</b></li>
                                 <li>Pastikan menggunakan template yang telah disediakan</li>
-                                <li>Kolom <b>Nama Lengkap</b>, <b>Username</b>, dan <b>Password</b> wajib diisi</li>
+                                <li>Kolom <b>Nama Lengkap</b> dan <b>Username</b> wajib diisi</li>
+                                <li><b>Password</b> opsional — kosongkan agar password awal sama dengan <b>NIP</b> (guru wajib ganti saat login pertama)</li>
+                                <li>Kolom <b>L/P</b> bisa diisi L, Laki-laki, P, atau Perempuan</li>
                             </ul>
                             <div className="mt-4">
                                 <Button variant="secondary" onClick={downloadTemplate} size="sm" icon={<FileDown className="w-4 h-4" />}>
@@ -543,7 +598,52 @@ export default function GuruPage() {
                             )}
                         </div>
                     </div>
-                ) : (
+                ) : bulkPreview ? (
+                    <div className="space-y-4">
+                        <p className="text-sm text-text-secondary">
+                            {bulkPreview.rows.length} baris terbaca
+                            {bulkPreview.issues.size > 0 && (
+                                <> — <span className="text-amber-600 dark:text-amber-400 font-bold">{bulkPreview.issues.size} baris perlu dicek</span></>
+                            )}
+                        </p>
+                        <div className="max-h-64 overflow-y-auto border border-secondary/20 rounded-lg">
+                            <table className="w-full text-xs">
+                                <thead className="bg-secondary/5 sticky top-0">
+                                    <tr>
+                                        <th className="px-2 py-2 text-left font-bold text-text-secondary">No</th>
+                                        <th className="px-2 py-2 text-left font-bold text-text-secondary">Nama</th>
+                                        <th className="px-2 py-2 text-left font-bold text-text-secondary">Username</th>
+                                        <th className="px-2 py-2 text-left font-bold text-text-secondary">NIP</th>
+                                        <th className="px-2 py-2 text-left font-bold text-text-secondary">Catatan</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-secondary/10">
+                                    {bulkPreview.rows.map((row, i) => {
+                                        const rowIssues = bulkPreview.issues.get(i)
+                                        return (
+                                            <tr key={i} className={rowIssues ? 'bg-amber-50 dark:bg-amber-900/10' : ''}>
+                                                <td className="px-2 py-1.5 text-text-secondary">{i + 1}</td>
+                                                <td className="px-2 py-1.5 text-text-main dark:text-white">{row.full_name || <span className="text-red-500">—</span>}</td>
+                                                <td className="px-2 py-1.5 text-text-secondary">{row.username || <span className="text-red-500">—</span>}</td>
+                                                <td className="px-2 py-1.5 text-text-secondary">{row.nip || '—'}</td>
+                                                <td className="px-2 py-1.5 text-amber-600 dark:text-amber-400">{rowIssues?.join('; ') || ''}</td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                        {error && <p className="text-center text-sm text-red-500">{error}</p>}
+                        <div className="flex gap-3">
+                            <Button variant="secondary" className="flex-1" onClick={() => setBulkPreview(null)} disabled={bulkSaving}>
+                                Ganti File
+                            </Button>
+                            <Button className="flex-1" onClick={processBulkUpload} loading={bulkSaving}>
+                                Proses {bulkPreview.rows.length} Guru
+                            </Button>
+                        </div>
+                    </div>
+                ) : bulkResults && (
                     <div className="space-y-6">
                         <div className="flex gap-4 p-4 bg-secondary/5 rounded-xl border border-secondary/10">
                             <div className="flex-1 text-center">
@@ -580,8 +680,13 @@ export default function GuruPage() {
                             </div>
                         )}
 
-                        <div className="pt-2">
-                            <Button className="w-full" onClick={() => setShowBulkModal(false)}>
+                        <div className="flex gap-3 pt-2">
+                            {bulkResults.failedRows.length > 0 && (
+                                <Button variant="secondary" className="flex-1" onClick={downloadFailedRows} icon={<FileDown className="w-4 h-4" />}>
+                                    Unduh Baris Gagal
+                                </Button>
+                            )}
+                            <Button className="flex-1" onClick={() => setShowBulkModal(false)}>
                                 Selesai
                             </Button>
                         </div>

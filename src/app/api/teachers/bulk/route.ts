@@ -18,6 +18,13 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Payload harus berupa array' }, { status: 400 })
         }
 
+        // Strip leading apostrophes from username/NIP — Excel users prefix ' to force
+        // text format, and it would otherwise end up in the login username & password
+        payload.forEach((item: any) => {
+            if (item.username) item.username = String(item.username).trim().replace(/^'+/, '')
+            if (item.nip) item.nip = String(item.nip).trim().replace(/^'+/, '')
+        })
+
         const results = []
 
         const schoolCode = await getSchoolCode(schoolId || '')
@@ -33,31 +40,46 @@ export async function POST(request: NextRequest) {
             .in('username', suffixedUsernames)
         const existingUsernames = new Set(existingUsers?.map(u => u.username) || [])
 
+        // Track usernames used within this batch (clean message instead of raw DB constraint error)
+        const usedInBatch = new Set<string>()
+
         // PARALLEL OPTIMIZATION: Hash ALL passwords at once (~150ms total instead of N × 150ms)
+        // Password optional: empty -> fall back to NIP (or username) as the initial password.
+        // must_change_password=true already forces a change on first login.
         const passwordHashes = await Promise.all(
-            payload.map((item: any) =>
-                item.password ? hashPassword(String(item.password)) : Promise.resolve('')
-            )
+            payload.map((item: any) => {
+                const fallback = (item.nip ? String(item.nip).trim() : '') || (item.username ? String(item.username).trim() : '')
+                const pw = item.password ? String(item.password) : fallback
+                return pw ? hashPassword(pw) : Promise.resolve('')
+            })
         )
 
         // Process sequentially (inserts need IDs from previous steps)
         for (let i = 0; i < payload.length; i++) {
             const item = payload[i]
-            const { full_name, gender, nip, username, password } = item
+            const { full_name, gender, nip, username } = item
 
-            if (!username || !password || !full_name) {
-                results.push({ item, success: false, error: 'Nama, Username, dan Password harus diisi' })
+            if (!full_name) {
+                results.push({ item, success: false, error: 'Nama Lengkap harus diisi' })
                 continue
             }
+
+            if (!username || !String(username).trim()) {
+                results.push({ item, success: false, error: 'Username harus diisi' })
+                continue
+            }
+
+            // Password optional — empty falls back to NIP/username (hashed above)
 
             try {
                 const suffixedUsername = `${String(username).trim()}.${schoolCode}`
 
-                // Check existing username from pre-fetched set (0ms vs 700ms)
-                if (existingUsernames.has(suffixedUsername)) {
-                    results.push({ item, success: false, error: 'Username sudah digunakan' })
+                // Check existing username from pre-fetched set + current batch
+                if (existingUsernames.has(suffixedUsername) || usedInBatch.has(suffixedUsername)) {
+                    results.push({ item, success: false, error: `Username '${suffixedUsername}' sudah digunakan` })
                     continue
                 }
+                usedInBatch.add(suffixedUsername)
 
                 // Use pre-computed hash (already done in parallel above)
                 const password_hash = passwordHashes[i]
@@ -79,12 +101,17 @@ export async function POST(request: NextRequest) {
                 if (userError) throw userError
 
                 // Create teacher record
+                // Gender: accept L/Laki-laki/P/Perempuan (case-insensitive)
+                const genderNorm = String(gender || '').trim().toLowerCase()
+                const mappedGender = ['l', 'laki-laki'].includes(genderNorm) ? 'L'
+                    : ['p', 'perempuan'].includes(genderNorm) ? 'P' : null
+
                 const { error: teacherError } = await supabase
                     .from('teachers')
                     .insert({
                         user_id: newUser.id,
                         nip: nip || null,
-                        gender: gender === 'L' || gender === 'P' ? gender : null,
+                        gender: mappedGender,
                         school_id: schoolId
                     })
 
