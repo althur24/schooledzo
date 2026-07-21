@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
-import MultiClassSelector from '@/components/MultiClassSelector'
+import ClassChipsSelector from '@/components/ClassChipsSelector'
 import { Edit as PenTool, Calendar, TimeCircle as Clock, Plus, ChevronDown, Paper, Activity, Search, Delete, Danger, Edit } from 'react-iconly'
 import { Loader2, Copy } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -507,8 +507,8 @@ export default function TugasPage() {
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div data-tutorial="task-form-class">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran</label>
-                        <MultiClassSelector
-                            teachingAssignments={teachingAssignments}
+                        <ClassChipsSelector
+                            assignments={teachingAssignments}
                             selectedIds={formData.teaching_assignment_ids}
                             onChange={(ids) => setFormData({ ...formData, teaching_assignment_ids: ids })}
                             mode={editingId ? 'single' : 'multi'}
@@ -588,13 +588,12 @@ export default function TugasPage() {
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pilih Kelas Tujuan</label>
-                        <MultiClassSelector
-                            teachingAssignments={teachingAssignments}
+                        <ClassChipsSelector
+                            assignments={teachingAssignments}
                             selectedIds={copyForm.teaching_assignment_ids}
                             onChange={(ids) => setCopyForm({ ...copyForm, teaching_assignment_ids: ids })}
-                            mode="multi"
                             disabled={teachingAssignments.length === 0}
-                            defaultSubjectLock={copySourceAssignment?.teaching_assignment?.subject?.name}
+                            defaultSubjectId={copySourceAssignment?.teaching_assignment?.subject?.id}
                         />
                     </div>
                     <div>

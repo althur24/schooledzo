@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Modal, PageHeader, Button } from '@/components/ui'
 import Card from '@/components/ui/Card'
-import MultiClassSelector from '@/components/MultiClassSelector'
+import ClassChipsSelector from '@/components/ClassChipsSelector'
 import { useAuth } from '@/contexts/AuthContext'
 import { Paper as FileText, TimeCircle as Clock, Calendar, Plus, Lock, ShieldDone, User, Swap, Graph, Edit, Delete, ChevronDown, Document } from 'react-iconly'
 import { Loader2, CheckSquare, Square, RefreshCw, GraduationCap, BookOpen, Users, Copy } from 'lucide-react'
@@ -832,13 +832,12 @@ export default function GuruUlanganPage() {
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pilih Kelas Tujuan</label>
-                        <MultiClassSelector
-                            teachingAssignments={teachingAssignments}
+                        <ClassChipsSelector
+                            assignments={teachingAssignments}
                             selectedIds={copyForm.teaching_assignment_ids}
                             onChange={(ids) => setCopyForm({ ...copyForm, teaching_assignment_ids: ids })}
-                            mode="multi"
                             disabled={teachingAssignments.length === 0}
-                            defaultSubjectLock={copySourceExam?.teaching_assignment?.subject?.name}
+                            defaultSubjectId={copySourceExam?.teaching_assignment?.subject?.id}
                         />
                     </div>
                     <div>
@@ -946,11 +945,10 @@ export default function GuruUlanganPage() {
                 <div className="space-y-4">
                     <div data-tutorial="exam-form-class">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran</label>
-                        <MultiClassSelector
-                            teachingAssignments={teachingAssignments}
+                        <ClassChipsSelector
+                            assignments={teachingAssignments}
                             selectedIds={form.teaching_assignment_ids}
                             onChange={(ids) => setForm({ ...form, teaching_assignment_ids: ids })}
-                            mode="multi"
                             disabled={teachingAssignments.length === 0}
                         />
                     </div>

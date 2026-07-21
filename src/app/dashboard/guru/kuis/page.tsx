@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
-import MultiClassSelector from '@/components/MultiClassSelector'
+import ClassChipsSelector from '@/components/ClassChipsSelector'
 import { TimeCircle as Clock, Document as FileText, Graph as BarChart3, Game as Brain, Calendar, Plus, Game, Graph, Edit, Swap } from 'react-iconly'
 import { Loader2, CheckSquare, Square, RefreshCw, Copy, CalendarDays, Clock as LuClock, FileText as LuFileText, Shuffle } from 'lucide-react'
 
@@ -613,11 +613,10 @@ export default function GuruKuisPage() {
                 <div className="space-y-4">
                     <div data-tutorial="quiz-form-class">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran</label>
-                        <MultiClassSelector
-                            teachingAssignments={teachingAssignments}
+                        <ClassChipsSelector
+                            assignments={teachingAssignments}
                             selectedIds={form.teaching_assignment_ids}
                             onChange={(ids) => setForm({ ...form, teaching_assignment_ids: ids })}
-                            mode="multi"
                             disabled={teachingAssignments.length === 0}
                         />
                     </div>
@@ -722,13 +721,12 @@ export default function GuruKuisPage() {
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pilih Kelas Tujuan</label>
-                        <MultiClassSelector
-                            teachingAssignments={teachingAssignments}
+                        <ClassChipsSelector
+                            assignments={teachingAssignments}
                             selectedIds={copyForm.teaching_assignment_ids}
                             onChange={(ids) => setCopyForm({ ...copyForm, teaching_assignment_ids: ids })}
-                            mode="multi"
                             disabled={teachingAssignments.length === 0}
-                            defaultSubjectLock={copySourceQuiz?.teaching_assignment?.subject?.name}
+                            defaultSubjectId={copySourceQuiz?.teaching_assignment?.subject?.id}
                         />
                     </div>
                     <div>
