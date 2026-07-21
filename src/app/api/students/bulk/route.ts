@@ -18,6 +18,13 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Payload harus berupa array' }, { status: 400 })
         }
 
+        // Strip leading apostrophes from NIS/username — Excel users prefix ' to force
+        // text format, and it would otherwise end up in the login username & password
+        payload.forEach((item: any) => {
+            if (item.nis) item.nis = String(item.nis).trim().replace(/^'+/, '')
+            if (item.username) item.username = String(item.username).trim().replace(/^'+/, '')
+        })
+
         // Fetch all classes to map class names to IDs (scoped via academic year)
         // classes don't have school_id directly - scope via academic_years
         const { data: schoolYears } = await supabase
