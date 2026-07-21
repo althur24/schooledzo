@@ -5,8 +5,9 @@ import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import {
     Home, Document as DocumentIcon, Edit, Game, Graph, TimeCircle, User, Work,
-    Category, Bookmark, Chart, Ticket, Notification, Calendar, Folder
+    Category, Bookmark, Chart, Ticket, Notification, Calendar, Folder, ShieldDone
 } from 'react-iconly'
+import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
 
 interface NavItem {
     icon: React.ElementType
@@ -46,8 +47,11 @@ export const adminNav: NavItem[] = [
     { icon: DocumentIcon, label: 'Materi', path: '/dashboard/admin/materi' },
     { icon: Calendar, label: 'Tahun', path: '/dashboard/admin/tahun-ajaran' },
     { icon: Chart, label: 'UTS/UAS', path: '/dashboard/admin/uts-uas' },
+    { icon: ShieldDone, label: 'Review Soal', path: '/dashboard/admin/review-soal' },
+    { icon: Folder, label: 'Bank Soal', path: '/dashboard/admin/bank-soal' },
     { icon: Chart, label: 'Analitik', path: '/dashboard/admin/analitik' },
     { icon: Ticket, label: 'Penugasan', path: '/dashboard/admin/penugasan' },
+    { icon: Graph, label: 'Rekap Nilai', path: '/dashboard/admin/rekap-nilai' },
     { icon: Notification, label: 'Info', path: '/dashboard/admin/pengumuman' },
     { icon: Calendar, label: 'Jadwal', path: '/dashboard/admin/jadwal' },
 ]
@@ -61,7 +65,14 @@ export const superAdminNav: NavItem[] = [
     { icon: Category, label: 'Sekolah', path: '/dashboard/super-admin/sekolah' },
 ]
 
-export default function Sidebar() {
+interface SidebarProps {
+    collapsed: boolean
+    onToggleCollapse: () => void
+    mobileOpen: boolean
+    onCloseMobile: () => void
+}
+
+export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile }: SidebarProps) {
     const pathname = usePathname()
     const { user } = useAuth()
 
@@ -87,44 +98,100 @@ export default function Sidebar() {
         return pathname.startsWith(path)
     }
 
-    return (
-        <aside className="fixed left-0 top-20 bottom-0 w-64 bg-surface-light dark:bg-surface-dark border-r border-[#E8F0E6] dark:border-primary/20 hidden lg:flex flex-col z-40 overflow-y-auto">
-            <div className="flex-1 py-6 px-4 space-y-2">
+    const renderNavItems = (iconOnly: boolean, onNavigate?: () => void, withTutorialAttrs = true) => (
+        <div className={`flex-1 py-6 space-y-2 overflow-y-auto ${iconOnly ? 'px-2' : 'px-4'}`}>
+            {!iconOnly && (
                 <div className="px-3 pb-4 mb-2 border-b border-[#E8F0E6] dark:border-primary/10">
                     <h3 className="text-xs font-bold text-text-secondary uppercase tracking-wider">
                         Menu Utama
                     </h3>
                 </div>
+            )}
 
-                {navItems.map((item) => {
-                    const active = isActive(item.path)
-                    const IconComponent = item.icon
+            {navItems.map((item) => {
+                const active = isActive(item.path)
+                const IconComponent = item.icon
 
-                    return (
-                        <Link
-                            key={item.path}
-                            href={item.path}
-                            data-tutorial={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
-                            className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group ${active
+                return (
+                    <Link
+                        key={item.path}
+                        href={item.path}
+                        onClick={onNavigate}
+                        data-tutorial={withTutorialAttrs ? `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}` : undefined}
+                        title={iconOnly ? item.label : undefined}
+                        className={`flex items-center rounded-xl transition-all duration-200 group ${iconOnly ? 'justify-center px-0 py-3' : 'gap-3 px-3 py-3'
+                            } ${active
                                 ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-emerald-400 font-bold'
                                 : 'text-text-secondary hover:bg-[#F2F7F1] dark:hover:bg-white/5 hover:text-text-main dark:hover:text-white font-medium'
-                                }`}
-                        >
-                            <div className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${active
-                                ? 'bg-primary text-white shadow-md shadow-primary/30'
-                                : 'bg-[#E8F0E6] dark:bg-surface-ground text-text-secondary group-hover:bg-white dark:group-hover:bg-surface-light group-hover:shadow-sm'
-                                }`}>
-                                <IconComponent
-                                    set={active ? 'bold' : 'light'}
-                                    primaryColor={active ? 'white' : 'currentColor'}
-                                    size="small"
-                                />
-                            </div>
-                            <span className="text-sm">{item.label}</span>
-                        </Link>
-                    )
-                })}
-            </div>
-        </aside>
+                            }`}
+                    >
+                        <div className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors flex-shrink-0 ${active
+                            ? 'bg-primary text-white shadow-md shadow-primary/30'
+                            : 'bg-[#E8F0E6] dark:bg-surface-ground text-text-secondary group-hover:bg-white dark:group-hover:bg-surface-light group-hover:shadow-sm'
+                            }`}>
+                            <IconComponent
+                                set={active ? 'bold' : 'light'}
+                                primaryColor={active ? 'white' : 'currentColor'}
+                                size="small"
+                            />
+                        </div>
+                        {!iconOnly && <span className="text-sm whitespace-nowrap">{item.label}</span>}
+                    </Link>
+                )
+            })}
+        </div>
+    )
+
+    return (
+        <>
+            {/* Desktop sidebar — collapsible to icon-only */}
+            <aside
+                className={`fixed left-0 top-20 bottom-0 bg-surface-light dark:bg-surface-dark border-r border-[#E8F0E6] dark:border-primary/20 hidden lg:flex flex-col z-40 transition-[width] duration-300 ease-in-out ${collapsed ? 'w-20' : 'w-64'
+                    }`}
+            >
+                {renderNavItems(collapsed)}
+
+                {/* Collapse toggle */}
+                <div className={`border-t border-[#E8F0E6] dark:border-primary/10 p-3 flex ${collapsed ? 'justify-center' : 'justify-end'}`}>
+                    <button
+                        onClick={onToggleCollapse}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl text-text-secondary hover:bg-[#F2F7F1] dark:hover:bg-white/5 hover:text-text-main dark:hover:text-white transition-colors"
+                        title={collapsed ? 'Buka menu' : 'Tutup menu'}
+                    >
+                        {collapsed
+                            ? <PanelLeftOpen className="w-5 h-5" />
+                            : <><PanelLeftClose className="w-5 h-5" /><span className="text-xs font-bold">Tutup</span></>
+                        }
+                    </button>
+                </div>
+            </aside>
+
+            {/* Mobile drawer */}
+            {mobileOpen && (
+                <div
+                    className="lg:hidden fixed inset-0 z-[65] bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
+                    onClick={onCloseMobile}
+                />
+            )}
+            <aside
+                className={`lg:hidden fixed left-0 top-0 bottom-0 w-72 bg-surface-light dark:bg-surface-dark border-r border-[#E8F0E6] dark:border-primary/20 flex flex-col z-[70] transition-transform duration-300 ease-in-out ${mobileOpen ? 'translate-x-0' : '-translate-x-full'
+                    }`}
+            >
+                <div className="flex items-center justify-between px-4 h-20 border-b border-[#E8F0E6] dark:border-primary/10 flex-shrink-0">
+                    <div className="flex items-center gap-3">
+                        <img src="/logoedzo.png" alt="Logo" className="w-9 h-9 rounded-xl object-cover" />
+                        <span className="font-bold text-text-main dark:text-white">Menu</span>
+                    </div>
+                    <button
+                        onClick={onCloseMobile}
+                        className="p-2 rounded-full text-text-secondary hover:bg-red-50 hover:text-red-500 transition-colors"
+                        aria-label="Tutup menu"
+                    >
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+                {renderNavItems(false, onCloseMobile, mobileOpen)}
+            </aside>
+        </>
     )
 }

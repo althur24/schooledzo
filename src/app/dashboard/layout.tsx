@@ -1,6 +1,6 @@
 'use client'
 
-import { ReactNode, useEffect, useRef } from 'react'
+import { ReactNode, useEffect, useRef, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import Link from 'next/link'
@@ -8,8 +8,11 @@ import NotificationBell from '@/components/NotificationBell'
 import BottomNavigation from '@/components/BottomNavigation'
 import TutorialFAB from '@/components/TutorialFAB'
 import { Logout } from 'react-iconly'
+import { Menu } from 'lucide-react'
 
 import Sidebar from '@/components/Sidebar'
+
+const SIDEBAR_COLLAPSED_KEY = 'sidebar_collapsed'
 
 interface DashboardLayoutProps {
     children: ReactNode
@@ -20,6 +23,29 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     const pathname = usePathname()
     const { user, logout, loading } = useAuth()
     const isIntentionalLogout = useRef(false)
+
+    // Sidebar: desktop collapse (persisted) + mobile drawer
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+    useEffect(() => {
+        try {
+            setSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true')
+        } catch { /* private browsing */ }
+    }, [])
+
+    const toggleSidebarCollapsed = () => {
+        setSidebarCollapsed(prev => {
+            const next = !prev
+            try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)) } catch { /* private browsing */ }
+            return next
+        })
+    }
+
+    // Close mobile drawer on navigation
+    useEffect(() => {
+        setMobileMenuOpen(false)
+    }, [pathname])
 
     const handleLogout = async () => {
         isIntentionalLogout.current = true
@@ -165,14 +191,23 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             <header className="sticky top-0 z-50 bg-slate-900 text-white shadow-md border-b border-slate-800">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex items-center justify-between h-20">
-                        {/* Logo */}
-                        <Link href="/dashboard" className="flex items-center gap-3 group">
-                            <img src="/logoedzo.png" alt="HIPPOCAMPUS Logo" className="w-10 h-10 rounded-xl shadow-lg shadow-emerald-500/20 group-hover:scale-110 transition-transform object-cover" />
-                            <div className="flex flex-col">
-                                <span className="text-xl font-bold text-white leading-none">{user?.school_name || 'HIPPOCAMPUS'}</span>
-                                <span className="text-xs text-slate-400 font-medium tracking-wide">Learning Management System</span>
-                            </div>
-                        </Link>
+                        {/* Hamburger (mobile) + Logo */}
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setMobileMenuOpen(true)}
+                                className="lg:hidden p-2.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                                aria-label="Buka menu"
+                            >
+                                <Menu className="w-6 h-6" />
+                            </button>
+                            <Link href="/dashboard" className="flex items-center gap-3 group">
+                                <img src="/logoedzo.png" alt="HIPPOCAMPUS Logo" className="w-10 h-10 rounded-xl shadow-lg shadow-emerald-500/20 group-hover:scale-110 transition-transform object-cover" />
+                                <div className="flex flex-col">
+                                    <span className="text-xl font-bold text-white leading-none">{user?.school_name || 'HIPPOCAMPUS'}</span>
+                                    <span className="text-xs text-slate-400 font-medium tracking-wide">Learning Management System</span>
+                                </div>
+                            </Link>
+                        </div>
 
                         {/* User info */}
                         <div className="flex items-center gap-4">
@@ -203,11 +238,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             </header>
 
             <div className="flex h-[calc(100vh-5rem)]">
-                {/* Desktop Sidebar (Left spacing provided by internal fixed class) */}
-                <Sidebar />
+                {/* Sidebar: desktop (collapsible) + mobile (drawer) */}
+                <Sidebar
+                    collapsed={sidebarCollapsed}
+                    onToggleCollapse={toggleSidebarCollapsed}
+                    mobileOpen={mobileMenuOpen}
+                    onCloseMobile={() => setMobileMenuOpen(false)}
+                />
 
-                {/* Main content - add bottom padding on mobile for bottom nav, left padding for desktop sidebar */}
-                <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 lg:pb-8 lg:pl-[17rem] overflow-y-auto animate-in fade-in duration-500" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                {/* Main content - bottom padding on mobile for bottom nav, left padding follows desktop sidebar width */}
+                <main className={`flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 lg:pb-8 overflow-y-auto animate-in fade-in duration-500 transition-[padding] duration-300 ease-in-out ${sidebarCollapsed ? 'lg:pl-28' : 'lg:pl-[17rem]'}`} style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                     <style>{`main::-webkit-scrollbar { display: none; }`}</style>
                     {children}
                 </main>

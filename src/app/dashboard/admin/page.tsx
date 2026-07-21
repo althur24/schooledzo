@@ -183,10 +183,22 @@ export default function AdminDashboard() {
             href: '/dashboard/admin/kenaikan-kelas',
         },
         {
+            title: 'Alumni',
+            description: 'Data alumni sekolah',
+            icon: Folder,
+            href: '/dashboard/admin/alumni',
+        },
+        {
             title: 'Mata Pelajaran',
             description: 'Kelola daftar mapel',
             icon: Bookmark,
             href: '/dashboard/admin/mapel',
+        },
+        {
+            title: 'Materi',
+            description: 'Materi yang dibagikan guru',
+            icon: Document,
+            href: '/dashboard/admin/materi',
         },
         {
             title: 'Akun Guru',
