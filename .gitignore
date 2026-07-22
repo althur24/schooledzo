@@ -44,3 +44,6 @@ next-env.d.ts
 offline/data/
 offline/node_modules/
 offline/config.json
+
+# Supabase CLI local state (berisi kredensial link/pooler)
+supabase/.temp/
