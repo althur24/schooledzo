@@ -4,10 +4,21 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
+import { Modal, Button, PageHeader, EmptyState, Toast, type ToastType } from '@/components/ui'
+import { Stepper } from '@/components/ui/Stepper'
 import SmartText from '@/components/SmartText'
 import Card from '@/components/ui/Card'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
+import QuestionImageUpload from '@/components/QuestionImageUpload'
+import FilterSelect from '@/components/FilterSelect'
+import Pagination from '@/components/Pagination'
+import HotsToggle from '@/components/HotsToggle'
+import AudioUploadField from '@/components/AudioUploadField'
+import ConfirmDialog from '@/components/ConfirmDialog'
+import { AnswerOptionsView, TextAnswerView } from '@/components/QuestionAnswerView'
+import {
+    QuestionTypeBadge, DifficultyBadge, QuestionStatusBadge, SourceBadge, HotsBadge
+} from '@/components/QuestionBadges'
 // Dynamic imports for heavy components
 const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
@@ -15,10 +26,11 @@ const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
     loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={4} readOnly />
 })
 import { plainToHtml } from '@/lib/richTextUtils'
-const AIReviewPanel = dynamic(() => import('@/components/AIReviewPanel'), { ssr: false })
-import { Folder, Plus, Document, Delete, Edit, Discovery, Paper, ShieldDone, TickSquare, InfoCircle, CloseSquare, Download, Search, Danger } from 'react-iconly'
-import { Copy, ChevronLeft, ChevronRight } from 'lucide-react'
-import Link from 'next/link' // Keep this import as it's used later
+import {
+    Folder, Plus, Document, Delete, Edit, Discovery, Paper, TickSquare,
+    Search, Show, Swap, EditSquare, Voice, Download
+} from 'react-iconly'
+import { ChevronDown, ChevronUp, Copy } from 'lucide-react'
 
 interface QuestionBankItem {
     id: string
@@ -70,6 +82,7 @@ interface Passage {
         order_in_passage: number
         status?: string
         teacher_hots_claim?: boolean
+        ai_review?: any
         admin_review?: any
         content_format?: 'html' | 'plain'
         source_type?: string
@@ -78,113 +91,165 @@ interface Passage {
     created_at: string
 }
 
+interface QuestionFormState {
+    question_text: string
+    question_type: string
+    options: string[]
+    correct_answer: string
+    difficulty: 'EASY' | 'MEDIUM' | 'HARD'
+    subject_id: string
+    image_url: string
+    teacher_hots_claim: boolean
+    content_format: 'html' | 'plain'
+}
+
+interface PassageFormState {
+    title: string
+    passage_text: string
+    audio_url: string
+    subject_id: string
+    questions: PassageQuestion[]
+}
+
+interface PreviewTarget {
+    question_text: string
+    question_type: string
+    options: string[] | null
+    correct_answer: string | null
+    difficulty: string
+    image_url?: string | null
+    ai_review?: any
+    passage?: { title: string | null; passage_text: string; audio_url?: string | null } | null
+}
+
+const ITEMS_PER_PAGE = 20
+
+const WIZARD_STEPS = [
+    { label: 'Tipe Soal' },
+    { label: 'Isi Soal' },
+    { label: 'Jawaban' },
+    { label: 'Pengaturan' }
+]
+
+const QUESTION_TYPE_CARDS: Array<{ value: string; label: string; desc: string; icon: React.ReactNode }> = [
+    { value: 'MULTIPLE_CHOICE', label: 'Pilihan Ganda', desc: 'Satu jawaban benar (A/B/C/D)', icon: <Paper set="bold" primaryColor="currentColor" size={28} /> },
+    { value: 'MULTIPLE_ANSWER', label: 'Ganda Kompleks', desc: 'Lebih dari satu jawaban benar', icon: <TickSquare set="bold" primaryColor="currentColor" size={28} /> },
+    { value: 'TRUE_FALSE', label: 'Benar / Salah', desc: 'Pernyataan benar atau salah', icon: <Swap set="bold" primaryColor="currentColor" size={28} /> },
+    { value: 'SHORT_ANSWER', label: 'Isian Singkat', desc: 'Jawaban berupa kata/frasa', icon: <EditSquare set="bold" primaryColor="currentColor" size={28} /> },
+    { value: 'ESSAY', label: 'Essay', desc: 'Jawaban uraian panjang', icon: <Document set="bold" primaryColor="currentColor" size={28} /> }
+]
+
+const emptyQuestionForm = (): QuestionFormState => ({
+    question_text: '',
+    question_type: 'MULTIPLE_CHOICE',
+    options: ['', '', '', ''],
+    correct_answer: '',
+    difficulty: 'MEDIUM',
+    subject_id: '',
+    image_url: '',
+    teacher_hots_claim: false,
+    content_format: 'html'
+})
+
+const emptyPassageQuestion = (): PassageQuestion => ({
+    question_text: '',
+    question_type: 'MULTIPLE_CHOICE',
+    options: ['', '', '', ''],
+    correct_answer: '',
+    difficulty: 'MEDIUM',
+    teacher_hots_claim: false,
+    content_format: 'html'
+})
+
+const emptyPassageForm = (): PassageFormState => ({
+    title: '',
+    passage_text: '',
+    audio_url: '',
+    subject_id: '',
+    questions: [emptyPassageQuestion()]
+})
+
+// Helper to strip HTML tags for validation (RichTextEditor may output <p></p> for empty)
+const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim()
+
+// Ringkasan hasil AI review (bloom level, kekuatan HOTS, label kesulitan)
+function AIReviewSummary({ review }: { review: any }) {
+    if (!review || typeof review !== 'object' || !review.primary_bloom_level) return null
+    const bloomLabels: Record<number, string> = {
+        1: 'C1 Mengingat', 2: 'C2 Memahami', 3: 'C3 Menerapkan',
+        4: 'C4 Menganalisis', 5: 'C5 Mengevaluasi', 6: 'C6 Mencipta'
+    }
+    const hotsLabels: Record<string, string> = { S0: 'LOTS', S1: 'HOTS Moderat', S2: 'HOTS Kuat' }
+    const chip = 'px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/20 font-medium'
+    return (
+        <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-xl">
+            <p className="text-xs font-bold text-blue-700 dark:text-blue-300 mb-1.5 flex items-center gap-1">
+                <Discovery set="bold" primaryColor="currentColor" size={14} /> Ringkasan AI Review
+            </p>
+            <div className="flex flex-wrap gap-1.5 text-[11px]">
+                <span className={chip}>{bloomLabels[review.primary_bloom_level] || `C${review.primary_bloom_level}`}</span>
+                {review.hots_strength && <span className={chip}>{hotsLabels[review.hots_strength] || review.hots_strength}</span>}
+                {review.difficulty_label && <span className={chip}>Kesulitan: {review.difficulty_label}</span>}
+            </div>
+        </div>
+    )
+}
+
 export default function BankSoalPage() {
     const { user } = useAuth()
     const searchParams = useSearchParams()
     const [questions, setQuestions] = useState<QuestionBankItem[]>([])
+    const [passages, setPassages] = useState<Passage[]>([])
     const [subjects, setSubjects] = useState<Subject[]>([])
     const [loading, setLoading] = useState(true)
+    const [activeTab, setActiveTab] = useState<'standalone' | 'passages'>('standalone')
+
+    // Filters (berlaku ke tab aktif)
     const [selectedSubject, setSelectedSubject] = useState('')
     const [selectedDifficulty, setSelectedDifficulty] = useState('')
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedType, setSelectedType] = useState('')
     const [selectedStatus, setSelectedStatus] = useState('')
-    const [currentPage, setCurrentPage] = useState(1)
-    const ITEMS_PER_PAGE = 20
+    const [standalonePage, setStandalonePage] = useState(1)
+    const [passagePage, setPassagePage] = useState(1)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
 
-    // Selection state for export
+    // Selection mode for export
+    const [selectionMode, setSelectionMode] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
     const [selectedPassageIds, setSelectedPassageIds] = useState<Set<string>>(new Set())
     const [showExportConfirm, setShowExportConfirm] = useState(false)
+    const [includeAnswerKey, setIncludeAnswerKey] = useState(true)
 
-    // Delete modal state
+    // Delete confirmation state
     const [showDeleteModal, setShowDeleteModal] = useState(false)
     const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
     const [deleteTargetType, setDeleteTargetType] = useState<'question' | 'passage'>('question')
     const [deleteTargetLabel, setDeleteTargetLabel] = useState('')
     const [deleting, setDeleting] = useState(false)
 
+    // Expand & preview state
+    const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null)
+    const [expandedPassageId, setExpandedPassageId] = useState<string | null>(null)
+    const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null)
 
-    // Modal & Form Control
-    const [showAddModal, setShowAddModal] = useState(false)
-    const [questionType, setQuestionType] = useState<'standalone' | 'passage'>('standalone')
+    // Wizard (Add & Edit soal satuan memakai form yang sama)
+    const [showWizard, setShowWizard] = useState(false)
+    const [wizardStep, setWizardStep] = useState(0)
+    const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null)
+    const [questionForm, setQuestionForm] = useState<QuestionFormState>(emptyQuestionForm())
     const [saving, setSaving] = useState(false)
     const [showRapihAI, setShowRapihAI] = useState(false)
     const [showAddDropdown, setShowAddDropdown] = useState(false)
 
-    // Toast notification state (replacing browser alert)
-    const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
-    const showToast = (message: string, type: 'success' | 'error' = 'error') => {
-        setToast({ message, type })
-        setTimeout(() => setToast(null), 4000)
-    }
-
-    // Standalone Question Form
-    const [questionForm, setQuestionForm] = useState({
-        question_text: '',
-        question_type: 'MULTIPLE_CHOICE',
-        options: ['', '', '', ''],
-        correct_answer: '',
-        difficulty: 'MEDIUM' as 'EASY' | 'MEDIUM' | 'HARD',
-        subject_id: '',
-        image_url: '',
-        teacher_hots_claim: false,
-        content_format: 'html' as 'html' | 'plain'
-    })
-    const [uploading, setUploading] = useState(false)
-    const [uploadingAudio, setUploadingAudio] = useState(false)
-
-    // Passage State
-    const [passages, setPassages] = useState<Passage[]>([])
-    const [passageForm, setPassageForm] = useState({
-        title: '',
-        passage_text: '',
-        audio_url: '',
-        subject_id: '',
-        questions: [{
-            question_text: '',
-            question_type: 'MULTIPLE_CHOICE',
-            options: ['', '', '', ''],
-            correct_answer: '',
-            difficulty: 'MEDIUM' as 'EASY' | 'MEDIUM' | 'HARD',
-            teacher_hots_claim: false,
-            content_format: 'html' as 'html' | 'plain'
-        }] as PassageQuestion[]
-    })
-
-    // Edit Passage State
+    // Passage modal (Add & Edit passage memakai form yang sama)
+    const [showPassageModal, setShowPassageModal] = useState(false)
     const [editingPassageId, setEditingPassageId] = useState<string | null>(null)
-    const [showEditPassageModal, setShowEditPassageModal] = useState(false)
-    const [editPassageForm, setEditPassageForm] = useState({
-        title: '',
-        passage_text: '',
-        audio_url: '',
-        subject_id: '',
-        questions: [] as PassageQuestion[]
-    })
+    const [passageForm, setPassageForm] = useState<PassageFormState>(emptyPassageForm())
 
-    // Image upload handler
-    const handleImageUpload = async (file: File): Promise<string | null> => {
-        setUploading(true)
-        try {
-            const formData = new FormData()
-            formData.append('file', file)
-            const res = await fetch('/api/questions/upload-image', {
-                method: 'POST',
-                body: formData
-            })
-            const data = await res.json()
-            if (res.ok) return data.url
-            showToast(data.error || 'Gagal upload gambar')
-            return null
-        } catch {
-            showToast('Gagal upload gambar')
-            return null
-        } finally {
-            setUploading(false)
-        }
-    }
+    // Toast notification (design system)
+    const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
+    const showToast = (message: string, type: ToastType = 'error') => setToast({ message, type })
 
     useEffect(() => {
         if (user) fetchData()
@@ -223,6 +288,10 @@ export default function BankSoalPage() {
         }
     }
 
+    // Setiap perubahan filter mereset halaman kedua tab
+    const resetPages = () => { setStandalonePage(1); setPassagePage(1) }
+
+    // ─── Delete ───
     const openDeleteModal = (id: string, type: 'question' | 'passage', label: string) => {
         setDeleteTargetId(id)
         setDeleteTargetType(type)
@@ -234,14 +303,14 @@ export default function BankSoalPage() {
         if (!deleteTargetId) return
         setDeleting(true)
         try {
-            if (deleteTargetType === 'question') {
-                await fetch(`/api/question-bank?id=${deleteTargetId}`, { method: 'DELETE' })
-            } else {
-                await fetch(`/api/passages?id=${deleteTargetId}`, { method: 'DELETE' })
-            }
+            const res = deleteTargetType === 'question'
+                ? await fetch(`/api/question-bank?id=${deleteTargetId}`, { method: 'DELETE' })
+                : await fetch(`/api/passages?id=${deleteTargetId}`, { method: 'DELETE' })
+            if (!res.ok) throw new Error('Delete failed')
             await fetchData()
             setShowDeleteModal(false)
             setDeleteTargetId(null)
+            showToast(deleteTargetType === 'question' ? 'Soal berhasil dihapus' : 'Passage berhasil dihapus', 'success')
         } catch (error) {
             console.error('Error:', error)
             showToast('Gagal menghapus')
@@ -250,153 +319,154 @@ export default function BankSoalPage() {
         }
     }
 
-    // Helper to strip HTML tags for validation (RichTextEditor may output <p></p> for empty)
-    const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim()
+    // ─── Duplikat soal ───
+    const handleDuplicate = async (q: QuestionBankItem) => {
+        setSaving(true)
+        try {
+            const res = await fetch('/api/question-bank', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    question_text: q.question_text,
+                    question_type: q.question_type,
+                    options: q.options,
+                    correct_answer: q.correct_answer,
+                    difficulty: q.difficulty,
+                    subject_id: q.subject?.id || '',
+                    image_url: q.image_url || '',
+                    teacher_hots_claim: q.teacher_hots_claim || false,
+                    content_format: q.content_format || 'html'
+                })
+            })
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}))
+                throw new Error(data.error || 'Gagal menduplikat soal')
+            }
+            await fetchData()
+            showToast('Soal diduplikat', 'success')
+        } catch (error: any) {
+            console.error('Error:', error)
+            showToast(error?.message || 'Gagal menduplikat soal')
+        } finally {
+            setSaving(false)
+        }
+    }
 
-    const handleSubmitStandalone = async () => {
-        // Validation
+    // ─── Wizard soal satuan (Add & Edit) ───
+    const openAddWizard = () => {
+        setEditingQuestionId(null)
+        setQuestionForm(emptyQuestionForm())
+        setWizardStep(0)
+        setShowWizard(true)
+    }
+
+    const handleEditQuestion = (q: QuestionBankItem) => {
+        setEditingQuestionId(q.id)
+        setQuestionForm({
+            question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text),
+            question_type: q.question_type,
+            options: q.options || ['', '', '', ''],
+            correct_answer: q.correct_answer || '',
+            difficulty: q.difficulty,
+            subject_id: q.subject?.id || '',
+            image_url: q.image_url || '',
+            teacher_hots_claim: q.teacher_hots_claim || false,
+            content_format: 'html'
+        })
+        setWizardStep(1) // Edit dibuka langsung di langkah isi soal (tipe bisa diubah via Kembali)
+        setShowWizard(true)
+    }
+
+    const handleCloseWizard = () => {
+        setShowWizard(false)
+        setEditingQuestionId(null)
+        setWizardStep(0)
+        setSaving(false)
+        setQuestionForm(emptyQuestionForm())
+    }
+
+    // Pilih tipe soal di langkah 1 wizard — reset opsi mengikuti tipe (logika lama)
+    const handleWizardTypeChange = (newType: string) => {
+        const prevType = questionForm.question_type
+        let newOpts: string[] = []
+        if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)) {
+            newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && questionForm.options?.length
+                ? questionForm.options
+                : ['', '', '', '']
+        } else if (newType === 'TRUE_FALSE') {
+            newOpts = ['Benar', 'Salah']
+        }
+        setQuestionForm({ ...questionForm, question_type: newType, options: newOpts, correct_answer: '' })
+    }
+
+    const validateQuestionForm = (): boolean => {
         if (!stripHtml(questionForm.question_text)) {
-            showToast('Pertanyaan tidak boleh kosong'); return
+            showToast('Pertanyaan tidak boleh kosong'); return false
         }
         if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(questionForm.question_type)) {
             if (!questionForm.options || questionForm.options.filter(o => o.trim()).length < 2) {
-                showToast('Minimal 2 opsi jawaban harus diisi'); return
+                showToast('Minimal 2 opsi jawaban harus diisi'); return false
             }
             if (!questionForm.correct_answer) {
-                showToast('Jawaban benar harus dipilih'); return
+                showToast('Jawaban benar harus dipilih'); return false
             }
         }
         if (questionForm.question_type === 'TRUE_FALSE' && !questionForm.correct_answer) {
-            showToast('Jawaban benar harus dipilih'); return
+            showToast('Jawaban benar harus dipilih'); return false
         }
         if (questionForm.question_type === 'SHORT_ANSWER' && !questionForm.correct_answer.trim()) {
-            showToast('Jawaban benar harus diisi'); return
+            showToast('Jawaban benar harus diisi'); return false
         }
+        return true
+    }
 
+    // addAnother=true → "Simpan & Tambah Lagi": simpan, reset form (tipe tetap), kembali ke langkah Isi Soal
+    const handleSaveQuestion = async (addAnother: boolean) => {
+        if (!validateQuestionForm()) return
         setSaving(true)
         try {
-            await fetch('/api/question-bank', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(questionForm)
-            })
+            const res = editingQuestionId
+                ? await fetch(`/api/question-bank?id=${editingQuestionId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(questionForm)
+                })
+                : await fetch('/api/question-bank', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(questionForm)
+                })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) throw new Error(data.error || 'Gagal menyimpan soal')
             await fetchData()
-            handleCloseModal()
-            showToast('Soal berhasil ditambahkan!', 'success')
-        } catch (error) {
+            if (addAnother && !editingQuestionId) {
+                const keepType = questionForm.question_type
+                const keepSubject = questionForm.subject_id
+                setQuestionForm({ ...emptyQuestionForm(), question_type: keepType, subject_id: keepSubject, options: keepType === 'TRUE_FALSE' ? ['Benar', 'Salah'] : ['', '', '', ''] })
+                setWizardStep(1)
+                showToast('Soal berhasil ditambahkan! Silakan tambah soal berikutnya.', 'success')
+            } else {
+                handleCloseWizard()
+                showToast(editingQuestionId ? 'Soal berhasil diperbarui!' : 'Soal berhasil ditambahkan!', 'success')
+            }
+        } catch (error: any) {
             console.error('Error:', error)
-            showToast('Gagal menyimpan soal')
+            showToast(error?.message || 'Gagal menyimpan soal')
         } finally {
             setSaving(false)
         }
     }
 
-    const handleSubmitPassage = async () => {
-        // Validation
-        if (!passageForm.passage_text.trim() && !passageForm.audio_url) {
-            showToast('Teks bacaan atau audio harus diisi'); return
-        }
-        const filledQuestions = passageForm.questions.filter(q => stripHtml(q.question_text))
-        if (filledQuestions.length === 0) {
-            showToast('Minimal 1 pertanyaan harus diisi'); return
-        }
-        for (let i = 0; i < filledQuestions.length; i++) {
-            const q = filledQuestions[i]
-            if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(q.question_type)) {
-                if (!q.options || q.options.filter(o => o.trim()).length < 2) {
-                    showToast(`Soal ${i + 1}: Minimal 2 opsi jawaban harus diisi`); return
-                }
-                if (!q.correct_answer) {
-                    showToast(`Soal ${i + 1}: Jawaban benar harus dipilih`); return
-                }
-            }
-            if (q.question_type === 'TRUE_FALSE' && !q.correct_answer) {
-                showToast(`Soal ${i + 1}: Jawaban benar harus dipilih`); return
-            }
-            if (q.question_type === 'SHORT_ANSWER' && !q.correct_answer.trim()) {
-                showToast(`Soal ${i + 1}: Jawaban benar harus diisi`); return
-            }
-        }
-
-        setSaving(true)
-        try {
-            await fetch('/api/passages', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(passageForm)
-            })
-            await fetchData()
-            handleCloseModal()
-            showToast('Passage berhasil ditambahkan!', 'success')
-        } catch (error) {
-            console.error('Error:', error)
-            showToast('Gagal menyimpan passage')
-        } finally {
-            setSaving(false)
-        }
+    // ─── Passage modal (Add & Edit) ───
+    const openAddPassageModal = () => {
+        setEditingPassageId(null)
+        setPassageForm(emptyPassageForm())
+        setShowPassageModal(true)
     }
 
-    const handleCloseModal = () => {
-        setShowAddModal(false)
-        setQuestionType('standalone')
-        setSaving(false)
-        // Reset forms
-        setQuestionForm({
-            question_text: '',
-            question_type: 'MULTIPLE_CHOICE',
-            options: ['', '', '', ''],
-            correct_answer: '',
-            difficulty: 'MEDIUM',
-            subject_id: '',
-            image_url: '',
-            teacher_hots_claim: false,
-            content_format: 'html'
-        })
-        setPassageForm({
-            title: '',
-            passage_text: '',
-            audio_url: '',
-            subject_id: '',
-            questions: [{
-                question_text: '',
-                question_type: 'MULTIPLE_CHOICE',
-                options: ['', '', '', ''],
-                correct_answer: '',
-                difficulty: 'MEDIUM',
-                teacher_hots_claim: false,
-                content_format: 'html'
-            }]
-        })
-    }
-
-    const handleAddPassageQuestion = () => {
-        setPassageForm({
-            ...passageForm,
-            questions: [...passageForm.questions, {
-                question_text: '',
-                question_type: 'MULTIPLE_CHOICE',
-                options: ['', '', '', ''],
-                correct_answer: '',
-                difficulty: 'MEDIUM',
-                teacher_hots_claim: false,
-                content_format: 'html'
-            }]
-        })
-    }
-
-    const handleRemovePassageQuestion = (index: number) => {
-        if (passageForm.questions.length > 1) {
-            setPassageForm({
-                ...passageForm,
-                questions: passageForm.questions.filter((_, i) => i !== index)
-            })
-        }
-    }
-
-    // Edit Passage Handlers
     const handleEditPassage = (p: Passage) => {
         setEditingPassageId(p.id)
-        setEditPassageForm({
+        setPassageForm({
             title: p.title || '',
             passage_text: p.passage_text,
             audio_url: p.audio_url || '',
@@ -411,108 +481,105 @@ export default function BankSoalPage() {
                 content_format: 'html' as 'html' | 'plain'
             })) || []
         })
-        setShowEditPassageModal(true)
+        setShowPassageModal(true)
     }
 
-    const handleSaveEditPassage = async () => {
-        if (!editingPassageId) return
+    const handleClosePassageModal = () => {
+        setShowPassageModal(false)
+        setEditingPassageId(null)
+        setSaving(false)
+        setPassageForm(emptyPassageForm())
+    }
+
+    const handleSavePassage = async () => {
+        // Validasi (add: lengkap; edit: sama seperti form lama — minimal bacaan/audio)
+        if (!passageForm.passage_text.trim() && !passageForm.audio_url) {
+            showToast('Teks bacaan atau audio harus diisi'); return
+        }
+        if (!editingPassageId) {
+            const filledQuestions = passageForm.questions.filter(q => stripHtml(q.question_text))
+            if (filledQuestions.length === 0) {
+                showToast('Minimal 1 pertanyaan harus diisi'); return
+            }
+            for (let i = 0; i < filledQuestions.length; i++) {
+                const q = filledQuestions[i]
+                if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(q.question_type)) {
+                    if (!q.options || q.options.filter(o => o.trim()).length < 2) {
+                        showToast(`Soal ${i + 1}: Minimal 2 opsi jawaban harus diisi`); return
+                    }
+                    if (!q.correct_answer) {
+                        showToast(`Soal ${i + 1}: Jawaban benar harus dipilih`); return
+                    }
+                }
+                if (q.question_type === 'TRUE_FALSE' && !q.correct_answer) {
+                    showToast(`Soal ${i + 1}: Jawaban benar harus dipilih`); return
+                }
+                if (q.question_type === 'SHORT_ANSWER' && !q.correct_answer.trim()) {
+                    showToast(`Soal ${i + 1}: Jawaban benar harus diisi`); return
+                }
+            }
+        }
+
         setSaving(true)
         try {
-            await fetch(`/api/passages?id=${editingPassageId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(editPassageForm)
-            })
+            const res = editingPassageId
+                ? await fetch(`/api/passages?id=${editingPassageId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(passageForm)
+                })
+                : await fetch('/api/passages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(passageForm)
+                })
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}))
+                throw new Error(data.error || 'Gagal menyimpan passage')
+            }
             await fetchData()
-            setShowEditPassageModal(false)
-            setEditingPassageId(null)
-            showToast('Passage berhasil diperbarui!', 'success')
-        } catch (error) {
+            const wasEditing = !!editingPassageId
+            handleClosePassageModal()
+            showToast(wasEditing ? 'Passage berhasil diperbarui!' : 'Passage berhasil ditambahkan!', 'success')
+        } catch (error: any) {
             console.error('Error:', error)
-            showToast('Gagal menyimpan perubahan')
+            showToast(error?.message || 'Gagal menyimpan passage')
         } finally {
             setSaving(false)
         }
     }
 
-    // handleDeletePassage is now handled by openDeleteModal + executeDelete
-
-    const handleAddEditPassageQuestion = () => {
-        setEditPassageForm({
-            ...editPassageForm,
-            questions: [...editPassageForm.questions, {
-                question_text: '',
-                question_type: 'MULTIPLE_CHOICE',
-                options: ['', '', '', ''],
-                correct_answer: '',
-                difficulty: 'MEDIUM',
-                teacher_hots_claim: false,
-                content_format: 'html' as 'html' | 'plain'
-            }]
-        })
+    const handleAddPassageQuestion = () => {
+        setPassageForm({ ...passageForm, questions: [...passageForm.questions, emptyPassageQuestion()] })
     }
 
-    const handleRemoveEditPassageQuestion = (index: number) => {
-        if (editPassageForm.questions.length > 1) {
-            setEditPassageForm({
-                ...editPassageForm,
-                questions: editPassageForm.questions.filter((_, i) => i !== index)
-            })
+    const handleRemovePassageQuestion = (index: number) => {
+        if (passageForm.questions.length > 1) {
+            setPassageForm({ ...passageForm, questions: passageForm.questions.filter((_, i) => i !== index) })
         }
     }
 
-    // Edit Standalone Question Handlers
-    const [showEditQuestionModal, setShowEditQuestionModal] = useState(false)
-    const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null)
-    const [editQuestionForm, setEditQuestionForm] = useState({
-        question_text: '',
-        question_type: 'MULTIPLE_CHOICE',
-        options: ['', '', '', ''],
-        correct_answer: '',
-        difficulty: 'MEDIUM' as 'EASY' | 'MEDIUM' | 'HARD',
-        subject_id: '',
-        image_url: '',
-        teacher_hots_claim: false,
-        content_format: 'html' as 'html' | 'plain'
-    })
+    const updatePassageQuestion = (index: number, updater: (q: PassageQuestion) => PassageQuestion) => {
+        const newQuestions = [...passageForm.questions]
+        newQuestions[index] = updater(newQuestions[index])
+        setPassageForm({ ...passageForm, questions: newQuestions })
+    }
 
-    const handleEditQuestion = (q: QuestionBankItem) => {
-        setEditingQuestionId(q.id)
-        setEditQuestionForm({
-            question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text),
-            question_type: q.question_type,
-            options: q.options || ['', '', '', ''],
-            correct_answer: q.correct_answer || '',
-            difficulty: q.difficulty,
-            subject_id: q.subject?.id || '',
-            image_url: q.image_url || '',
-            teacher_hots_claim: q.teacher_hots_claim || false,
-            content_format: 'html'
+    const handlePassageQuestionTypeChange = (index: number, newType: string) => {
+        updatePassageQuestion(index, (q) => {
+            let newOpts: string[] = []
+            if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)) {
+                newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(q.question_type) && q.options?.length
+                    ? q.options
+                    : ['', '', '', '']
+            } else if (newType === 'TRUE_FALSE') {
+                newOpts = ['Benar', 'Salah']
+            }
+            return { ...q, question_type: newType, options: newOpts, correct_answer: '' }
         })
-        setShowEditQuestionModal(true)
     }
 
-    const handleSaveEditQuestion = async () => {
-        if (!editingQuestionId) return
-        setSaving(true)
-        try {
-            await fetch(`/api/question-bank?id=${editingQuestionId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(editQuestionForm)
-            })
-            await fetchData()
-            setShowEditQuestionModal(false)
-            setEditingQuestionId(null)
-            showToast('Soal berhasil diperbarui!', 'success')
-        } catch (error) {
-            console.error('Error:', error)
-            showToast('Gagal menyimpan perubahan')
-        } finally {
-            setSaving(false)
-        }
-    }
-
+    // ─── Filters ───
     const filteredQuestions = questions.filter((q) => {
         if (selectedSubject && q.subject?.id !== selectedSubject) return false
         if (selectedDifficulty && q.difficulty !== selectedDifficulty) return false
@@ -536,73 +603,59 @@ export default function BankSoalPage() {
         return true
     })
 
-    // Pagination
-    const totalPages = Math.ceil(filteredQuestions.length / ITEMS_PER_PAGE)
+    // Pagination per tab
     const paginatedQuestions = filteredQuestions.slice(
-        (currentPage - 1) * ITEMS_PER_PAGE,
-        currentPage * ITEMS_PER_PAGE
+        (standalonePage - 1) * ITEMS_PER_PAGE,
+        standalonePage * ITEMS_PER_PAGE
+    )
+    const paginatedPassages = filteredPassages.slice(
+        (passagePage - 1) * ITEMS_PER_PAGE,
+        passagePage * ITEMS_PER_PAGE
     )
 
-    const getDifficultyBadge = (difficulty: string) => {
-        switch (difficulty) {
-            case 'EASY':
-                return 'bg-green-500/10 text-green-600 dark:text-green-400 border-green-200'
-            case 'MEDIUM':
-                return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200'
-            case 'HARD':
-                return 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-200'
-            default:
-                return 'bg-secondary/10 text-text-secondary border-secondary/20'
+    // ─── Selection mode ───
+    const totalSelected = selectedIds.size + selectedPassageIds.size
+
+    const toggleSelectionMode = () => {
+        if (selectionMode) {
+            setSelectedIds(new Set())
+            setSelectedPassageIds(new Set())
+        }
+        setSelectionMode(!selectionMode)
+    }
+
+    const toggleSelectAll = () => {
+        if (activeTab === 'standalone') {
+            const allSelected = selectedIds.size === filteredQuestions.length && filteredQuestions.length > 0
+            setSelectedIds(allSelected ? new Set() : new Set(filteredQuestions.map(q => q.id)))
+        } else {
+            const allSelected = selectedPassageIds.size === filteredPassages.length && filteredPassages.length > 0
+            setSelectedPassageIds(allSelected ? new Set() : new Set(filteredPassages.map(p => p.id)))
         }
     }
 
-    const getDifficultyLabel = (difficulty: string) => {
-        switch (difficulty) {
-            case 'EASY': return 'Mudah'
-            case 'MEDIUM': return 'Sedang'
-            case 'HARD': return 'Sulit'
-            default: return difficulty
-        }
+    const toggleSelectQuestion = (id: string) => {
+        const newSet = new Set(selectedIds)
+        if (newSet.has(id)) newSet.delete(id)
+        else newSet.add(id)
+        setSelectedIds(newSet)
     }
 
-    const getSourceLabel = (source: string, sourceName?: string): string => {
-        if (source === 'exam') return `Ulangan${sourceName ? `: ${sourceName}` : ''}`
-        if (source === 'quiz') return `Kuis${sourceName ? `: ${sourceName}` : ''}`
-        if (source === 'ai_generated') return 'AI Generated'
-        return 'Manual'
+    const toggleSelectPassage = (id: string) => {
+        const newSet = new Set(selectedPassageIds)
+        if (newSet.has(id)) newSet.delete(id)
+        else newSet.add(id)
+        setSelectedPassageIds(newSet)
     }
 
-    const getSourceBadge = (source?: string, sourceName?: string) => {
-        const type = source || 'manual'
-        if (type === 'exam') return <span className="px-2 py-0.5 text-xs rounded-full font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" title={sourceName}>📋 {getSourceLabel(type, sourceName)}</span>
-        if (type === 'quiz') return <span className="px-2 py-0.5 text-xs rounded-full font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300" title={sourceName}>📋 {getSourceLabel(type, sourceName)}</span>
-        if (type === 'ai_generated') return <span className="px-2 py-0.5 text-xs rounded-full font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">🤖 AI Generated</span>
-        return <span className="px-2 py-0.5 text-xs rounded-full font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">📝 Manual</span>
-    }
-
-    const getStatusBadge = (status?: string) => {
-        switch (status) {
-            case 'approved':
-                return <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 font-medium flex items-center gap-1"><TickSquare set="bold" primaryColor="currentColor" size={12} /> Approved</span>
-            case 'ai_reviewing':
-                return aiReviewEnabled ? <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 font-medium animate-pulse flex items-center gap-1"><Discovery set="bold" primaryColor="currentColor" size={12} /> AI Review...</span> : null
-            case 'admin_review':
-                return aiReviewEnabled ? <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 font-medium flex items-center gap-1"><InfoCircle set="bold" primaryColor="currentColor" size={12} /> Perlu Review</span> : null
-            case 'returned':
-                return <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 font-medium flex items-center gap-1"><CloseSquare set="bold" primaryColor="currentColor" size={12} /> Dikembalikan</span>
-            case 'draft':
-                return <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 font-medium flex items-center gap-1"><Paper set="bold" primaryColor="currentColor" size={12} /> Draft</span>
-            default:
-                return null
-        }
-    }
-
+    // ─── Export Word (.doc) — logika sama persis dengan implementasi lama ───
     const handleExport = () => {
         const questionsToExport = filteredQuestions.filter(q => selectedIds.has(q.id))
         const passagesToExport = filteredPassages.filter(p => selectedPassageIds.has(p.id))
         let questionNumber = 0
 
         // Helper: render options/answer for any question type
+        // includeAnswerKey=false → lembar soal polos untuk siswa (tanpa tanda jawaban/rubrik)
         const renderOptionsHtml = (q: { question_type: string; options?: string[] | null; correct_answer?: string | null }) => {
             if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(q.question_type) && q.options) {
                 let correctLetters: string[] = []
@@ -613,9 +666,9 @@ export default function BankSoalPage() {
                     <ul style="list-style:none; padding-left:20px; margin:0;">
                         ${q.options.map((opt, optIdx) => {
                             const letter = String.fromCharCode(65 + optIdx)
-                            const isCorrect = q.question_type === 'MULTIPLE_ANSWER'
+                            const isCorrect = includeAnswerKey && (q.question_type === 'MULTIPLE_ANSWER'
                                 ? correctLetters.includes(letter)
-                                : q.correct_answer === letter
+                                : q.correct_answer === letter)
                             return `
                                 <li style="margin-bottom: 4px; ${isCorrect ? 'font-weight:bold; color:green;' : ''}">
                                     ${letter}. ${opt}
@@ -627,15 +680,15 @@ export default function BankSoalPage() {
                 return `
                     <ul style="list-style:none; padding-left:20px; margin:0;">
                         ${q.options.map(opt => {
-                            const isCorrect = q.correct_answer?.toUpperCase() === opt.toUpperCase()
+                            const isCorrect = includeAnswerKey && q.correct_answer?.toUpperCase() === opt.toUpperCase()
                             return `<li style="margin-bottom: 4px; ${isCorrect ? 'font-weight:bold; color:green;' : ''}">${opt}</li>`
                         }).join('')}
                     </ul>`
             }
-            if (q.question_type === 'SHORT_ANSWER' && q.correct_answer) {
+            if (includeAnswerKey && q.question_type === 'SHORT_ANSWER' && q.correct_answer) {
                 return `<p style="margin-top:8px; padding-left:20px;"><strong>Jawaban:</strong> <span style="color:green;">${q.correct_answer}</span></p>`
             }
-            if (q.question_type === 'ESSAY' && q.correct_answer) {
+            if (includeAnswerKey && q.question_type === 'ESSAY' && q.correct_answer) {
                 return `<p style="margin-top:8px; padding-left:20px;"><strong>Rubrik:</strong> <span style="color:#555;">${q.correct_answer}</span></p>`
             }
             return ''
@@ -679,7 +732,7 @@ export default function BankSoalPage() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = 'Bank_Soal.doc'
+        a.download = includeAnswerKey ? 'Bank_Soal_dengan_Kunci.doc' : 'Lembar_Soal_tanpa_Kunci.doc'
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
@@ -687,23 +740,10 @@ export default function BankSoalPage() {
         setShowExportConfirm(false)
         setSelectedIds(new Set())
         setSelectedPassageIds(new Set())
+        setSelectionMode(false)
     }
 
-    const totalSelected = selectedIds.size + selectedPassageIds.size
-
-    const toggleSelectAll = () => {
-        const allQSelected = selectedIds.size === filteredQuestions.length && filteredQuestions.length > 0
-        const allPSelected = selectedPassageIds.size === filteredPassages.length && filteredPassages.length > 0
-        if (allQSelected && allPSelected) {
-            setSelectedIds(new Set())
-            setSelectedPassageIds(new Set())
-        } else {
-            setSelectedIds(new Set(filteredQuestions.map(q => q.id)))
-            setSelectedPassageIds(new Set(filteredPassages.map(p => p.id)))
-        }
-    }
-
-    // Rapih AI Save Handler - saves AI results directly to bank soal
+    // ─── Rapih AI: simpan hasil AI langsung ke bank soal ───
     const handleSaveAIToBank = async (results: any[]) => {
         if (results.length === 0) return
         setSaving(true)
@@ -783,9 +823,17 @@ export default function BankSoalPage() {
                 action={
                     <div className="flex items-center gap-3">
                         <div className="text-right hidden sm:block">
-                            <p className="text-xl font-bold text-primary">{questions.length}</p>
+                            <p className="text-xl font-bold text-primary">{questions.length + passages.reduce((acc, p) => acc + (p.questions?.length || 0), 0)}</p>
                             <p className="text-xs text-text-secondary">Total Soal</p>
                         </div>
+                        <Button
+                            variant={selectionMode ? 'secondary' : 'outline'}
+                            onClick={toggleSelectionMode}
+                            icon={<TickSquare set="bold" primaryColor="currentColor" size={20} />}
+                            aria-label={selectionMode ? 'Keluar dari mode pilih' : 'Aktifkan mode pilih dan export'}
+                        >
+                            {selectionMode ? 'Selesai' : 'Pilih & Export'}
+                        </Button>
                         <div className="relative inline-block">
                             <button
                                 onClick={() => setShowAddDropdown(!showAddDropdown)}
@@ -798,15 +846,15 @@ export default function BankSoalPage() {
                             {showAddDropdown && (
                                 <>
                                     <div className="fixed inset-0 z-40" onClick={() => setShowAddDropdown(false)} />
-                                    <div className="absolute right-0 top-full mt-2 z-50 w-64 bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-gray-200 dark:border-zinc-700 py-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                                    <div className="absolute right-0 top-full mt-2 z-50 w-64 bg-white dark:bg-surface-dark rounded-xl shadow-xl border border-secondary/20 py-2 animate-in fade-in slide-in-from-top-2 duration-200">
                                         <button
                                             onClick={() => {
-                                                setShowAddModal(true)
+                                                openAddWizard()
                                                 setShowAddDropdown(false)
                                             }}
                                             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer"
                                         >
-                                            <div className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+                                            <div className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0 text-blue-600 dark:text-blue-300">
                                                 <Edit set="bold" primaryColor="currentColor" size={20} />
                                             </div>
                                             <div className="text-left">
@@ -822,7 +870,7 @@ export default function BankSoalPage() {
                                             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors cursor-pointer"
                                             data-tutorial="bank-ai-btn"
                                         >
-                                            <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0">
+                                            <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0 text-purple-600 dark:text-purple-300">
                                                 <Discovery set="bold" primaryColor="currentColor" size={20} />
                                             </div>
                                             <div className="text-left">
@@ -834,20 +882,36 @@ export default function BankSoalPage() {
                                 </>
                             )}
                         </div>
-                        <Button
-                            onClick={() => setShowExportConfirm(true)}
-                            disabled={totalSelected === 0}
-                            className="disabled:opacity-50 disabled:cursor-not-allowed"
-                            icon={<Download set="bold" primaryColor="currentColor" size={20} />}
-                        >
-                            Export ({totalSelected})
-                        </Button>
                     </div>
                 }
             />
 
+            {/* Tabs */}
+            <div className="flex gap-2 border-b border-secondary/20">
+                <button
+                    onClick={() => setActiveTab('standalone')}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-t-xl border-b-2 -mb-px transition-colors cursor-pointer ${activeTab === 'standalone'
+                        ? 'border-primary text-primary bg-primary/5'
+                        : 'border-transparent text-text-secondary hover:text-text-main hover:bg-secondary/5'
+                        }`}
+                >
+                    <Paper set="bold" primaryColor="currentColor" size={18} />
+                    Soal Satuan ({filteredQuestions.length})
+                </button>
+                <button
+                    onClick={() => setActiveTab('passages')}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-t-xl border-b-2 -mb-px transition-colors cursor-pointer ${activeTab === 'passages'
+                        ? 'border-primary text-primary bg-primary/5'
+                        : 'border-transparent text-text-secondary hover:text-text-main hover:bg-secondary/5'
+                        }`}
+                >
+                    <Document set="bold" primaryColor="currentColor" size={18} />
+                    Bacaan & Listening ({filteredPassages.length})
+                </button>
+            </div>
+
             {/* Search & Filters */}
-            <div className="space-y-3">
+            <div className="space-y-3" data-tutorial="bank-filters">
                 <div className="relative">
                     <div className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary">
                         <Search set="light" primaryColor="currentColor" size={20} />
@@ -855,487 +919,457 @@ export default function BankSoalPage() {
                     <input
                         type="text"
                         value={searchQuery}
-                        onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1) }}
-                        placeholder="Cari soal berdasarkan kata kunci..."
+                        onChange={(e) => { setSearchQuery(e.target.value); resetPages() }}
+                        placeholder={activeTab === 'standalone' ? 'Cari soal berdasarkan kata kunci...' : 'Cari bacaan atau soal di dalamnya...'}
                         className="w-full pl-10 pr-4 py-3 bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary"
                     />
                 </div>
-                <div className="flex flex-col lg:flex-row gap-4" data-tutorial="bank-filters">
-                    <select
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <FilterSelect
                         value={selectedSubject}
-                        onChange={(e) => { setSelectedSubject(e.target.value); setCurrentPage(1) }}
-                        className="w-full sm:w-auto px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none cursor-pointer hover:bg-secondary/10 transition-colors"
-                    >
-                        <option value="">Semua Mata Pelajaran</option>
-                        {subjects.map((s) => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                    </select>
-                    <select
+                        onChange={(v) => { setSelectedSubject(v); resetPages() }}
+                        placeholder="Semua Mata Pelajaran"
+                        ariaLabel="Filter mata pelajaran"
+                        options={subjects.map(s => ({ value: s.id, label: s.name }))}
+                    />
+                    <FilterSelect
                         value={selectedDifficulty}
-                        onChange={(e) => { setSelectedDifficulty(e.target.value); setCurrentPage(1) }}
-                        className="w-full sm:w-auto px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none cursor-pointer hover:bg-secondary/10 transition-colors"
-                    >
-                        <option value="">Semua Kesulitan</option>
-                        <option value="EASY">Mudah</option>
-                        <option value="MEDIUM">Sedang</option>
-                        <option value="HARD">Sulit</option>
-                    </select>
-                    <select
+                        onChange={(v) => { setSelectedDifficulty(v); resetPages() }}
+                        placeholder="Semua Kesulitan"
+                        ariaLabel="Filter kesulitan"
+                        options={[
+                            { value: 'EASY', label: 'Mudah' },
+                            { value: 'MEDIUM', label: 'Sedang' },
+                            { value: 'HARD', label: 'Sulit' }
+                        ]}
+                    />
+                    <FilterSelect
                         value={selectedType}
-                        onChange={(e) => { setSelectedType(e.target.value); setCurrentPage(1) }}
-                        className="w-full sm:w-auto px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none cursor-pointer hover:bg-secondary/10 transition-colors"
-                    >
-                        <option value="">Semua Tipe</option>
-                        <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
-                            <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
-                            <option value="TRUE_FALSE">Benar Salah</option>
-                            <option value="SHORT_ANSWER">Isian Singkat</option>
-                            <option value="ESSAY">Essay</option>
-                    </select>
-                    <select
+                        onChange={(v) => { setSelectedType(v); resetPages() }}
+                        placeholder="Semua Tipe"
+                        ariaLabel="Filter tipe soal"
+                        options={[
+                            { value: 'MULTIPLE_CHOICE', label: 'Pilihan Ganda' },
+                            { value: 'MULTIPLE_ANSWER', label: 'Ganda Kompleks' },
+                            { value: 'TRUE_FALSE', label: 'Benar Salah' },
+                            { value: 'SHORT_ANSWER', label: 'Isian Singkat' },
+                            { value: 'ESSAY', label: 'Essay' }
+                        ]}
+                    />
+                    <FilterSelect
                         value={selectedStatus}
-                        onChange={(e) => { setSelectedStatus(e.target.value); setCurrentPage(1) }}
-                        className="w-full sm:w-auto px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none cursor-pointer hover:bg-secondary/10 transition-colors"
-                    >
-                        <option value="">Semua Status</option>
-                        <option value="approved">✅ Approved</option>
-                        {aiReviewEnabled && <option value="ai_reviewing">🤖 AI Review</option>}
-                        {aiReviewEnabled && <option value="admin_review">⚠️ Perlu Review</option>}
-                        <option value="returned">❌ Dikembalikan</option>
-                        <option value="draft">📝 Draft</option>
-                    </select>
-                    {(filteredQuestions.length > 0 || filteredPassages.length > 0) && (
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={toggleSelectAll}
-                            className="w-full sm:w-auto"
-                        >
-                            {selectedIds.size === filteredQuestions.length && selectedPassageIds.size === filteredPassages.length && (filteredQuestions.length + filteredPassages.length) > 0 ? 'Batal Pilih Semua' : 'Pilih Semua'}
-                        </Button>
-                    )}
-                    {(searchQuery || selectedSubject || selectedDifficulty || selectedType) && (
-                        <span className="text-xs text-text-secondary">Ditemukan: {filteredQuestions.length} soal, {filteredPassages.length} passage</span>
-                    )}
+                        onChange={(v) => { setSelectedStatus(v); resetPages() }}
+                        placeholder="Semua Status"
+                        ariaLabel="Filter status soal"
+                        options={[
+                            { value: 'approved', label: '✅ Approved' },
+                            ...(aiReviewEnabled ? [
+                                { value: 'ai_reviewing', label: '🤖 AI Review' },
+                                { value: 'admin_review', label: '⚠️ Perlu Review' }
+                            ] : []),
+                            { value: 'returned', label: '❌ Dikembalikan' },
+                            { value: 'draft', label: '📝 Draft' }
+                        ]}
+                    />
                 </div>
+                {(searchQuery || selectedSubject || selectedDifficulty || selectedType || selectedStatus) && (
+                    <span className="text-xs text-text-secondary">
+                        Ditemukan: {filteredQuestions.length} soal, {filteredPassages.length} bacaan
+                    </span>
+                )}
             </div>
 
             {loading ? (
                 <div className="flex justify-center py-12">
-                    <div className="animate-spin text-3xl text-primary"><Discovery set="bold" primaryColor="currentColor" size={40} /></div>
+                    <div className="animate-spin text-primary"><Discovery set="bold" primaryColor="currentColor" size={40} /></div>
                 </div>
             ) : filteredQuestions.length === 0 && filteredPassages.length === 0 ? (
                 <EmptyState
                     icon={<div className="text-secondary"><Folder set="bold" primaryColor="currentColor" size={48} /></div>}
                     title="Bank Soal Kosong"
-                    description="Simpan soal ke bank soal saat membuat kuis dengan OCR atau AI Generate."
+                    description="Belum ada soal yang tersimpan. Tambahkan soal secara manual, atau gunakan Rapih AI untuk merapikan dan membuat soal secara otomatis."
                     action={
-                        <Link href="/dashboard/guru/kuis">
-                            <Button>Buat Kuis dengan AI</Button>
-                        </Link>
+                        <div className="flex flex-wrap justify-center gap-3">
+                            <Button onClick={openAddWizard} icon={<Plus set="bold" primaryColor="currentColor" size={18} />}>
+                                Tambah Soal Manual
+                            </Button>
+                            <Button variant="secondary" onClick={() => setShowRapihAI(true)} icon={<Discovery set="bold" primaryColor="currentColor" size={18} />}>
+                                Rapih AI
+                            </Button>
+                        </div>
                     }
                 />
-            ) : (
-                <div className="space-y-6">
-                    {/* Passages Section */}
-                    {filteredPassages.length > 0 && (
-                        <div className="space-y-4">
-                            <h3 className="text-lg font-bold text-text-main dark:text-white flex items-center gap-2">
-                                <Document set="bold" primaryColor="currentColor" size={20} />
-                                Soal dengan Bacaan ({filteredPassages.length})
-                            </h3>
-                            {filteredPassages.map((p) => (
-                                <label key={p.id} className={`block border-2 rounded-2xl overflow-hidden cursor-pointer transition-all ${selectedPassageIds.has(p.id) ? 'border-primary bg-primary/5' : 'border-teal-200 dark:border-teal-700 bg-teal-50/50 dark:bg-teal-900/20'}`}>
-                                    <div className="p-4 bg-teal-100/50 dark:bg-teal-800/30 border-b border-teal-200 dark:border-teal-700">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedPassageIds.has(p.id)}
-                                                    onChange={(e) => {
-                                                        const newSet = new Set(selectedPassageIds)
-                                                        if (e.target.checked) newSet.add(p.id)
-                                                        else newSet.delete(p.id)
-                                                        setSelectedPassageIds(newSet)
-                                                    }}
-                                                    className="w-5 h-5 rounded-md border-secondary/30 text-primary focus:ring-primary bg-secondary/10"
-                                                />
-                                                <div>
-                                                    <h4 className="font-bold text-text-main dark:text-white flex items-center gap-2">
-                                                        <Document set="bold" primaryColor="currentColor" size={16} /> {p.title || 'Bacaan Tanpa Judul'}
-                                                    </h4>
-                                                    <span className="text-xs text-teal-600 dark:text-teal-400">{p.questions?.length || 0} soal terkait</span>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                {p.subject && (
-                                                    <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-teal-500/20 text-teal-700 dark:text-teal-300">
-                                                        {p.subject.name}
-                                                    </span>
-                                                )}
-                                                <button
-                                                    onClick={(e) => { e.preventDefault(); handleEditPassage(p) }}
-                                                    className="p-2 hover:bg-teal-200 dark:hover:bg-teal-700 rounded-lg transition-colors"
-                                                    title="Edit passage"
-                                                >
-                                                    <Edit set="bold" primaryColor="currentColor" size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={(e) => { e.preventDefault(); openDeleteModal(p.id, 'passage', p.title || 'Bacaan') }}
-                                                    className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                                                    title="Hapus passage"
-                                                >
-                                                    <Delete set="bold" primaryColor="currentColor" size={16} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <p className="text-sm text-text-secondary dark:text-zinc-400 mt-2 line-clamp-3">{p.passage_text}</p>
-                                        {p.audio_url && (
-                                            <div className="mt-2 flex items-center gap-2">
-                                                <span className="px-2 py-0.5 text-xs rounded-full bg-violet-500/20 text-violet-600 dark:text-violet-400 font-medium flex-shrink-0">🎧 Listening</span>
-                                                <audio controls controlsList="nodownload" className="h-9 flex-1 min-w-0" src={p.audio_url} />
-                                            </div>
-                                        )}
-                                    </div>
-                                    {/* Questions inside passage */}
-                                    {p.questions && p.questions.length > 0 && (
-                                        <div className="p-4 space-y-3">
-                                            {p.questions.map((q, idx) => (
-                                                <div key={q.id} className="p-3 bg-white dark:bg-surface-dark rounded-xl border border-teal-200 dark:border-teal-700">
-                                                    <div className="flex items-start gap-3">
-                                                        <span className="w-6 h-6 rounded-full bg-teal-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                                            {idx + 1}
-                                                        </span>
-                                                        <div className="flex-1">
-                                                            <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                                                <span className={`px-2 py-0.5 text-xs font-bold rounded-full bg-secondary/10 text-text-main dark:text-white`}>
-                                                                    {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
-                                                                     q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
-                                                                     q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
-                                                                     q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
-                                                                </span>
-                                                                <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${getDifficultyBadge(q.difficulty)}`}>
-                                                                    {getDifficultyLabel(q.difficulty)}
-                                                                </span>
-                                                                {getSourceBadge(q.source_type, q.source_name)}
-                                                                {getStatusBadge(q.status)}
-                                                                {aiReviewEnabled && q.teacher_hots_claim && (
-                                                                    <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-200 dark:text-emerald-400">
-                                                                        🧠 HOTS
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                            {/* Admin return reason */}
-                                                            {q.status === 'returned' && q.admin_review?.notes && (
-                                                                <div className="mt-2 mb-3 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                                                                    <p className="text-[10px] font-bold text-amber-700 dark:text-amber-300 mb-0.5">📋 Alasan Admin:</p>
-                                                                    <p className="text-[10px] text-amber-600 dark:text-amber-400">{q.admin_review.notes}</p>
-                                                                </div>
-                                                            )}
-                                                            <SmartText text={q.question_text} className="text-text-main dark:text-white text-sm" />
-                                                            {['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(q.question_type) && q.options && (
-                                                                <div className="mt-2 grid grid-cols-2 gap-1 text-xs">
-                                                                    {q.options.map((opt, optIdx) => {
-                                                                        const letter = String.fromCharCode(65 + optIdx)
-                                                                        let isCorrect = false
-                                                                        if (q.question_type === 'MULTIPLE_ANSWER') {
-                                                                            try { isCorrect = JSON.parse(q.correct_answer || '[]').includes(letter) } catch {}
-                                                                        } else if (q.question_type === 'TRUE_FALSE') {
-                                                                            isCorrect = q.correct_answer?.toUpperCase() === opt.toUpperCase()
-                                                                        } else {
-                                                                            isCorrect = q.correct_answer === letter
-                                                                        }
-                                                                        return (
-                                                                            <div key={optIdx} className={`px-2 py-1 rounded ${isCorrect ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'text-text-secondary'}`}>
-                                                                                {q.question_type === 'TRUE_FALSE' ? opt : `${letter}. ${opt}`}
-                                                                            </div>
-                                                                        )
-                                                                    })}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </label>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* Standalone Questions Section */}
-                    {paginatedQuestions.length > 0 && (
-                        <div className="space-y-4">
-                            {filteredPassages.length > 0 && (
-                                <h3 className="text-lg font-bold text-text-main dark:text-white flex items-center gap-2">
-                                    <Paper set="bold" primaryColor="currentColor" size={20} /> Soal Biasa ({filteredQuestions.length})
-                                </h3>
-                            )}
-                            <div className="grid grid-cols-1 gap-4">
-                                {paginatedQuestions.map((q, idx) => (
-                                    <label
+            ) : activeTab === 'standalone' ? (
+                /* ─── TAB: SOAL SATUAN ─── */
+                paginatedQuestions.length === 0 ? (
+                    <div className="text-center py-12 text-text-secondary text-sm bg-white dark:bg-surface-dark rounded-2xl border border-secondary/20">
+                        Tidak ada soal satuan yang cocok dengan filter. Coba tab Bacaan & Listening.
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-1 gap-4">
+                            {paginatedQuestions.map((q, idx) => {
+                                const isExpanded = expandedQuestionId === q.id
+                                return (
+                                    <Card
                                         key={q.id}
-                                        className={`block bg-white dark:bg-surface-dark border rounded-2xl p-5 cursor-pointer transition-all hover:shadow-md ${selectedIds.has(q.id)
+                                        padding="p-5"
+                                        className={`transition-all hover:shadow-md ${selectionMode && selectedIds.has(q.id)
                                             ? 'border-primary bg-primary/5 dark:bg-primary/10'
-                                            : 'border-transparent hover:border-primary/30'
+                                            : 'hover:border-primary/30'
                                             }`}
                                     >
                                         <div className="flex items-start gap-4">
-                                            <div className="pt-1">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedIds.has(q.id)}
-                                                    onChange={(e) => {
-                                                        const newSet = new Set(selectedIds)
-                                                        if (e.target.checked) {
-                                                            newSet.add(q.id)
-                                                        } else {
-                                                            newSet.delete(q.id)
-                                                        }
-                                                        setSelectedIds(newSet)
-                                                    }}
-                                                    className="w-5 h-5 rounded-md border-secondary/30 text-primary focus:ring-primary bg-secondary/10"
-                                                />
-                                            </div>
+                                            {selectionMode && (
+                                                <div className="pt-1">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedIds.has(q.id)}
+                                                        onChange={() => toggleSelectQuestion(q.id)}
+                                                        aria-label={`Pilih soal nomor ${(standalonePage - 1) * ITEMS_PER_PAGE + idx + 1}`}
+                                                        className="w-5 h-5 rounded-md border-secondary/30 text-primary focus:ring-primary bg-secondary/10 cursor-pointer"
+                                                    />
+                                                </div>
+                                            )}
                                             <div className="w-8 h-8 rounded-lg bg-secondary/10 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0">
-                                                {(currentPage - 1) * ITEMS_PER_PAGE + idx + 1}
+                                                {(standalonePage - 1) * ITEMS_PER_PAGE + idx + 1}
                                             </div>
-                                            <div className="flex-1">
+                                            <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2 mb-3 flex-wrap">
-                                                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full border bg-secondary/10 text-text-main border-secondary/20 dark:text-white`}>
-                                                        {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 
-                                                         q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : 
-                                                         q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
-                                                         q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
-                                                    </span>
-                                                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full border ${getDifficultyBadge(q.difficulty)}`}>
-                                                        {getDifficultyLabel(q.difficulty)}
-                                                    </span>
-                                                    {getSourceBadge(q.source_type, q.source_name)}
-                                                    {getStatusBadge(q.status)}
+                                                    <QuestionTypeBadge type={q.question_type} />
+                                                    <DifficultyBadge difficulty={q.difficulty} />
+                                                    <SourceBadge source={q.source_type} sourceName={q.source_name} />
+                                                    <QuestionStatusBadge status={q.status} aiReviewEnabled={aiReviewEnabled} />
+                                                    {aiReviewEnabled && q.teacher_hots_claim && <HotsBadge />}
                                                     {q.subject && (
-                                                        <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-secondary/10 text-text-secondary border border-secondary/20">
+                                                        <span className="inline-flex items-center px-2 py-0.5 text-xs rounded-full font-medium border bg-secondary/10 text-text-secondary border-secondary/20">
                                                             {q.subject.name}
                                                         </span>
                                                     )}
                                                 </div>
-                                                {/* Admin return reason */}
-                                                {q.status === 'returned' && q.admin_review?.notes && (
-                                                    <div className="mt-2 p-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                                                        <p className="text-xs font-bold text-amber-700 dark:text-amber-300 mb-0.5">📋 Alasan Pengembalian dari Admin:</p>
-                                                        <p className="text-xs text-amber-600 dark:text-amber-400">{q.admin_review.notes}</p>
-                                                    </div>
-                                                )}
-                                                <SmartText text={q.question_text} className="text-text-main dark:text-white mb-4 text-lg font-medium leading-relaxed" />
-                                                {['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(q.question_type) && q.options && (
-                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                                                        {q.options.map((opt, optIdx) => {
-                                                            const letter = String.fromCharCode(65 + optIdx)
-                                                            let isCorrect = false
-                                                            if (q.question_type === 'MULTIPLE_ANSWER') {
-                                                                try { isCorrect = JSON.parse(q.correct_answer || '[]').includes(letter) } catch {}
-                                                            } else if (q.question_type === 'TRUE_FALSE') {
-                                                                isCorrect = q.correct_answer?.toUpperCase() === opt.toUpperCase()
-                                                            } else {
-                                                                isCorrect = q.correct_answer === letter
-                                                            }
-                                                            return (
-                                                                <div key={optIdx} className={`px-4 py-3 rounded-xl border flex items-center gap-3 ${isCorrect ? 'bg-green-500/5 border-green-200 text-green-700 dark:text-green-400 dark:border-green-500/20' : 'bg-secondary/5 border-transparent text-text-secondary'}`}>
-                                                                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isCorrect ? 'bg-green-500 text-white' : 'bg-secondary/20 text-text-secondary'}`}>
-                                                                        {q.question_type === 'TRUE_FALSE' ? (opt === 'Benar' ? '✓' : '✗') : letter}
-                                                                    </span>
-                                                                    {q.question_type === 'TRUE_FALSE' ? opt : opt}
-                                                                </div>
-                                                            )
-                                                        })}
+                                                <button
+                                                    onClick={() => setExpandedQuestionId(isExpanded ? null : q.id)}
+                                                    className="w-full text-left cursor-pointer"
+                                                    aria-expanded={isExpanded}
+                                                >
+                                                    <SmartText
+                                                        text={q.question_text}
+                                                        className={`text-text-main dark:text-white font-medium leading-relaxed ${isExpanded ? 'text-lg' : 'line-clamp-2'}`}
+                                                    />
+                                                </button>
+
+                                                {isExpanded && (
+                                                    <div className="mt-4 pt-4 border-t border-secondary/20 space-y-4">
+                                                        {q.image_url && (
+                                                            <img src={q.image_url} alt="Gambar soal" className="max-h-56 rounded-xl border border-secondary/20" />
+                                                        )}
+                                                        <AnswerOptionsView questionType={q.question_type} options={q.options} correctAnswer={q.correct_answer} />
+                                                        <TextAnswerView questionType={q.question_type} correctAnswer={q.correct_answer} />
+                                                        {q.status === 'returned' && q.admin_review?.notes && (
+                                                            <div className="p-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                                                                <p className="text-xs font-bold text-amber-700 dark:text-amber-300 mb-0.5">📋 Alasan Pengembalian dari Admin:</p>
+                                                                <p className="text-xs text-amber-600 dark:text-amber-400">{q.admin_review.notes}</p>
+                                                            </div>
+                                                        )}
+                                                        <AIReviewSummary review={q.ai_review} />
+                                                        <div className="flex flex-wrap gap-2 pt-1">
+                                                            <Button
+                                                                size="sm"
+                                                                variant="secondary"
+                                                                aria-label="Preview soal"
+                                                                icon={<Show set="bold" primaryColor="currentColor" size={16} />}
+                                                                onClick={() => setPreviewTarget({
+                                                                    question_text: q.question_text,
+                                                                    question_type: q.question_type,
+                                                                    options: q.options,
+                                                                    correct_answer: q.correct_answer,
+                                                                    difficulty: q.difficulty,
+                                                                    image_url: q.image_url,
+                                                                    ai_review: q.ai_review
+                                                                })}
+                                                            >
+                                                                Preview
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="secondary"
+                                                                aria-label="Duplikat soal"
+                                                                icon={<Copy className="w-4 h-4" />}
+                                                                onClick={() => handleDuplicate(q)}
+                                                                disabled={saving}
+                                                            >
+                                                                Duplikat
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="secondary"
+                                                                aria-label="Edit soal"
+                                                                icon={<Edit set="bold" primaryColor="currentColor" size={16} />}
+                                                                onClick={() => handleEditQuestion(q)}
+                                                            >
+                                                                Edit
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="danger"
+                                                                aria-label="Hapus soal"
+                                                                icon={<Delete set="bold" primaryColor="currentColor" size={16} />}
+                                                                onClick={() => openDeleteModal(q.id, 'question', q.question_text.replace(/<[^>]*>/g, '').substring(0, 50))}
+                                                            >
+                                                                Hapus
+                                                            </Button>
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>
-                                            <div className="flex flex-col items-center gap-1">
-                                                <Button
-                                                    variant="secondary"
-                                                    size="sm"
-                                                    onClick={(e: any) => { e.preventDefault(); handleEditQuestion(q) }}
-                                                    className="text-blue-500 hover:text-blue-600 hover:bg-blue-50"
-                                                    title="Edit"
+                                            <button
+                                                onClick={() => setExpandedQuestionId(isExpanded ? null : q.id)}
+                                                aria-label={isExpanded ? 'Tutup detail soal' : 'Buka detail soal'}
+                                                aria-expanded={isExpanded}
+                                                className="p-2 rounded-lg hover:bg-secondary/10 text-text-secondary transition-colors flex-shrink-0"
+                                            >
+                                                {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                                            </button>
+                                        </div>
+                                    </Card>
+                                )
+                            })}
+                        </div>
+                        <Pagination
+                            currentPage={standalonePage}
+                            totalItems={filteredQuestions.length}
+                            itemsPerPage={ITEMS_PER_PAGE}
+                            onPageChange={setStandalonePage}
+                            itemLabel="soal"
+                        />
+                    </div>
+                )
+            ) : (
+                /* ─── TAB: BACAAN & LISTENING ─── */
+                paginatedPassages.length === 0 ? (
+                    <div className="text-center py-12 text-text-secondary text-sm bg-white dark:bg-surface-dark rounded-2xl border border-secondary/20">
+                        Tidak ada bacaan yang cocok dengan filter. Coba tab Soal Satuan.
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        {paginatedPassages.map((p) => {
+                            const isExpanded = expandedPassageId === p.id
+                            return (
+                                <div
+                                    key={p.id}
+                                    className={`border-2 rounded-2xl overflow-hidden transition-all ${selectionMode && selectedPassageIds.has(p.id)
+                                        ? 'border-primary bg-primary/5'
+                                        : 'border-primary/20 dark:border-primary/10 bg-primary/[0.02]'
+                                        }`}
+                                >
+                                    <div className="p-4 bg-primary/5 dark:bg-primary/10 border-b border-primary/20 dark:border-primary/10">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                {selectionMode && (
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedPassageIds.has(p.id)}
+                                                        onChange={() => toggleSelectPassage(p.id)}
+                                                        aria-label={`Pilih bacaan ${p.title || 'tanpa judul'}`}
+                                                        className="w-5 h-5 rounded-md border-secondary/30 text-primary focus:ring-primary bg-secondary/10 cursor-pointer flex-shrink-0"
+                                                    />
+                                                )}
+                                                <div className="min-w-0">
+                                                    <h4 className="font-bold text-text-main dark:text-white flex items-center gap-2 flex-wrap">
+                                                        <Document set="bold" primaryColor="currentColor" size={16} />
+                                                        <span className="truncate">{p.title || 'Bacaan Tanpa Judul'}</span>
+                                                        {p.audio_url && (
+                                                            <span className="px-2 py-0.5 text-xs rounded-full bg-violet-500/20 text-violet-600 dark:text-violet-400 font-medium flex-shrink-0">🎧 Listening</span>
+                                                        )}
+                                                    </h4>
+                                                    <span className="text-xs text-primary">{p.questions?.length || 0} soal terkait</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 flex-shrink-0">
+                                                {p.subject && (
+                                                    <span className="hidden sm:inline-flex px-2.5 py-1 text-xs font-bold rounded-full bg-primary/10 text-primary border border-primary/20">
+                                                        {p.subject.name}
+                                                    </span>
+                                                )}
+                                                <button
+                                                    onClick={() => setExpandedPassageId(isExpanded ? null : p.id)}
+                                                    aria-label={isExpanded ? 'Tutup detail bacaan' : 'Buka detail bacaan'}
+                                                    aria-expanded={isExpanded}
+                                                    className="p-2 rounded-lg hover:bg-primary/10 text-text-secondary transition-colors"
                                                 >
-                                                    <Edit set="bold" primaryColor="currentColor" size={16} />
+                                                    {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <p className={`text-sm text-text-secondary mt-2 whitespace-pre-wrap ${isExpanded ? '' : 'line-clamp-3'}`}>{p.passage_text}</p>
+                                        {p.audio_url && (
+                                            <audio controls controlsList="nodownload" className="mt-2 h-9 w-full" src={p.audio_url} />
+                                        )}
+                                    </div>
+
+                                    {isExpanded && (
+                                        <div className="p-4 space-y-3">
+                                            {p.questions && p.questions.length > 0 && p.questions.map((pq, idx) => (
+                                                <div key={pq.id} className="p-3 bg-white dark:bg-surface-dark rounded-xl border border-primary/20 dark:border-primary/10">
+                                                    <div className="flex items-start gap-3">
+                                                        <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                                            {idx + 1}
+                                                        </span>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                                                <QuestionTypeBadge type={pq.question_type} />
+                                                                <DifficultyBadge difficulty={pq.difficulty} />
+                                                                <SourceBadge source={pq.source_type} sourceName={pq.source_name} />
+                                                                <QuestionStatusBadge status={pq.status} aiReviewEnabled={aiReviewEnabled} />
+                                                                {aiReviewEnabled && pq.teacher_hots_claim && <HotsBadge />}
+                                                            </div>
+                                                            <SmartText text={pq.question_text} className="text-text-main dark:text-white text-sm" />
+                                                            <div className="mt-2">
+                                                                <AnswerOptionsView questionType={pq.question_type} options={pq.options} correctAnswer={pq.correct_answer} />
+                                                                <TextAnswerView questionType={pq.question_type} correctAnswer={pq.correct_answer} />
+                                                            </div>
+                                                            {pq.status === 'returned' && pq.admin_review?.notes && (
+                                                                <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                                                                    <p className="text-[10px] font-bold text-amber-700 dark:text-amber-300 mb-0.5">📋 Alasan Admin:</p>
+                                                                    <p className="text-[10px] text-amber-600 dark:text-amber-400">{pq.admin_review.notes}</p>
+                                                                </div>
+                                                            )}
+                                                            <div className="mt-2">
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="ghost"
+                                                                    aria-label={`Preview soal ${idx + 1} bacaan`}
+                                                                    icon={<Show set="bold" primaryColor="currentColor" size={16} />}
+                                                                    onClick={() => setPreviewTarget({
+                                                                        question_text: pq.question_text,
+                                                                        question_type: pq.question_type,
+                                                                        options: pq.options,
+                                                                        correct_answer: pq.correct_answer,
+                                                                        difficulty: pq.difficulty,
+                                                                        ai_review: pq.ai_review,
+                                                                        passage: { title: p.title, passage_text: p.passage_text, audio_url: p.audio_url }
+                                                                    })}
+                                                                >
+                                                                    Preview
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            <div className="flex flex-wrap gap-2 pt-1">
+                                                <Button
+                                                    size="sm"
+                                                    variant="secondary"
+                                                    aria-label="Edit bacaan"
+                                                    icon={<Edit set="bold" primaryColor="currentColor" size={16} />}
+                                                    onClick={() => handleEditPassage(p)}
+                                                >
+                                                    Edit Bacaan
                                                 </Button>
                                                 <Button
-                                                    variant="secondary"
                                                     size="sm"
-                                                    onClick={(e: any) => { e.preventDefault(); openDeleteModal(q.id, 'question', q.question_text.substring(0, 50)) }}
-                                                    className="text-red-500 hover:text-red-600 hover:bg-red-50"
-                                                    title="Hapus"
+                                                    variant="danger"
+                                                    aria-label="Hapus bacaan"
+                                                    icon={<Delete set="bold" primaryColor="currentColor" size={16} />}
+                                                    onClick={() => openDeleteModal(p.id, 'passage', p.title || 'Bacaan')}
                                                 >
-                                                    <Delete set="bold" primaryColor="currentColor" size={20} />
+                                                    Hapus
                                                 </Button>
                                             </div>
                                         </div>
-                                    </label>
-                                ))}
-                            </div>
-
-                            {/* Pagination */}
-                            {totalPages > 1 && (
-                                <div className="flex items-center justify-center gap-4 py-4">
-                                    <button
-                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                        disabled={currentPage === 1}
-                                        className="p-2 rounded-lg hover:bg-secondary/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                    >
-                                        <ChevronLeft className="w-5 h-5" />
-                                    </button>
-                                    <span className="text-sm text-text-secondary">
-                                        Halaman <span className="font-bold text-text-main dark:text-white">{currentPage}</span> dari <span className="font-bold text-text-main dark:text-white">{totalPages}</span>
-                                    </span>
-                                    <button
-                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                        disabled={currentPage === totalPages}
-                                        className="p-2 rounded-lg hover:bg-secondary/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                    >
-                                        <ChevronRight className="w-5 h-5" />
-                                    </button>
+                                    )}
                                 </div>
-                            )}
-                        </div>
-                    )}
+                            )
+                        })}
+                        <Pagination
+                            currentPage={passagePage}
+                            totalItems={filteredPassages.length}
+                            itemsPerPage={ITEMS_PER_PAGE}
+                            onPageChange={setPassagePage}
+                            itemLabel="bacaan"
+                        />
+                    </div>
+                )
+            )}
+
+            {/* Bulk bar melayang (mode seleksi) */}
+            {selectionMode && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-white dark:bg-surface-dark border border-secondary/20 rounded-2xl shadow-2xl shadow-primary/20 animate-in fade-in slide-in-from-bottom-3 duration-300">
+                    <span className="text-sm font-bold text-text-main dark:text-white whitespace-nowrap">
+                        {totalSelected} dipilih
+                    </span>
+                    <Button size="sm" variant="ghost" onClick={toggleSelectAll}>
+                        Pilih Semua
+                    </Button>
+                    <Button
+                        size="sm"
+                        onClick={() => setShowExportConfirm(true)}
+                        disabled={totalSelected === 0}
+                        icon={<Download set="bold" primaryColor="currentColor" size={16} />}
+                    >
+                        Export Word
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={toggleSelectionMode}>
+                        Batal
+                    </Button>
                 </div>
             )}
 
-            {/* Add Question Modal */}
+            {/* ─── Wizard Tambah/Edit Soal ─── */}
             <Modal
-                open={showAddModal}
-                onClose={handleCloseModal}
-                title="Tambah Soal"
+                open={showWizard}
+                onClose={handleCloseWizard}
+                title={editingQuestionId ? 'Edit Soal' : 'Tambah Soal'}
                 maxWidth="2xl"
             >
-                <div className="space-y-5">
-                    {/* Type Selection */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <label className={`flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-colors ${questionType === 'standalone' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-secondary/20 hover:border-blue-300'}`}>
-                            <input
-                                type="radio"
-                                name="questionType"
-                                value="standalone"
-                                checked={questionType === 'standalone'}
-                                onChange={() => setQuestionType('standalone')}
-                                className="w-5 h-5"
-                            />
-                            <div>
-                                <p className="font-bold text-text-main dark:text-white">📝 Soal Biasa</p>
-                                <p className="text-xs text-text-secondary">Soal standalone</p>
-                            </div>
-                        </label>
+                <div className="space-y-6">
+                    <Stepper steps={WIZARD_STEPS} currentStep={wizardStep} />
 
-                        <label className={`flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-colors ${questionType === 'passage' ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20' : 'border-secondary/20 hover:border-teal-300'}`}>
-                            <input
-                                type="radio"
-                                name="questionType"
-                                value="passage"
-                                checked={questionType === 'passage'}
-                                onChange={() => setQuestionType('passage')}
-                                className="w-5 h-5"
-                            />
-                            <div>
-                                <p className="font-bold text-text-main dark:text-white">📖 Soal dengan Bacaan</p>
-                                <p className="text-xs text-text-secondary">Passage + multiple soal</p>
-                            </div>
-                        </label>
-                    </div>
-
-                    {/* Image Upload */}
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Gambar Soal</label>
-                        {questionForm.image_url ? (
-                            <div className="relative inline-block">
-                                <img src={questionForm.image_url} alt="Preview" className="max-h-40 rounded-xl border border-secondary/20" />
-                                <button
-                                    onClick={() => setQuestionForm({ ...questionForm, image_url: '' })}
-                                    className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
-                                >✕</button>
-                            </div>
-                        ) : (
-                            <label className="flex items-center gap-2 px-4 py-3 bg-secondary/5 border-2 border-dashed border-secondary/30 rounded-xl cursor-pointer hover:border-primary/50 transition-colors">
-                                <svg className="w-5 h-5 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                                <span className="text-sm text-text-secondary">{uploading ? 'Mengupload...' : 'Upload Gambar (maks 5MB)'}</span>
-                                <input
-                                    type="file"
-                                    accept="image/*"
-                                    className="hidden"
-                                    disabled={uploading}
-                                    onChange={async (e) => {
-                                        const file = e.target.files?.[0]
-                                        if (file) {
-                                            const url = await handleImageUpload(file)
-                                            if (url) setQuestionForm({ ...questionForm, image_url: url })
-                                        }
-                                    }}
-                                />
-                            </label>
-                        )}
-                    </div>
-
-                    {/* STANDALONE FORM */}
-                    {questionType === 'standalone' && (
+                    {/* Langkah 1: Pilih tipe soal */}
+                    {wizardStep === 0 && (
                         <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Soal</label>
-                                <select
-                                    value={questionForm.question_type}
-                                    onChange={(e) => {
-                                        const newType = e.target.value
-                                        const prevType = questionForm.question_type
-                                        let newOpts: string[] = []
-                                        if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)) {
-                                            newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && questionForm.options?.length
-                                                ? questionForm.options
-                                                : ['', '', '', '']
-                                        } else if (newType === 'TRUE_FALSE') {
-                                            newOpts = ['Benar', 'Salah']
-                                        }
-                                        setQuestionForm({ ...questionForm, question_type: newType, options: newOpts, correct_answer: '' })
-                                    }}
-                                    className="w-full px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white"
-                                >
-                                    <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
-                                    <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
-                                    <option value="TRUE_FALSE">Benar Salah</option>
-                                    <option value="SHORT_ANSWER">Isian Singkat</option>
-                                    <option value="ESSAY">Essay</option>
-                                </select>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Mata Pelajaran</label>
-                                    <select
-                                        value={questionForm.subject_id}
-                                        onChange={(e) => setQuestionForm({ ...questionForm, subject_id: e.target.value })}
-                                        className="w-full px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white"
+                            <p className="text-sm text-text-secondary text-center">Pilih tipe soal yang ingin {editingQuestionId ? 'digunakan' : 'dibuat'}</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {QUESTION_TYPE_CARDS.map((t) => (
+                                    <button
+                                        key={t.value}
+                                        onClick={() => handleWizardTypeChange(t.value)}
+                                        className={`flex items-center gap-3 p-4 border-2 rounded-xl text-left transition-all cursor-pointer ${questionForm.question_type === t.value
+                                            ? 'border-primary bg-primary/5 dark:bg-primary/10'
+                                            : 'border-secondary/20 hover:border-primary/40'
+                                            }`}
                                     >
-                                        <option value="">Pilih Mapel</option>
-                                        {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kesulitan</label>
-                                    <select
-                                        value={questionForm.difficulty}
-                                        onChange={(e) => setQuestionForm({ ...questionForm, difficulty: e.target.value as any })}
-                                        className="w-full px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white"
+                                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${questionForm.question_type === t.value ? 'bg-primary text-white' : 'bg-secondary/10 text-primary'}`}>
+                                            {t.icon}
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-text-main dark:text-white">{t.label}</p>
+                                            <p className="text-xs text-text-secondary">{t.desc}</p>
+                                        </div>
+                                    </button>
+                                ))}
+                                {!editingQuestionId && (
+                                    <button
+                                        onClick={() => { handleCloseWizard(); openAddPassageModal() }}
+                                        className="flex items-center gap-3 p-4 border-2 border-dashed border-violet-300 dark:border-violet-700 rounded-xl text-left transition-all hover:bg-violet-50 dark:hover:bg-violet-900/20 cursor-pointer"
                                     >
-                                        <option value="EASY">Mudah</option>
-                                        <option value="MEDIUM">Sedang</option>
-                                        <option value="HARD">Sulit</option>
-                                    </select>
-                                </div>
+                                        <div className="w-12 h-12 rounded-xl bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-300 flex items-center justify-center flex-shrink-0">
+                                            <Voice set="bold" primaryColor="currentColor" size={28} />
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-text-main dark:text-white">Bacaan / Listening</p>
+                                            <p className="text-xs text-text-secondary">Passage + beberapa soal (bisa dengan audio)</p>
+                                        </div>
+                                    </button>
+                                )}
                             </div>
+                        </div>
+                    )}
 
+                    {/* Langkah 2: Isi soal */}
+                    {wizardStep === 1 && (
+                        <div className="space-y-4">
                             <div>
                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pertanyaan *</label>
                                 <RichTextEditor
@@ -1344,615 +1378,359 @@ export default function BankSoalPage() {
                                     placeholder="Tulis soal..."
                                 />
                             </div>
-
-                            <QuestionOptionsEditor
-                                questionType={questionForm.question_type}
-                                options={questionForm.options}
-                                correctAnswer={questionForm.correct_answer}
-                                onChange={(opts, correct) => setQuestionForm({ ...questionForm, options: opts || [], correct_answer: correct || '' })}
-                            />
-
-
-                            {/* HOTS Claim Toggle */}
-                            {aiReviewEnabled && (
-                                <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl">
-                                    <label className="relative inline-flex items-center cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={questionForm.teacher_hots_claim}
-                                            onChange={e => setQuestionForm({ ...questionForm, teacher_hots_claim: e.target.checked })}
-                                            className="sr-only peer"
-                                        />
-                                        <div className="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                                    </label>
-                                    <div>
-                                        <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">🧠 Klaim HOTS</p>
-                                        <p className="text-xs text-emerald-600 dark:text-emerald-400">Tandai soal ini sebagai Higher-Order Thinking</p>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="flex gap-3 pt-4">
-                                <Button variant="secondary" onClick={handleCloseModal} className="flex-1">Batal</Button>
-                                <Button
-                                    onClick={handleSubmitStandalone}
-                                    disabled={saving || !questionForm.question_text.trim()}
-                                    loading={saving}
-                                    className="flex-1"
-                                >
-                                    {saving ? 'Menyimpan...' : 'Tambah Soal'}
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* PASSAGE FORM */}
-                    {questionType === 'passage' && (
-                        <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Bacaan (opsional)</label>
-                                    <input
-                                        type="text"
-                                        value={passageForm.title}
-                                        onChange={(e) => setPassageForm({ ...passageForm, title: e.target.value })}
-                                        placeholder="Contoh: Dialog di Toko"
-                                        className="w-full px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white"
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Gambar Soal (opsional)</label>
+                                <div className="flex items-center gap-3">
+                                    <QuestionImageUpload
+                                        imageUrl={questionForm.image_url || null}
+                                        onImageChange={(url) => setQuestionForm({ ...questionForm, image_url: url || '' })}
                                     />
+                                    {!questionForm.image_url && (
+                                        <span className="text-xs text-text-secondary">Tambahkan gambar pendukung (maks 5MB)</span>
+                                    )}
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Mata Pelajaran</label>
-                                    <select
-                                        value={passageForm.subject_id}
-                                        onChange={(e) => setPassageForm({ ...passageForm, subject_id: e.target.value })}
-                                        className="w-full px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white"
-                                    >
-                                        <option value="">Pilih Mapel (opsional)</option>
-                                        {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Teks Bacaan *</label>
-                                <textarea
-                                    value={passageForm.passage_text}
-                                    onChange={(e) => setPassageForm({ ...passageForm, passage_text: e.target.value })}
-                                    rows={6}
-                                    placeholder="Masukkan teks bacaan/dialog..."
-                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white resize-none"
-                                />
-                            </div>
-
-                            {/* Audio Upload */}
-                            <div>
-                                <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-2">🎧 Audio Listening (Opsional)</label>
-                                {passageForm.audio_url ? (
-                                    <div className="p-3 bg-violet-50 dark:bg-violet-900/20 border border-violet-300 dark:border-violet-700 rounded-xl space-y-2">
-                                        <audio controls controlsList="nodownload" className="w-full" src={passageForm.audio_url} />
-                                        <button onClick={() => setPassageForm({ ...passageForm, audio_url: '' })} className="text-sm text-red-500 hover:text-red-700 font-medium">✕ Hapus Audio</button>
-                                    </div>
-                                ) : (
-                                    <div className="relative">
-                                        <input type="file" accept="audio/*" onChange={async (e) => {
-                                            const file = e.target.files?.[0]
-                                            if (!file) return
-                                            if (file.size > 25 * 1024 * 1024) { showToast('Maksimal ukuran audio 25MB.'); return }
-                                            setUploadingAudio(true)
-                                            try {
-                                                const fd = new FormData(); fd.append('file', file)
-                                                const res = await fetch('/api/audio/upload', { method: 'POST', body: fd })
-                                                if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Upload gagal') }
-                                                const { url } = await res.json()
-                                                setPassageForm({ ...passageForm, audio_url: url })
-                                            } catch (err: any) { showToast(err.message || 'Gagal upload audio') }
-                                            finally { setUploadingAudio(false); e.target.value = '' }
-                                        }} className="hidden" id="bank-passage-audio" disabled={uploadingAudio} />
-                                        <label htmlFor="bank-passage-audio" className={`flex items-center justify-center gap-2 w-full py-3 border-2 border-dashed border-violet-300 dark:border-violet-700 rounded-xl text-sm font-medium cursor-pointer transition-colors ${uploadingAudio ? 'opacity-50 cursor-wait' : 'text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20'}`}>
-                                            {uploadingAudio ? '⏳ Mengupload...' : '🎵 Upload Audio (MP3, WAV, M4A, OGG — maks 25MB)'}
-                                        </label>
-                                    </div>
+                                {questionForm.image_url && (
+                                    <img src={questionForm.image_url} alt="Preview gambar soal" className="mt-2 max-h-40 rounded-xl border border-secondary/20" />
                                 )}
                             </div>
-
-                            <div className="border-t pt-4">
-                                <div className="flex items-center justify-between mb-3">
-                                    <label className="text-sm font-bold text-text-main dark:text-white">Soal-Soal ({passageForm.questions.length})</label>
-                                    <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        onClick={handleAddPassageQuestion}
-                                        icon={<Plus set="bold" primaryColor="currentColor" size={16} />}
-                                    >
-                                        Tambah Soal
-                                    </Button>
-                                </div>
-
-                                <div className="space-y-4">
-                                    {passageForm.questions.map((pq, idx) => (
-                                        <div key={idx} className="p-4 bg-secondary/5 rounded-xl border border-secondary/20">
-                                            <div className="flex items-center justify-between mb-3">
-                                                <span className="text-sm font-bold text-text-main dark:text-white">Soal {idx + 1}</span>
-                                                {passageForm.questions.length > 1 && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleRemovePassageQuestion(idx)}
-                                                        className="p-1 text-red-500 hover:bg-red-50 rounded"
-                                                    >
-                                                        <Delete set="bold" primaryColor="currentColor" size={16} />
-                                                    </button>
-                                                )}
-                                            </div>
-
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
-                                                <select
-                                                    value={pq.question_type}
-                                                    onChange={(e) => {
-                                                        const newType = e.target.value
-                                                        const prevType = pq.question_type
-                                                        const newQuestions = [...passageForm.questions]
-                                                        let newOpts: string[] = []
-                                                        if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)) {
-                                                            newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && pq.options?.length
-                                                                ? pq.options
-                                                                : ['', '', '', '']
-                                                        } else if (newType === 'TRUE_FALSE') {
-                                                            newOpts = ['Benar', 'Salah']
-                                                        }
-                                                        newQuestions[idx] = { ...newQuestions[idx], question_type: newType as any, options: newOpts, correct_answer: '' }
-                                                        setPassageForm({ ...passageForm, questions: newQuestions })
-                                                    }}
-                                                    className="px-3 py-2 bg-white dark:bg-surface-dark border border-secondary/20 rounded-lg text-sm"
-                                                >
-                                                    <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
-                            <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
-                            <option value="TRUE_FALSE">Benar Salah</option>
-                            <option value="SHORT_ANSWER">Isian Singkat</option>
-                            <option value="ESSAY">Essay</option>
-                                                </select>
-                                                <select
-                                                    value={pq.difficulty}
-                                                    onChange={(e) => {
-                                                        const newQuestions = [...passageForm.questions]
-                                                        newQuestions[idx].difficulty = e.target.value as any
-                                                        setPassageForm({ ...passageForm, questions: newQuestions })
-                                                    }}
-                                                    className="px-3 py-2 bg-white dark:bg-surface-dark border border-secondary/20 rounded-lg text-sm"
-                                                >
-                                                    <option value="EASY">Mudah</option>
-                                                    <option value="MEDIUM">Sedang</option>
-                                                    <option value="HARD">Sulit</option>
-                                                </select>
-                                            </div>
-
-                                            <RichTextEditor
-                                                value={pq.question_text}
-                                                onChange={(val) => {
-                                                    const newQuestions = [...passageForm.questions]
-                                                    newQuestions[idx].question_text = val
-                                                    setPassageForm({ ...passageForm, questions: newQuestions })
-                                                }}
-                                                placeholder="Tulis pertanyaan..."
-                                            />
-
-                                            <QuestionOptionsEditor
-                                                questionType={pq.question_type}
-                                                options={pq.options}
-                                                correctAnswer={pq.correct_answer}
-                                                onChange={(opts, correct) => {
-                                                    const newQuestions = [...passageForm.questions]
-                                                    newQuestions[idx].options = opts || []
-                                                    newQuestions[idx].correct_answer = correct || ''
-                                                    setPassageForm({ ...passageForm, questions: newQuestions })
-                                                }}
-                                            />
-
-                                            {/* HOTS Claim Toggle */}
-                                            {aiReviewEnabled && (
-                                                <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl mt-2">
-                                                    <label className="relative inline-flex items-center cursor-pointer">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={pq.teacher_hots_claim || false}
-                                                            onChange={e => {
-                                                                const newQuestions = [...passageForm.questions]
-                                                                newQuestions[idx] = { ...newQuestions[idx], teacher_hots_claim: e.target.checked }
-                                                                setPassageForm({ ...passageForm, questions: newQuestions })
-                                                            }}
-                                                            className="sr-only peer"
-                                                        />
-                                                        <div className="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                                                    </label>
-                                                    <div>
-                                                        <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">🧠 Klaim HOTS</p>
-                                                        <p className="text-xs text-emerald-600 dark:text-emerald-400">Tandai sebagai Higher-Order Thinking</p>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="flex gap-3 pt-4 border-t">
-                                <Button variant="secondary" onClick={handleCloseModal} className="flex-1">Batal</Button>
-                                <Button
-                                    onClick={handleSubmitPassage}
-                                    disabled={saving || (!passageForm.passage_text.trim() && !passageForm.audio_url)}
-                                    loading={saving}
-                                    className="flex-1 bg-teal-500 hover:bg-teal-600"
-                                >
-                                    {saving ? 'Menyimpan...' : 'Simpan Passage'}
-                                </Button>
-                            </div>
                         </div>
                     )}
-                </div>
-            </Modal>
 
-            {/* Export Confirmation Modal */}
-            <Modal
-                open={showExportConfirm}
-                onClose={() => setShowExportConfirm(false)}
-                title="Export ke Word"
-                maxWidth="sm"
-            >
-                <div className="text-center py-4">
-                    <div className="w-20 h-20 bg-blue-500/10 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                    </div>
-                    <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Konfirmasi Export</h3>
-                    <p className="text-text-secondary mb-8">
-                        Kamu akan mengexport <span className="text-primary font-bold">{selectedIds.size} soal{selectedPassageIds.size > 0 ? ` + ${selectedPassageIds.size} passage` : ''}</span> terpilih ke dalam format Microsoft Word (.doc).
-                    </p>
-                    <div className="flex gap-3">
-                        <Button variant="secondary" onClick={() => setShowExportConfirm(false)} className="flex-1">
-                            Batal
-                        </Button>
-                        <Button onClick={handleExport} className="flex-1">
-                            Ya, Export Sekarang
-                        </Button>
-                    </div>
-                </div>
-            </Modal>
-
-            {/* Edit Question Modal */}
-            <Modal
-                open={showEditQuestionModal}
-                onClose={() => setShowEditQuestionModal(false)}
-                title="Edit Soal"
-                maxWidth="xl"
-            >
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Tipe Soal</label>
-                        <select
-                            value={editQuestionForm.question_type}
-                            onChange={(e) => {
-                                const newType = e.target.value
-                                const prevType = editQuestionForm.question_type
-                                let newOpts: string[] = []
-                                if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)) {
-                                    // Keep existing options only if coming from MC/GK
-                                    newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && editQuestionForm.options?.length
-                                        ? editQuestionForm.options
-                                        : ['', '', '', '']
-                                } else if (newType === 'TRUE_FALSE') {
-                                    newOpts = ['Benar', 'Salah']
-                                }
-                                setEditQuestionForm({ ...editQuestionForm, question_type: newType, options: newOpts, correct_answer: '' })
-                            }}
-                            className="w-full p-3 border border-secondary/30 rounded-xl bg-secondary/10 text-text-main"
-                        >
-                            <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
-                            <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
-                            <option value="TRUE_FALSE">Benar Salah</option>
-                            <option value="SHORT_ANSWER">Isian Singkat</option>
-                            <option value="ESSAY">Essay</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Mata Pelajaran</label>
-                        <select
-                            value={editQuestionForm.subject_id}
-                            onChange={(e) => setEditQuestionForm({ ...editQuestionForm, subject_id: e.target.value })}
-                            className="w-full p-3 border border-secondary/30 rounded-xl bg-secondary/10 text-text-main"
-                        >
-                            <option value="">Pilih Mata Pelajaran</option>
-                            {subjects.map((s) => (
-                                <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Kesulitan</label>
-                        <select
-                            value={editQuestionForm.difficulty}
-                            onChange={(e) => setEditQuestionForm({ ...editQuestionForm, difficulty: e.target.value as 'EASY' | 'MEDIUM' | 'HARD' })}
-                            className="w-full p-3 border border-secondary/30 rounded-xl bg-secondary/10 text-text-main"
-                        >
-                            <option value="EASY">Mudah</option>
-                            <option value="MEDIUM">Sedang</option>
-                            <option value="HARD">Sulit</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Pertanyaan</label>
-                        <RichTextEditor
-                            value={editQuestionForm.question_text}
-                            onChange={(val) => setEditQuestionForm({ ...editQuestionForm, question_text: val })}
-                            placeholder="Tulis pertanyaan..."
+                    {/* Langkah 3: Jawaban */}
+                    {wizardStep === 2 && (
+                        <QuestionOptionsEditor
+                            questionType={questionForm.question_type}
+                            options={questionForm.options}
+                            correctAnswer={questionForm.correct_answer}
+                            onChange={(opts, correct) => setQuestionForm({ ...questionForm, options: opts || [], correct_answer: correct || '' })}
                         />
-                    </div>
-                    <QuestionOptionsEditor
-                        questionType={editQuestionForm.question_type}
-                        options={editQuestionForm.options}
-                        correctAnswer={editQuestionForm.correct_answer}
-                        onChange={(opts, correct) => setEditQuestionForm({ ...editQuestionForm, options: opts || [], correct_answer: correct || '' })}
-                    />
-                    {/* HOTS Claim Toggle */}
-                    {aiReviewEnabled && (
-                        <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl">
-                            <label className="relative inline-flex items-center cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={editQuestionForm.teacher_hots_claim}
-                                    onChange={e => setEditQuestionForm({ ...editQuestionForm, teacher_hots_claim: e.target.checked })}
-                                    className="sr-only peer"
-                                />
-                                <div className="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                            </label>
+                    )}
+
+                    {/* Langkah 4: Pengaturan */}
+                    {wizardStep === 3 && (
+                        <div className="space-y-4">
                             <div>
-                                <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">🧠 Klaim HOTS</p>
-                                <p className="text-xs text-emerald-600 dark:text-emerald-400">Tandai soal ini sebagai Higher-Order Thinking</p>
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Mata Pelajaran</label>
+                                <FilterSelect
+                                    value={questionForm.subject_id}
+                                    onChange={(v) => setQuestionForm({ ...questionForm, subject_id: v })}
+                                    placeholder="Pilih Mapel"
+                                    ariaLabel="Mata pelajaran soal"
+                                    options={subjects.map(s => ({ value: s.id, label: s.name }))}
+                                />
                             </div>
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kesulitan</label>
+                                <FilterSelect
+                                    value={questionForm.difficulty}
+                                    onChange={(v) => setQuestionForm({ ...questionForm, difficulty: v as 'EASY' | 'MEDIUM' | 'HARD' })}
+                                    ariaLabel="Tingkat kesulitan soal"
+                                    options={[
+                                        { value: 'EASY', label: 'Mudah' },
+                                        { value: 'MEDIUM', label: 'Sedang' },
+                                        { value: 'HARD', label: 'Sulit' }
+                                    ]}
+                                />
+                            </div>
+                            {aiReviewEnabled && (
+                                <HotsToggle
+                                    checked={questionForm.teacher_hots_claim}
+                                    onChange={(c) => setQuestionForm({ ...questionForm, teacher_hots_claim: c })}
+                                />
+                            )}
                         </div>
                     )}
-                    <div className="flex gap-3 pt-4">
-                        <Button variant="secondary" onClick={() => setShowEditQuestionModal(false)} className="flex-1">Batal</Button>
-                        <Button onClick={handleSaveEditQuestion} disabled={saving} className="flex-1">
-                            {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
+
+                    {/* Footer navigasi wizard */}
+                    <div className="flex gap-3 pt-4 border-t border-secondary/20">
+                        <Button
+                            variant="secondary"
+                            onClick={wizardStep === 0 ? handleCloseWizard : () => setWizardStep(wizardStep - 1)}
+                        >
+                            {wizardStep === 0 ? 'Batal' : 'Kembali'}
                         </Button>
-                    </div>
-                </div>
-            </Modal>
-
-            {/* Edit Passage Modal */}
-            <Modal
-                open={showEditPassageModal}
-                onClose={() => setShowEditPassageModal(false)}
-                title="Edit Passage"
-                maxWidth="2xl"
-            >
-                <div className="space-y-5 max-h-[70vh] overflow-y-auto">
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Judul Bacaan (Opsional)</label>
-                        <input
-                            type="text"
-                            value={editPassageForm.title}
-                            onChange={(e) => setEditPassageForm({ ...editPassageForm, title: e.target.value })}
-                            className="w-full p-3 border border-secondary/30 rounded-xl bg-secondary/10 text-text-main"
-                            placeholder="Contoh: Teks Narasi - Cerita Rakyat"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Teks Bacaan *</label>
-                        <textarea
-                            value={editPassageForm.passage_text}
-                            onChange={(e) => setEditPassageForm({ ...editPassageForm, passage_text: e.target.value })}
-                            className="w-full p-3 border border-secondary/30 rounded-xl bg-secondary/10 text-text-main min-h-[150px]"
-                            placeholder="Tulis atau paste teks bacaan di sini..."
-                        />
-                    </div>
-
-                    {/* Audio Upload */}
-                    <div>
-                        <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-1">🎧 Audio Listening (Opsional)</label>
-                        {editPassageForm.audio_url ? (
-                            <div className="p-3 bg-violet-50 dark:bg-violet-900/20 border border-violet-300 dark:border-violet-700 rounded-xl space-y-2">
-                                <audio controls controlsList="nodownload" className="w-full" src={editPassageForm.audio_url} />
-                                <button onClick={() => setEditPassageForm({ ...editPassageForm, audio_url: '' })} className="text-sm text-red-500 hover:text-red-700 font-medium">✕ Hapus Audio</button>
-                            </div>
+                        {wizardStep < WIZARD_STEPS.length - 1 ? (
+                            <Button
+                                className="flex-1"
+                                onClick={() => setWizardStep(wizardStep + 1)}
+                                disabled={wizardStep === 1 && !stripHtml(questionForm.question_text)}
+                            >
+                                Lanjut
+                            </Button>
+                        ) : editingQuestionId ? (
+                            <Button
+                                className="flex-1"
+                                onClick={() => handleSaveQuestion(false)}
+                                loading={saving}
+                                disabled={saving}
+                            >
+                                Simpan Perubahan
+                            </Button>
                         ) : (
-                            <div className="relative">
-                                <input type="file" accept="audio/*" onChange={async (e) => {
-                                    const file = e.target.files?.[0]
-                                    if (!file) return
-                                    if (file.size > 25 * 1024 * 1024) { showToast('Maksimal ukuran audio 25MB.'); return }
-                                    setUploadingAudio(true)
-                                    try {
-                                        const fd = new FormData(); fd.append('file', file)
-                                        const res = await fetch('/api/audio/upload', { method: 'POST', body: fd })
-                                        if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Upload gagal') }
-                                        const { url } = await res.json()
-                                        setEditPassageForm({ ...editPassageForm, audio_url: url })
-                                    } catch (err: any) { showToast(err.message || 'Gagal upload audio') }
-                                    finally { setUploadingAudio(false); e.target.value = '' }
-                                }} className="hidden" id="bank-edit-passage-audio" disabled={uploadingAudio} />
-                                <label htmlFor="bank-edit-passage-audio" className={`flex items-center justify-center gap-2 w-full py-3 border-2 border-dashed border-violet-300 dark:border-violet-700 rounded-xl text-sm font-medium cursor-pointer transition-colors ${uploadingAudio ? 'opacity-50 cursor-wait' : 'text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20'}`}>
-                                    {uploadingAudio ? '⏳ Mengupload...' : '🎵 Upload Audio (MP3, WAV, M4A, OGG — maks 25MB)'}
-                                </label>
-                            </div>
+                            <>
+                                <Button
+                                    variant="outline"
+                                    className="flex-1"
+                                    onClick={() => handleSaveQuestion(true)}
+                                    disabled={saving}
+                                >
+                                    {saving ? 'Menyimpan...' : 'Simpan & Tambah Lagi'}
+                                </Button>
+                                <Button
+                                    className="flex-1"
+                                    onClick={() => handleSaveQuestion(false)}
+                                    loading={saving}
+                                    disabled={saving}
+                                >
+                                    Simpan & Tutup
+                                </Button>
+                            </>
                         )}
                     </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-1">Mata Pelajaran</label>
-                        <select
-                            value={editPassageForm.subject_id}
-                            onChange={(e) => setEditPassageForm({ ...editPassageForm, subject_id: e.target.value })}
-                            className="w-full p-3 border border-secondary/30 rounded-xl bg-secondary/10 text-text-main"
-                        >
-                            <option value="">Pilih Mata Pelajaran</option>
-                            {subjects.map((s) => (
-                                <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                        </select>
+                </div>
+            </Modal>
+
+            {/* ─── Modal Tambah/Edit Bacaan ─── */}
+            <Modal
+                open={showPassageModal}
+                onClose={handleClosePassageModal}
+                title={editingPassageId ? 'Edit Bacaan' : 'Tambah Bacaan & Soal'}
+                maxWidth="2xl"
+            >
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Bacaan (opsional)</label>
+                            <input
+                                type="text"
+                                value={passageForm.title}
+                                onChange={(e) => setPassageForm({ ...passageForm, title: e.target.value })}
+                                placeholder="Contoh: Dialog di Toko"
+                                className="w-full px-4 py-2.5 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Mata Pelajaran</label>
+                            <FilterSelect
+                                value={passageForm.subject_id}
+                                onChange={(v) => setPassageForm({ ...passageForm, subject_id: v })}
+                                placeholder="Pilih Mapel (opsional)"
+                                ariaLabel="Mata pelajaran bacaan"
+                                options={subjects.map(s => ({ value: s.id, label: s.name }))}
+                            />
+                        </div>
                     </div>
 
-                    {/* Questions */}
-                    <div className="border-t pt-4">
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Teks Bacaan *</label>
+                        <textarea
+                            value={passageForm.passage_text}
+                            onChange={(e) => setPassageForm({ ...passageForm, passage_text: e.target.value })}
+                            rows={6}
+                            placeholder="Masukkan teks bacaan/dialog..."
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+                        />
+                    </div>
+
+                    <AudioUploadField
+                        value={passageForm.audio_url}
+                        onChange={(url) => setPassageForm({ ...passageForm, audio_url: url })}
+                        onError={(msg) => showToast(msg)}
+                    />
+
+                    <div className="border-t border-secondary/20 pt-4">
                         <div className="flex items-center justify-between mb-3">
-                            <h4 className="font-bold text-text-main dark:text-white">Soal-soal ({editPassageForm.questions.length})</h4>
-                            <Button variant="secondary" size="sm" onClick={handleAddEditPassageQuestion} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
+                            <label className="text-sm font-bold text-text-main dark:text-white">Soal-Soal ({passageForm.questions.length})</label>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={handleAddPassageQuestion}
+                                icon={<Plus set="bold" primaryColor="currentColor" size={16} />}
+                            >
                                 Tambah Soal
                             </Button>
                         </div>
+
                         <div className="space-y-4">
-                            {editPassageForm.questions.map((q, idx) => (
-                                <div key={idx} className="border border-secondary/20 rounded-xl p-4 bg-secondary/5">
-                                    <div className="flex items-center justify-between mb-3">
-                                        <span className="font-bold text-sm">Soal #{idx + 1}</span>
-                                        {editPassageForm.questions.length > 1 && (
-                                            <button onClick={() => handleRemoveEditPassageQuestion(idx)} className="text-red-500 hover:text-red-600">
+                            {passageForm.questions.map((pq, idx) => (
+                                <div key={idx} className="p-4 bg-secondary/5 rounded-xl border border-secondary/20 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm font-bold text-text-main dark:text-white">Soal {idx + 1}</span>
+                                        {passageForm.questions.length > 1 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemovePassageQuestion(idx)}
+                                                aria-label={`Hapus soal ${idx + 1}`}
+                                                className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                                            >
                                                 <Delete set="bold" primaryColor="currentColor" size={16} />
                                             </button>
                                         )}
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                                        <select
-                                            value={q.question_type}
-                                            onChange={(e) => {
-                                                const newType = e.target.value
-                                                const prevType = q.question_type
-                                                const newQs = [...editPassageForm.questions]
-                                                let newOpts: string[] = []
-                                                if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(newType)) {
-                                                    newOpts = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prevType) && q.options?.length
-                                                        ? q.options
-                                                        : ['', '', '', '']
-                                                } else if (newType === 'TRUE_FALSE') {
-                                                    newOpts = ['Benar', 'Salah']
-                                                }
-                                                newQs[idx] = { ...newQs[idx], question_type: newType, options: newOpts, correct_answer: '' }
-                                                setEditPassageForm({ ...editPassageForm, questions: newQs })
-                                            }}
-                                            className="p-2 border border-secondary/30 rounded-lg bg-secondary/10 text-sm"
-                                        >
-                                            <option value="MULTIPLE_CHOICE">Pilihan Ganda</option>
-                            <option value="MULTIPLE_ANSWER">Ganda Kompleks</option>
-                            <option value="TRUE_FALSE">Benar Salah</option>
-                            <option value="SHORT_ANSWER">Isian Singkat</option>
-                            <option value="ESSAY">Essay</option>
-                                        </select>
-                                        <select
-                                            value={q.difficulty}
-                                            onChange={(e) => {
-                                                const newQs = [...editPassageForm.questions]
-                                                newQs[idx].difficulty = e.target.value as 'EASY' | 'MEDIUM' | 'HARD'
-                                                setEditPassageForm({ ...editPassageForm, questions: newQs })
-                                            }}
-                                            className="p-2 border border-secondary/30 rounded-lg bg-secondary/10 text-sm"
-                                        >
-                                            <option value="EASY">Mudah</option>
-                                            <option value="MEDIUM">Sedang</option>
-                                            <option value="HARD">Sulit</option>
-                                        </select>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        <FilterSelect
+                                            value={pq.question_type}
+                                            onChange={(v) => handlePassageQuestionTypeChange(idx, v)}
+                                            ariaLabel={`Tipe soal ${idx + 1}`}
+                                            options={[
+                                                { value: 'MULTIPLE_CHOICE', label: 'Pilihan Ganda' },
+                                                { value: 'MULTIPLE_ANSWER', label: 'Ganda Kompleks' },
+                                                { value: 'TRUE_FALSE', label: 'Benar Salah' },
+                                                { value: 'SHORT_ANSWER', label: 'Isian Singkat' },
+                                                { value: 'ESSAY', label: 'Essay' }
+                                            ]}
+                                        />
+                                        <FilterSelect
+                                            value={pq.difficulty}
+                                            onChange={(v) => updatePassageQuestion(idx, (q) => ({ ...q, difficulty: v as 'EASY' | 'MEDIUM' | 'HARD' }))}
+                                            ariaLabel={`Kesulitan soal ${idx + 1}`}
+                                            options={[
+                                                { value: 'EASY', label: 'Mudah' },
+                                                { value: 'MEDIUM', label: 'Sedang' },
+                                                { value: 'HARD', label: 'Sulit' }
+                                            ]}
+                                        />
                                     </div>
+
                                     <RichTextEditor
-                                        value={q.question_text}
-                                        onChange={(val) => {
-                                            const newQs = [...editPassageForm.questions]
-                                            newQs[idx].question_text = val
-                                            setEditPassageForm({ ...editPassageForm, questions: newQs })
-                                        }}
-                                        placeholder="Pertanyaan..."
+                                        value={pq.question_text}
+                                        onChange={(val) => updatePassageQuestion(idx, (q) => ({ ...q, question_text: val }))}
+                                        placeholder="Tulis pertanyaan..."
                                     />
+
                                     <QuestionOptionsEditor
-                                        questionType={q.question_type}
-                                        options={q.options}
-                                        correctAnswer={q.correct_answer}
-                                        onChange={(opts, correct) => {
-                                            const newQs = [...editPassageForm.questions]
-                                            newQs[idx].options = opts || []
-                                            newQs[idx].correct_answer = correct || ''
-                                            setEditPassageForm({ ...editPassageForm, questions: newQs })
-                                        }}
+                                        questionType={pq.question_type}
+                                        options={pq.options}
+                                        correctAnswer={pq.correct_answer}
+                                        onChange={(opts, correct) => updatePassageQuestion(idx, (q) => ({ ...q, options: opts || [], correct_answer: correct || '' }))}
                                     />
-                                    {/* HOTS Claim Toggle for Passage Question */}
+
                                     {aiReviewEnabled && (
-                                        <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl mt-3">
-                                            <label className="relative inline-flex items-center cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={q.teacher_hots_claim || false}
-                                                    onChange={e => {
-                                                        const newQs = [...editPassageForm.questions]
-                                                        newQs[idx].teacher_hots_claim = e.target.checked
-                                                        setEditPassageForm({ ...editPassageForm, questions: newQs })
-                                                    }}
-                                                    className="sr-only peer"
-                                                />
-                                                <div className="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                                            </label>
-                                            <div>
-                                                <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">🧠 Klaim HOTS</p>
-                                                <p className="text-xs text-emerald-600 dark:text-emerald-400">Tandai soal ini sebagai Higher-Order Thinking</p>
-                                            </div>
-                                        </div>
+                                        <HotsToggle
+                                            checked={pq.teacher_hots_claim || false}
+                                            onChange={(c) => updatePassageQuestion(idx, (q) => ({ ...q, teacher_hots_claim: c }))}
+                                        />
                                     )}
                                 </div>
                             ))}
                         </div>
                     </div>
 
-                    <div className="flex gap-3 pt-4 border-t">
-                        <Button variant="secondary" onClick={() => setShowEditPassageModal(false)} className="flex-1">Batal</Button>
-                        <Button onClick={handleSaveEditPassage} disabled={saving} className="flex-1">
-                            {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
+                    <div className="flex gap-3 pt-4 border-t border-secondary/20">
+                        <Button variant="secondary" onClick={handleClosePassageModal} className="flex-1">Batal</Button>
+                        <Button
+                            onClick={handleSavePassage}
+                            disabled={saving || (!passageForm.passage_text.trim() && !passageForm.audio_url)}
+                            loading={saving}
+                            className="flex-1"
+                        >
+                            {saving ? 'Menyimpan...' : editingPassageId ? 'Simpan Perubahan' : 'Simpan Bacaan'}
                         </Button>
                     </div>
                 </div>
             </Modal>
 
-            {/* Delete Confirmation Modal */}
+            {/* ─── Preview Soal (tampilan siswa, kunci ditandai untuk guru) ─── */}
             <Modal
-                open={showDeleteModal}
-                onClose={() => { setShowDeleteModal(false); setDeleteTargetId(null) }}
-                title="Konfirmasi Hapus"
+                open={!!previewTarget}
+                onClose={() => setPreviewTarget(null)}
+                title="Preview Soal"
+                maxWidth="2xl"
             >
-                <div className="space-y-4">
-                    <div className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
-                        <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
-                            <Danger set="bold" primaryColor="currentColor" size={24} />
+                {previewTarget && (
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <QuestionTypeBadge type={previewTarget.question_type} />
+                            <DifficultyBadge difficulty={previewTarget.difficulty} />
                         </div>
-                        <div>
-                            <p className="font-bold text-red-700 dark:text-red-400">
-                                {deleteTargetType === 'passage' ? 'Hapus Passage?' : 'Hapus Soal?'}
-                            </p>
-                            <p className="text-sm text-red-600/80 dark:text-red-300/80">
-                                {deleteTargetType === 'passage'
-                                    ? 'Passage beserta semua soal di dalamnya akan dihapus permanen.'
-                                    : 'Soal ini akan dihapus permanen dari Bank Soal.'}
-                            </p>
-                        </div>
+
+                        {previewTarget.passage && (
+                            <div className="p-4 bg-primary/5 dark:bg-primary/10 border border-primary/20 rounded-xl space-y-2">
+                                <p className="text-sm font-bold text-text-main dark:text-white flex items-center gap-2">
+                                    <Document set="bold" primaryColor="currentColor" size={16} />
+                                    {previewTarget.passage.title || 'Bacaan'}
+                                </p>
+                                <p className="text-sm text-text-secondary whitespace-pre-wrap">{previewTarget.passage.passage_text}</p>
+                                {previewTarget.passage.audio_url && (
+                                    <audio controls controlsList="nodownload" className="w-full h-9" src={previewTarget.passage.audio_url} />
+                                )}
+                            </div>
+                        )}
+
+                        <SmartText text={previewTarget.question_text} className="text-text-main dark:text-white text-lg font-medium leading-relaxed" />
+
+                        {previewTarget.image_url && (
+                            <img src={previewTarget.image_url} alt="Gambar soal" className="max-h-56 rounded-xl border border-secondary/20" />
+                        )}
+
+                        <AnswerOptionsView questionType={previewTarget.question_type} options={previewTarget.options} correctAnswer={previewTarget.correct_answer} />
+                        <TextAnswerView questionType={previewTarget.question_type} correctAnswer={previewTarget.correct_answer} />
+
+                        <AIReviewSummary review={previewTarget.ai_review} />
+
+                        <p className="text-xs text-text-secondary">Kunci jawaban ditandai hijau — hanya terlihat oleh guru, tidak oleh siswa.</p>
                     </div>
-                    {deleteTargetLabel && (
-                        <p className="text-sm text-text-secondary px-1 line-clamp-2">
-                            &quot;{deleteTargetLabel}...&quot;
-                        </p>
-                    )}
-                    <div className="flex gap-3">
-                        <Button
-                            variant="secondary"
-                            onClick={() => { setShowDeleteModal(false); setDeleteTargetId(null) }}
-                            className="flex-1 justify-center"
-                        >
-                            Batal
-                        </Button>
-                        <Button
-                            onClick={executeDelete}
-                            disabled={deleting}
-                            className="flex-1 justify-center bg-red-500 hover:bg-red-600 text-white"
-                        >
-                            {deleting ? 'Menghapus...' : 'Ya, Hapus'}
-                        </Button>
-                    </div>
-                </div>
+                )}
             </Modal>
 
-            {/* Rapih AI Modal */}
+            {/* ─── Konfirmasi Export ─── */}
+            <ConfirmDialog
+                open={showExportConfirm}
+                onCancel={() => setShowExportConfirm(false)}
+                onConfirm={handleExport}
+                title="Export ke Word"
+                confirmLabel="Ya, Export Sekarang"
+                message={
+                    <div className="space-y-3">
+                        <p>
+                            Kamu akan mengexport <span className="font-bold">{selectedIds.size} soal{selectedPassageIds.size > 0 ? ` + ${selectedPassageIds.size} bacaan` : ''}</span> terpilih ke dalam format Microsoft Word (.doc).
+                        </p>
+                        <label className="flex items-center gap-3 p-3 bg-white/60 dark:bg-white/5 border border-blue-200 dark:border-blue-800 rounded-xl cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={includeAnswerKey}
+                                onChange={(e) => setIncludeAnswerKey(e.target.checked)}
+                                className="w-5 h-5 accent-emerald-600"
+                            />
+                            <div>
+                                <p className="font-bold text-blue-900 dark:text-blue-200">Sertakan kunci jawaban</p>
+                                <p className="text-xs text-blue-700 dark:text-blue-400">
+                                    {includeAnswerKey
+                                        ? 'Jawaban benar ditandai hijau — cocok untuk arsip guru.'
+                                        : 'Tanpa kunci — cocok dibagikan ke siswa sebagai lembar soal.'}
+                                </p>
+                            </div>
+                        </label>
+                    </div>
+                }
+            />
+
+            {/* ─── Konfirmasi Hapus ─── */}
+            <ConfirmDialog
+                open={showDeleteModal}
+                onCancel={() => { setShowDeleteModal(false); setDeleteTargetId(null) }}
+                onConfirm={executeDelete}
+                title="Konfirmasi Hapus"
+                confirmLabel="Ya, Hapus"
+                variant="danger"
+                loading={deleting}
+                message={
+                    <div className="space-y-1">
+                        <p className="font-bold">{deleteTargetType === 'passage' ? 'Hapus Bacaan?' : 'Hapus Soal?'}</p>
+                        <p>
+                            {deleteTargetType === 'passage'
+                                ? 'Bacaan beserta semua soal di dalamnya akan dihapus permanen.'
+                                : 'Soal ini akan dihapus permanen dari Bank Soal.'}
+                        </p>
+                        {deleteTargetLabel && (
+                            <p className="line-clamp-2 opacity-80">&quot;{deleteTargetLabel}...&quot;</p>
+                        )}
+                    </div>
+                }
+            />
+
+            {/* ─── Rapih AI Modal ─── */}
             {showRapihAI && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
                     <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -1969,14 +1747,13 @@ export default function BankSoalPage() {
                 </div>
             )}
 
-            {/* Toast notification */}
+            {/* Toast notification (design system) */}
             {toast && (
-                <div className={`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg border text-sm font-medium animate-in fade-in slide-in-from-bottom-3 duration-300 ${toast.type === 'success'
-                    ? 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-500/30 text-green-700 dark:text-green-300'
-                    : 'bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-500/30 text-red-700 dark:text-red-300'
-                    }`}>
-                    {toast.type === 'success' ? '✅' : '❌'} {toast.message}
-                </div>
+                <Toast
+                    message={toast.message}
+                    type={toast.type}
+                    onClose={() => setToast(null)}
+                />
             )}
         </div>
     )
