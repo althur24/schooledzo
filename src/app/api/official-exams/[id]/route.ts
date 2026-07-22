@@ -79,6 +79,17 @@ export async function PUT(
         if (show_results_immediately !== undefined) updateData.show_results_immediately = show_results_immediately
         if (results_released !== undefined) updateData.results_released = results_released
 
+        // Fetch current state to detect the results_released false→true transition
+        let wasResultsReleased = false
+        if (results_released === true) {
+            const { data: currentExam } = await supabase
+                .from('official_exams')
+                .select('results_released')
+                .eq('id', id)
+                .single()
+            wasResultsReleased = currentExam?.results_released === true
+        }
+
         const { data, error } = await supabase
             .from('official_exams')
             .update(updateData)
@@ -199,6 +210,46 @@ export async function PUT(
                 }
             } catch (notifError) {
                 console.error('Error sending official exam notifications:', notifError)
+            }
+        }
+
+        // Notify target students when results are released ("Bagikan Hasil" — false→true transition only)
+        if (results_released === true && !wasResultsReleased && data?.target_class_ids?.length > 0) {
+            try {
+                const { data: activeYear } = await supabase
+                    .from('academic_years')
+                    .select('id')
+                    .eq('is_active', true)
+                    .eq('school_id', data.school_id)
+                    .single()
+
+                if (activeYear) {
+                    const { data: enrollments } = await supabase
+                        .from('student_enrollments')
+                        .select('student:students(user_id)')
+                        .eq('academic_year_id', activeYear.id)
+                        .in('class_id', data.target_class_ids)
+
+                    const userIds = [...new Set(
+                        (enrollments || []).map((e: any) => (Array.isArray(e.student) ? e.student[0]?.user_id : e.student?.user_id)).filter(Boolean)
+                    )] as string[]
+
+                    if (userIds.length > 0) {
+                        const examLabel = data.exam_type === 'UTS' ? 'UTS' : 'UAS'
+                        const subjectName = (data as any).subject?.name || ''
+                        await supabase.from('notifications').insert(
+                            userIds.map(uid => ({
+                                user_id: uid,
+                                type: 'NILAI_KELUAR',
+                                title: `Nilai Keluar: ${data.title}`,
+                                message: `${examLabel} ${subjectName} — Hasil ujian sudah bisa dilihat`,
+                                link: '/dashboard/siswa/uts-uas'
+                            }))
+                        )
+                    }
+                }
+            } catch (notifError) {
+                console.error('Error sending results-released notifications:', notifError)
             }
         }
 

@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
         // Verify every assignment exists, belongs to this school, and is not in an archived year
         const { data: tas, error: taError } = await supabase
             .from('teaching_assignments')
-            .select('id, academic_year:academic_years(school_id, status)')
+            .select('id, class_id, subject:subjects(name), academic_year:academic_years(school_id, status)')
             .in('id', taIds)
 
         if (taError) throw taError
@@ -135,6 +135,49 @@ export async function POST(request: NextRequest) {
         if (error) {
             console.error('Supabase Insert Error:', error)
             return NextResponse.json({ error: error.message }, { status: 500 })
+        }
+
+        // Notify students in all target classes about the new material
+        try {
+            const classIds = [...new Set((tas || []).map((t: any) => t.class_id).filter(Boolean))]
+            if (classIds.length > 0 && schoolId) {
+                const { data: activeYear } = await supabase
+                    .from('academic_years')
+                    .select('id')
+                    .eq('is_active', true)
+                    .eq('school_id', schoolId)
+                    .single()
+
+                if (activeYear) {
+                    const { data: enrollments } = await supabase
+                        .from('student_enrollments')
+                        .select('student:students(user_id)')
+                        .eq('academic_year_id', activeYear.id)
+                        .in('class_id', classIds)
+
+                    const userIds = [...new Set(
+                        (enrollments || [])
+                            .map((e: any) => (Array.isArray(e.student) ? e.student[0]?.user_id : e.student?.user_id))
+                            .filter(Boolean)
+                    )] as string[]
+
+                    if (userIds.length > 0) {
+                        const subjectName = (tas?.[0] as any)?.subject?.name || ''
+                        await supabase.from('notifications').insert(
+                            userIds.map(uid => ({
+                                user_id: uid,
+                                type: 'MATERI_BARU',
+                                title: `Materi Baru: ${title}`,
+                                message: `${subjectName} — dibagikan ke ${classIds.length} kelas`,
+                                link: '/dashboard/siswa/materi'
+                            }))
+                        )
+                    }
+                }
+            }
+        } catch (notifError) {
+            // Jangan gagalkan request utama kalau notifikasi gagal
+            console.error('Error sending material notifications:', notifError)
         }
 
         return NextResponse.json({ created: data?.length || 0, items: data })

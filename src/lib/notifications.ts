@@ -4,6 +4,7 @@ type NotificationType =
     | 'TUGAS_BARU'
     | 'KUIS_BARU'
     | 'ULANGAN_BARU'
+    | 'MATERI_BARU'
     | 'NILAI_KELUAR'
     | 'SUBMISSION_BARU'
     | 'SUBMISSION_KUIS'
@@ -54,6 +55,8 @@ export function getNotificationIcon(type: NotificationType): string {
             return '🎯'
         case 'ULANGAN_BARU':
             return '📋'
+        case 'MATERI_BARU':
+            return '📚'
         case 'NILAI_KELUAR':
             return '📊'
         case 'SUBMISSION_BARU':

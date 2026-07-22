@@ -32,6 +32,33 @@ async function sendQuizSubmissionNotification(quizId: string, userFullName: stri
     }
 }
 
+// Helper: notify student their quiz result is out (auto-graded only)
+async function sendQuizResultNotification(quizId: string, studentUserId: string, totalScore: number, maxScore: number) {
+    try {
+        const { data: quiz } = await supabase
+            .from('quizzes')
+            .select(`
+                title,
+                teaching_assignment:teaching_assignments(
+                    subject:subjects(name)
+                )
+            `)
+            .eq('id', quizId)
+            .single()
+
+        const subjectName = (quiz?.teaching_assignment as any)?.subject?.name || ''
+        await supabase.from('notifications').insert({
+            user_id: studentUserId,
+            type: 'NILAI_KELUAR',
+            title: `Nilai Keluar: ${quiz?.title}`,
+            message: `${subjectName} — Nilai: ${totalScore}/${maxScore}`,
+            link: '/dashboard/siswa/kuis'
+        })
+    } catch (notifError) {
+        console.error('Error sending quiz result notification:', notifError)
+    }
+}
+
 // GET submissions (for teacher or student)
 export async function GET(request: NextRequest) {
     try {
@@ -430,6 +457,7 @@ export async function POST(request: NextRequest) {
 
             // Notify
             await sendQuizSubmissionNotification(quiz_id, user.full_name || 'Siswa')
+            if (allGraded) await sendQuizResultNotification(quiz_id, user.id, totalScore, maxScore)
 
             return NextResponse.json(data)
         }
@@ -461,6 +489,7 @@ export async function POST(request: NextRequest) {
         // Notify for new submission if submitted
         if (submit) {
             await sendQuizSubmissionNotification(quiz_id, user.full_name || 'Siswa')
+            if (allGraded) await sendQuizResultNotification(quiz_id, user.id, totalScore, maxScore)
         }
 
         return NextResponse.json(data)

@@ -56,7 +56,7 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id')
+            .select('teaching_assignment_id, results_released')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -219,6 +219,41 @@ export async function PUT(
                 }
             } catch (notifError) {
                 console.error('Error sending exam notifications:', notifError)
+            }
+        }
+
+        // Notify students when results are released ("Bagikan Hasil" — only on the false→true transition)
+        if (results_released === true && !examForYear?.results_released && data?.teaching_assignment?.class_id) {
+            try {
+                const { data: activeYear } = await supabase
+                    .from('academic_years')
+                    .select('id')
+                    .eq('is_active', true)
+                    .eq('school_id', schoolId)
+                    .single()
+
+                if (activeYear) {
+                    const { data: enrollments } = await supabase
+                        .from('student_enrollments')
+                        .select('student:students(user_id)')
+                        .eq('academic_year_id', activeYear.id)
+                        .eq('class_id', data.teaching_assignment.class_id)
+
+                    if (enrollments && enrollments.length > 0) {
+                        const subjectName = data.teaching_assignment.subject?.name || ''
+                        await supabase.from('notifications').insert(
+                            enrollments.map((e: any) => ({
+                                user_id: e.student.user_id,
+                                type: 'NILAI_KELUAR',
+                                title: `Nilai Keluar: ${data.title}`,
+                                message: `${subjectName} — Hasil ulangan sudah bisa dilihat`,
+                                link: '/dashboard/siswa/ulangan'
+                            }))
+                        )
+                    }
+                }
+            } catch (notifError) {
+                console.error('Error sending results-released notifications:', notifError)
             }
         }
         return NextResponse.json(data)
