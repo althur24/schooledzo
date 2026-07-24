@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
+import SearchableSelect from '@/components/ui/SearchableSelect'
 import { AssignmentWizard } from '@/components/AssignmentWizard'
 import {
     Document as BookOpen, AddUser as UserPlus, User, Delete as Trash2, Edit,
@@ -113,21 +114,27 @@ export default function PenugasanPage() {
         if (selectedYearId) fetchAssignments()
     }, [selectedYearId])
 
-    // Initialize wali kelas map when classes load
+    // Initialize wali kelas map — scoped to the SELECTED academic year only.
+    // /api/classes returns classes for ALL years, so without this filter a
+    // teacher who is wali in a different year (e.g. last, completed year)
+    // gets wrongly flagged as "already assigned" and hidden from this year's
+    // dropdown. Rule: 1 guru = 1 kelas per tahun ajaran.
     useEffect(() => {
         const map: Record<string, string> = {}
         const saved: Record<string, string> = {}
-        classes.forEach((cls: any) => {
-            if (cls.homeroom_teacher?.id) {
-                map[cls.id] = cls.homeroom_teacher.id
-                saved[cls.id] = cls.homeroom_teacher.id
-            }
-        })
+        classes
+            .filter((cls: any) => !selectedYearId || cls.academic_year_id === selectedYearId)
+            .forEach((cls: any) => {
+                if (cls.homeroom_teacher?.id) {
+                    map[cls.id] = cls.homeroom_teacher.id
+                    saved[cls.id] = cls.homeroom_teacher.id
+                }
+            })
         setWaliKelasMap(map)
         setSavedWaliMap(saved)
         // Classes that already have a wali assigned start in "locked" (non-editing) mode
         setEditingWali(new Set())
-    }, [classes])
+    }, [classes, selectedYearId])
 
     const handleSaveWali = async (classId: string) => {
         setSavingWali(classId)
@@ -168,6 +175,14 @@ export default function PenugasanPage() {
                 next.delete(classId)
                 return next
             })
+            // Refetch classes so the wali map (rebuilt from `classes` whenever the
+            // academic year changes) reflects this save. Without this, switching
+            // years and back would rebuild the map from stale data and the just-saved
+            // wali would visually disappear. Non-fatal: local state already patched above.
+            try {
+                const classesRes = await fetch('/api/classes')
+                if (classesRes.ok) setClasses(await classesRes.json())
+            } catch { /* ignore — save itself already succeeded */ }
         } catch (error) {
             console.error('Error saving wali kelas:', error)
             alert('Gagal menyimpan wali kelas: masalah jaringan')
@@ -807,31 +822,28 @@ export default function PenugasanPage() {
                                                         <Check className="w-4 h-4 text-green-500 flex-shrink-0" />
                                                     </div>
                                                 ) : (
-                                                    // Editing state: show dropdown
-                                                    <div className="relative">
-                                                        <select
-                                                            value={currentWali}
-                                                            onChange={(e) => setWaliKelasMap(prev => ({
-                                                                ...prev,
-                                                                [cls.id]: e.target.value
+                                                    // Editing state: searchable dropdown
+                                                    <SearchableSelect
+                                                        value={currentWali}
+                                                        onChange={(val) => setWaliKelasMap(prev => ({
+                                                            ...prev,
+                                                            [cls.id]: val
+                                                        }))}
+                                                        placeholder="— Belum ada wali kelas —"
+                                                        emptyOptionLabel="— Belum ada wali kelas —"
+                                                        searchPlaceholder="Cari nama / NIP guru..."
+                                                        className={hasChanged
+                                                            ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30'
+                                                            : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'}
+                                                        options={teachers
+                                                            .filter(t => !assignedElsewhere.has(t.id) || t.id === currentWali)
+                                                            .sort((a, b) => (a.user.full_name || a.user.username).localeCompare(b.user.full_name || b.user.username))
+                                                            .map(t => ({
+                                                                value: t.id,
+                                                                label: t.user.full_name || t.user.username,
+                                                                sublabel: t.nip ? `NIP ${t.nip}` : undefined,
                                                             }))}
-                                                            className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none transition-colors ${hasChanged
-                                                                ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30 text-slate-900 dark:text-white'
-                                                                : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white'
-                                                                }`}
-                                                        >
-                                                            <option value="">— Belum ada wali kelas —</option>
-                                                            {teachers
-                                                                .filter(t => !assignedElsewhere.has(t.id) || t.id === currentWali)
-                                                                .sort((a, b) => (a.user.full_name || a.user.username).localeCompare(b.user.full_name || b.user.username))
-                                                                .map((t) => (
-                                                                    <option key={t.id} value={t.id}>
-                                                                        {t.user.full_name || t.user.username} {t.nip ? `(${t.nip})` : ''}
-                                                                    </option>
-                                                                ))}
-                                                        </select>
-                                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary">▼</div>
-                                                    </div>
+                                                    />
                                                 )}
                                             </div>
 
