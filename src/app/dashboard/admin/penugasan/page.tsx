@@ -220,6 +220,39 @@ export default function PenugasanPage() {
         !selectedYearId || c.academic_year_id === selectedYearId
     )
 
+    // Flatten wali-kelas classes into a single list grouped by school_level, tagging
+    // the FIRST class of each group so the render can show a section separator inline
+    // (avoids deep nesting / re-indenting the row). Order: SMP, SMA, then other levels
+    // alphabetically, then uncategorized ("Tanpa Jenjang"); within a group sort by
+    // grade_level then name.
+    const waliRows: any[] = (() => {
+        const byLevel: Record<string, any[]> = {}
+        filteredClasses.forEach((cls: any) => {
+            const level = cls.school_level || 'Tanpa Jenjang'
+            if (!byLevel[level]) byLevel[level] = []
+            byLevel[level].push(cls)
+        })
+        const preferred = ['SMP', 'SMA']
+        const levels = [
+            ...preferred.filter(l => byLevel[l]),
+            ...Object.keys(byLevel).filter(l => !preferred.includes(l)).sort(),
+        ]
+        const sortClasses = (arr: any[]) => arr.slice().sort((a, b) =>
+            (a.grade_level ?? 0) - (b.grade_level ?? 0) || String(a.name).localeCompare(String(b.name))
+        )
+        const out: any[] = []
+        levels.forEach(level => {
+            const classes = sortClasses(byLevel[level])
+            classes.forEach((cls, idx) => out.push({
+                ...cls,
+                __groupStart: idx === 0,
+                __groupLevel: level,
+                __groupCount: classes.length,
+            }))
+        })
+        return out
+    })()
+
     // Calculate stats
     const assignedCount = teacherGroups.reduce((sum, g) => sum + g.total_classes, 0)
     const unassignedTeachers = teacherGroups.filter(g => g.total_classes === 0)
@@ -768,7 +801,7 @@ export default function PenugasanPage() {
                                     <div className="col-span-3 text-sm font-bold text-text-main dark:text-white uppercase tracking-wider text-right">Aksi</div>
                                 </div>
 
-                                {filteredClasses.map((cls: any) => {
+                                {waliRows.map((cls: any) => {
                                     const currentWali = waliKelasMap[cls.id] || ''
                                     const savedVal = savedWaliMap[cls.id] || ''
                                     const hasSavedWali = !!savedVal
@@ -784,8 +817,24 @@ export default function PenugasanPage() {
 
                                     // Determine if row is in "locked" (view) mode
                                     const isLocked = hasSavedWali && !isEditing
+                                    // Badge color for the school-level section header (SMP / SMA / other)
+                                    const groupBadgeClass = cls.__groupLevel === 'SMP'
+                                        ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20'
+                                        : cls.__groupLevel === 'SMA'
+                                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                            : 'bg-slate-500/10 text-slate-600 dark:text-slate-300 border border-slate-500/20'
 
-                                    return (
+                                    return ([
+                                        cls.__groupStart && (
+                                            <div key={`grp-${cls.__groupLevel}`} className="flex items-center gap-2 px-4 md:px-6 py-2.5 bg-slate-100 dark:bg-slate-800/70">
+                                                <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${groupBadgeClass}`}>
+                                                    {cls.__groupLevel}
+                                                </span>
+                                                <span className="text-xs text-text-secondary dark:text-zinc-400">
+                                                    {cls.__groupCount} kelas
+                                                </span>
+                                            </div>
+                                        ),
                                         <div key={cls.id} className="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4 px-4 md:px-6 py-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors items-center">
                                             {/* Class info */}
                                             <div className="md:col-span-4 flex items-center gap-3">
@@ -886,7 +935,7 @@ export default function PenugasanPage() {
                                                 )}
                                             </div>
                                         </div>
-                                    )
+                                    ])
                                 })}
                             </div>
                         )}
