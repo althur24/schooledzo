@@ -120,13 +120,13 @@ export async function GET(request: NextRequest) {
                 id, exam_id, student_id, started_at, submitted_at, is_submitted,
                 total_score, max_score, violation_count, violations_log, is_graded, created_at,
                 student:students(id, nis, user:users!students_user_id_fkey(full_name)),
-                exam:exams(
-                    id, 
-                    title, 
+                exam:exams!inner(
+                    id,
+                    title,
                     duration_minutes,
                     show_results_immediately,
                     results_released,
-                    teaching_assignment:teaching_assignments(
+                    teaching_assignment:teaching_assignments!inner(
                         academic_year_id,
                         subject:subjects(id, name),
                         class:classes(id, name)
@@ -163,25 +163,12 @@ export async function GET(request: NextRequest) {
                 .single()
 
             if (activeYear) {
-                const { data: taIds } = await supabase
-                    .from('teaching_assignments')
-                    .select('id')
-                    .eq('academic_year_id', activeYear.id)
-
-                if (taIds && taIds.length > 0) {
-                    const { data: examIds } = await supabase
-                        .from('exams')
-                        .select('id')
-                        .in('teaching_assignment_id', taIds.map(t => t.id))
-
-                    if (examIds && examIds.length > 0) {
-                        query = query.in('exam_id', examIds.map(e => e.id))
-                    } else {
-                        return NextResponse.json([])
-                    }
-                } else {
-                    return NextResponse.json([])
-                }
+                // Inner join filter replaces the old two-hop .in(list): hundreds of TA ids
+                // overflow the 16KB header limit at larger schools and break this endpoint
+                query = query.eq('exam.teaching_assignment.academic_year_id', activeYear.id)
+            } else {
+                // No active year: return empty instead of leaking content across years
+                return NextResponse.json([])
             }
         }
 

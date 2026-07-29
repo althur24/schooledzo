@@ -23,11 +23,11 @@ export async function GET(request: NextRequest) {
           nis,
            user:users!students_user_id_fkey(full_name)
         ),
-        assignment:assignments(
+        assignment:assignments!inner(
           id,
           title,
           type,
-          teaching_assignment:teaching_assignments(
+          teaching_assignment:teaching_assignments!inner(
             academic_year_id,
             subject:subjects(name)
           )
@@ -64,26 +64,27 @@ export async function GET(request: NextRequest) {
                 .single()
 
             if (activeYear) {
-                const { data: taIds } = await supabase
-                    .from('teaching_assignments')
-                    .select('id')
-                    .eq('academic_year_id', activeYear.id)
+                // Inner join filter replaces the old two-hop .in(list): hundreds of TA ids
+                // overflow the 16KB header limit at larger schools and break this endpoint
+                query = query.eq('assignment.teaching_assignment.academic_year_id', activeYear.id)
 
-                if (taIds && taIds.length > 0) {
-                    // Get assignment IDs for active year's TAs
-                    const { data: assignmentIds } = await supabase
-                        .from('assignments')
+                // STRICT FILTERING FOR GURU: only submissions to own teaching assignments
+                if (user.role === 'GURU') {
+                    const { data: teacher } = await supabase
+                        .from('teachers')
                         .select('id')
-                        .in('teaching_assignment_id', taIds.map(t => t.id))
+                        .eq('user_id', user.id)
+                        .single()
 
-                    if (assignmentIds && assignmentIds.length > 0) {
-                        query = query.in('assignment_id', assignmentIds.map(a => a.id))
+                    if (teacher) {
+                        query = query.eq('assignment.teaching_assignment.teacher_id', teacher.id)
                     } else {
                         return NextResponse.json([])
                     }
-                } else {
-                    return NextResponse.json([])
                 }
+            } else {
+                // No active year: return empty instead of leaking content across years
+                return NextResponse.json([])
             }
         }
 

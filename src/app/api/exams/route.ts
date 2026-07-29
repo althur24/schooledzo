@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
             .from('exams')
             .select(`
                 *,
-                teaching_assignment:teaching_assignments(
+                teaching_assignment:teaching_assignments!inner(
                     id,
                     academic_year_id,
                     teacher:teachers(id, user:users(full_name)),
@@ -32,7 +32,8 @@ export async function GET(request: NextRequest) {
         if (teachingAssignmentId) {
             query = query.eq('teaching_assignment_id', teachingAssignmentId)
         } else if (allYears !== 'true') {
-            // Filter by active year
+            // Filter by active year — via inner join (NOT .in(list): hundreds of TA ids
+            // overflow the 16KB header limit at larger schools and break this endpoint)
             const { data: activeYear } = await supabase
                 .from('academic_years')
                 .select('id')
@@ -41,11 +42,7 @@ export async function GET(request: NextRequest) {
                 .single()
 
             if (activeYear) {
-                // Determine base teaching assignments by academic year
-                let taQuery = supabase
-                    .from('teaching_assignments')
-                    .select('id, class_id')
-                    .eq('academic_year_id', activeYear.id)
+                query = query.eq('teaching_assignment.academic_year_id', activeYear.id)
 
                 // STRICT FILTERING FOR SISWA
                 if (user.role === 'SISWA') {
@@ -56,20 +53,26 @@ export async function GET(request: NextRequest) {
                         .single()
 
                     if (student?.class_id) {
-                        taQuery = taQuery.eq('class_id', student.class_id)
+                        query = query.eq('teaching_assignment.class_id', student.class_id)
                     } else {
-                        // Student has no valid class -> returns empty list 
+                        // Student has no valid class -> returns empty list
+                        return NextResponse.json([])
+                    }
+                } else if (user.role === 'GURU') {
+                    // STRICT FILTERING FOR GURU: only own teaching assignments
+                    const { data: teacher } = await supabase
+                        .from('teachers')
+                        .select('id')
+                        .eq('user_id', user.id)
+                        .single()
+
+                    if (teacher) {
+                        query = query.eq('teaching_assignment.teacher_id', teacher.id)
+                    } else {
                         return NextResponse.json([])
                     }
                 }
-
-                const { data: taIds } = await taQuery
-
-                if (taIds && taIds.length > 0) {
-                    query = query.in('teaching_assignment_id', taIds.map(t => t.id))
-                } else {
-                    return NextResponse.json([])
-                }
+                // ADMIN: active-year filter above is sufficient
             } else {
                 // No active year: return empty instead of leaking content across years
                 return NextResponse.json([])
