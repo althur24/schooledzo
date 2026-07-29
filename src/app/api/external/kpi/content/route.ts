@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 export async function GET(request: NextRequest) {
     try {
@@ -28,97 +29,39 @@ export async function GET(request: NextRequest) {
             return query
         }
 
-        // 1. Get Teaching Assignment IDs for filtering (scoped by school via academic_years)
-        // teaching_assignments doesn't have school_id directly
-        const { data: schoolYears } = await supabase
-            .from('academic_years')
-            .select('id')
-            .eq('school_id', schoolId)
-        const yearIds = schoolYears?.map(y => y.id) || []
-
-        let teachingAssignmentIds: string[] = []
-        if (yearIds.length > 0) {
-            let taQuery = supabase
-                .from('teaching_assignments')
-                .select('id')
-                .in('academic_year_id', yearIds)
-            if (teacherId) {
-                taQuery = taQuery.eq('teacher_id', teacherId)
-            }
-            const { data: tas } = await taQuery
-            if (tas) teachingAssignmentIds = tas.map(t => t.id)
-        }
-        if (teachingAssignmentIds.length === 0) {
-            return NextResponse.json({
-                teacher_id: teacherId || 'all',
-                kpi_metrics: {
-                    a1_materials: { count: 0, details: [] },
-                    a2_assignments: { count: 0, details: [] },
-                    a3_exams: { count: 0, details: [] },
-                    a4_quizzes: { count: 0, details: [] }
-                }
-            })
-        }
-
-        // Helper to query count
-        const getCount = async (table: string, timeColumn: string = 'created_at') => {
-            let query = supabase.from(table).select('id, teaching_assignment_id, created_at', { count: 'exact' })
-
-            if (teacherId && teachingAssignmentIds.length > 0) {
-                query = query.in('teaching_assignment_id', teachingAssignmentIds)
-            } else if (teacherId && teachingAssignmentIds.length === 0) {
-                return { count: 0, data: [] } // Teacher has no assignments
-            }
-
-            if (month) {
-                // Filter by month
-                // This assumes standard ISO timestamp
-                // Using gte/lte for month range in current year would be better but let's just get data for now
-                // Or let the external system filter by date
-            }
-
+        // Scope sekolah via inner join berjenjang (terbukti di PostgREST deployment ini):
+        // teaching_assignments!inner(academic_year:academic_years!inner(school_id)).
+        // Tidak perlu materialisasi daftar TA (ratusan–1000+ id → URL overflow 16KB).
+        // Catatan: blok getCount()/Promise.all yang lama dihapus — hasilnya tidak pernah
+        // dipakai (dead code; respons dibangun dari 4 query di bawah).
+        const TA_JOIN = 'teaching_assignment:teaching_assignments!inner(academic_year:academic_years!inner(school_id))'
+        const scopeQuery = (query: any) => {
+            query = query.eq('teaching_assignment.academic_year.school_id', schoolId)
+            if (teacherId) query = query.eq('teaching_assignment.teacher_id', teacherId)
             return query
         }
-
-        // Execute parallel queries
-        const [materials, assignments, exams, quizzes] = await Promise.all([
-            getCount('materials'),
-            getCount('assignments'), // assignments has type 'TUGAS' or 'ULANGAN'? No, type is separate
-            getCount('exams'),
-            getCount('quizzes')
-        ])
-
-        // Further refinement: "Assignments" table generally holds TUGAS. "Exams" table holds ULANGAN.
-        // But type in assignments can be 'ULANGAN' too? Let's check types.ts
-        // types.ts: Assignment type: 'TUGAS' | 'ULANGAN'.
-        // types.ts: Quiz exists separately.
-        // So metrics:
-        // A1 (Materials): Count from 'materials'
-        // A2 (Assignments): Count from 'assignments' where type='TUGAS'
-        // A3 (Exams): Count from 'exams' table (which is CBT exams)
-        // A4 (Quizzes): Count from 'quizzes'
-
-        // Refetch with specific filters
+        // Embed join di-strip agar bentuk baris `details` identik dengan sebelumnya
+        const stripJoin = (rows: any[]) => rows.map(({ teaching_assignment, ...rest }) => rest)
 
         // A1: Materials
-        let matQuery = supabase.from('materials').select('id, teaching_assignment_id, created_at, type')
-        if (teachingAssignmentIds.length > 0) matQuery = matQuery.in('teaching_assignment_id', teachingAssignmentIds)
-        const { data: matData } = await matQuery
+        const matData = stripJoin(await fetchAllRows(scopeQuery(
+            supabase.from('materials').select(`id, teaching_assignment_id, created_at, type, ${TA_JOIN}`)
+        )))
 
         // A2: Assignments (Tugas)
-        let assQuery = supabase.from('assignments').select('id, teaching_assignment_id, created_at, due_date').eq('type', 'TUGAS')
-        if (teachingAssignmentIds.length > 0) assQuery = assQuery.in('teaching_assignment_id', teachingAssignmentIds)
-        const { data: assData } = await assQuery
+        const assData = stripJoin(await fetchAllRows(scopeQuery(
+            supabase.from('assignments').select(`id, teaching_assignment_id, created_at, due_date, ${TA_JOIN}`).eq('type', 'TUGAS')
+        )))
 
         // A3: Exams
-        let examQuery = supabase.from('exams').select('id, teaching_assignment_id, created_at, start_time')
-        if (teachingAssignmentIds.length > 0) examQuery = examQuery.in('teaching_assignment_id', teachingAssignmentIds)
-        const { data: examData } = await examQuery
+        const examData = stripJoin(await fetchAllRows(scopeQuery(
+            supabase.from('exams').select(`id, teaching_assignment_id, created_at, start_time, ${TA_JOIN}`)
+        )))
 
         // A4: Quizzes
-        let quizQuery = supabase.from('quizzes').select('id, teaching_assignment_id, created_at')
-        if (teachingAssignmentIds.length > 0) quizQuery = quizQuery.in('teaching_assignment_id', teachingAssignmentIds)
-        const { data: quizData } = await quizQuery
+        const quizData = stripJoin(await fetchAllRows(scopeQuery(
+            supabase.from('quizzes').select(`id, teaching_assignment_id, created_at, ${TA_JOIN}`)
+        )))
 
         return NextResponse.json({
             teacher_id: teacherId || 'all',

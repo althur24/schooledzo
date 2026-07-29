@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,12 +45,10 @@ export async function GET(request: NextRequest) {
             query = query.eq('angkatan', angkatan)
         }
 
-        const { data, error } = await query
-
-        if (error) {
-            console.error('Supabase query error:', error)
-            throw error
-        }
+        // fetchAllRows: jumlah alumni terus bertambah per angkatan — query biasa
+        // terpotong diam-diam di 1000 baris (error dilempar ke catch di bawah, sama
+        // seperti `if (error) throw error` sebelumnya)
+        const data = await fetchAllRows(query)
 
         // Process and flatten the data
         let formattedData = (data || []).map((student: any) => {

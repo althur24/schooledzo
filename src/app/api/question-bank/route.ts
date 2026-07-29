@@ -3,6 +3,8 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
+import { batchedIn } from '@/lib/batchedIn'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // GET question bank
 export async function GET(request: NextRequest) {
@@ -64,9 +66,8 @@ export async function GET(request: NextRequest) {
             query = query.ilike('question_text', `%${search}%`)
         }
 
-        const { data, error } = await query
-
-        if (error) throw error
+        // fetchAllRows: bank soal tumbuh terus — query biasa terpotong diam-diam di 1000
+        const data = await fetchAllRows(query)
 
         // Fetch AI reviews for all questions
         const questionIds = (data || []).map((q: any) => q.id)
@@ -74,12 +75,23 @@ export async function GET(request: NextRequest) {
         let adminReviewMap = new Map()
 
         if (questionIds.length > 0) {
-            const { data: aiReviews } = await supabase
-                .from('ai_reviews')
-                .select('*')
-                .eq('question_source', 'bank')
-                .in('question_id', questionIds)
-                .order('created_at', { ascending: false })
+            // batchedIn per 100 question id (batas URL) + fetchAllRows per chunk.
+            // Setiap question id hanya muncul di satu chunk, dan di dalam chunk urutan
+            // created_at DESC terjaga — jadi "latest review per question" tetap identik.
+            const aiReviews = await batchedIn(
+                'question_id', questionIds,
+                async (chunk) => ({
+                    data: await fetchAllRows(
+                        supabase
+                            .from('ai_reviews')
+                            .select('*')
+                            .eq('question_source', 'bank')
+                            .in('question_id', chunk)
+                            .order('created_at', { ascending: false })
+                    ),
+                    error: null
+                })
+            )
 
             // Keep only the latest AI review per question
             aiReviews?.forEach((r: any) => {
@@ -89,12 +101,20 @@ export async function GET(request: NextRequest) {
             })
 
             // Fetch admin reviews (for return reasons)
-            const { data: adminReviews } = await supabase
-                .from('admin_reviews')
-                .select('*')
-                .eq('question_source', 'bank')
-                .in('question_id', questionIds)
-                .order('created_at', { ascending: false })
+            const adminReviews = await batchedIn(
+                'question_id', questionIds,
+                async (chunk) => ({
+                    data: await fetchAllRows(
+                        supabase
+                            .from('admin_reviews')
+                            .select('*')
+                            .eq('question_source', 'bank')
+                            .in('question_id', chunk)
+                            .order('created_at', { ascending: false })
+                    ),
+                    error: null
+                })
+            )
 
             // Keep only the latest admin review per question
             adminReviews?.forEach((r: any) => {

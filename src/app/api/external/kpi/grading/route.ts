@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
+import { batchedIn } from '@/lib/batchedIn'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 export async function GET(request: NextRequest) {
     try {
@@ -16,41 +18,16 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'school_id parameter is required' }, { status: 400 })
         }
 
-        // Get school's teaching assignments (scoped via academic_years chain)
-        const { data: schoolYears } = await supabase
-            .from('academic_years')
-            .select('id')
-            .eq('school_id', schoolId)
-        const yearIds = schoolYears?.map(y => y.id) || []
-
-        let taQuery = supabase
-            .from('teaching_assignments')
-            .select('id')
-        if (yearIds.length > 0) {
-            taQuery = taQuery.in('academic_year_id', yearIds)
-        } else {
-            return NextResponse.json({
-                meta: { total_processed: 0, avg_grading_time_hours: 0, sla_compliance_rate_percent: 0, avg_feedback_word_count: 0 },
-                data: []
-            })
-        }
-        if (teacherId) taQuery = taQuery.eq('teacher_id', teacherId)
-        const { data: tas } = await taQuery
-        const taIds = tas?.map(t => t.id) || []
-
-        if (taIds.length === 0) {
-            return NextResponse.json({
-                meta: { total_processed: 0, avg_grading_time_hours: 0, sla_compliance_rate_percent: 0, avg_feedback_word_count: 0 },
-                data: []
-            })
-        }
-
-        // Get assignments linked to these TAs
-        const { data: assignmentsList } = await supabase
+        // Get assignments milik sekolah (opsional: filter guru) via inner join berjenjang —
+        // tanpa mematerialisasi daftar TA (ratusan–1000+ id → URL overflow 16KB).
+        // Embed join sengaja tidak dipakai downstream (hanya id yang dibaca).
+        let assQuery = supabase
             .from('assignments')
-            .select('id')
-            .in('teaching_assignment_id', taIds)
-        const assignmentIds = assignmentsList?.map(a => a.id) || []
+            .select('id, teaching_assignment:teaching_assignments!inner(academic_year:academic_years!inner(school_id))')
+            .eq('teaching_assignment.academic_year.school_id', schoolId)
+        if (teacherId) assQuery = assQuery.eq('teaching_assignment.teacher_id', teacherId)
+        const assignmentsList = await fetchAllRows(assQuery)
+        const assignmentIds = assignmentsList.map((a: any) => a.id)
 
         if (assignmentIds.length === 0) {
             return NextResponse.json({
@@ -59,35 +36,48 @@ export async function GET(request: NextRequest) {
             })
         }
 
-        // Fetch grades scoped to this school's assignments
-        const { data: rawGrades, error } = await supabase
-            .from('grades')
-            .select(`
-                id,
-                score,
-                feedback,
-                graded_at,
-                submission:student_submissions(
-                    id,
-                    submitted_at,
-                    assignment:assignments(
-                        id,
-                        title,
-                        type,
-                        teaching_assignment:teaching_assignments(
+        // Fetch grades scoped to this school's assignments — batchedIn per 100 assignment
+        // id (ribuan id → URL overflow) + fetchAllRows per chunk. Embed submission memakai
+        // !inner supaya filter nested benar-benar diterapkan PostgREST ke parent rows
+        // (tanpa !inner filter embed diabaikan untuk parent dan seluruh tabel terambil).
+        const rawGradesAll = await batchedIn(
+            'assignment_id', assignmentIds,
+            async (chunk) => ({
+                data: await fetchAllRows(
+                    supabase
+                        .from('grades')
+                        .select(`
                             id,
-                            teacher_id,
-                            subject:subjects(name),
-                            class:classes(name)
-                        )
-                    )
-                )
-            `)
-            .in('submission.assignment_id', assignmentIds)
-            .order('graded_at', { ascending: false })
-            .limit(limit)
+                            score,
+                            feedback,
+                            graded_at,
+                            submission:student_submissions!inner(
+                                id,
+                                submitted_at,
+                                assignment:assignments(
+                                    id,
+                                    title,
+                                    type,
+                                    teaching_assignment:teaching_assignments(
+                                        id,
+                                        teacher_id,
+                                        subject:subjects(name),
+                                        class:classes(name)
+                                    )
+                                )
+                            )
+                        `)
+                        .in('submission.assignment_id', chunk)
+                ),
+                error: null
+            })
+        )
 
-        if (error) throw error
+        // Reproduksi ORDER BY graded_at DESC + LIMIT lama di JS (urutan global tidak
+        // terjaga antar-batch)
+        const rawGrades = rawGradesAll
+            .sort((a: any, b: any) => new Date(b.graded_at).getTime() - new Date(a.graded_at).getTime())
+            .slice(0, limit)
 
         // Filter by teacher in memory if needed (for deep nested filtering)
         let filteredGrades = rawGrades || []

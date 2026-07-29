@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { hashPassword } from '@/lib/auth'
 import { getSchoolContextOrError, isErrorResponse, getSchoolCode } from '@/lib/schoolContext'
+import { batchedIn } from '@/lib/batchedIn'
 
 export async function POST(request: NextRequest) {
     try {
@@ -81,11 +82,13 @@ export async function POST(request: NextRequest) {
             return baseUsername ? `${baseUsername}.${schoolCode}` : ''
         }).filter(Boolean)
 
-        const { data: existingUsers } = await supabase
-            .from('users')
-            .select('username')
-            .in('username', resolvedUsernames)
-        const existingUsernames = new Set(existingUsers?.map(u => u.username) || [])
+        // batchedIn per 100: upload satu sekolah penuh (1000+ username × ~25 char ≈ 27KB)
+        // overflow limit URL PostgREST dalam satu .in()
+        const existingUsers = await batchedIn<{ username: string }>(
+            'username', resolvedUsernames,
+            (chunk) => supabase.from('users').select('username').in('username', chunk)
+        )
+        const existingUsernames = new Set(existingUsers.map(u => u.username))
 
         // Track usernames added within this batch to detect duplicates
         const usedInBatch = new Set<string>()

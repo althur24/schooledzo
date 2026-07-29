@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
+import { batchedIn } from '@/lib/batchedIn'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 export async function GET(request: NextRequest) {
     try {
@@ -17,69 +19,61 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'school_id parameter is required' }, { status: 400 })
         }
 
-        // 1. Get relevant teaching assignments (scoped by school via academic_years)
-        const { data: schoolYears } = await supabase
-            .from('academic_years')
-            .select('id')
-            .eq('school_id', schoolId)
-        const yearIds = schoolYears?.map(y => y.id) || []
+        // 1. Scope sekolah via inner join berjenjang (pola sama seperti KPI content) —
+        // tanpa mematerialisasi daftar TA (ratusan–1000+ id → URL overflow 16KB).
+        // Head-count untuk mempertahankan kontrak lama: tidak ada TA yang cocok -> [].
+        let taCountQuery = supabase
+            .from('teaching_assignments')
+            .select('id, academic_year:academic_years!inner(school_id)', { count: 'exact', head: true })
+            .eq('academic_year.school_id', schoolId)
+        if (teacherId) taCountQuery = taCountQuery.eq('teacher_id', teacherId)
+        if (classId) taCountQuery = taCountQuery.eq('class_id', classId)
+        if (academicYearId) taCountQuery = taCountQuery.eq('academic_year_id', academicYearId)
+        const { count: taCount } = await taCountQuery
+        if (!taCount) return NextResponse.json([])
 
-        let taQuery = supabase.from('teaching_assignments').select('id, teacher_id, subject_id, class_id')
-        if (yearIds.length > 0) {
-            taQuery = taQuery.in('academic_year_id', yearIds)
-        } else {
-            return NextResponse.json([])
+        // 2. Query `assignmentGrades` yang lama dihapus: hasilnya tidak pernah dipakai
+        // (dead code — agregasi memakai gradesRes di bawah), dan nested .in() tanpa
+        // !inner memang tidak berfungsi seperti yang diragukan komentar lamanya.
+
+        // A. Fetch the assessment *containers* (scoped by school + optional filters)
+        const TA_JOIN = 'teaching_assignment:teaching_assignments!inner(academic_year:academic_years!inner(school_id))'
+        const scopeQuery = (query: any) => {
+            query = query.eq('teaching_assignment.academic_year.school_id', schoolId)
+            if (teacherId) query = query.eq('teaching_assignment.teacher_id', teacherId)
+            if (classId) query = query.eq('teaching_assignment.class_id', classId)
+            if (academicYearId) query = query.eq('teaching_assignment.academic_year_id', academicYearId)
+            return query
         }
 
-        if (teacherId) taQuery = taQuery.eq('teacher_id', teacherId)
-        if (classId) taQuery = taQuery.eq('class_id', classId)
-        if (academicYearId) taQuery = taQuery.eq('academic_year_id', academicYearId)
+        const assignments = await fetchAllRows(scopeQuery(
+            supabase.from('assignments').select(`id, teaching_assignment_id, title, type, ${TA_JOIN}`)
+        ))
+        const quizzes = await fetchAllRows(scopeQuery(
+            supabase.from('quizzes').select(`id, teaching_assignment_id, title, ${TA_JOIN}`)
+        ))
+        const exams = await fetchAllRows(scopeQuery(
+            supabase.from('exams').select(`id, teaching_assignment_id, title, ${TA_JOIN}`)
+        ))
 
-        const { data: tas } = await taQuery
-        if (!tas || tas.length === 0) return NextResponse.json([])
+        const assignmentIds = assignments.map(a => a.id)
+        const quizIds = quizzes.map(q => q.id)
+        const examIds = exams.map(e => e.id)
 
-        const taIds = tas.map(t => t.id)
+        // B. Fetch Scores — batchedIn per 100 id (batas URL) + fetchAllRows per chunk
+        // (100 kontainer × puluhan siswa bisa >1000 baris per chunk). Dibungkus { data }
+        // agar kode agregasi di bawah tidak berubah. Embed grades memakai !inner supaya
+        // filter submission.assignment_id benar-benar diterapkan PostgREST ke parent rows.
+        const batchedFetchAll = <T,>(column: string, ids: string[], buildQuery: (chunk: string[]) => any) =>
+            batchedIn<T>(column, ids, async (chunk) => ({ data: await fetchAllRows<T>(buildQuery(chunk)), error: null }))
 
-        // 2. Fetch Assignments Grades (KPI C1)
-        // assignment -> teaching_assignment
-        const { data: assignmentGrades } = await supabase
-            .from('grades')
-            .select(`
-                score,
-                submission:student_submissions(
-                    student_id,
-                    assignment:assignments(
-                        id,
-                        title,
-                        type,
-                        teaching_assignment_id
-                    )
-                )
-            `)
-            .in('submission.assignment.teaching_assignment_id', taIds)
-        // Note: Supabase might struggle with deep nested in() filtering on some versions/configs.
-        // If this fails, we might need to fetch assignments first.
-        // Let's assume standard PostgREST behavior where this filter applies if we construct it right.
-        // Actually, for deep filter we usually need !inner or equivalent.
-        // Let's optimize: Fetch assignments, quizzes, exams linked to these TAs first.
-
-        // Optimized approach:
-
-        // A. External System usually wants aggregated data per student/subject
-        // Let's fetch the assessment *containers* first
-        const { data: assignments } = await supabase.from('assignments').select('id, teaching_assignment_id, title, type').in('teaching_assignment_id', taIds)
-        const { data: quizzes } = await supabase.from('quizzes').select('id, teaching_assignment_id, title').in('teaching_assignment_id', taIds)
-        const { data: exams } = await supabase.from('exams').select('id, teaching_assignment_id, title').in('teaching_assignment_id', taIds)
-
-        const assignmentIds = assignments?.map(a => a.id) || []
-        const quizIds = quizzes?.map(q => q.id) || []
-        const examIds = exams?.map(e => e.id) || []
-
-        // B. Fetch Scores
         const [gradesRes, quizSubRes, examSubRes] = await Promise.all([
-            assignmentIds.length > 0 ? supabase.from('grades').select('score, submission:student_submissions(student_id, assignment_id)').in('submission.assignment_id', assignmentIds) : { data: [] },
-            quizIds.length > 0 ? supabase.from('quiz_submissions').select('total_score, student_id, quiz_id').in('quiz_id', quizIds) : { data: [] },
-            examIds.length > 0 ? supabase.from('exam_submissions').select('total_score, student_id, exam_id').in('exam_id', examIds) : { data: [] }
+            (async () => ({ data: await batchedFetchAll('assignment_id', assignmentIds, (chunk) =>
+                supabase.from('grades').select('score, submission:student_submissions!inner(student_id, assignment_id)').in('submission.assignment_id', chunk)) }))(),
+            (async () => ({ data: await batchedFetchAll('quiz_id', quizIds, (chunk) =>
+                supabase.from('quiz_submissions').select('total_score, student_id, quiz_id').in('quiz_id', chunk)) }))(),
+            (async () => ({ data: await batchedFetchAll('exam_id', examIds, (chunk) =>
+                supabase.from('exam_submissions').select('total_score, student_id, exam_id').in('exam_id', chunk)) }))()
         ])
 
         // C. Aggregate
