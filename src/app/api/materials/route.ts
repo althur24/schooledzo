@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
         // Verify every assignment exists, belongs to this school, and is not in an archived year
         const { data: tas, error: taError } = await supabase
             .from('teaching_assignments')
-            .select('id, class_id, subject:subjects(name), academic_year:academic_years(school_id, status)')
+            .select('id, class_id, subject:subjects(name), teacher:teachers(user_id), academic_year:academic_years(school_id, status)')
             .in('id', taIds)
 
         if (taError) throw taError
@@ -176,6 +176,27 @@ export async function POST(request: NextRequest) {
                 message: `Berhasil dibagikan ke ${classIds.length} kelas`,
                 link: user.role === 'ADMIN' ? '/dashboard/admin/materi' : '/dashboard/guru/materi'
             })
+
+            // If an ADMIN uploaded on behalf of teachers, notify the TA owners too
+            if (user.role === 'ADMIN') {
+                const ownerIds = [...new Set(
+                    (tas || [])
+                        .map((t: any) => (Array.isArray(t.teacher) ? t.teacher[0]?.user_id : t.teacher?.user_id))
+                        .filter(Boolean)
+                )] as string[]
+                const subjectName = (tas?.[0] as any)?.subject?.name || ''
+                if (ownerIds.length > 0) {
+                    await supabase.from('notifications').insert(
+                        ownerIds.map(uid => ({
+                            user_id: uid,
+                            type: 'SYSTEM',
+                            title: `Admin menambahkan materi: ${title}`,
+                            message: `${subjectName} — dibagikan ke ${classIds.length} kelas oleh admin`,
+                            link: '/dashboard/guru/materi'
+                        }))
+                    )
+                }
+            }
         } catch (notifError) {
             // Jangan gagalkan request utama kalau notifikasi gagal
             console.error('Error sending material notifications:', notifError)

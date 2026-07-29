@@ -36,17 +36,9 @@ export async function POST(request: NextRequest) {
         const { data: classesData, error: classesError } = yearIds.length > 0
             ? await supabase
                 .from('classes')
-                .select('id, name')
+                .select('id, name, academic_year_id')
                 .in('academic_year_id', yearIds)
             : { data: [] as any[], error: null }
-
-        if (classesError) throw classesError
-
-        // Create a lookup map for classes (case-insensitive)
-        const classMap = new Map<string, string>()
-        classesData?.forEach(c => {
-            classMap.set(c.name.trim().toLowerCase(), c.id)
-        })
 
         // Fetch active academic year once for enrollment creation (+ angkatan default)
         const { data: activeYear } = await supabase
@@ -55,6 +47,20 @@ export async function POST(request: NextRequest) {
             .eq('is_active', true)
             .eq('school_id', schoolId)
             .single()
+
+        if (classesError) throw classesError
+
+        // Create a lookup map for classes (case-insensitive).
+        // Class names repeat across years — insert in two passes so classes from the
+        // ACTIVE year always win over same-named classes from older years.
+        const classMap = new Map<string, string>()
+        const activeYearId = activeYear?.id
+        classesData?.forEach(c => {
+            if (c.academic_year_id !== activeYearId) classMap.set(c.name.trim().toLowerCase(), c.id)
+        })
+        classesData?.forEach(c => {
+            if (c.academic_year_id === activeYearId) classMap.set(c.name.trim().toLowerCase(), c.id)
+        })
 
         // Default angkatan = start year of the active academic year ("2026/2027" -> "2026")
         const defaultAngkatan = activeYear?.name?.match(/\d{4}/)?.[0] || null
