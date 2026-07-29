@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { needsManualGrading } from '@/lib/questionTypeUtils'
+import { batchedIn, IN_BATCH_SIZE } from '@/lib/batchedIn'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 export async function GET(request: NextRequest) {
     try {
@@ -97,17 +99,21 @@ export async function GET(request: NextRequest) {
         //    target_class_ids are unique per academic year, and enrollment records persist
         //    after promotion/graduation — so this returns the correct roster even for past
         //    exams. students.class_id (current) would drop students who have since moved up.
-        const { data: rosterEnrollments } = await supabase
-            .from('student_enrollments')
-            .select(`
-                class_id,
-                student:students!student_enrollments_student_id_fkey(
-                    id, nis,
-                    user:users!students_user_id_fkey(full_name)
-                ),
-                class:classes!student_enrollments_class_id_fkey(id, name)
-            `)
-            .in('class_id', allowedClassIds)
+        // fetchAllRows: roster seangkatan/sekolah bisa >1000 baris — query biasa
+        // terpotong diam-diam pada limit 1000 baris PostgREST
+        const rosterEnrollments = await fetchAllRows(
+            supabase
+                .from('student_enrollments')
+                .select(`
+                    class_id,
+                    student:students!student_enrollments_student_id_fkey(
+                        id, nis,
+                        user:users!students_user_id_fkey(full_name)
+                    ),
+                    class:classes!student_enrollments_class_id_fkey(id, name)
+                `)
+                .in('class_id', allowedClassIds)
+        )
 
         const seenStudent = new Set<string>()
         const students: any[] = []
@@ -134,15 +140,19 @@ export async function GET(request: NextRequest) {
 
         // 5. Fetch submissions for these students
         const studentIds = students.map(s => s.id)
-        const { data: submissions } = await supabase
-            .from('official_exam_submissions')
-            .select(`
-                id, student_id, is_submitted, is_graded, violation_count, started_at, submitted_at,
-                total_score, max_score,
-                answers:official_exam_answers(count)
-            `)
-            .eq('exam_id', examId)
-            .in('student_id', studentIds)
+        // batchedIn: ratusan–1088 student id dalam satu .in() membuat URL >16KB
+        // dan PostgREST menolak dengan 500 — pecah per 100 id
+        const submissions = await batchedIn('student_id', studentIds, (chunk) =>
+            supabase
+                .from('official_exam_submissions')
+                .select(`
+                    id, student_id, is_submitted, is_graded, violation_count, started_at, submitted_at,
+                    total_score, max_score,
+                    answers:official_exam_answers(count)
+                `)
+                .eq('exam_id', examId)
+                .in('student_id', chunk)
+        )
 
         // Map submissions for quick lookup
         const submissionMap = new Map()
@@ -156,21 +166,27 @@ export async function GET(request: NextRequest) {
             })
         }
 
-        // Fetch answer counts per submission using batched queries to avoid 1000-row limit
+        // Fetch answer counts per submission — batch per 100 submission id (batas URL)
+        // + fetchAllRows per chunk (satu chunk bisa berisi ribuan baris jawaban).
+        // Menggantikan N+1 count-query per submission (~1088 query paralel per poll).
         const submissionIds = submissions?.map(s => s.id) || []
-        const answerCounts = new Map()
+        const answerCounts = new Map<string, number>()
         if (submissionIds.length > 0) {
-            // Query count for each submission individually using Promise.all
-            // This is more reliable than fetching all rows (which hits Supabase 1000-row limit)
-            const countPromises = submissionIds.map(async (subId) => {
-                const { count } = await supabase
-                    .from('official_exam_answers')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('submission_id', subId)
-                return { subId, count: count || 0 }
-            })
-            const counts = await Promise.all(countPromises)
-            counts.forEach(({ subId, count }) => answerCounts.set(subId, count))
+            const chunks: string[][] = []
+            for (let i = 0; i < submissionIds.length; i += IN_BATCH_SIZE) {
+                chunks.push(submissionIds.slice(i, i + IN_BATCH_SIZE))
+            }
+            await Promise.all(chunks.map(async (chunk) => {
+                const rows = await fetchAllRows<{ submission_id: string }>(
+                    supabase
+                        .from('official_exam_answers')
+                        .select('submission_id')
+                        .in('submission_id', chunk)
+                )
+                for (const a of rows) {
+                    answerCounts.set(a.submission_id, (answerCounts.get(a.submission_id) || 0) + 1)
+                }
+            }))
         }
 
         const now = new Date()
