@@ -4,9 +4,15 @@ import { useEffect, useState } from 'react'
 import { Modal, Button, EmptyState, PageHeader, Toast, type ToastType } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
-import { Document as BookOpen, User, Delete as Trash2, Video, Paper as FileText, Plus } from 'react-iconly'
-import { Loader2, Search } from 'lucide-react'
+import { Document as BookOpen, User, Delete as Trash2, Video, Paper as FileText, Plus, Download, TickSquare as CheckCircle } from 'react-iconly'
+import { Loader2, Search, CheckSquare } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import {
+    formatToOfflineMaterial,
+    saveMaterialOffline,
+    getAllOfflineMaterials,
+    removeMaterialOffline
+} from '@/lib/offlineMateri'
 
 interface Teacher {
     id: string
@@ -64,6 +70,52 @@ export default function AdminMateriPage() {
     const [deleteTarget, setDeleteTarget] = useState<Material | null>(null)
     const [deleting, setDeleting] = useState(false)
     const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
+    const [successInfo, setSuccessInfo] = useState<{ title: string; classCount: number } | null>(null)
+
+    // Offline Mode (simpan materi ke perangkat)
+    const [savedMaterials, setSavedMaterials] = useState<Set<string>>(new Set())
+    const [savingStates, setSavingStates] = useState<Record<string, boolean>>({})
+
+    useEffect(() => {
+        const loadSaved = async () => {
+            const saved = await getAllOfflineMaterials()
+            setSavedMaterials(new Set(saved.map(m => m.id)))
+        }
+        loadSaved()
+    }, [])
+
+    const handleToggleOffline = async (material: Material) => {
+        const isSaved = savedMaterials.has(material.id)
+        if (isSaved) {
+            await removeMaterialOffline(material.id)
+            setSavedMaterials(prev => { const next = new Set(prev); next.delete(material.id); return next })
+            return
+        }
+        setSavingStates(prev => ({ ...prev, [material.id]: true }))
+        try {
+            const isPdf = material.type === 'PDF' && material.content_url
+            const offlineData = formatToOfflineMaterial(
+                material,
+                material.teaching_assignment?.subject?.name || 'Lainnya',
+                material.teaching_assignment?.class?.name || '',
+                !!isPdf
+            )
+            let blob: Blob | undefined
+            if (isPdf && material.content_url) {
+                const response = await fetch(material.content_url)
+                if (!response.ok) throw new Error('Gagal mengambil file PDF')
+                blob = await response.blob()
+            }
+            await saveMaterialOffline(offlineData, blob)
+            setSavedMaterials(prev => { const next = new Set(prev); next.add(material.id); return next })
+            setToast({ message: 'Materi disimpan ke perangkat', type: 'success' })
+        } catch (error) {
+            console.error('Save offline error:', error)
+            setToast({ message: 'Gagal menyimpan materi offline', type: 'error' })
+        } finally {
+            setSavingStates(prev => ({ ...prev, [material.id]: false }))
+        }
+    }
 
     const fetchData = async () => {
         try {
@@ -203,10 +255,7 @@ export default function AdminMateriPage() {
             if (!res.ok) throw new Error(data.error || 'Gagal menyimpan materi')
 
             const classCount = formData.teaching_assignment_ids.length
-            setToast({
-                message: classCount > 1 ? `Materi terkirim ke ${classCount} kelas!` : 'Materi berhasil disimpan!',
-                type: 'success'
-            })
+            setSuccessInfo({ title: formData.title, classCount })
             resetForm()
             fetchData()
         } catch (error: any) {
@@ -293,13 +342,33 @@ export default function AdminMateriPage() {
                                                 {new Date(m.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                                             </td>
                                             <td className="px-6 py-4 text-right">
-                                                <button
-                                                    onClick={() => setDeleteTarget(m)}
-                                                    className="w-8 h-8 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 inline-flex items-center justify-center transition-colors"
-                                                    title="Hapus materi"
-                                                >
-                                                    <Trash2 set="bold" primaryColor="currentColor" size={16} />
-                                                </button>
+                                                <div className="flex items-center justify-end gap-2">
+                                                    {(m.type === 'PDF' || m.type === 'TEXT') && (
+                                                        <button
+                                                            onClick={() => handleToggleOffline(m)}
+                                                            disabled={savingStates[m.id]}
+                                                            className={`w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors ${savedMaterials.has(m.id)
+                                                                ? 'bg-green-500/10 text-green-600 hover:bg-red-500/10 hover:text-red-500'
+                                                                : 'bg-secondary/10 text-text-secondary hover:bg-primary/10 hover:text-primary'}`}
+                                                            title={savedMaterials.has(m.id) ? 'Tersimpan offline — klik untuk hapus' : 'Simpan offline'}
+                                                            aria-label={savedMaterials.has(m.id) ? 'Hapus dari penyimpanan offline' : 'Simpan materi untuk offline'}
+                                                        >
+                                                            {savingStates[m.id]
+                                                                ? <Loader2 className="w-4 h-4 animate-spin" />
+                                                                : savedMaterials.has(m.id)
+                                                                    ? <CheckSquare className="w-4 h-4" />
+                                                                    : <Download set="bold" primaryColor="currentColor" size={16} />}
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={() => setDeleteTarget(m)}
+                                                        className="w-8 h-8 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 inline-flex items-center justify-center transition-colors"
+                                                        title="Hapus materi"
+                                                        aria-label="Hapus materi"
+                                                    >
+                                                        <Trash2 set="bold" primaryColor="currentColor" size={16} />
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -609,6 +678,26 @@ export default function AdminMateriPage() {
     function renderOverlays() {
         return (
             <>
+                {successInfo && (
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                        <div className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                            <div className="w-16 h-16 bg-emerald-500/15 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <CheckCircle set="bold" primaryColor="currentColor" size={32} />
+                            </div>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Materi Berhasil Dibagikan! 🎉</h3>
+                            <p className="text-text-secondary mb-1 text-sm font-bold text-text-main dark:text-white">
+                                "{successInfo.title}"
+                            </p>
+                            <p className="text-text-secondary mb-6 text-sm">
+                                Terkirim ke {successInfo.classCount} kelas. Siswa sudah mendapat notifikasi.
+                            </p>
+                            <Button className="w-full" onClick={() => setSuccessInfo(null)}>
+                                Selesai
+                            </Button>
+                        </div>
+                    </div>
+                )}
+
                 {saving && uploadProgress === 0 && (
                     <div className="fixed bottom-6 right-6 bg-white dark:bg-surface-dark px-6 py-4 rounded-2xl shadow-2xl border border-secondary/20 z-50 flex items-center gap-3 w-80 animate-in slide-in-from-bottom duration-300">
                         <Loader2 className="w-5 h-5 text-primary animate-spin" />

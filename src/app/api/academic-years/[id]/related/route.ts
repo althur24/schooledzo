@@ -55,51 +55,43 @@ export async function GET(
                 .eq('academic_year_id', id)
         ])
 
-        const classIds = classesRes.data?.map(c => c.id) || []
-        const taIds = teachingAssignmentsRes.data?.map(ta => ta.id) || []
+        // Nested counts via inner-join filters — NOT .in(id lists): hundreds of
+        // teaching-assignment ids overflow the 16KB header limit at larger schools
+        const [materialsRes, assignmentsRes, quizzesRes, examsRes] = await Promise.all([
+            supabase.from('materials')
+                .select('id, teaching_assignment:teaching_assignments!inner(academic_year_id)', { count: 'exact', head: true })
+                .eq('teaching_assignment.academic_year_id', id),
+            supabase.from('assignments')
+                .select('id, teaching_assignment:teaching_assignments!inner(academic_year_id)', { count: 'exact', head: true })
+                .eq('teaching_assignment.academic_year_id', id),
+            supabase.from('quizzes')
+                .select('id, teaching_assignment:teaching_assignments!inner(academic_year_id)', { count: 'exact', head: true })
+                .eq('teaching_assignment.academic_year_id', id),
+            supabase.from('exams')
+                .select('id, teaching_assignment:teaching_assignments!inner(academic_year_id)', { count: 'exact', head: true })
+                .eq('teaching_assignment.academic_year_id', id)
+        ])
 
-        // Get nested counts based on classes and teaching assignments
-        let materialsCount = 0
-        let assignmentsCount = 0
-        let quizzesCount = 0
-        let examsCount = 0
-        let submissionsCount = 0
-        let quizSubmissionsCount = 0
-        let examSubmissionsCount = 0
+        const materialsCount = materialsRes.count || 0
+        const assignmentsCount = assignmentsRes.count || 0
+        const quizzesCount = quizzesRes.count || 0
+        const examsCount = examsRes.count || 0
 
-        if (taIds.length > 0) {
-            const [materialsRes, assignmentsRes, quizzesRes, examsRes] = await Promise.all([
-                supabase.from('materials').select('id', { count: 'exact' }).in('teaching_assignment_id', taIds),
-                supabase.from('assignments').select('id', { count: 'exact' }).in('teaching_assignment_id', taIds),
-                supabase.from('quizzes').select('id', { count: 'exact' }).in('teaching_assignment_id', taIds),
-                supabase.from('exams').select('id', { count: 'exact' }).in('teaching_assignment_id', taIds)
-            ])
+        const [subRes, qSubRes, eSubRes] = await Promise.all([
+            supabase.from('student_submissions')
+                .select('id, assignment:assignments!inner(teaching_assignment:teaching_assignments!inner(academic_year_id))', { count: 'exact', head: true })
+                .eq('assignment.teaching_assignment.academic_year_id', id),
+            supabase.from('quiz_submissions')
+                .select('id, quiz:quizzes!inner(teaching_assignment:teaching_assignments!inner(academic_year_id))', { count: 'exact', head: true })
+                .eq('quiz.teaching_assignment.academic_year_id', id),
+            supabase.from('exam_submissions')
+                .select('id, exam:exams!inner(teaching_assignment:teaching_assignments!inner(academic_year_id))', { count: 'exact', head: true })
+                .eq('exam.teaching_assignment.academic_year_id', id)
+        ])
 
-            materialsCount = materialsRes.count || 0
-            assignmentsCount = assignmentsRes.count || 0
-            quizzesCount = quizzesRes.count || 0
-            examsCount = examsRes.count || 0
-
-            // Get assignment IDs for submissions
-            const assignmentIds = assignmentsRes.data?.map(a => a.id) || []
-            const quizIds = quizzesRes.data?.map(q => q.id) || []
-            const examIds = examsRes.data?.map(e => e.id) || []
-
-            if (assignmentIds.length > 0) {
-                const subRes = await supabase.from('student_submissions').select('id', { count: 'exact' }).in('assignment_id', assignmentIds)
-                submissionsCount = subRes.count || 0
-            }
-
-            if (quizIds.length > 0) {
-                const qSubRes = await supabase.from('quiz_submissions').select('id', { count: 'exact' }).in('quiz_id', quizIds)
-                quizSubmissionsCount = qSubRes.count || 0
-            }
-
-            if (examIds.length > 0) {
-                const eSubRes = await supabase.from('exam_submissions').select('id', { count: 'exact' }).in('exam_id', examIds)
-                examSubmissionsCount = eSubRes.count || 0
-            }
-        }
+        const submissionsCount = subRes.count || 0
+        const quizSubmissionsCount = qSubRes.count || 0
+        const examSubmissionsCount = eSubRes.count || 0
 
         return NextResponse.json({
             classes: {

@@ -61,6 +61,7 @@ export default function MateriPage() {
     const [saving, setSaving] = useState(false)
     const [uploadProgress, setUploadProgress] = useState(0)
     const [file, setFile] = useState<File | null>(null)
+    const [successInfo, setSuccessInfo] = useState<{ title: string; classCount: number } | null>(null)
 
     const [previewingPDF, setPreviewingPDF] = useState<string | null>(null)
     const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
@@ -391,10 +392,7 @@ export default function MateriPage() {
             }
 
             const classCount = formData.teaching_assignment_ids.length
-            setToast({
-                message: classCount > 1 ? `Materi terkirim ke ${classCount} kelas!` : 'Materi berhasil disimpan!',
-                type: 'success'
-            })
+            setSuccessInfo({ title: formData.title, classCount })
             setFormData({
                 teaching_assignment_ids: [],
                 title: '',
@@ -939,6 +937,29 @@ export default function MateriPage() {
                             className="bg-primary h-full rounded-full transition-all duration-300 ease-out"
                             style={{ width: `${uploadProgress}%` }}
                         ></div>
+                    </div>
+                </div>
+            )}
+
+            {/* Success Modal — konfirmasi jelas di tengah layar setelah upload */}
+            {successInfo && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                        <div className="w-16 h-16 bg-emerald-500/15 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <CheckCircle set="bold" primaryColor="currentColor" size={32} />
+                        </div>
+                        <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Materi Berhasil Dibagikan! 🎉</h3>
+                        <p className="text-text-secondary mb-1 text-sm font-bold text-text-main dark:text-white">
+                            "{successInfo.title}"
+                        </p>
+                        <p className="text-text-secondary mb-6 text-sm">
+                            {successInfo.classCount > 1
+                                ? `Terkirim ke ${successInfo.classCount} kelas. Siswa sudah mendapat notifikasi.`
+                                : 'Terkirim ke 1 kelas. Siswa sudah mendapat notifikasi.'}
+                        </p>
+                        <Button className="w-full" onClick={() => setSuccessInfo(null)}>
+                            Selesai
+                        </Button>
                     </div>
                 </div>
             )}

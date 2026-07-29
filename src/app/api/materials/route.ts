@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
             .from('materials')
             .select(`
         *,
-          teaching_assignment:teaching_assignments(
+          teaching_assignment:teaching_assignments!inner(
           id,
           academic_year_id,
           teacher:teachers(id, user:users(full_name)),
@@ -38,7 +38,8 @@ export async function GET(request: NextRequest) {
         if (teachingAssignmentId) {
             query = query.eq('teaching_assignment_id', teachingAssignmentId)
         } else if (allYears !== 'true') {
-            // Filter by active year
+            // Filter by active year — via inner join (NOT .in(list): hundreds of TA ids
+            // overflow the 16KB header limit at larger schools and break this endpoint)
             const { data: activeYear } = await supabase
                 .from('academic_years')
                 .select('id')
@@ -47,16 +48,7 @@ export async function GET(request: NextRequest) {
                 .single()
 
             if (activeYear) {
-                const { data: taIds } = await supabase
-                    .from('teaching_assignments')
-                    .select('id')
-                    .eq('academic_year_id', activeYear.id)
-
-                if (taIds && taIds.length > 0) {
-                    query = query.in('teaching_assignment_id', taIds.map(t => t.id))
-                } else {
-                    return NextResponse.json([])
-                }
+                query = query.eq('teaching_assignment.academic_year_id', activeYear.id)
             } else {
                 // No active year: return empty instead of leaking content across years
                 return NextResponse.json([])
@@ -168,13 +160,22 @@ export async function POST(request: NextRequest) {
                                 user_id: uid,
                                 type: 'MATERI_BARU',
                                 title: `Materi Baru: ${title}`,
-                                message: `${subjectName} — dibagikan ke ${classIds.length} kelas`,
+                                message: subjectName,
                                 link: '/dashboard/siswa/materi'
                             }))
                         )
                     }
                 }
             }
+
+            // Confirmation notification for the uploader (guru/admin) — record in the bell
+            await supabase.from('notifications').insert({
+                user_id: user.id,
+                type: 'SYSTEM',
+                title: `Materi Terkirim: ${title}`,
+                message: `Berhasil dibagikan ke ${classIds.length} kelas`,
+                link: user.role === 'ADMIN' ? '/dashboard/admin/materi' : '/dashboard/guru/materi'
+            })
         } catch (notifError) {
             // Jangan gagalkan request utama kalau notifikasi gagal
             console.error('Error sending material notifications:', notifError)
