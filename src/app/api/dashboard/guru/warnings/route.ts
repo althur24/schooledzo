@@ -1,24 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { batchedIn } from '@/lib/batchedIn'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 const DEFAULT_KKM = 75
 
-// Batch .in() queries to avoid URL overflow (max ~100 UUIDs per request).
-// Same pattern as analytics route. Needed because a teacher with many classes
-// can produce hundreds of submission_ids -> a raw .in() exceeds Supabase's URL
-// limit and silently fails (grades come back empty -> tugas not counted).
-async function batchedIn<T>(table: string, column: string, ids: string[], select: string): Promise<T[]> {
-    if (ids.length === 0) return []
-    const BATCH = 100
-    const results: T[] = []
-    for (let i = 0; i < ids.length; i += BATCH) {
-        const chunk = ids.slice(i, i + BATCH)
-        const { data, error } = await supabase.from(table).select(select).in(column, chunk)
-        if (error) throw error
-        if (data) results.push(...(data as T[]))
-    }
-    return results
+// batchedIn per 100 id (batas URL) + fetchAllRows per chunk: satu chunk 100 id bisa
+// berisi >1000 baris (100 kuis × puluhan siswa) yang otherwise terpotong diam-diam.
+function batchedFetchAll<T>(column: string, ids: string[], buildQuery: (chunk: string[]) => any): Promise<T[]> {
+    return batchedIn<T>(column, ids, async (chunk) => ({ data: await fetchAllRows<T>(buildQuery(chunk)), error: null }))
 }
 
 export async function GET(request: NextRequest) {
@@ -116,33 +107,36 @@ export async function GET(request: NextRequest) {
         const allTaIds = activeAllAssignments.map(ta => ta.id)
 
         // 5. Get Submissions Data
+        // Satu query dengan .in(quizIds).in(studentIds) membawa ratusan id per kolom
+        // untuk guru multi-kelas → URL overflow. Dipisah: batch per 100 id pada kolom
+        // pertama, filter siswa di JS (pola yang sama seperti rantai tugas di bawah).
+        const studentSet = new Set(studentIds)
+
         // - Quizzes
         const { data: quizzes } = await supabase.from('quizzes').select('id, title, teaching_assignment_id').in('teaching_assignment_id', allTaIds)
         const quizIds = (quizzes || []).map(q => q.id)
-        let quizSubs: any[] = []
-        if (quizIds.length > 0) {
-            const { data } = await supabase
+        const allQuizSubs = await batchedFetchAll<{ quiz_id: string; student_id: string; total_score: number; max_score: number }>(
+            'quiz_id', quizIds,
+            (chunk) => supabase
                 .from('quiz_submissions')
                 .select('quiz_id, student_id, total_score, max_score')
-                .in('quiz_id', quizIds)
-                .in('student_id', studentIds)
+                .in('quiz_id', chunk)
                 .not('submitted_at', 'is', null)
-            quizSubs = data || []
-        }
+        )
+        const quizSubs = allQuizSubs.filter(s => studentSet.has(s.student_id))
 
         // - Exams
         const { data: exams } = await supabase.from('exams').select('id, title, teaching_assignment_id').in('teaching_assignment_id', allTaIds)
         const examIds = (exams || []).map(e => e.id)
-        let examSubs: any[] = []
-        if (examIds.length > 0) {
-            const { data } = await supabase
+        const allExamSubs = await batchedFetchAll<{ exam_id: string; student_id: string; total_score: number; max_score: number }>(
+            'exam_id', examIds,
+            (chunk) => supabase
                 .from('exam_submissions')
                 .select('exam_id, student_id, total_score, max_score')
-                .in('exam_id', examIds)
-                .in('student_id', studentIds)
+                .in('exam_id', chunk)
                 .eq('is_submitted', true)
-            examSubs = data || []
-        }
+        )
+        const examSubs = allExamSubs.filter(s => studentSet.has(s.student_id))
 
         // - Tugas
         const { data: tasks } = await supabase.from('assignments').select('id, teaching_assignment_id').in('teaching_assignment_id', allTaIds)
@@ -151,17 +145,18 @@ export async function GET(request: NextRequest) {
         if (taskIds.length > 0) {
             // Batched to avoid URL overflow — a teacher with many classes yields many
             // assignment_ids / submission_ids that exceed Supabase's URL limit and make
-            // the grades query silently fail (=> tugas not counted). See batchedIn helper.
-            const allSubs = await batchedIn<{ id: string; student_id: string; assignment_id: string }>(
-                'student_submissions', 'assignment_id', taskIds, 'id, student_id, assignment_id'
+            // the grades query silently fail (=> tugas not counted).
+            const allSubs = await batchedFetchAll<{ id: string; student_id: string; assignment_id: string }>(
+                'assignment_id', taskIds,
+                (chunk) => supabase.from('student_submissions').select('id, student_id, assignment_id').in('assignment_id', chunk)
             )
-            const studentSet = new Set(studentIds)
             const submissions = allSubs.filter(s => studentSet.has(s.student_id))
 
             if (submissions.length > 0) {
                 const subIds = submissions.map(s => s.id)
                 const gradesData = await batchedIn<{ submission_id: string; score: number }>(
-                    'grades', 'submission_id', subIds, 'submission_id, score'
+                    'submission_id', subIds,
+                    (chunk) => supabase.from('grades').select('submission_id, score').in('submission_id', chunk)
                 )
 
                 // Merge grades with submissions

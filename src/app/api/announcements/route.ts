@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // GET /api/announcements - Fetch announcements
 export async function GET(req: NextRequest) {
@@ -113,7 +114,9 @@ export async function POST(req: NextRequest) {
                 studentsQuery = studentsQuery.in('class_id', class_ids)
             }
 
-            const { data: students } = await studentsQuery
+            // fetchAllRows: sekolah besar punya >1000 siswa — query biasa terpotong
+            // diam-diam dan sebagian siswa tidak menerima notifikasi pengumuman
+            const students = await fetchAllRows(studentsQuery)
 
             if (students && students.length > 0) {
                 const notifications = students.map(student => ({

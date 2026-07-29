@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { batchedIn } from '@/lib/batchedIn'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // M2: Service Role Key required — analytics needs cross-table reads that RLS blocks for anon role.
 // Access restricted to ADMIN only.
@@ -9,18 +11,10 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-// Helper: batch .in() queries to avoid URL overflow (max ~100 UUIDs per request)
-async function batchedIn<T>(table: string, column: string, ids: string[], select: string): Promise<T[]> {
-    if (ids.length === 0) return []
-    const BATCH = 100
-    const results: T[] = []
-    for (let i = 0; i < ids.length; i += BATCH) {
-        const chunk = ids.slice(i, i + BATCH)
-        const { data, error } = await supabase.from(table).select(select).in(column, chunk)
-        if (error) throw error
-        if (data) results.push(...(data as T[]))
-    }
-    return results
+// batchedIn per 100 id (batas URL) + fetchAllRows per chunk: satu chunk 100 id bisa
+// berisi >1000 baris (100 kuis × puluhan siswa) yang otherwise terpotong diam-diam.
+function batchedFetchAll<T>(column: string, ids: string[], buildQuery: (chunk: string[]) => any): Promise<T[]> {
+    return batchedIn<T>(column, ids, async (chunk) => ({ data: await fetchAllRows<T>(buildQuery(chunk)), error: null }))
 }
 // GET analytics data per class per subject
 export async function GET(request: NextRequest) {
@@ -58,26 +52,27 @@ export async function GET(request: NextRequest) {
         if (subjectsError) throw subjectsError
 
         // Get all students (used for name/nis lookups in the result)
-        const { data: students, error: studentsError } = await supabase
-            .from('students')
-            .select('id, nis, class_id, user:users!students_user_id_fkey(full_name)')
-            .eq('school_id', schoolId)
-
-        if (studentsError) throw studentsError
+        // fetchAllRows: sekolah besar punya >1000 siswa — query biasa terpotong diam-diam
+        const students = await fetchAllRows<any>(
+            supabase
+                .from('students')
+                .select('id, nis, class_id, user:users!students_user_id_fkey(full_name)')
+                .eq('school_id', schoolId)
+        )
 
         // SOURCE OF TRUTH for "who was in which class during this year": student_enrollments.
         // We must NOT use students.class_id (current class) here, otherwise students who have
         // since been promoted/graduated disappear from their old class's historical analytics.
         const yearClassIds = classes?.map(c => c.id) || []
-        const { data: enrollments, error: enrollError } = yearClassIds.length > 0
-            ? await supabase
-                .from('student_enrollments')
-                .select('student_id, class_id')
-                .eq('academic_year_id', academicYearId)
-                .in('class_id', yearClassIds)
-            : { data: [] as any[], error: null }
-
-        if (enrollError) throw enrollError
+        const enrollments: any[] = yearClassIds.length > 0
+            ? await fetchAllRows(
+                supabase
+                    .from('student_enrollments')
+                    .select('student_id, class_id')
+                    .eq('academic_year_id', academicYearId)
+                    .in('class_id', yearClassIds)
+            )
+            : []
 
         // classRoster: class_id -> Set(student_id) enrolled in that class this year
         // studentClassByYear: student_id -> class_id (for official-exam attribution)
@@ -105,51 +100,64 @@ export async function GET(request: NextRequest) {
         }
 
         // Get all assignments (scoped by school's TAs) — batched to avoid URL overflow
-        const assignments = await batchedIn<{id: string, teaching_assignment_id: string}>('assignments', 'teaching_assignment_id', taIds, 'id, teaching_assignment_id')
+        const assignments = await batchedIn<{id: string, teaching_assignment_id: string}>(
+            'teaching_assignment_id', taIds,
+            (chunk) => supabase.from('assignments').select('id, teaching_assignment_id').in('teaching_assignment_id', chunk)
+        )
 
         const assignmentIds = assignments.map(a => a.id)
 
-        // Get student submissions for tugas — batched
-        const studentSubmissions = await batchedIn<{id: string, student_id: string, assignment_id: string}>('student_submissions', 'assignment_id', assignmentIds, 'id, student_id, assignment_id')
+        // Get student submissions for tugas — batched + paged per chunk
+        // (100 assignment × puluhan siswa bisa >1000 baris per chunk)
+        const studentSubmissions = await batchedFetchAll<{id: string, student_id: string, assignment_id: string}>(
+            'assignment_id', assignmentIds,
+            (chunk) => supabase.from('student_submissions').select('id, student_id, assignment_id').in('assignment_id', chunk)
+        )
 
         const submissionIds = studentSubmissions.map(s => s.id)
 
-        // Get grades for student submissions — batched
-        const grades = await batchedIn<{id: string, submission_id: string, score: number}>('grades', 'submission_id', submissionIds, 'id, submission_id, score')
+        // Get grades for student submissions — batched (≤1 grade per submission, chunk stays small)
+        const grades = await batchedIn<{id: string, submission_id: string, score: number}>(
+            'submission_id', submissionIds,
+            (chunk) => supabase.from('grades').select('id, submission_id, score').in('submission_id', chunk)
+        )
 
-        // Get quizzes (scoped by school's TAs)
-        const { data: quizzes, error: quizzesError } = await supabase
+        // Get quizzes (scoped by year's TAs) — inner join instead of .in(taIds):
+        // ratusan TA id overflow limit 16KB header (pola Fase 1)
+        const { data: quizzes } = await supabase
             .from('quizzes')
-            .select('id, teaching_assignment_id')
-            .in('teaching_assignment_id', taIds)
+            .select('id, teaching_assignment_id, teaching_assignment:teaching_assignments!inner(academic_year_id)')
+            .eq('teaching_assignment.academic_year_id', academicYearId)
 
-        const quizIds = quizzes?.map(q => q.id) || []
+        const quizIds = (quizzes || []).map(q => q.id)
 
-        // Get quiz submissions (scoped by school's quizzes)
-        const { data: quizSubmissions, error: qsError } = quizIds.length > 0
-            ? await supabase
+        // Get quiz submissions (scoped by year's quizzes) — batched + paged per chunk
+        const quizSubmissions = await batchedFetchAll<any>(
+            'quiz_id', quizIds,
+            (chunk) => supabase
                 .from('quiz_submissions')
                 .select('id, student_id, quiz_id, total_score, max_score, submitted_at')
-                .in('quiz_id', quizIds)
+                .in('quiz_id', chunk)
                 .not('submitted_at', 'is', null)
-            : { data: [] as any[], error: null }
+        )
 
-        // Get exams (scoped by school's TAs)
-        const { data: exams, error: examsError } = await supabase
+        // Get exams (scoped by year's TAs) — inner join, pola sama seperti quizzes
+        const { data: exams } = await supabase
             .from('exams')
-            .select('id, teaching_assignment_id')
-            .in('teaching_assignment_id', taIds)
+            .select('id, teaching_assignment_id, teaching_assignment:teaching_assignments!inner(academic_year_id)')
+            .eq('teaching_assignment.academic_year_id', academicYearId)
 
-        const examIds = exams?.map(e => e.id) || []
+        const examIds = (exams || []).map(e => e.id)
 
-        // Get exam submissions (scoped by school's exams)
-        const { data: examSubmissions, error: esError } = examIds.length > 0
-            ? await supabase
+        // Get exam submissions (scoped by year's exams) — batched + paged per chunk
+        const examSubmissions = await batchedFetchAll<any>(
+            'exam_id', examIds,
+            (chunk) => supabase
                 .from('exam_submissions')
                 .select('id, student_id, exam_id, total_score, max_score, submitted_at, is_submitted')
-                .in('exam_id', examIds)
+                .in('exam_id', chunk)
                 .eq('is_submitted', true)
-            : { data: [] as any[], error: null }
+        )
 
         // Get official exams (UTS/UAS) for this academic year
         const { data: officialExams } = await supabase
@@ -160,14 +168,15 @@ export async function GET(request: NextRequest) {
 
         const officialExamIds = officialExams?.map(oe => oe.id) || []
 
-        // Get all official exam submissions (only submitted ones)
-        const { data: officialExamSubmissions } = officialExamIds.length > 0
-            ? await supabase
+        // Get all official exam submissions (only submitted ones) — batched + paged per chunk
+        const officialExamSubmissions = await batchedFetchAll<any>(
+            'exam_id', officialExamIds,
+            (chunk) => supabase
                 .from('official_exam_submissions')
                 .select('id, student_id, exam_id, total_score, max_score, is_submitted')
-                .in('exam_id', officialExamIds)
+                .in('exam_id', chunk)
                 .eq('is_submitted', true)
-            : { data: [] as any[] }
+        )
 
         // Get all granular KKM
         const subjectIds = subjects?.map(s => s.id) || []

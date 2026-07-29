@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { resolveKkm } from '@/lib/resolveKkm'
+import { batchedIn } from '@/lib/batchedIn'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // ─── Shared helpers ─────────────────────────────────────────────
 function median(arr: number[]): number {
@@ -100,15 +102,21 @@ export async function GET(
         const allSubmissions = submissions || []
 
         // 4) Fetch all exam_answers for these submissions (normalized table)
+        // batchedIn per 100 submission id (batas URL) + fetchAllRows per chunk:
+        // 100 submission × puluhan soal bisa >1000 baris jawaban per chunk
         const submissionIds = allSubmissions.map(s => s.id)
-        let allAnswers: any[] = []
-        if (submissionIds.length > 0) {
-            const { data: answers } = await supabase
-                .from('exam_answers')
-                .select('submission_id, question_id, answer, is_correct, points_earned')
-                .in('submission_id', submissionIds)
-            allAnswers = answers || []
-        }
+        const allAnswers: any[] = await batchedIn(
+            'submission_id', submissionIds,
+            async (chunk) => ({
+                data: await fetchAllRows(
+                    supabase
+                        .from('exam_answers')
+                        .select('submission_id, question_id, answer, is_correct, points_earned')
+                        .in('submission_id', chunk)
+                ),
+                error: null
+            })
+        )
 
         // 5) Total students in class — count by ENROLLMENT. class_id is unique per
         //    (class, academic year) and enrollment records persist after promotion/

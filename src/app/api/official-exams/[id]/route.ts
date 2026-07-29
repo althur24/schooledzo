@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { batchedIn, IN_BATCH_SIZE } from '@/lib/batchedIn'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // GET single official exam
 export async function GET(
@@ -120,11 +122,15 @@ export async function PUT(
                     const subjectName = (data as any).subject?.name || ''
 
                     // 1. Student Notifications
-                    const { data: enrollments } = await supabase
-                        .from('student_enrollments')
-                        .select('student:students(user_id)')
-                        .eq('academic_year_id', activeYear.id)
-                        .in('class_id', data.target_class_ids)
+                    // fetchAllRows: UTS seangkatan/sekolah bisa >1000 enrollment — query
+                    // biasa terpotong diam-diam dan sebagian siswa tidak dinotifikasi
+                    const enrollments = await fetchAllRows(
+                        supabase
+                            .from('student_enrollments')
+                            .select('student:students(user_id)')
+                            .eq('academic_year_id', activeYear.id)
+                            .in('class_id', data.target_class_ids)
+                    )
 
                     if (enrollments && enrollments.length > 0) {
                         const studentTitle = isFuture 
@@ -135,12 +141,16 @@ export async function PUT(
                             : `${subjectName} — Silakan kerjakan pada: ${startDate}`
 
                         const userIds = enrollments.map((e: any) => e.student.user_id).filter(Boolean)
-                        const { data: existingNotifs } = await supabase
-                            .from('notifications')
-                            .select('user_id')
-                            .in('user_id', userIds)
-                            .eq('title', studentTitle)
-                            .eq('type', 'UJIAN_RESMI')
+                        // batchedIn: ratusan–1088 user id dalam satu .in() overflow URL
+                        const existingNotifs = await batchedIn<{ user_id: string }>(
+                            'user_id', userIds,
+                            (chunk) => supabase
+                                .from('notifications')
+                                .select('user_id')
+                                .in('user_id', chunk)
+                                .eq('title', studentTitle)
+                                .eq('type', 'UJIAN_RESMI')
+                        )
 
                         const alreadyNotified = new Set((existingNotifs || []).map((n: any) => n.user_id))
                         const toNotify = userIds.filter((uid: string) => !alreadyNotified.has(uid))
@@ -224,11 +234,14 @@ export async function PUT(
                     .single()
 
                 if (activeYear) {
-                    const { data: enrollments } = await supabase
-                        .from('student_enrollments')
-                        .select('student:students(user_id)')
-                        .eq('academic_year_id', activeYear.id)
-                        .in('class_id', data.target_class_ids)
+                    // fetchAllRows: sama seperti notif aktivasi — roster >1000 terpotong diam-diam
+                    const enrollments = await fetchAllRows(
+                        supabase
+                            .from('student_enrollments')
+                            .select('student:students(user_id)')
+                            .eq('academic_year_id', activeYear.id)
+                            .in('class_id', data.target_class_ids)
+                    )
 
                     const userIds = [...new Set(
                         (enrollments || []).map((e: any) => (Array.isArray(e.student) ? e.student[0]?.user_id : e.student?.user_id)).filter(Boolean)
@@ -276,32 +289,38 @@ export async function DELETE(
         }
 
         // Cascade: delete related records first (foreign key constraints)
-        // 1. Delete submission answers (if table exists)
-        try {
-            const { data: subs } = await supabase
+        // 1. Delete submission answers. fetchAllRows: UTS sekolah bisa >1000 submissions
+        //    (query biasa terpotong diam-diam); delete di-batch per 100 id karena satu
+        //    .in() dengan ribuan id overflow URL. Error TIDAK boleh ditelan — answers
+        //    yang tersisa membuat delete submissions gagal (FK constraint).
+        const subs = await fetchAllRows<{ id: string }>(
+            supabase
                 .from('official_exam_submissions')
                 .select('id')
                 .eq('exam_id', id)
-            if (subs && subs.length > 0) {
-                const subIds = subs.map(s => s.id)
-                await supabase
-                    .from('official_exam_answers')
-                    .delete()
-                    .in('submission_id', subIds)
-            }
-        } catch { }
+        )
+        const subIds = subs.map(s => s.id)
+        for (let i = 0; i < subIds.length; i += IN_BATCH_SIZE) {
+            const { error: answersError } = await supabase
+                .from('official_exam_answers')
+                .delete()
+                .in('submission_id', subIds.slice(i, i + IN_BATCH_SIZE))
+            if (answersError) throw answersError
+        }
 
         // 2. Delete submissions
-        await supabase
+        const { error: submissionsError } = await supabase
             .from('official_exam_submissions')
             .delete()
             .eq('exam_id', id)
+        if (submissionsError) throw submissionsError
 
         // 3. Delete questions
-        await supabase
+        const { error: questionsError } = await supabase
             .from('official_exam_questions')
             .delete()
             .eq('exam_id', id)
+        if (questionsError) throw questionsError
 
         // 4. Delete the exam itself
         const { error } = await supabase

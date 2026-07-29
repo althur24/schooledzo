@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // Create admin client to bypass RLS
 const supabase = createClient(
@@ -20,10 +21,13 @@ export async function GET(request: NextRequest) {
             const academicYearId = request.nextUrl.searchParams.get('academic_year_id')
             const allYears = request.nextUrl.searchParams.get('all_years')
 
-            // Get teaching assignment IDs for the target academic year
-            let taIds: string[] | null = null
+            // Resolve the DB-side year filter (replaces the old in-memory taIds list):
+            // - default: the requested academic year, or the active one
+            // - all_years=true: all of this school's academic years
+            let filterYearId: string | null = null
+            let filterYearIds: string[] | null = null
             if (allYears !== 'true') {
-                let filterYearId = academicYearId
+                filterYearId = academicYearId
                 if (!filterYearId) {
                     let yearQuery = supabase
                         .from('academic_years')
@@ -33,32 +37,20 @@ export async function GET(request: NextRequest) {
                     const { data: activeYear } = await yearQuery.single()
                     if (activeYear) filterYearId = activeYear.id
                 }
+            } else if (schoolId) {
+                // all_years = true: still scope to this school's academic years
+                const { data: schoolYears } = await supabase
+                    .from('academic_years')
+                    .select('id')
+                    .eq('school_id', schoolId)
+                filterYearIds = schoolYears?.map(y => y.id) || []
+            }
 
-                if (filterYearId) {
-                    let taQuery = supabase
-                        .from('teaching_assignments')
-                        .select('id')
-                        .eq('academic_year_id', filterYearId)
-                    // teaching_assignments scoped via academic_year_id (no school_id column)
-                    const { data: tas } = await taQuery
-                    taIds = tas?.map(t => t.id) || []
-                }
-            } else {
-                // allYears = true: still scope to this school's teaching assignments
-                if (schoolId) {
-                    const { data: schoolYears } = await supabase
-                        .from('academic_years')
-                        .select('id')
-                        .eq('school_id', schoolId)
-                    const yearIds = schoolYears?.map(y => y.id) || []
-                    if (yearIds.length > 0) {
-                        const { data: tas } = await supabase
-                            .from('teaching_assignments')
-                            .select('id')
-                            .in('academic_year_id', yearIds)
-                        taIds = tas?.map(t => t.id) || []
-                    }
-                }
+            // Apply the year filter on the teaching_assignments embed (!inner join)
+            const applyYearFilter = (query: any, taPath: string) => {
+                if (filterYearId) return query.eq(`${taPath}.academic_year_id`, filterYearId)
+                if (filterYearIds && filterYearIds.length > 0) return query.in(`${taPath}.academic_year_id`, filterYearIds)
+                return query
             }
 
             const allGrades: any[] = []
@@ -71,21 +63,22 @@ export async function GET(request: NextRequest) {
                     score,
                     feedback,
                     graded_at,
-                    submission:student_submissions(
+                    submission:student_submissions!inner(
                         id,
                         student_id,
-                        assignment:assignments(
+                        assignment:assignments!inner(
                             id,
                             title,
                             type,
                             teaching_assignment_id,
-                            teaching_assignment:teaching_assignments(
+                            teaching_assignment:teaching_assignments!inner(
                                 subject:subjects(id, name)
                             )
                         )
                     )
                 `)
                 .order('graded_at', { ascending: false })
+            assignmentQuery = applyYearFilter(assignmentQuery, 'submission.assignment.teaching_assignment')
 
             // 2. Fetch Quiz Grades (KUIS)
             let quizQuery = supabase
@@ -96,16 +89,17 @@ export async function GET(request: NextRequest) {
                     total_score,
                     max_score,
                     submitted_at,
-                    quiz:quizzes(
+                    quiz:quizzes!inner(
                         id,
                         title,
                         teaching_assignment_id,
-                        teaching_assignment:teaching_assignments(
+                        teaching_assignment:teaching_assignments!inner(
                             subject:subjects(id, name)
                         )
                     )
                 `)
                 .not('submitted_at', 'is', null)
+            quizQuery = applyYearFilter(quizQuery, 'quiz.teaching_assignment')
 
             // 3. Fetch Exam Grades (ULANGAN)
             let examQuery = supabase
@@ -116,109 +110,85 @@ export async function GET(request: NextRequest) {
                     total_score,
                     max_score,
                     submitted_at,
-                    exam:exams(
+                    exam:exams!inner(
                         id,
                         title,
                         teaching_assignment_id,
-                        teaching_assignment:teaching_assignments(
+                        teaching_assignment:teaching_assignments!inner(
                             subject:subjects(id, name)
                         )
                     )
                 `)
                 .not('submitted_at', 'is', null)
+            examQuery = applyYearFilter(examQuery, 'exam.teaching_assignment')
 
-            // Filter by student_id if provided
+            // Filter by student_id if provided (all four categories now filtered at DB level)
             const studentId = request.nextUrl.searchParams.get('student_id')
             if (studentId) {
-                // For grades (TUGAS), the relation makes it tricky to filter directly in one go efficiently without inner join syntax limitations in raw PostgREST via Supabase JS sometimes.
-                // But we can try !inner if supported or just filter in memory for simplicity if data isn't huge, OR use the 'student_submissions' filter.
-                // Actually 'grades' has 'submission_id'. 'student_submissions' has 'student_id'.
-                // We can't easily filter top-level 'grades' by 'submission.student_id' in simple query builder without complex syntax.
-                // Let's filter in-memory for consistency with existing structure, usually fine for school scale.
-                // OPTIMIZATION: Filter Quiz/Exam directly as they have student_id column.
-
+                assignmentQuery = assignmentQuery.eq('submission.student_id', studentId)
                 quizQuery = quizQuery.eq('student_id', studentId)
                 examQuery = examQuery.eq('student_id', studentId)
             }
 
-            const { data: assignmentGrades, error: gradesError } = await assignmentQuery
-            const { data: quizSubmissions, error: quizzesError } = await quizQuery
-            const { data: examSubmissions, error: examsError } = await examQuery
+            // fetchAllRows: rekap setahun penuh bisa jauh melampaui limit 1000 baris
+            // PostgREST per request — ambil semua halaman (cap 50.000 baris per kategori)
+            const assignmentGrades = await fetchAllRows(assignmentQuery, 1000, 50)
+            const quizSubmissions = await fetchAllRows(quizQuery, 1000, 50)
+            const examSubmissions = await fetchAllRows(examQuery, 1000, 50)
 
-            if (!gradesError && assignmentGrades) {
-                const mappedAssignments = assignmentGrades
-                    .filter((g: any) => {
-                        if (studentId && g.submission?.student_id !== studentId) return false
-                        if (!taIds) return true // all_years
-                        const taId = g.submission?.assignment?.teaching_assignment_id
-                        return taId && taIds.includes(taId)
-                    })
-                    .map((g: any) => {
-                        const submission = g.submission
-                        const assignment = submission?.assignment
-                        const subject = assignment?.teaching_assignment?.subject
-                        return {
-                            id: g.id,
-                            student_id: submission?.student_id,
-                            subject_id: subject?.id,
-                            grade_type: assignment?.type || 'TUGAS',
-                            score: g.score,
-                            subject: { name: subject?.name || '-' },
-                            graded_at: g.graded_at
-                        }
-                    })
-                allGrades.push(...mappedAssignments)
-            }
+            const mappedAssignments = assignmentGrades
+                .map((g: any) => {
+                    const submission = g.submission
+                    const assignment = submission?.assignment
+                    const subject = assignment?.teaching_assignment?.subject
+                    return {
+                        id: g.id,
+                        student_id: submission?.student_id,
+                        subject_id: subject?.id,
+                        grade_type: assignment?.type || 'TUGAS',
+                        score: g.score,
+                        subject: { name: subject?.name || '-' },
+                        graded_at: g.graded_at
+                    }
+                })
+            allGrades.push(...mappedAssignments)
 
-            if (!quizzesError && quizSubmissions) {
-                const mappedQuizzes = quizSubmissions
-                    .filter((qs: any) => {
-                        if (!taIds) return true
-                        const taId = qs.quiz?.teaching_assignment_id
-                        return taId && taIds.includes(taId)
-                    })
-                    .map((qs: any) => {
-                        const quiz = qs.quiz
-                        const subject = quiz?.teaching_assignment?.subject
-                        const score = qs.max_score > 0 ? (qs.total_score / qs.max_score) * 100 : 0
-                        return {
-                            id: qs.id,
-                            student_id: qs.student_id,
-                            subject_id: subject?.id,
-                            grade_type: 'KUIS',
-                            score: Math.round(score * 10) / 10,
-                            subject: { name: subject?.name || '-' },
-                            graded_at: qs.submitted_at
-                        }
-                    })
-                allGrades.push(...mappedQuizzes)
-            }
+            const mappedQuizzes = quizSubmissions
+                .map((qs: any) => {
+                    const quiz = qs.quiz
+                    const subject = quiz?.teaching_assignment?.subject
+                    const score = qs.max_score > 0 ? (qs.total_score / qs.max_score) * 100 : 0
+                    return {
+                        id: qs.id,
+                        student_id: qs.student_id,
+                        subject_id: subject?.id,
+                        grade_type: 'KUIS',
+                        score: Math.round(score * 10) / 10,
+                        subject: { name: subject?.name || '-' },
+                        graded_at: qs.submitted_at
+                    }
+                })
+            allGrades.push(...mappedQuizzes)
 
-            if (!examsError && examSubmissions) {
-                const mappedExams = examSubmissions
-                    .filter((es: any) => {
-                        if (!taIds) return true
-                        const taId = es.exam?.teaching_assignment_id
-                        return taId && taIds.includes(taId)
-                    })
-                    .map((es: any) => {
-                        const exam = es.exam
-                        const subject = exam?.teaching_assignment?.subject
-                        const score = es.max_score > 0 ? (es.total_score / es.max_score) * 100 : 0
-                        return {
-                            id: es.id,
-                            student_id: es.student_id,
-                            subject_id: subject?.id,
-                            grade_type: 'ULANGAN',
-                            score: Math.round(score * 10) / 10,
-                            subject: { name: subject?.name || '-' },
-                            graded_at: es.submitted_at
-                        }
-                    })
-                allGrades.push(...mappedExams)
-            }
+            const mappedExams = examSubmissions
+                .map((es: any) => {
+                    const exam = es.exam
+                    const subject = exam?.teaching_assignment?.subject
+                    const score = es.max_score > 0 ? (es.total_score / es.max_score) * 100 : 0
+                    return {
+                        id: es.id,
+                        student_id: es.student_id,
+                        subject_id: subject?.id,
+                        grade_type: 'ULANGAN',
+                        score: Math.round(score * 10) / 10,
+                        subject: { name: subject?.name || '-' },
+                        graded_at: es.submitted_at
+                    }
+                })
+            allGrades.push(...mappedExams)
 
-            // 4. Fetch Official Exam Grades (UTS / UAS)
+            // 4. Fetch Official Exam Grades (UTS / UAS) — scoped to this school only.
+            //    Year filter is intentionally NOT applied here (same as before).
             let officialExamQuery = supabase
                 .from('official_exam_submissions')
                 .select(`
@@ -228,7 +198,7 @@ export async function GET(request: NextRequest) {
                     max_score,
                     submitted_at,
                     is_graded,
-                    exam:official_exams(
+                    exam:official_exams!inner(
                         id,
                         title,
                         exam_type,
@@ -241,43 +211,31 @@ export async function GET(request: NextRequest) {
                 .eq('is_submitted', true)
                 .not('submitted_at', 'is', null)
 
+            if (schoolId) {
+                officialExamQuery = officialExamQuery.eq('exam.school_id', schoolId)
+            }
             if (studentId) {
                 officialExamQuery = officialExamQuery.eq('student_id', studentId)
             }
 
-            const { data: officialSubmissions, error: officialError } = await officialExamQuery
+            const officialSubmissions = await fetchAllRows(officialExamQuery, 1000, 50)
 
-            if (!officialError && officialSubmissions) {
-                const mappedOfficial = officialSubmissions
-                    .filter((os: any) => {
-                        // Filter by school_id
-                        if (schoolId && os.exam?.school_id !== schoolId) return false
-                        // Filter by academic year if not all_years
-                        if (taIds !== null) {
-                            // Use academic_year_id from active year
-                            const activeYearId = taIds.length > 0 ? undefined : null // if taIds exist, we have a year
-                            // Actually, simpler: just check if the exam's academic_year_id matches
-                            const { data: activeYr } = { data: null } as any // We already fetched it above
-                            // For simplicity, include all official exams from the school
-                        }
-                        return true
-                    })
-                    .map((os: any) => {
-                        const exam = os.exam
-                        const subject = exam?.subject
-                        const score = os.max_score > 0 ? (os.total_score / os.max_score) * 100 : 0
-                        return {
-                            id: os.id,
-                            student_id: os.student_id,
-                            subject_id: subject?.id,
-                            grade_type: exam?.exam_type || 'UTS', // 'UTS' or 'UAS'
-                            score: Math.round(score * 10) / 10,
-                            subject: { name: subject?.name || '-' },
-                            graded_at: os.submitted_at
-                        }
-                    })
-                allGrades.push(...mappedOfficial)
-            }
+            const mappedOfficial = officialSubmissions
+                .map((os: any) => {
+                    const exam = os.exam
+                    const subject = exam?.subject
+                    const score = os.max_score > 0 ? (os.total_score / os.max_score) * 100 : 0
+                    return {
+                        id: os.id,
+                        student_id: os.student_id,
+                        subject_id: subject?.id,
+                        grade_type: exam?.exam_type || 'UTS', // 'UTS' or 'UAS'
+                        score: Math.round(score * 10) / 10,
+                        subject: { name: subject?.name || '-' },
+                        graded_at: os.submitted_at
+                    }
+                })
+            allGrades.push(...mappedOfficial)
 
             return NextResponse.json(allGrades)
         }
