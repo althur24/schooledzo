@@ -632,7 +632,7 @@ export default function EditExamPage() {
         if (!editQuestionForm || !editingQuestionId) return
         setSaving(true)
         try {
-            await fetch(`/api/exams/${examId}/questions`, {
+            const res = await fetch(`/api/exams/${examId}/questions`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -651,6 +651,11 @@ export default function EditExamPage() {
                     content_format: 'html'
                 })
             })
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}))
+                setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: errData?.error || 'Gagal menyimpan perubahan soal. Periksa isian lalu coba lagi.' })
+                return // form tetap terbuka — perubahan tidak hilang diam-diam
+            }
             setEditingQuestionId(null)
             setEditQuestionForm(null)
             fetchExam()
@@ -1047,23 +1052,27 @@ export default function EditExamPage() {
                     <Button
                         size="sm"
                         variant="secondary"
-                        onClick={() => {
+                        onClick={async () => {
                             const pointPerQuestion = Math.floor(100 / questions.length)
                             const remainder = 100 - (pointPerQuestion * questions.length)
                             const balanced = questions.map((q, idx) => ({
                                 ...q,
                                 points: pointPerQuestion + (idx < remainder ? 1 : 0)
                             }))
-                            setQuestions(balanced)
-                            balanced.forEach(async (q) => {
-                                if (q.id) {
-                                    await fetch(`/api/exams/${examId}/questions`, {
-                                        method: 'PUT',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ question_id: q.id, points: q.points })
-                                    })
-                                }
-                            })
+                            // Simpan semua ke server dulu; UI hanya diubah bila semua berhasil
+                            const results = await Promise.all(balanced.filter(q => q.id).map(q =>
+                                fetch(`/api/exams/${examId}/questions`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ question_id: q.id, points: q.points })
+                                })
+                            ))
+                            if (results.every(r => r.ok)) {
+                                setQuestions(balanced)
+                            } else {
+                                setAlertInfo({ type: 'error', title: 'Gagal', message: 'Sebagian poin gagal disimpan. Coba lagi.' })
+                                fetchExam()
+                            }
                         }}
                     >
                         Seimbangkan Poin
@@ -1411,13 +1420,19 @@ export default function EditExamPage() {
                                                         if (q.id) {
                                                             try {
                                                                 const currentPoints = parseInt(e.target.value) || 1
-                                                                await fetch(`/api/exams/${examId}/questions`, {
+                                                                const res = await fetch(`/api/exams/${examId}/questions`, {
                                                                     method: 'PUT',
                                                                     headers: { 'Content-Type': 'application/json' },
                                                                     body: JSON.stringify({ question_id: q.id, points: currentPoints })
                                                                 })
+                                                                if (!res.ok) {
+                                                                    setAlertInfo({ type: 'error', title: 'Gagal', message: 'Poin gagal disimpan. Coba lagi.' })
+                                                                    fetchExam()
+                                                                }
                                                             } catch (error) {
                                                                 console.error('Failed to update points:', error)
+                                                                setAlertInfo({ type: 'error', title: 'Gagal', message: 'Poin gagal disimpan. Periksa koneksi.' })
+                                                                fetchExam()
                                                             }
                                                         }
                                                     }}

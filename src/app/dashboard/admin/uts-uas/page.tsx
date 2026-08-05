@@ -168,6 +168,9 @@ export default function AdminUtsUasPage() {
                     target_class_ids: []
                 })
                 router.push(`/dashboard/admin/uts-uas/${newExam.id}`)
+            } else {
+                const errData = await res.json().catch(() => ({}))
+                alert(errData?.error || 'Gagal membuat ujian. Periksa isian lalu coba lagi.')
             }
         } finally {
             setCreating(false)

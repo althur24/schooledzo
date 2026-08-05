@@ -166,12 +166,17 @@ export default function TakeOfficialExamPage() {
             if (remaining <= 0) {
                 // Auto-submit expired
                 const formattedAnswers = Object.entries(initialAnswers).map(([qId, val]) => ({ question_id: qId, answer: val }))
-                await fetch('/api/official-exam-submissions', {
+                const res = await fetch('/api/official-exam-submissions', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ submission_id: subData.id, answers: formattedAnswers, submit: true })
                 })
-                clearLocal()
+                if (!res.ok) {
+                    // Submit gagal — jawaban lokal jangan dihapus; siswa bisa buka ulang untuk coba lagi
+                    alert('Gagal mengumpulkan jawaban otomatis. Jawaban Anda tersimpan di perangkat; buka kembali ujian untuk mencoba lagi.')
+                } else {
+                    clearLocal()
+                }
                 router.replace('/dashboard/siswa/ulangan')
                 return
             }
@@ -212,7 +217,7 @@ export default function TakeOfficialExamPage() {
                         isTimeUp = Date.now() >= examEndTime
                     }
 
-                    await fetch('/api/official-exam-submissions', {
+                    const res = await fetch('/api/official-exam-submissions', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -223,6 +228,7 @@ export default function TakeOfficialExamPage() {
                     })
 
                     if (isTimeUp) {
+                        if (!res.ok) return // submit gagal — jawaban lokal jangan dihapus
                         clearLocal()
                         router.replace('/dashboard/siswa/ulangan')
                     }
@@ -450,11 +456,16 @@ export default function TakeOfficialExamPage() {
         setSubmitting(true)
         try {
             const answersArray = Object.entries(answersRef.current).map(([question_id, answer]) => ({ question_id, answer }))
-            await fetch('/api/official-exam-submissions', {
+            const res = await fetch('/api/official-exam-submissions', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ submission_id: submission.id, answers: answersArray, submit: true })
             })
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}))
+                alert(errData?.error || 'Gagal mengumpulkan ujian. Jawaban Anda masih tersimpan — coba lagi.')
+                return // JANGAN clearLocal: jawaban siswa tetap tersimpan di perangkat
+            }
             clearLocal()
             if (document.fullscreenElement) await document.exitFullscreen()
             router.push('/dashboard/siswa/ulangan')

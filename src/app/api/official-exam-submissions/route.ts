@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         const examId = request.nextUrl.searchParams.get('exam_id')
         const studentId = request.nextUrl.searchParams.get('student_id')
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
                 total_score, max_score, violation_count, violations_log, is_graded, created_at,
                 student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name), class:classes(id, school_level, grade_level)),
                 exam:official_exams(
-                    id, title, exam_type, duration_minutes, is_active, subject_id,
+                    id, title, exam_type, duration_minutes, is_active, subject_id, school_id,
                     academic_year_id, target_class_ids,
                     show_results_immediately, results_released,
                     subject:subjects(id, name, kkm)
@@ -40,6 +40,11 @@ export async function GET(request: NextRequest) {
         if (error) throw error
 
         let result = data || []
+
+        // Scope multi-tenant: submission hanya milik sekolah user
+        if (schoolId) {
+            result = result.filter((s: any) => (s.exam as any)?.school_id === schoolId)
+        }
 
         // Role-based filtering
         if (user.role === 'SISWA') {
@@ -258,7 +263,7 @@ export async function POST(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         if (user.role !== 'SISWA') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -280,7 +285,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Student not found' }, { status: 404 })
         }
 
-        // Check if exam exists and is active
+        // Check if exam exists
         const { data: exam } = await supabase
             .from('official_exams')
             .select('*, official_exam_questions(id)')
@@ -290,30 +295,9 @@ export async function POST(request: NextRequest) {
         if (!exam) {
             return NextResponse.json({ error: 'Exam not found' }, { status: 404 })
         }
-        if (!exam.is_active) {
-            return NextResponse.json({ error: 'Ujian belum dibuka' }, { status: 400 })
-        }
 
-        // Check if student's class is in target_class_ids
-        if (!exam.target_class_ids?.includes(student.class_id)) {
-            return NextResponse.json({ error: 'Anda tidak terdaftar dalam ujian ini' }, { status: 403 })
-        }
-
-        // C3 Hotfix: Remedial guard
-        if (exam.is_remedial && exam.allowed_student_ids && exam.allowed_student_ids.length > 0) {
-            if (!exam.allowed_student_ids.includes(student.id)) {
-                return NextResponse.json({ error: 'Anda tidak terdaftar untuk ujian remedial ini' }, { status: 403 })
-            }
-        }
-
-        // Check start time
-        const now = new Date()
-        const startTime = new Date(exam.start_time)
-        if (now < startTime) {
-            return NextResponse.json({ error: 'Ujian belum dimulai' }, { status: 400 })
-        }
-
-        // Check if already submitted
+        // Resume dulu: submission yang sudah berjalan tidak boleh terkunci
+        // (mis. auto-deaktivasi saat window lewat, atau reload di tengah ujian)
         const { data: existingSubmission } = await supabase
             .from('official_exam_submissions')
             .select('id, is_submitted, question_order, started_at, violation_count, max_score')
@@ -327,6 +311,57 @@ export async function POST(request: NextRequest) {
 
         if (existingSubmission) {
             return NextResponse.json(existingSubmission)
+        }
+
+        // === Sesi baru: semua gate wajib lolos ===
+        if (!exam.is_active) {
+            return NextResponse.json({ error: 'Ujian belum dibuka' }, { status: 400 })
+        }
+
+        // Kelas siswa: utamakan enrollment ACTIVE di tahun aktif (selaras jalur notifikasi)
+        let studentClassId = student.class_id
+        if (schoolId) {
+            const { data: activeYears } = await supabase
+                .from('academic_years')
+                .select('id')
+                .eq('is_active', true)
+                .eq('school_id', schoolId)
+                .order('created_at', { ascending: false })
+                .limit(1)
+            const yearId = activeYears?.[0]?.id
+            if (yearId) {
+                const { data: enrollment } = await supabase
+                    .from('student_enrollments')
+                    .select('class_id')
+                    .eq('student_id', student.id)
+                    .eq('academic_year_id', yearId)
+                    .eq('status', 'ACTIVE')
+                    .maybeSingle()
+                if (enrollment?.class_id) studentClassId = enrollment.class_id
+            }
+        }
+
+        // Check if student's class is in target_class_ids
+        if (!exam.target_class_ids?.includes(studentClassId)) {
+            return NextResponse.json({ error: 'Anda tidak terdaftar dalam ujian ini' }, { status: 403 })
+        }
+
+        // C3 Hotfix: Remedial guard
+        if (exam.is_remedial && exam.allowed_student_ids && exam.allowed_student_ids.length > 0) {
+            if (!exam.allowed_student_ids.includes(student.id)) {
+                return NextResponse.json({ error: 'Anda tidak terdaftar untuk ujian remedial ini' }, { status: 403 })
+            }
+        }
+
+        // Check start time + window pengerjaan
+        const now = new Date()
+        const startTime = new Date(exam.start_time)
+        if (now < startTime) {
+            return NextResponse.json({ error: 'Ujian belum dimulai' }, { status: 400 })
+        }
+        const endTime = new Date(startTime.getTime() + (exam.duration_minutes || 0) * 60 * 1000)
+        if (now > endTime) {
+            return NextResponse.json({ error: 'Waktu pengerjaan ujian sudah berakhir' }, { status: 400 })
         }
 
         // Create randomized question order if enabled

@@ -13,7 +13,19 @@ export async function GET(
         const { id } = await params
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
+
+        // Scope multi-tenant: verifikasi ujian milik sekolah user
+        if (schoolId) {
+            const { data: examRow } = await supabase
+                .from('official_exams')
+                .select('school_id')
+                .eq('id', id)
+                .single()
+            if (examRow?.school_id && examRow.school_id !== schoolId) {
+                return NextResponse.json({ error: 'Ujian tidak ditemukan' }, { status: 404 })
+            }
+        }
 
         const { data, error } = await supabase
             .from('official_exam_questions')

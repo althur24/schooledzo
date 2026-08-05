@@ -263,14 +263,17 @@ export default function GuruUlanganPage() {
                         })
                     )
                 )
-                const failed = siblingResults.filter(r => r.status === 'rejected').length
-                siblingResults.forEach(r => {
+                const failedClassNames: string[] = []
+                siblingResults.forEach((r, i) => {
                     if (r.status === 'fulfilled' && r.value?.id) {
                         siblingIds.push(r.value.id)
+                    } else {
+                        const taId = form.teaching_assignment_ids.slice(1)[i]
+                        failedClassNames.push(teachingAssignments.find(t => t.id === taId)?.class?.name || `Kelas ke-${i + 2}`)
                     }
                 })
-                if (failed > 0) {
-                    alert(`Ulangan utama berhasil dibuat. ${siblingIds.length} kelas tambahan berhasil, ${failed} gagal.`)
+                if (failedClassNames.length > 0) {
+                    alert(`Ulangan utama berhasil dibuat. ${siblingIds.length} kelas tambahan berhasil, ${failedClassNames.length} GAGAL: ${failedClassNames.join(', ')}. Buat ulang ulangan untuk kelas tersebut.`)
                 }
             }
 
@@ -662,8 +665,9 @@ export default function GuruUlanganPage() {
                                                             <span className="flex items-center gap-1 font-medium">
                                                                 <Clock set="bold" primaryColor="currentColor" size={14} /> {exam.duration_minutes}m
                                                             </span>
-                                                            <span className="flex items-center gap-1 font-medium">
+                                                            <span className={`flex items-center gap-1 ${(exam.question_count || 0) === 0 ? 'font-bold text-red-500' : 'font-medium'}`}>
                                                                 <Edit set="bold" primaryColor="currentColor" size={14} /> {exam.question_count || 0}
+                                                                {(exam.question_count || 0) === 0 && <span className="px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded text-[10px] font-bold">BELUM ADA SOAL</span>}
                                                             </span>
                                                         </div>
                                                     </div>

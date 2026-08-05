@@ -31,13 +31,18 @@ export async function GET(request: NextRequest) {
             .eq('school_id', schoolId)
             .order('created_at', { ascending: false })
 
-        // Filter by active year by default
-        const { data: activeYear } = await supabase
+        // Filter by active year by default (tahan kasus 2 tahun aktif: ambil terbaru + peringatan)
+        const { data: activeYears } = await supabase
             .from('academic_years')
             .select('id')
             .eq('is_active', true)
             .eq('school_id', schoolId)
-            .single()
+            .order('created_at', { ascending: false })
+            .limit(2)
+        if ((activeYears || []).length > 1) {
+            console.warn(`[official-exams] Sekolah ${schoolId} punya ${activeYears!.length} tahun aktif — pakai yang terbaru`)
+        }
+        const activeYear = activeYears?.[0] || null
 
         if (activeYear) {
             query = query.eq('academic_year_id', activeYear.id)
@@ -57,16 +62,29 @@ export async function GET(request: NextRequest) {
 
         // Role-based filtering
         if (user.role === 'SISWA') {
-            // Get student's class_id
+            // Kelas siswa: utamakan enrollment ACTIVE di tahun aktif (selaras jalur
+            // notifikasi), fallback ke students.class_id
             const { data: student } = await supabase
                 .from('students')
                 .select('id, class_id')
                 .eq('user_id', user.id)
                 .single()
 
-            if (student?.class_id) {
+            let studentClassId = student?.class_id || null
+            if (student && activeYear) {
+                const { data: enrollment } = await supabase
+                    .from('student_enrollments')
+                    .select('class_id')
+                    .eq('student_id', student.id)
+                    .eq('academic_year_id', activeYear.id)
+                    .eq('status', 'ACTIVE')
+                    .maybeSingle()
+                if (enrollment?.class_id) studentClassId = enrollment.class_id
+            }
+
+            if (studentClassId) {
                 result = result.filter((exam: any) =>
-                    exam.target_class_ids?.includes(student.class_id)
+                    exam.target_class_ids?.includes(studentClassId)
                 )
             } else {
                 result = []

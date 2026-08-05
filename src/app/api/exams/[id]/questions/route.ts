@@ -277,12 +277,16 @@ export async function PUT(
         if (text_direction !== undefined) updateData.text_direction = text_direction
         if (content_format !== undefined) updateData.content_format = content_format
 
-        // Reset status & re-trigger HOTS (same logic as bank soal PUT)
+        // Reset status & re-trigger HOTS hanya bila konten soal berubah.
+        // Perubahan poin semata tidak menyentuh status (menghindari publish terblokir).
+        const contentChanged = [question_text, question_type, options, correct_answer, passage_text, passage_audio_url, image_url, content_format, text_direction, difficulty].some(v => v !== undefined)
         const aiEnabled = await isAIReviewEnabled(schoolId)
-        if (aiEnabled) {
-            updateData.status = 'ai_reviewing'
-        } else {
-            updateData.status = 'approved'
+        if (contentChanged) {
+            if (aiEnabled) {
+                updateData.status = 'ai_reviewing'
+            } else {
+                updateData.status = 'approved'
+            }
         }
 
         const { data, error } = await supabase
@@ -295,8 +299,8 @@ export async function PUT(
 
         if (error) throw error
 
-        // Re-trigger HOTS analysis (fire-and-forget)
-        if (data && aiEnabled) {
+        // Re-trigger HOTS analysis (fire-and-forget) — hanya bila konten berubah
+        if (data && aiEnabled && contentChanged) {
             const { data: exam } = await supabase.from('exams')
                 .select('teaching_assignment:teaching_assignments(subject:subjects(name), class:classes(school_level))')
                 .eq('id', id).single()
