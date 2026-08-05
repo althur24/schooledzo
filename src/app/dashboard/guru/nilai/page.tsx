@@ -307,7 +307,7 @@ export default function NilaiPage() {
         const ta = teachingAssignments.find(t => t.id === selectedTA)
         if (!ta) return
 
-        const tugasAssignmentsLocal = assignments.filter(a => a.type === 'TUGAS')
+        const tugasAssignmentsLocal = assignments.filter(a => a.type !== 'ULANGAN')
         const utsExamsLocal = officialExams.filter(oe => oe.exam_type === 'UTS')
         const uasExamsLocal = officialExams.filter(oe => oe.exam_type === 'UAS')
 
@@ -401,7 +401,7 @@ export default function NilaiPage() {
     }
 
     const selectedTAData = teachingAssignments.find(t => t.id === selectedTA)
-    const tugasAssignments = assignments.filter(a => a.type === 'TUGAS')
+    const tugasAssignments = assignments.filter(a => a.type !== 'ULANGAN')
     const utsExams = officialExams.filter(oe => oe.exam_type === 'UTS')
     const uasExams = officialExams.filter(oe => oe.exam_type === 'UAS')
 

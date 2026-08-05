@@ -56,9 +56,11 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ message: 'No questions to copy' })
         }
 
-        // 2. Copy questions to each target (per-target error isolation)
+        // 2. Copy questions to each target (per-target error isolation).
+        // Insert-first, delete-after: kalau insert gagal, soal lama di target tetap utuh.
         let totalCopied = 0
         const failedTargets: string[] = []
+        const cleanupWarnings: string[] = []
 
         for (const targetId of target_exam_ids) {
             try {
@@ -68,19 +70,20 @@ export async function POST(req: NextRequest) {
                     return { ...rest, exam_id: targetId }
                 })
 
-                // Delete existing questions in target
-                const { error: deleteError } = await supabase
+                // Snapshot soal yang ada di target (dibersihkan setelah insert sukses)
+                const { data: oldRows, error: fetchOldError } = await supabase
                     .from('exam_questions')
-                    .delete()
+                    .select('id')
                     .eq('exam_id', targetId)
 
-                if (deleteError) {
-                    console.error(`Error deleting old questions for target ${targetId}:`, deleteError)
+                if (fetchOldError) {
+                    console.error(`Error fetching old questions for target ${targetId}:`, fetchOldError)
                     failedTargets.push(targetId)
                     continue
                 }
+                const oldIds = (oldRows || []).map(r => r.id)
 
-                // Insert copied questions
+                // Insert copied questions FIRST — soal lama selamat kalau ini gagal
                 const { error: insertError } = await supabase
                     .from('exam_questions')
                     .insert(questionsForTarget)
@@ -89,6 +92,19 @@ export async function POST(req: NextRequest) {
                     console.error(`Error inserting questions for target ${targetId}:`, insertError)
                     failedTargets.push(targetId)
                     continue
+                }
+
+                // Baru hapus soal lama setelah salinan berhasil dibuat
+                if (oldIds.length > 0) {
+                    const { error: deleteError } = await supabase
+                        .from('exam_questions')
+                        .delete()
+                        .in('id', oldIds)
+                    if (deleteError) {
+                        // Tidak fatal: target punya soal ganda sementara, bukan kehilangan soal
+                        console.error(`Error cleaning old questions for target ${targetId}:`, deleteError)
+                        cleanupWarnings.push(targetId)
+                    }
                 }
 
                 totalCopied += questionsForTarget.length
@@ -116,7 +132,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
             success: true,
             copied_count: totalCopied,
-            failed_targets: failedTargets.length > 0 ? failedTargets : undefined
+            failed_targets: failedTargets.length > 0 ? failedTargets : undefined,
+            cleanup_warnings: cleanupWarnings.length > 0 ? cleanupWarnings : undefined
         })
 
     } catch (error: any) {

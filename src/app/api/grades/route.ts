@@ -145,7 +145,8 @@ export async function GET(request: NextRequest) {
                         id: g.id,
                         student_id: submission?.student_id,
                         subject_id: subject?.id,
-                        grade_type: assignment?.type || 'TUGAS',
+                        // Normalize PR/PROYEK/LATIHAN to TUGAS so they count in rekap/rapor
+                        grade_type: assignment?.type === 'ULANGAN' ? 'ULANGAN' : 'TUGAS',
                         score: g.score,
                         subject: { name: subject?.name || '-' },
                         graded_at: g.graded_at

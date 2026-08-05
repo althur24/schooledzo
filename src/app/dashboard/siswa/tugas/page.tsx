@@ -65,7 +65,7 @@ export default function SiswaTugasPage() {
 
                 const assignmentsArray = Array.isArray(assignmentsData) ? assignmentsData : []
                 const myAssignments = assignmentsArray.filter((a: Assignment) =>
-                    a.teaching_assignment?.class?.name === myStudent.class.name && a.type === 'TUGAS'
+                    a.teaching_assignment?.class?.name === myStudent.class.name
                 )
                 setAssignments(myAssignments)
                 setSubmissions(Array.isArray(submissionsData) ? submissionsData : [])

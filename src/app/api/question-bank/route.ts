@@ -5,6 +5,7 @@ import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type T
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { filterNewBankQuestions } from '@/lib/questionBankSync'
 
 // GET question bank
 export async function GET(request: NextRequest) {
@@ -270,9 +271,18 @@ export async function POST(request: NextRequest) {
                 content_format: q.content_format || 'plain'
             }))
 
+            // Skip soal yang kontennya sudah ada di bank (double-submit / import ulang)
+            const { fresh: freshQuestions, skipped } = await filterNewBankQuestions(teacher.id, questions)
+            if (skipped > 0) {
+                console.log(`[question-bank] ${skipped} soal duplikat diskip untuk teacher ${teacher.id}`)
+            }
+            if (freshQuestions.length === 0) {
+                return NextResponse.json([])
+            }
+
             const { data, error } = await supabase
                 .from('question_bank')
-                .insert(questions)
+                .insert(freshQuestions)
                 .select()
 
             if (error) throw error
@@ -312,20 +322,31 @@ export async function POST(request: NextRequest) {
         // Single insert
         const { subject_id, question_text, question_type, options, correct_answer, difficulty, tags, teacher_hots_claim, content_format } = body
 
+        const candidate = {
+            teacher_id: teacher.id,
+            subject_id: subject_id || null,
+            question_text,
+            question_type,
+            options: options || null,
+            correct_answer: correct_answer || null,
+            difficulty: difficulty || 'MEDIUM',
+            tags: tags || null,
+            teacher_hots_claim: Boolean(teacher_hots_claim),
+            content_format: content_format || 'plain'
+        }
+
+        // Tolak soal yang kontennya persis sama dengan yang sudah ada di bank.
+        // Kecualikan duplikasi eksplisit (tombol "Duplikat" di bank soal).
+        if (!body.allow_duplicate) {
+            const { fresh } = await filterNewBankQuestions(teacher.id, [candidate])
+            if (fresh.length === 0) {
+                return NextResponse.json({ error: 'Soal dengan konten yang sama sudah ada di bank soal' }, { status: 409 })
+            }
+        }
+
         const { data, error } = await supabase
             .from('question_bank')
-            .insert({
-                teacher_id: teacher.id,
-                subject_id: subject_id || null,
-                question_text,
-                question_type,
-                options: options || null,
-                correct_answer: correct_answer || null,
-                difficulty: difficulty || 'MEDIUM',
-                tags: tags || null,
-                teacher_hots_claim: Boolean(teacher_hots_claim),
-                content_format: content_format || 'plain'
-            })
+            .insert(candidate)
             .select()
             .single()
 

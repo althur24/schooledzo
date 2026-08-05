@@ -335,7 +335,8 @@ export default function BankSoalPage() {
                     subject_id: q.subject?.id || '',
                     image_url: q.image_url || '',
                     teacher_hots_claim: q.teacher_hots_claim || false,
-                    content_format: q.content_format || 'html'
+                    content_format: q.content_format || 'html',
+                    allow_duplicate: true // duplikasi eksplisit — bypass dedup server
                 })
             })
             if (!res.ok) {

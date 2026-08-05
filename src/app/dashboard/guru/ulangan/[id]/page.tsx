@@ -166,6 +166,8 @@ export default function EditExamPage() {
     const [showPublishConfirm, setShowPublishConfirm] = useState(false)
     const [showPreview, setShowPreview] = useState(false)
     const [publishing, setPublishing] = useState(false)
+    const [syncFailedCount, setSyncFailedCount] = useState(0)
+    const [retryingSync, setRetryingSync] = useState(false)
     const [showSuccessModal, setShowSuccessModal] = useState<false | 'published' | 'pending'>(false)
     const [alertInfo, setAlertInfo] = useState<{ type: 'info' | 'warning' | 'error' | 'success', title: string, message: string } | null>(null)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
@@ -334,6 +336,46 @@ export default function EditExamPage() {
         setShowPublishConfirm(true)
     }
 
+    // Salin soal ke kelas sibling. Return true bila semua target berhasil.
+    const syncToSiblings = async (): Promise<boolean> => {
+        try {
+            const syncRes = await fetch('/api/exams/copy-questions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_exam_id: examId,
+                    target_exam_ids: siblingIds,
+                    also_publish: true
+                })
+            })
+            const syncData = await syncRes.json().catch(() => null)
+            const failedTargets: string[] = syncData?.failed_targets || []
+            if (!syncRes.ok || failedTargets.length > 0) {
+                setSyncFailedCount(failedTargets.length || siblingIds.length)
+                return false
+            }
+            sessionStorage.removeItem(`exam_siblings_${examId}`)
+            setSyncFailedCount(0)
+            return true
+        } catch (syncError) {
+            console.error('Error syncing questions to siblings:', syncError)
+            setSyncFailedCount(siblingIds.length)
+            return false
+        }
+    }
+
+    const handleRetrySync = async () => {
+        setRetryingSync(true)
+        const ok = await syncToSiblings()
+        setRetryingSync(false)
+        if (ok) {
+            setAlertInfo({ type: 'success', title: 'Berhasil', message: 'Soal berhasil disalin ke semua kelas.' })
+            fetchExam()
+        } else {
+            setAlertInfo({ type: 'error', title: 'Masih Gagal', message: 'Penyalinan soal masih gagal. Coba lagi beberapa saat.' })
+        }
+    }
+
     const confirmPublish = async () => {
         setPublishing(true)
         try {
@@ -347,28 +389,33 @@ export default function EditExamPage() {
             })
             if (res.ok) {
                 const resData = await res.json()
-                
+
+                // Soal menunggu review admin — sibling jangan diterbitkan/disalin dulu
+                if (resData?.pending_publish) {
+                    setShowPublishConfirm(false)
+                    setShowSuccessModal('pending')
+                    fetchExam()
+                    return
+                }
+
                 // After successful publish, sync questions to siblings
                 if (siblingIds.length > 0) {
-                    try {
-                        await fetch('/api/exams/copy-questions', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                source_exam_id: examId,
-                                target_exam_ids: siblingIds,
-                                also_publish: true
-                            })
+                    const syncOk = await syncToSiblings()
+                    if (!syncOk) {
+                        // Linkage sibling dipertahankan — guru retry lewat tombol "Salin Ulang Soal"
+                        setAlertInfo({
+                            type: 'error',
+                            title: 'Gagal Menyalin Soal',
+                            message: 'Soal gagal disalin ke beberapa kelas. Ulangan utama tetap terbit. Gunakan tombol "Salin Ulang Soal" di halaman ini untuk mencoba lagi.'
                         })
-                        sessionStorage.removeItem(`exam_siblings_${examId}`)
-                    } catch (syncError) {
-                        console.error('Error syncing questions to siblings:', syncError)
-                        // Note: primary exam is still published, so we just log the sync error
+                        setShowPublishConfirm(false)
+                        fetchExam()
+                        return
                     }
                 }
 
                 setShowPublishConfirm(false)
-                setShowSuccessModal(resData?.pending_publish ? 'pending' : 'published')
+                setShowSuccessModal('published')
                 fetchExam()
             } else {
                 let errData
@@ -889,6 +936,25 @@ export default function EditExamPage() {
                                 Ulangan ini juga akan dibuat untuk kelas lainnya. Soal yang Anda tambahkan di sini akan otomatis disalin ke kelas lainnya saat publish.
                             </p>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Sync Failure Banner — muncul bila penyalinan ke kelas lain gagal (bisa terjadi setelah primary terbit) */}
+            {syncFailedCount > 0 && siblingIds.length > 0 && (
+                <div className="p-4 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-700 rounded-xl animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div>
+                            <h4 className="font-bold text-red-800 dark:text-red-300 text-sm">
+                                Soal belum tersalin ke {syncFailedCount} kelas
+                            </h4>
+                            <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-0.5">
+                                Ulangan utama sudah terbit. Tekan tombol di samping untuk menyalin ulang soal ke kelas lainnya.
+                            </p>
+                        </div>
+                        <Button size="sm" onClick={handleRetrySync} loading={retryingSync}>
+                            Salin Ulang Soal
+                        </Button>
                     </div>
                 </div>
             )}

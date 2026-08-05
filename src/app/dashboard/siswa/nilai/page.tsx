@@ -139,10 +139,11 @@ export default function SiswaNilaiPage() {
                 submissions.forEach((sub) => {
                     const subjectName = sub.assignment?.teaching_assignment?.subject?.name || 'Lainnya'
                     const subject = getOrInitSubject(subjectName)
-                    if (sub.assignment.type === 'TUGAS') {
-                        subject.tugas.push(sub)
-                    } else if (sub.assignment.type === 'ULANGAN') {
+                    if (sub.assignment.type === 'ULANGAN') {
                         subject.ulangan.push(sub)
+                    } else {
+                        // TUGAS/PR/PROYEK/LATIHAN all count as tugas
+                        subject.tugas.push(sub)
                     }
                 })
 

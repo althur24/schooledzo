@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
+import { syncQuestionsToBank } from '@/lib/questionBankSync'
 
 // GET questions for a quiz
 export async function GET(
@@ -191,31 +192,19 @@ export async function POST(
                     }
                 }
 
-                // Sync to bank
-                try {
-                    const bankInserts = data.map((q: any) => ({
-                        teacher_id: teacherId,
-                        subject_id: subjectId,
-                        question_text: q.question_text,
-                        question_type: q.question_type,
-                        options: q.options,
-                        correct_answer: q.correct_answer,
-                        difficulty: q.difficulty,
-                        teacher_hots_claim: q.teacher_hots_claim,
-                        content_format: q.content_format,
-                        image_url: q.image_url,
-                        source_type: 'quiz',
-                        source_quiz_id: id,
-                        source_name: quizData.title,
-                        status: 'approved' // Automatically approved since it's already used in a quiz
-                    }))
-                    // We don't await this to keep response fast (fire and forget)
-                    supabase.from('question_bank').insert(bankInserts).then(({ error: bankErr }) => {
-                        if (bankErr) console.error('Failed to auto-sync quiz questions to bank:', bankErr)
-                    })
-                } catch (err) {
-                    console.error('Error preparing bank sync:', err)
-                }
+                // Sync to bank — hanya soal baru; soal yang diambil dari bank tidak disalin balik
+                const fromBankIdx = new Set<number>(
+                    body.map((q: any, i: number) => (q.bank_status ? i : -1)).filter((i: number) => i >= 0)
+                )
+                const newQuestions = (data as any[]).filter((_: any, i: number) => !fromBankIdx.has(i))
+                syncQuestionsToBank({
+                    teacherId,
+                    subjectId,
+                    sourceType: 'quiz',
+                    sourceId: id,
+                    sourceName: quizData.title,
+                    questions: newQuestions
+                })
             }
 
             return NextResponse.json(data)
@@ -293,29 +282,16 @@ export async function POST(
                 }).catch(err => console.error('HOTS trigger error:', err))
             }
 
-            // Sync to bank
-            try {
-                const bankInsert = {
-                    teacher_id: teacherId,
-                    subject_id: subjectId,
-                    question_text: data.question_text,
-                    question_type: data.question_type,
-                    options: data.options,
-                    correct_answer: data.correct_answer,
-                    difficulty: data.difficulty,
-                    teacher_hots_claim: data.teacher_hots_claim,
-                    content_format: data.content_format,
-                    image_url: data.image_url,
-                    source_type: 'quiz',
-                    source_quiz_id: id,
-                    source_name: quizData.title,
-                    status: 'approved'
-                }
-                supabase.from('question_bank').insert(bankInsert).then(({ error: bankErr }) => {
-                    if (bankErr) console.error('Failed to auto-sync quiz question to bank:', bankErr)
+            // Sync to bank — hanya soal baru; soal yang diambil dari bank tidak disalin balik
+            if (!body.bank_status) {
+                syncQuestionsToBank({
+                    teacherId,
+                    subjectId,
+                    sourceType: 'quiz',
+                    sourceId: id,
+                    sourceName: quizData.title,
+                    questions: [data]
                 })
-            } catch (err) {
-                console.error('Error preparing bank sync:', err)
             }
         }
 
