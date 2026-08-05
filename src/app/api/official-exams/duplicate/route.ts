@@ -86,8 +86,15 @@ export async function POST(request: NextRequest) {
             .select('*')
             .eq('exam_id', source_exam_id)
 
-        // 4. Insert questions to new exam
-        if (!questionsError && sourceQuestions && sourceQuestions.length > 0) {
+        // 4. Insert questions to new exam — kegagalan select/insert menggagalkan duplikasi
+        //    (ujian baru di-rollback agar tidak jadi ujian yatim 0 soal)
+        if (questionsError) {
+            console.error('Error fetching source questions for duplicate:', questionsError)
+            await supabase.from('official_exams').delete().eq('id', newExam.id)
+            return NextResponse.json({ error: 'Gagal membaca soal sumber. Duplikasi dibatalkan.' }, { status: 500 })
+        }
+
+        if (sourceQuestions && sourceQuestions.length > 0) {
             const newQuestions = sourceQuestions.map((q: any) => ({
                 exam_id: newExam.id,
                 question_text: q.question_text,
@@ -109,7 +116,11 @@ export async function POST(request: NextRequest) {
                 .from('official_exam_questions')
                 .insert(newQuestions)
 
-            if (duplicateError) throw duplicateError
+            if (duplicateError) {
+                console.error('Error inserting duplicated questions:', duplicateError)
+                await supabase.from('official_exams').delete().eq('id', newExam.id)
+                return NextResponse.json({ error: 'Gagal menyalin soal. Duplikasi dibatalkan.' }, { status: 500 })
+            }
         }
 
         // 5. Send notifications if remedial
@@ -121,7 +132,7 @@ export async function POST(request: NextRequest) {
                     .in('id', allowed_student_ids)
 
                 if (students && students.length > 0) {
-                    const startDate = new Date(start_time).toLocaleString('id-ID')
+                    const startDate = new Date(start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })
                     const examLabel = sourceExam.exam_type === 'UTS' ? 'UTS' : 'UAS'
                     
                     await supabase.from('notifications').insert(

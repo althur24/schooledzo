@@ -223,7 +223,9 @@ export default function GuruUlanganPage() {
         try {
             const localStart = new Date(form.start_time)
             const utcStart = localStart.toISOString()
-            const payload = { ...form, start_time: utcStart }
+            // Satu batch multi-kelas diikat batch_id di DB — tahan tab tertutup
+            const batchId = form.teaching_assignment_ids.length > 1 ? crypto.randomUUID() : null
+            const payload = { ...form, start_time: utcStart, batch_id: batchId }
 
             // Create first (primary) exam
             const primaryRes = await fetch('/api/exams', {

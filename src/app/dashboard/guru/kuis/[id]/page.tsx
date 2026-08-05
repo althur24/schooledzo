@@ -50,6 +50,7 @@ interface Quiz {
     description: string | null
     is_active: boolean
     pending_publish: boolean
+    batch_id?: string | null
     teaching_assignment: {
         subject: { id: string; name: string }
         class: { name: string }
@@ -251,7 +252,21 @@ export default function EditQuizPage() {
 
     const handleRetrySync = async () => {
         setRetryingSync(true)
-        const ok = await syncToSiblings()
+        let ok = false
+        if (quiz?.batch_id) {
+            // Jalur utama: sync-batch di server (sumber kebenaran batch_id di DB)
+            try {
+                const res = await fetch(`/api/quizzes/${quizId}/sync-batch`, { method: 'POST' })
+                const data = await res.json().catch(() => null)
+                ok = !!res.ok && !!data && (data.failed?.length || 0) === 0
+                if (!ok) setSyncFailedCount(data?.failed?.length || siblingIds.length)
+            } catch {
+                ok = false
+                setSyncFailedCount(siblingIds.length)
+            }
+        } else {
+            ok = await syncToSiblings()
+        }
         setRetryingSync(false)
         if (ok) {
             setAlertInfo({ type: 'success', title: 'Berhasil', message: 'Soal berhasil disalin ke semua kelas.' })
@@ -283,8 +298,24 @@ export default function EditQuizPage() {
                     return
                 }
 
-                // After successful publish, sync questions to siblings
-                if (siblingIds.length > 0) {
+                // Sinkronisasi kelas satu batch dilakukan server saat aktivasi (batch_id di DB)
+                const batchSync = resData?.batch_sync
+                if (batchSync && (batchSync.total ?? 0) > 0) {
+                    if (batchSync.failed?.length > 0) {
+                        setSyncFailedCount(batchSync.failed.length)
+                        setAlertInfo({
+                            type: 'error',
+                            title: 'Gagal Menyalin Soal',
+                            message: `Soal gagal disalin ke ${batchSync.failed.length} kelas. Kuis utama tetap terbit. Gunakan tombol "Salin Ulang Soal" di halaman ini untuk mencoba lagi.`
+                        })
+                        setShowPublishConfirm(false)
+                        fetchQuiz()
+                        return
+                    }
+                    sessionStorage.removeItem(`quiz_siblings_${quizId}`)
+                    setSyncFailedCount(0)
+                } else if (siblingIds.length > 0) {
+                    // Fallback legacy: kuis lama tanpa batch_id disalin via sessionStorage
                     const syncOk = await syncToSiblings()
                     if (!syncOk) {
                         // Linkage sibling dipertahankan — guru retry lewat tombol "Salin Ulang Soal"

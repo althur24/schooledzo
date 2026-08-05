@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
+import { syncExamBatch } from '@/lib/examBatch'
 
 // GET single exam
 export async function GET(
@@ -80,7 +81,10 @@ export async function PUT(
                 .select('id, status, updated_at')
                 .eq('exam_id', id)
 
-            if (questions && questions.length > 0) {
+            if (!questions || questions.length === 0) {
+                return NextResponse.json({ error: 'Tidak bisa mempublikasikan ulangan tanpa soal. Tambahkan minimal 1 soal terlebih dahulu.' }, { status: 400 })
+            }
+            if (questions.length > 0) {
                 if (!aiEnabled) {
                     // AI Review OFF — auto-approve any non-approved questions
                     const nonApproved = questions.filter(q => q.status !== 'approved')
@@ -205,7 +209,7 @@ export async function PUT(
 
                     if (enrollments && enrollments.length > 0) {
                         const subjectName = data.teaching_assignment.subject?.name || ''
-                        const startDate = new Date(data.start_time).toLocaleString('id-ID')
+                        const startDate = new Date(data.start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })
                         await supabase.from('notifications').insert(
                             enrollments.map((e: any) => ({
                                 user_id: e.student.user_id,
@@ -256,7 +260,18 @@ export async function PUT(
                 console.error('Error sending results-released notifications:', notifError)
             }
         }
-        return NextResponse.json(data)
+        // Sinkronkan kelas satu batch (multi-kelas) bila ulangan baru saja diaktifkan
+        let batchSync: { total: number, failed: string[] } | null = null
+        if (finalIsActive === true && data?.batch_id) {
+            try {
+                batchSync = await syncExamBatch(id)
+            } catch (batchError) {
+                console.error('Batch sync error (exam):', batchError)
+                batchSync = { total: -1, failed: [] }
+            }
+        }
+
+        return NextResponse.json({ ...data, batch_sync: batchSync })
     } catch (error) {
         console.error('Error updating exam:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

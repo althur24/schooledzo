@@ -282,7 +282,7 @@ export async function POST(request: NextRequest) {
         // Get student record
         const { data: student } = await supabase
             .from('students')
-            .select('id')
+            .select('id, class_id')
             .eq('user_id', user.id)
             .single()
 
@@ -290,10 +290,10 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Student not found' }, { status: 404 })
         }
 
-        // Check if exam exists and is active
+        // Check if exam exists (+ kelas pemilik via teaching assignment)
         const { data: exam } = await supabase
             .from('exams')
-            .select('*, exam_questions(id)')
+            .select('*, exam_questions(id), teaching_assignment:teaching_assignments(class_id)')
             .eq('id', exam_id)
             .single()
 
@@ -301,18 +301,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Exam not found' }, { status: 404 })
         }
 
-        if (!exam.is_active) {
-            return NextResponse.json({ error: 'Ulangan belum dibuka' }, { status: 400 })
-        }
-
-        // Check start time
-        const now = new Date()
-        const startTime = new Date(exam.start_time)
-        if (now < startTime) {
-            return NextResponse.json({ error: 'Ulangan belum dimulai' }, { status: 400 })
-        }
-
-        // Check if already submitted
+        // Resume dulu: submission yang sudah berjalan tidak boleh terkunci saat reload
         const { data: existingSubmission } = await supabase
             .from('exam_submissions')
             .select('id, is_submitted, question_order, started_at, violation_count, max_score')
@@ -327,6 +316,35 @@ export async function POST(request: NextRequest) {
         if (existingSubmission) {
             // Return existing submission with all data needed for resume
             return NextResponse.json(existingSubmission)
+        }
+
+        // === Sesi baru: semua gate wajib lolos ===
+        if (!exam.is_active) {
+            return NextResponse.json({ error: 'Ulangan belum dibuka' }, { status: 400 })
+        }
+
+        // Check start time + window pengerjaan
+        const now = new Date()
+        const startTime = new Date(exam.start_time)
+        if (now < startTime) {
+            return NextResponse.json({ error: 'Ulangan belum dimulai' }, { status: 400 })
+        }
+        const endTime = new Date(startTime.getTime() + (exam.duration_minutes || 0) * 60 * 1000)
+        if (now > endTime) {
+            return NextResponse.json({ error: 'Waktu pengerjaan ulangan sudah berakhir' }, { status: 400 })
+        }
+
+        // Verifikasi kelas siswa
+        const examClassId = (exam.teaching_assignment as any)?.class_id
+        if (examClassId && student.class_id !== examClassId) {
+            return NextResponse.json({ error: 'Ulangan ini bukan untuk kelas Anda' }, { status: 403 })
+        }
+
+        // Verifikasi remedial
+        if (exam.is_remedial && Array.isArray(exam.allowed_student_ids) && exam.allowed_student_ids.length > 0) {
+            if (!exam.allowed_student_ids.includes(student.id)) {
+                return NextResponse.json({ error: 'Anda tidak terdaftar dalam daftar remedial ini' }, { status: 403 })
+            }
         }
 
         // Create randomized question order if enabled

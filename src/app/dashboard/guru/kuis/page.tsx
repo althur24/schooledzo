@@ -187,12 +187,16 @@ export default function GuruKuisPage() {
         if (form.teaching_assignment_ids.length === 0 || !form.title) return
         setCreating(true)
         try {
+            // Satu batch multi-kelas diikat batch_id di DB — tahan tab tertutup
+            const batchId = form.teaching_assignment_ids.length > 1 ? crypto.randomUUID() : null
+
             // Create first (primary) quiz
             const primaryRes = await fetch('/api/quizzes', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     teaching_assignment_id: form.teaching_assignment_ids[0],
+                    batch_id: batchId,
                     title: form.title,
                     description: form.description,
                     duration_minutes: form.duration_minutes,
@@ -219,6 +223,7 @@ export default function GuruKuisPage() {
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 teaching_assignment_id: taId,
+                                batch_id: batchId,
                                 title: form.title,
                                 description: form.description,
                                 duration_minutes: form.duration_minutes,
@@ -231,14 +236,17 @@ export default function GuruKuisPage() {
                         })
                     )
                 )
-                const failed = siblingResults.filter(r => r.status === 'rejected').length
-                siblingResults.forEach(r => {
+                const failedClassNames: string[] = []
+                siblingResults.forEach((r, i) => {
                     if (r.status === 'fulfilled' && r.value?.id) {
                         siblingIds.push(r.value.id)
+                    } else {
+                        const taId = form.teaching_assignment_ids.slice(1)[i]
+                        failedClassNames.push(teachingAssignments.find(t => t.id === taId)?.class?.name || `Kelas ke-${i + 2}`)
                     }
                 })
-                if (failed > 0) {
-                    alert(`Kuis utama berhasil dibuat. ${siblingIds.length} kelas tambahan berhasil, ${failed} gagal.`)
+                if (failedClassNames.length > 0) {
+                    alert(`Kuis utama berhasil dibuat. ${siblingIds.length} kelas tambahan berhasil, ${failedClassNames.length} GAGAL: ${failedClassNames.join(', ')}. Buat ulang kuis untuk kelas tersebut.`)
                 }
             }
 

@@ -1,4 +1,5 @@
 import { supabaseAdmin as supabase } from '@/lib/supabase'
+import { syncExamBatch, syncQuizBatch } from '@/lib/examBatch'
 
 export async function checkAndAutoPublish(
     source: 'quiz' | 'exam',
@@ -102,6 +103,17 @@ export async function checkAndAutoPublish(
         // 5. Send notifications
         await sendPublishNotifications(source, parent)
 
+        // 6. Sinkronkan kelas satu batch (multi-kelas) bila ada — menutup celah
+        //    pending-review yang dulu hanya menerbitkan kelas utama
+        if ((parent as any).batch_id) {
+            try {
+                const syncResult = source === 'quiz' ? await syncQuizBatch(parentId) : await syncExamBatch(parentId)
+                console.log(`[autoPublish] Batch sync: total=${syncResult.total}, failed=${syncResult.failed.length}`)
+            } catch (batchError) {
+                console.error('[autoPublish] Batch sync error:', batchError)
+            }
+        }
+
         return true
     } catch (error) {
         console.error(`[autoPublish] Unexpected error:`, error)
@@ -157,7 +169,11 @@ async function sendPublishNotifications(source: 'quiz' | 'exam', parent: any) {
                 yearQuery = yearQuery.eq('school_id', schoolId)
             }
 
-            const { data: activeYear } = await yearQuery.single()
+            const { data: activeYears } = await yearQuery.order('created_at', { ascending: false }).limit(2)
+            if ((activeYears || []).length > 1) {
+                console.warn(`[autoPublish] Sekolah punya ${activeYears!.length} tahun aktif — pakai yang terbaru`)
+            }
+            const activeYear = activeYears?.[0] || null
 
             if (activeYear) {
                 const { data: enrollments } = await supabase
@@ -168,7 +184,7 @@ async function sendPublishNotifications(source: 'quiz' | 'exam', parent: any) {
 
                 if (enrollments && enrollments.length > 0) {
                     const subjectName = parent.teaching_assignment.subject?.name || ''
-                    const startDate = parent.start_time ? ` Mulai: ${new Date(parent.start_time).toLocaleString('id-ID')}` : ''
+                    const startDate = parent.start_time ? ` Mulai: ${new Date(parent.start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}` : ''
 
                     await supabase.from('notifications').insert(
                         enrollments.map((e) => {

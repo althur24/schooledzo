@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
+import { syncQuizBatch } from '@/lib/examBatch'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
@@ -103,7 +104,10 @@ export async function PUT(
                 .select('id, status, updated_at')
                 .eq('quiz_id', id)
 
-            if (questions && questions.length > 0) {
+            if (!questions || questions.length === 0) {
+                return NextResponse.json({ error: 'Tidak bisa mempublikasikan kuis tanpa soal. Tambahkan minimal 1 soal terlebih dahulu.' }, { status: 400 })
+            }
+            if (questions.length > 0) {
                 if (!aiEnabled) {
                     // AI Review OFF — auto-approve any non-approved questions
                     const nonApproved = questions.filter(q => q.status !== 'approved')
@@ -268,7 +272,18 @@ export async function PUT(
                 console.error('Error sending quiz notifications:', notifError)
             }
         }
-        return NextResponse.json(data)
+        // Sinkronkan kelas satu batch (multi-kelas) bila kuis baru saja diaktifkan
+        let batchSync: { total: number, failed: string[] } | null = null
+        if (finalIsActive === true && data?.batch_id) {
+            try {
+                batchSync = await syncQuizBatch(id)
+            } catch (batchError) {
+                console.error('Batch sync error (quiz):', batchError)
+                batchSync = { total: -1, failed: [] }
+            }
+        }
+
+        return NextResponse.json({ ...data, batch_sync: batchSync })
     } catch (error) {
         console.error('Error updating quiz:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

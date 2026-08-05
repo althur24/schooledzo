@@ -13,6 +13,7 @@ export async function GET(
         const { id } = await params
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
+        const { schoolId } = ctx
 
         const { data, error } = await supabase
             .from('official_exams')
@@ -26,6 +27,11 @@ export async function GET(
             .single()
 
         if (error) throw error
+
+        // Scope multi-tenant: ujian sekolah lain tidak boleh dibaca
+        if (data && schoolId && (data as any).school_id && (data as any).school_id !== schoolId) {
+            return NextResponse.json({ error: 'Ujian tidak ditemukan' }, { status: 404 })
+        }
 
         // Resolve target class names
         if (data?.target_class_ids?.length > 0) {
@@ -67,6 +73,17 @@ export async function PUT(
             is_randomized, is_active, max_violations,
             target_class_ids, subject_id, show_results_immediately, results_released
         } = body
+
+        // Server-side guard: jangan aktifkan ujian tanpa soal
+        if (is_active === true) {
+            const { count: questionCount } = await supabase
+                .from('official_exam_questions')
+                .select('id', { count: 'exact', head: true })
+                .eq('exam_id', id)
+            if (!questionCount || questionCount === 0) {
+                return NextResponse.json({ error: 'Tidak bisa mengaktifkan ujian tanpa soal. Tambahkan minimal 1 soal terlebih dahulu.' }, { status: 400 })
+            }
+        }
 
         const updateData: any = { updated_at: new Date().toISOString() }
         if (title !== undefined) updateData.title = title
@@ -117,7 +134,7 @@ export async function PUT(
 
                 if (activeYear && data.target_class_ids?.length > 0) {
                     const isFuture = new Date(data.start_time) > new Date()
-                    const startDate = new Date(data.start_time).toLocaleString('id-ID')
+                    const startDate = new Date(data.start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })
                     const examLabel = data.exam_type === 'UTS' ? 'UTS' : 'UAS'
                     const subjectName = (data as any).subject?.name || ''
 
@@ -162,7 +179,7 @@ export async function PUT(
                                     type: 'UJIAN_RESMI',
                                     title: studentTitle,
                                     message: studentMessage,
-                                    link: '/dashboard/siswa/uts-uas'
+                                    link: '/dashboard/siswa/ulangan'
                                 }))
                             )
                         }
@@ -256,7 +273,7 @@ export async function PUT(
                                 type: 'NILAI_KELUAR',
                                 title: `Nilai Keluar: ${data.title}`,
                                 message: `${examLabel} ${subjectName} — Hasil ujian sudah bisa dilihat`,
-                                link: '/dashboard/siswa/uts-uas'
+                                link: '/dashboard/siswa/ulangan'
                             }))
                         )
                     }

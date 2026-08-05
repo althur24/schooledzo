@@ -34,12 +34,18 @@ export async function GET(request: NextRequest) {
         } else if (allYears !== 'true') {
             // Filter by active year — via inner join (NOT .in(list): hundreds of TA ids
             // overflow the 16KB header limit at larger schools and break this endpoint)
-            const { data: activeYear } = await supabase
+            // Tahan kasus 2 tahun aktif: ambil terbaru + peringatan (index DB mencegah sisanya)
+            const { data: activeYears } = await supabase
                 .from('academic_years')
                 .select('id')
                 .eq('is_active', true)
                 .eq('school_id', schoolId)
-                .single()
+                .order('created_at', { ascending: false })
+                .limit(2)
+            if ((activeYears || []).length > 1) {
+                console.warn(`[exams] Sekolah ${schoolId} punya ${activeYears!.length} tahun aktif — pakai yang terbaru`)
+            }
+            const activeYear = activeYears?.[0] || null
 
             if (activeYear) {
                 query = query.eq('teaching_assignment.academic_year_id', activeYear.id)
@@ -109,7 +115,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { title, description, start_time, duration_minutes, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, show_results_immediately } = body
+        const { title, description, start_time, duration_minutes, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, show_results_immediately, batch_id } = body
 
         if (!title || !start_time || duration_minutes === undefined || !teaching_assignment_id) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -133,7 +139,8 @@ export async function POST(request: NextRequest) {
                 is_remedial: is_remedial || false,
                 remedial_for_id: remedial_for_id || null,
                 allowed_student_ids: allowed_student_ids || null,
-                show_results_immediately: show_results_immediately ?? true
+                show_results_immediately: show_results_immediately ?? true,
+                batch_id: batch_id || null
             })
             .select()
             .single()
@@ -171,7 +178,7 @@ export async function POST(request: NextRequest) {
                     .in('id', allowed_student_ids)
 
                 if (students && students.length > 0) {
-                    const startDate = new Date(start_time).toLocaleString('id-ID')
+                    const startDate = new Date(start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })
                     await supabase.from('notifications').insert(
                         students.map((s: any) => ({
                             user_id: s.user_id,

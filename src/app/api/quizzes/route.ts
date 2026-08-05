@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { title, description, start_time, deadline, duration_minutes, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, questions } = body
+        const { title, description, start_time, deadline, duration_minutes, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, questions, batch_id } = body
 
         if (!title || duration_minutes === undefined || !teaching_assignment_id) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -126,7 +126,8 @@ export async function POST(request: NextRequest) {
                 is_randomized: is_randomized ?? true,
                 is_remedial: is_remedial || false,
                 remedial_for_id: remedial_for_id || null,
-                allowed_student_ids: allowed_student_ids || null
+                allowed_student_ids: allowed_student_ids || null,
+                batch_id: batch_id || null
             })
             .select()
             .single()
