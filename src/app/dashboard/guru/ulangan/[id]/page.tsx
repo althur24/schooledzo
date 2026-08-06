@@ -169,6 +169,7 @@ export default function EditExamPage() {
     const [publishing, setPublishing] = useState(false)
     const [syncFailedCount, setSyncFailedCount] = useState(0)
     const [retryingSync, setRetryingSync] = useState(false)
+    const [publishingCheck, setPublishingCheck] = useState(false)
     const [showSuccessModal, setShowSuccessModal] = useState<false | 'published' | 'pending'>(false)
     const [alertInfo, setAlertInfo] = useState<{ type: 'info' | 'warning' | 'error' | 'success', title: string, message: string } | null>(null)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
@@ -329,12 +330,26 @@ export default function EditExamPage() {
         }
     }, [activeTab, exam?.is_active, fetchResults])
 
-    const handlePublishClick = () => {
-        if (questions.length === 0) {
-            setAlertInfo({ type: 'warning', title: 'Belum Ada Soal', message: 'Minimal harus ada 1 soal untuk mempublish ulangan!' })
-            return
+    const handlePublishClick = async () => {
+        // Verifikasi segar ke server — state bisa basi tepat setelah import/simpan soal
+        // (klik Publish sebelum list sempat refresh → salah tolak "Belum Ada Soal")
+        setPublishingCheck(true)
+        try {
+            const res = await fetch(`/api/exams/${examId}/questions`)
+            const fresh = await res.json().catch(() => [])
+            const freshQuestions = Array.isArray(fresh) ? fresh : []
+            if (freshQuestions.length === 0) {
+                setAlertInfo({ type: 'warning', title: 'Belum Ada Soal', message: 'Minimal harus ada 1 soal untuk mempublish ulangan!' })
+                return
+            }
+            // Segarkan state sekalian supaya indikator lain ikut benar
+            setQuestions(freshQuestions)
+            setShowPublishConfirm(true)
+        } catch {
+            setAlertInfo({ type: 'error', title: 'Gagal Memuat', message: 'Tidak bisa memeriksa soal. Periksa koneksi lalu coba lagi.' })
+        } finally {
+            setPublishingCheck(false)
         }
-        setShowPublishConfirm(true)
     }
 
     // Salin soal ke kelas sibling. Return true bila semua target berhasil.
@@ -932,7 +947,8 @@ export default function EditExamPage() {
                         {!exam.is_active && !exam.pending_publish && (
                             <Button
                                 onClick={handlePublishClick}
-                                disabled={questions.length === 0 || (aiReviewEnabled && questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned'))}
+                                disabled={publishingCheck || (aiReviewEnabled && questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned'))}
+                                loading={publishingCheck}
                                 title={aiReviewEnabled && questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned') ? 'Tunggu proses AI selesai atau perbaiki soal yang dikembalikan sebelum publish' : ''}
                                 className="disabled:opacity-50 disabled:cursor-not-allowed"
                                 data-tutorial="exam-activate-btn"
