@@ -6,6 +6,8 @@ import { Document, Danger, Scan, TimeCircle, TickSquare } from 'react-iconly'
 import SmartText from '@/components/SmartText'
 import StudentAnswerInput from '@/components/StudentAnswerInput'
 import PassageBlock from '@/components/PassageBlock'
+import NetworkBadge from '@/components/NetworkBadge'
+import useOnlineStatus from '@/hooks/useOnlineStatus'
 
 interface ExamQuestion {
     id: string
@@ -59,7 +61,10 @@ export default function TakeExamPage() {
     const [showViolationWarning, setShowViolationWarning] = useState(false)
     const [isFullscreen, setIsFullscreen] = useState(false)
     const [forceSubmitted, setForceSubmitted] = useState(false)
-    const [isOffline, setIsOffline] = useState(false)
+    const isOnline = useOnlineStatus()
+    const isOffline = !isOnline
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+    const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null)
 
     const containerRef = useRef<HTMLDivElement>(null)
     const hasStarted = useRef(false)
@@ -70,18 +75,7 @@ export default function TakeExamPage() {
         answersRef.current = answers
     }, [answers])
 
-    // Reactive offline state
-    useEffect(() => {
-        setIsOffline(!navigator.onLine)
-        const goOffline = () => setIsOffline(true)
-        const goOnline = () => setIsOffline(false)
-        window.addEventListener('offline', goOffline)
-        window.addEventListener('online', goOnline)
-        return () => {
-            window.removeEventListener('offline', goOffline)
-            window.removeEventListener('online', goOnline)
-        }
-    }, [])
+    // Status online/offline kini dari hook useOnlineStatus (blok listener di sini dihapus).
 
     // Resume State
     const [showResumeModal, setShowResumeModal] = useState(false)
@@ -590,8 +584,10 @@ export default function TakeExamPage() {
 
     const syncToServer = async (questionId: string, answer: string) => {
         if (!submission) return
+        setSaveStatus('saving')
+        const t0 = performance.now()
         try {
-            await fetch('/api/exam-submissions', {
+            const res = await fetch('/api/exam-submissions', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -599,8 +595,11 @@ export default function TakeExamPage() {
                     answers: [{ question_id: questionId, answer }]
                 })
             })
+            setLastLatencyMs(performance.now() - t0)
+            setSaveStatus(res.ok ? 'saved' : 'error')
         } catch (error) {
             console.error('Error saving answer:', error)
+            setSaveStatus('error')
         }
     }
 
@@ -730,6 +729,7 @@ export default function TakeExamPage() {
                         <p className="text-sm text-text-secondary">{exam.teaching_assignment?.subject?.name}</p>
                     </div>
                     <div className="flex items-center justify-between md:justify-end gap-3 md:gap-6">
+                        <NetworkBadge isOnline={isOnline} saveStatus={saveStatus} latencyMs={lastLatencyMs} />
                         {/* Violation counter */}
                         <div className={`px-3 py-1 rounded-lg flex items-center gap-1.5 ${violationCount > 0 ? 'bg-red-500/20 text-red-500 dark:text-red-400' : 'bg-gray-100 dark:bg-gray-800 text-text-secondary'}`}>
                             <Danger set="bold" primaryColor="currentColor" size={16} /> {violationCount}/{maxViolations}
@@ -785,7 +785,7 @@ export default function TakeExamPage() {
                 const isLastItem = currentIndex >= displayItems.length - 1
 
                 return (
-                    <div className="flex-1 flex flex-col md:flex-row max-w-4xl mx-auto w-full">
+                    <div className="flex-1 min-h-0 flex flex-col md:flex-row max-w-4xl mx-auto w-full">
                         {/* Question navigation sidebar (Desktop) */}
                         <div className="hidden md:block w-20 bg-surface-light dark:bg-surface-dark border-r border-gray-200 dark:border-gray-700 p-3 overflow-y-auto">
                             <p className="text-xs text-text-secondary mb-3 text-center">Navigasi</p>
@@ -836,8 +836,8 @@ export default function TakeExamPage() {
                         </div>
 
                         {/* Question area */}
-                        <div className="flex-1 flex flex-col overflow-hidden">
-                            <div className="flex-1 overflow-y-auto w-full p-3 md:p-6">
+                        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                            <div className="flex-1 min-h-0 overflow-y-auto w-full p-3 md:p-6">
                                 {currentItem?.type === 'audio_group' ? (
                                     /* Audio group: show audio + all questions */
                                     <div className="bg-white dark:bg-surface-dark border border-violet-300 dark:border-violet-700 rounded-xl overflow-hidden min-h-0 md:min-h-[400px]">

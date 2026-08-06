@@ -6,6 +6,8 @@ import { Document, Danger, Scan, TimeCircle, TickSquare } from 'react-iconly'
 import SmartText from '@/components/SmartText'
 import StudentAnswerInput from '@/components/StudentAnswerInput'
 import PassageBlock from '@/components/PassageBlock'
+import NetworkBadge from '@/components/NetworkBadge'
+import useOnlineStatus from '@/hooks/useOnlineStatus'
 import { GraduationCap } from 'lucide-react'
 
 interface ExamQuestion {
@@ -57,7 +59,10 @@ export default function TakeOfficialExamPage() {
     const [isFullscreen, setIsFullscreen] = useState(false)
     const [forceSubmitted, setForceSubmitted] = useState(false)
     const [alertMessage, setAlertMessage] = useState<string | null>(null)
-    const [isOffline, setIsOffline] = useState(false)
+    const isOnline = useOnlineStatus()
+    const isOffline = !isOnline
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+    const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null)
 
     const containerRef = useRef<HTMLDivElement>(null)
     const hasStarted = useRef(false)
@@ -66,18 +71,7 @@ export default function TakeOfficialExamPage() {
 
     useEffect(() => { answersRef.current = answers }, [answers])
 
-    // Reactive offline state
-    useEffect(() => {
-        setIsOffline(!navigator.onLine)
-        const goOffline = () => setIsOffline(true)
-        const goOnline = () => setIsOffline(false)
-        window.addEventListener('offline', goOffline)
-        window.addEventListener('online', goOnline)
-        return () => {
-            window.removeEventListener('offline', goOffline)
-            window.removeEventListener('online', goOnline)
-        }
-    }, [])
+    // Status online/offline kini dari hook useOnlineStatus (blok listener di sini dihapus).
 
     // LocalStorage helpers
     const saveLocal = (a: { [key: string]: string }) => {
@@ -440,14 +434,19 @@ export default function TakeOfficialExamPage() {
 
     const syncToServer = async (questionId: string, answer: string) => {
         if (!submission) return
+        setSaveStatus('saving')
+        const t0 = performance.now()
         try {
-            await fetch('/api/official-exam-submissions', {
+            const res = await fetch('/api/official-exam-submissions', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ submission_id: submission.id, answers: [{ question_id: questionId, answer }] })
             })
+            setLastLatencyMs(performance.now() - t0)
+            setSaveStatus(res.ok ? 'saved' : 'error')
         } catch (error) {
             console.error('Error saving answer:', error)
+            setSaveStatus('error')
         }
     }
 
@@ -566,6 +565,7 @@ export default function TakeOfficialExamPage() {
                         </div>
                     </div>
                     <div className="flex items-center justify-between md:justify-end gap-3 md:gap-6">
+                        <NetworkBadge isOnline={isOnline} saveStatus={saveStatus} latencyMs={lastLatencyMs} />
                         <div className={`px-3 py-1 rounded-lg flex items-center gap-1.5 ${violationCount > 0 ? 'bg-red-500/20 text-red-500' : 'bg-gray-100 dark:bg-gray-800 text-text-secondary'}`}>
                             <Danger set="bold" primaryColor="currentColor" size={16} /> {violationCount}/{maxViolations}
                         </div>
@@ -577,7 +577,7 @@ export default function TakeOfficialExamPage() {
             </div>
 
             {/* Main */}
-            <div className="flex-1 flex flex-col md:flex-row max-w-4xl mx-auto w-full overflow-hidden">
+            <div className="flex-1 min-h-0 flex flex-col md:flex-row max-w-4xl mx-auto w-full overflow-hidden">
                 {/* Nav sidebar */}
                 <div className="hidden md:block w-20 bg-surface-light dark:bg-surface-dark border-r border-gray-200 dark:border-gray-700 p-3 overflow-y-auto">
                     <p className="text-xs text-text-secondary mb-3 text-center">Navigasi</p>
@@ -596,7 +596,7 @@ export default function TakeOfficialExamPage() {
                 </div>
 
                 {/* Question */}
-                <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                     {/* Mobile horizontal navigation strip */}
                     <div className="md:hidden bg-surface-light dark:bg-surface-dark border-b border-gray-200 dark:border-gray-700 px-3 py-2">
                         <div className="flex items-center gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
@@ -613,7 +613,7 @@ export default function TakeOfficialExamPage() {
                         <p className="text-xs text-text-secondary mt-1 text-center">{answeredCount}/{questions.length}</p>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-3 md:p-6">
+                    <div className="flex-1 min-h-0 overflow-y-auto p-3 md:p-6">
                         <div className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-6">
                             <div className="flex items-center gap-3 mb-4">
                                 <span className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">{currentIndex + 1}</span>

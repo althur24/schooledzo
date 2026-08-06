@@ -6,6 +6,8 @@ import Link from 'next/link'
 import SmartText from '@/components/SmartText'
 import StudentAnswerInput from '@/components/StudentAnswerInput'
 import PassageBlock from '@/components/PassageBlock'
+import NetworkBadge from '@/components/NetworkBadge'
+import useOnlineStatus from '@/hooks/useOnlineStatus'
 import { Danger, TimeCircle, TickSquare } from 'react-iconly'
 
 interface QuizQuestion {
@@ -53,7 +55,8 @@ export default function KerjakanKuisPage() {
     const [showTimeoutModal, setShowTimeoutModal] = useState(false)
     const [showOfflineTimeoutModal, setShowOfflineTimeoutModal] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    const [isOffline, setIsOffline] = useState(false)
+    const isOnline = useOnlineStatus()
+    const isOffline = !isOnline
 
     // Resume State
     const [showResumeModal, setShowResumeModal] = useState(false)
@@ -75,18 +78,7 @@ export default function KerjakanKuisPage() {
     useEffect(() => { quizRef.current = quiz }, [quiz])
     useEffect(() => { startTimeRef.current = startTime }, [startTime])
 
-    // Reactive offline state
-    useEffect(() => {
-        setIsOffline(!navigator.onLine)
-        const goOffline = () => setIsOffline(true)
-        const goOnline = () => setIsOffline(false)
-        window.addEventListener('offline', goOffline)
-        window.addEventListener('online', goOnline)
-        return () => {
-            window.removeEventListener('offline', goOffline)
-            window.removeEventListener('online', goOnline)
-        }
-    }, [])
+    // Status online/offline kini dari hook useOnlineStatus (blok listener di sini dihapus).
 
     // LocalStorage helpers
     const saveAnswersToLocal = (answers: Record<string, string>) => {
@@ -493,8 +485,11 @@ export default function KerjakanKuisPage() {
                         <h1 className="text-base md:text-xl font-bold text-text-main dark:text-white truncate max-w-[200px] md:max-w-md">{quiz.title}</h1>
                         <p className="text-xs text-text-secondary">Total: {quiz.questions.length} Soal</p>
                     </div>
-                    <div className={`px-3 py-1.5 md:px-4 md:py-2 rounded-xl font-mono text-base md:text-xl font-bold shadow-lg relative ${(timeLeft || 0) < 60000 ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 dark:bg-surface-dark text-primary dark:text-primary-light'}`}>
-                        {timeLeft !== null ? formatTime(timeLeft) : '--:--:--'}
+                    <div className="flex items-center gap-2 md:gap-3">
+                        <NetworkBadge isOnline={isOnline} />
+                        <div className={`px-3 py-1.5 md:px-4 md:py-2 rounded-xl font-mono text-base md:text-xl font-bold shadow-lg relative ${(timeLeft || 0) < 60000 ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 dark:bg-surface-dark text-primary dark:text-primary-light'}`}>
+                            {timeLeft !== null ? formatTime(timeLeft) : '--:--:--'}
+                        </div>
                     </div>
                 </div>
             </div>
