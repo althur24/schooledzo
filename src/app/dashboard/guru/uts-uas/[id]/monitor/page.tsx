@@ -49,9 +49,15 @@ interface MonitorData {
     }
 }
 
-export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id: string }> }) {
+export default function GuruUtsUasMonitorPage({ params, searchParams }: {
+    params: Promise<{ id: string }>
+    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
     const { id: examId } = use(params)
+    const spRaw = use(searchParams ?? Promise.resolve({}))
     const router = useRouter()
+    const isUlangan = (spRaw as { type?: string } | undefined)?.type === 'ulangan'
+    const monitorEndpoint = isUlangan ? '/api/exam-submissions/monitor' : '/api/official-exam-submissions/monitor'
 
     const [data, setData] = useState<MonitorData | null>(null)
     const [loading, setLoading] = useState(true)
@@ -68,7 +74,7 @@ export default function GuruUtsUasMonitorPage({ params }: { params: Promise<{ id
     const fetchMonitorData = async (isManualRefresh = false) => {
         if (isManualRefresh) setRefreshing(true)
         try {
-            const res = await fetch(`/api/official-exam-submissions/monitor?exam_id=${examId}`)
+            const res = await fetch(`${monitorEndpoint}?exam_id=${examId}`)
             const json = await res.json()
             
             if (!res.ok) throw new Error(json.error || 'Gagal memuat data')

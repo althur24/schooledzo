@@ -52,9 +52,17 @@ interface MonitorData {
     }
 }
 
-export default function AdminUtsUasMonitorPage({ params }: { params: Promise<{ id: string }> }) {
+export default function AdminUtsUasMonitorPage({ params, searchParams }: {
+    params: Promise<{ id: string }>
+    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
     const { id: examId } = use(params)
+    const spRaw = use(searchParams ?? Promise.resolve({}))
     const router = useRouter()
+    const isUlangan = (spRaw as { type?: string } | undefined)?.type === 'ulangan'
+    const monitorEndpoint = isUlangan ? '/api/exam-submissions/monitor' : '/api/official-exam-submissions/monitor'
+    const resetEndpoint = isUlangan ? '/api/exam-submissions' : '/api/official-exam-submissions'
+    const backHref = isUlangan ? '/dashboard/admin/uts-uas' : `/dashboard/admin/uts-uas/${examId}`
 
     const [data, setData] = useState<MonitorData | null>(null)
     const [loading, setLoading] = useState(true)
@@ -82,7 +90,7 @@ export default function AdminUtsUasMonitorPage({ params }: { params: Promise<{ i
     const fetchMonitorData = async (isManualRefresh = false) => {
         if (isManualRefresh) setRefreshing(true)
         try {
-            const res = await fetch(`/api/official-exam-submissions/monitor?exam_id=${examId}`)
+            const res = await fetch(`${monitorEndpoint}?exam_id=${examId}`)
             const json = await res.json()
             
             if (!res.ok) throw new Error(json.error || 'Gagal memuat data')
@@ -135,7 +143,7 @@ export default function AdminUtsUasMonitorPage({ params }: { params: Promise<{ i
         setResettingId(submissionId)
         setResetMenuId(null)
         try {
-            const res = await fetch('/api/official-exam-submissions', {
+            const res = await fetch(resetEndpoint, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ submission_id: submissionId, reset_attempt: mode })
@@ -176,7 +184,7 @@ export default function AdminUtsUasMonitorPage({ params }: { params: Promise<{ i
                 <div className="p-4 bg-orange-50 border-b border-orange-100 dark:bg-orange-900/10 dark:border-orange-900/20 px-8 flex flex-col items-center justify-center text-center">
                     <p className="font-bold text-orange-800 dark:text-orange-400 mb-2">Ujian Belum Dimulai</p>
                     <p className="text-sm text-orange-700 dark:text-orange-500 mb-4">Waktu mulai: {new Date(data.exam.start_time).toLocaleString('id-ID')}</p>
-                    <button onClick={() => router.push(`/dashboard/admin/uts-uas/${examId}`)} className="text-primary hover:underline font-bold">
+                    <button onClick={() => router.push(backHref)} className="text-primary hover:underline font-bold">
                         Kembali ke Detail Ujian
                     </button>
                 </div>
@@ -188,7 +196,7 @@ export default function AdminUtsUasMonitorPage({ params }: { params: Promise<{ i
                 <AlertTriangle className="w-12 h-12 text-red-500 mx-auto" />
                 <h2 className="text-xl font-bold text-text-main dark:text-white">Gagal Memuat Monitor</h2>
                 <p className="text-text-secondary">{error || 'Data ujian tidak ditemukan atau Anda tidak memiliki akses.'}</p>
-                <button onClick={() => router.push(`/dashboard/admin/uts-uas/${examId}`)} className="text-primary hover:underline font-bold">
+                <button onClick={() => router.push(backHref)} className="text-primary hover:underline font-bold">
                     Kembali ke Detail Ujian
                 </button>
             </div>
@@ -249,7 +257,7 @@ export default function AdminUtsUasMonitorPage({ params }: { params: Promise<{ i
             <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                 <div>
                     <Link
-                        href={`/dashboard/admin/uts-uas/${examId}`}
+                        href={backHref}
                         className="inline-flex items-center justify-center p-3 mb-4 rounded-xl bg-white dark:bg-surface-dark border border-secondary/20 hover:border-primary text-text-secondary hover:text-primary transition-all shadow-sm"
                         title="Kembali ke Detail Ujian"
                     >

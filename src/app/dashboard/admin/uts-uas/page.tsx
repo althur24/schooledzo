@@ -51,6 +51,10 @@ export default function AdminUtsUasPage() {
     const [filterType, setFilterType] = useState<string>('')
     const [filterSubject, setFilterSubject] = useState<string>('')
     const [submissionCounts, setSubmissionCounts] = useState<Record<string, { submitted: number; total: number }>>({})
+    const [tab, setTab] = useState<'utsuas' | 'ulangan'>('utsuas')
+    const [ulanganExams, setUlanganExams] = useState<any[]>([])
+    const [ulanganCounts, setUlanganCounts] = useState<Record<string, { submitted: number; total: number }>>({})
+    const [ulanganLoading, setUlanganLoading] = useState(true)
 
     // Duplicate & Remedial states
     const [showDuplicate, setShowDuplicate] = useState(false)
@@ -90,6 +94,7 @@ export default function AdminUtsUasPage() {
 
     useEffect(() => {
         fetchData()
+        fetchUlangan()
     }, [])
 
     const fetchData = async () => {
@@ -136,6 +141,32 @@ export default function AdminUtsUasPage() {
             console.error('Error fetching data:', error)
         } finally {
             setLoading(false)
+        }
+    }
+
+    const fetchUlangan = async () => {
+        setUlanganLoading(true)
+        try {
+            const res = await fetch('/api/exams')
+            const data = await res.json()
+            const list = Array.isArray(data) ? data : []
+            setUlanganExams(list)
+            const counts: Record<string, { submitted: number; total: number }> = {}
+            await Promise.all(list.map(async (exam: any) => {
+                try {
+                    const r = await fetch(`/api/exam-submissions?exam_id=${exam.id}`)
+                    if (r.ok) {
+                        const subs = await r.json()
+                        const arr = Array.isArray(subs) ? subs : []
+                        counts[exam.id] = { submitted: arr.filter((s: any) => s.is_submitted).length, total: arr.length }
+                    }
+                } catch { }
+            }))
+            setUlanganCounts(counts)
+        } catch (error) {
+            console.error('Error fetching ulangan:', error)
+        } finally {
+            setUlanganLoading(false)
         }
     }
 
@@ -355,6 +386,14 @@ export default function AdminUtsUasPage() {
         return true
     })
 
+    // Ambil object teaching_assignment (array-aware) untuk ulangan
+    const ulanganTA = (exam: any) => Array.isArray(exam?.teaching_assignment) ? exam.teaching_assignment[0] : exam?.teaching_assignment
+
+    const filteredUlangan = ulanganExams.filter(e => {
+        if (filterSubject && ulanganTA(e)?.subject?.id !== filterSubject) return false
+        return true
+    })
+
     // Group classes by school_level for the selection UI
     const classesByLevel = classes.reduce((acc, c) => {
         const level = c.school_level || 'Lainnya'
@@ -379,17 +418,35 @@ export default function AdminUtsUasPage() {
                 }
             />
 
+            {/* Tab toggle: UTS/UAS ↔ Ulangan */}
+            <div className="flex gap-1 bg-secondary/5 p-1 rounded-xl w-fit">
+                <button
+                    onClick={() => setTab('utsuas')}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${tab === 'utsuas' ? 'bg-white dark:bg-surface-dark text-primary shadow-sm' : 'text-text-secondary hover:text-text-main dark:hover:text-white'}`}
+                >
+                    UTS / UAS
+                </button>
+                <button
+                    onClick={() => setTab('ulangan')}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${tab === 'ulangan' ? 'bg-white dark:bg-surface-dark text-primary shadow-sm' : 'text-text-secondary hover:text-text-main dark:hover:text-white'}`}
+                >
+                    Ulangan
+                </button>
+            </div>
+
             {/* Filters */}
             <div className="flex flex-wrap gap-3">
-                <select
-                    value={filterType}
-                    onChange={(e) => setFilterType(e.target.value)}
-                    className="px-4 py-2 bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                >
-                    <option value="">Semua Tipe</option>
-                    <option value="UTS">UTS</option>
-                    <option value="UAS">UAS</option>
-                </select>
+                {tab === 'utsuas' && (
+                    <select
+                        value={filterType}
+                        onChange={(e) => setFilterType(e.target.value)}
+                        className="px-4 py-2 bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                    >
+                        <option value="">Semua Tipe</option>
+                        <option value="UTS">UTS</option>
+                        <option value="UAS">UAS</option>
+                    </select>
+                )}
                 <select
                     value={filterSubject}
                     onChange={(e) => setFilterSubject(e.target.value)}
@@ -402,7 +459,8 @@ export default function AdminUtsUasPage() {
                 </select>
             </div>
 
-            {/* Exam List */}
+            {/* Exam List — UTS/UAS */}
+            <div className={tab === 'utsuas' ? '' : 'hidden'}>
             {loading ? (
                 <div className="flex justify-center py-12">
                     <Loader2 className="w-10 h-10 animate-spin text-primary" />
@@ -543,6 +601,89 @@ export default function AdminUtsUasPage() {
                     })}
                 </div>
             )}
+            </div>
+
+            {/* Exam List — Ulangan */}
+            <div className={tab === 'ulangan' ? '' : 'hidden'}>
+                {ulanganLoading ? (
+                    <div className="flex justify-center py-12">
+                        <Loader2 className="w-10 h-10 animate-spin text-primary" />
+                    </div>
+                ) : filteredUlangan.length === 0 ? (
+                    <EmptyState
+                        icon={<div className="text-indigo-400"><GraduationCap className="w-12 h-12" /></div>}
+                        title="Belum Ada Ulangan"
+                        description="Ulangan yang dibuat guru akan muncul di sini untuk dimonitor."
+                    />
+                ) : (
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        {filteredUlangan.map((exam: any) => {
+                            const status = getExamStatus(exam as any)
+                            const ta = ulanganTA(exam)
+                            const className = (Array.isArray(ta?.class) ? ta?.class[0]?.name : ta?.class?.name) || '-'
+                            const teacherName = (Array.isArray(ta?.teacher?.user) ? ta?.teacher?.user[0]?.full_name : ta?.teacher?.user?.full_name) || '-'
+                            const subjectName = (Array.isArray(ta?.subject) ? ta?.subject[0]?.name : ta?.subject?.name) || '-'
+                            const counts = ulanganCounts[exam.id]
+                            return (
+                                <Card key={exam.id} padding="p-5" className="group hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all">
+                                    <div className="flex flex-col h-full gap-3">
+                                        <div className="flex items-start justify-between">
+                                            <div className="flex-1">
+                                                <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${status.color}`}>{status.label}</span>
+                                                    <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400">Ulangan</span>
+                                                </div>
+                                                <h3 className="font-bold text-text-main dark:text-white text-lg group-hover:text-primary transition-colors line-clamp-2">{exam.title}</h3>
+                                            </div>
+                                            <div className="w-10 h-10 rounded-full bg-teal-500/10 flex items-center justify-center text-teal-500">
+                                                <FileText className="w-5 h-5" />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2 pt-3 border-t border-secondary/10">
+                                            <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                <span>Mata Pelajaran</span>
+                                                <span className="px-2 py-1 bg-primary/10 rounded font-bold text-primary">{subjectName}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                <span>Kelas</span>
+                                                <span className="font-bold text-text-main dark:text-white">{className}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                <span>Guru</span>
+                                                <span className="font-bold text-text-main dark:text-white truncate ml-2 text-right">{teacherName}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                <span>Soal & Durasi</span>
+                                                <div className="flex gap-3">
+                                                    <span className="flex items-center gap-1 font-medium"><FileText className="w-3.5 h-3.5" /> {exam.question_count}</span>
+                                                    <span className="flex items-center gap-1 font-medium"><Clock className="w-3.5 h-3.5" /> {exam.duration_minutes}m</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                <span>Mulai</span>
+                                                <span className="font-bold text-text-main dark:text-white">{formatDateTime(exam.start_time)}</span>
+                                            </div>
+                                            {counts && (
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <span className="text-text-secondary">Pengumpulan</span>
+                                                    <span className="font-bold text-primary">{counts.submitted} terkumpul</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 mt-auto pt-3">
+                                            <Link href={`/dashboard/admin/uts-uas/${exam.id}/monitor?type=ulangan`} className="flex-1 min-w-[140px]">
+                                                <Button variant="outline" size="sm" className="w-full justify-center text-primary border-primary/20 hover:bg-primary/5 gap-1.5">
+                                                    <Activity className="w-4 h-4" /> Monitor
+                                                </Button>
+                                            </Link>
+                                        </div>
+                                    </div>
+                                </Card>
+                            )
+                        })}
+                    </div>
+                )}
+            </div>
 
             {/* Create Modal */}
             <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Buat Ujian Baru">
