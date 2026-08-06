@@ -124,8 +124,9 @@ export async function GET(request: NextRequest) {
         }
 
         // Server-side auto-submit: detect and submit expired but unsubmitted entries
-        // This catches submissions where the student's browser closed before auto-submit could fire
-        if (user.role === 'GURU' || user.role === 'ADMIN') {
+        // This catches submissions where the student's browser closed before auto-submit could fire.
+        // SISWA disertakan: entri mereka sendiri sudah terfilter di atas, jadi aman & self-scoped.
+        if (['GURU', 'ADMIN', 'SISWA'].includes(user.role)) {
             const now = Date.now()
             const expiredSubs = result.filter((sub: any) => {
                 if (sub.is_submitted) return false

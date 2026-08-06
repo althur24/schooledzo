@@ -23,6 +23,18 @@ export async function POST(
         const { data: exam } = await supabase
             .from('exams').select('teaching_assignment_id, batch_id').eq('id', id).single()
         if (!exam) return NextResponse.json({ error: 'Ulangan tidak ditemukan' }, { status: 404 })
+
+        // Guru hanya boleh sync ujian miliknya sendiri
+        if (user.role === 'GURU') {
+            const { data: teacher } = await supabase
+                .from('teachers').select('id').eq('user_id', user.id).single()
+            const { data: ta } = await supabase
+                .from('teaching_assignments').select('teacher_id').eq('id', exam.teaching_assignment_id).single()
+            if (!teacher || ta?.teacher_id !== teacher.id) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
+        }
+
         if (!exam.batch_id) return NextResponse.json({ success: true, total: 0, failed: [] })
 
         if (exam.teaching_assignment_id) {

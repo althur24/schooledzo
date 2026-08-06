@@ -23,6 +23,18 @@ export async function POST(
         const { data: quiz } = await supabase
             .from('quizzes').select('teaching_assignment_id, batch_id').eq('id', id).single()
         if (!quiz) return NextResponse.json({ error: 'Kuis tidak ditemukan' }, { status: 404 })
+
+        // Guru hanya boleh sync kuis miliknya sendiri
+        if (user.role === 'GURU') {
+            const { data: teacher } = await supabase
+                .from('teachers').select('id').eq('user_id', user.id).single()
+            const { data: ta } = await supabase
+                .from('teaching_assignments').select('teacher_id').eq('id', quiz.teaching_assignment_id).single()
+            if (!teacher || ta?.teacher_id !== teacher.id) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke kuis ini' }, { status: 403 })
+            }
+        }
+
         if (!quiz.batch_id) return NextResponse.json({ success: true, total: 0, failed: [] })
 
         if (quiz.teaching_assignment_id) {
