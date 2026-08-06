@@ -101,7 +101,7 @@ export async function PUT(
 
             const { data: questions } = await supabase
                 .from('quiz_questions')
-                .select('id, status, updated_at')
+                .select('id, status')
                 .eq('quiz_id', id)
 
             if (!questions || questions.length === 0) {
@@ -117,33 +117,11 @@ export async function PUT(
                             .in('id', nonApproved.map(q => q.id))
                     }
                 } else {
-                    // AI Review ON — auto-recover stuck questions (> 3 minutes in ai_reviewing/draft)
-                    const THREE_MINUTES = 3 * 60 * 1000
-                    const now = Date.now()
-                    const stuckQuestions = questions.filter(q => {
-                        if (q.status !== 'ai_reviewing' && q.status !== 'draft') return false
-                        const updatedAt = q.updated_at ? new Date(q.updated_at).getTime() : 0
-                        return (now - updatedAt) > THREE_MINUTES
-                    })
-
-                    if (stuckQuestions.length > 0) {
-                        console.log(`[quiz-publish] Auto-recovering ${stuckQuestions.length} stuck questions to admin_review`)
-                        await supabase.from('quiz_questions')
-                            .update({ status: 'admin_review', updated_at: new Date().toISOString() })
-                            .in('id', stuckQuestions.map(q => q.id))
-                        
-                        // Re-fetch after fix
-                        const { data: refreshed } = await supabase
-                            .from('quiz_questions')
-                            .select('id, status, updated_at')
-                            .eq('quiz_id', id)
-                        if (refreshed) {
-                            questions.length = 0
-                            questions.push(...refreshed)
-                        }
-                    }
-
-                    // Check statuses after potential auto-recovery
+                    // AI Review ON — block publish while questions are still processing or returned.
+                    // (The previous "auto-recover stuck after 3 min" used updated_at, which doesn't
+                    //  exist on quiz_questions and isn't written by any status update, so it never
+                    //  worked. Admin can move a truly-stuck question to admin_review manually.)
+                    // Check statuses
                     const statuses = {
                         draft: questions.filter(q => q.status === 'draft').length,
                         ai_reviewing: questions.filter(q => q.status === 'ai_reviewing').length,
