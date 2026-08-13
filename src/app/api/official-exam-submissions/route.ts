@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { gradeAnswer, needsManualGrading } from '@/lib/questionTypeUtils'
+import { logError } from '@/lib/logError'
+import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 
 // GET official exam submissions
 export async function GET(request: NextRequest) {
@@ -254,7 +256,7 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json(result)
     } catch (error) {
-        console.error('Error fetching official exam submissions:', error)
+        logError('Error fetching official exam submissions', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
     }
 }
@@ -554,11 +556,8 @@ export async function PUT(request: NextRequest) {
                     }
                 })
 
-                const { data: examQuestions } = await supabase
-                    .from('official_exam_questions')
-                    .select('question_type')
-                    .eq('exam_id', currentSubmission.exam_id)
-                hasEssays = hasEssays || (examQuestions?.some((q: any) => needsManualGrading(q.question_type)) || false)
+                const examQuestions = await getExamQuestionsForGrading('official_exam_questions', currentSubmission.exam_id)
+                hasEssays = hasEssays || examQuestions.some(q => needsManualGrading(q.question_type))
 
                 await supabase
                     .from('official_exam_submissions')
@@ -584,13 +583,10 @@ export async function PUT(request: NextRequest) {
 
         // Handle saving answers
         if (answers && Array.isArray(answers) && answers.length > 0) {
-            const { data: allQuestions } = await supabase
-                .from('official_exam_questions')
-                .select('id, correct_answer, options, points, question_type')
-                .eq('exam_id', currentSubmission.exam_id)
+            // Soal dari cache in-memory (TTL 10 mnt) — tanpa ini setiap autosave mem-fetch ulang seluruh soal
+            const allQuestions = await getExamQuestionsForGrading('official_exam_questions', currentSubmission.exam_id)
 
-            const questionMap = new Map<string, { correct_answer: string; options: string[] | null; points: number; question_type: string }>()
-            allQuestions?.forEach((q: any) => questionMap.set(q.id, q))
+            const questionMap = new Map(allQuestions.map(q => [q.id, q]))
 
             const gradedAnswers = answers.map((ans: { question_id: string; answer: string }) => {
                 const question = questionMap.get(ans.question_id)
@@ -637,12 +633,9 @@ export async function PUT(request: NextRequest) {
 
             const totalScore = allAnswers?.reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) || 0
 
-            const { data: examQuestions } = await supabase
-                .from('official_exam_questions')
-                .select('question_type')
-                .eq('exam_id', currentSubmission.exam_id)
+            const examQuestions = await getExamQuestionsForGrading('official_exam_questions', currentSubmission.exam_id)
 
-            const hasEssays = examQuestions?.some((q: any) => needsManualGrading(q.question_type)) || false
+            const hasEssays = examQuestions.some(q => needsManualGrading(q.question_type))
 
             const { data: updatedSubmission, error } = await supabase
                 .from('official_exam_submissions')

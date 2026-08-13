@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
+import { logError } from '@/lib/logError'
 
 // GET questions for an official exam
 export async function GET(
@@ -63,7 +64,7 @@ export async function GET(
 
         return NextResponse.json(questions)
     } catch (error) {
-        console.error('Error fetching official exam questions:', error)
+        logError('Error fetching official exam questions', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
     }
 }

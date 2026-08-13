@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { hashPassword } from '@/lib/auth'
 import { getSchoolContextOrError, isErrorResponse, getSchoolCode } from '@/lib/schoolContext'
+import { logError } from '@/lib/logError'
 
 // GET all students
 export async function GET(request: NextRequest) {
@@ -115,7 +116,7 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json(allData)
     } catch (error) {
-        console.error('Error fetching students:', error)
+        logError('Error fetching students', error)
         return NextResponse.json([])
     }
 }

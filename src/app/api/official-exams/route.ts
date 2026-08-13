@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { checkEndedOfficialExams } from '@/lib/checkEndedExams'
+import { logError } from '@/lib/logError'
 
 // GET all official exams (UTS/UAS)
 export async function GET(request: NextRequest) {
@@ -148,7 +149,7 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json(examsWithCount)
     } catch (error) {
-        console.error('Error fetching official exams:', error)
+        logError('Error fetching official exams', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
     }
 }

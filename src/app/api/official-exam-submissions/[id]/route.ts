@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { logError } from '@/lib/logError'
 
 // GET submission detail with answers
 export async function GET(
@@ -65,7 +66,7 @@ export async function GET(
 
         return NextResponse.json(responseData)
     } catch (error) {
-        console.error('Error fetching official exam submission:', error)
+        logError('Error fetching official exam submission', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
     }
 }

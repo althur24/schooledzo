@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { batchedIn, IN_BATCH_SIZE } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { logError } from '@/lib/logError'
 
 // GET single official exam
 export async function GET(
@@ -47,7 +48,7 @@ export async function GET(
 
         return NextResponse.json(data)
     } catch (error) {
-        console.error('Error fetching official exam:', error)
+        logError('Error fetching official exam', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
     }
 }

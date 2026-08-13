@@ -21,26 +21,36 @@ export default function NotificationBell() {
     const [loading, setLoading] = useState(false)
     const dropdownRef = useRef<HTMLDivElement>(null)
 
-    // Fetch notifications on mount and periodically (with Page Visibility API)
+    // Fetch notifications on mount and periodically (Page Visibility API + backoff on failure)
     useEffect(() => {
-        fetchNotifications()
+        let timeoutId: ReturnType<typeof setTimeout>
+        let stopped = false
+        let failCount = 0
 
-        // Poll every 60 seconds (reduced from 30s)
-        let interval = setInterval(fetchNotifications, 60000)
+        const POLL_INTERVAL = 60000 // 60s
+        const MAX_INTERVAL = 5 * 60000 // back off up to 5 min when the server keeps failing
+
+        const tick = async () => {
+            const ok = await fetchNotifications()
+            failCount = ok ? 0 : failCount + 1
+            if (stopped) return
+            // On repeated failure poll less often: 120s, 240s, then capped at 5 min
+            const delay = failCount === 0 ? POLL_INTERVAL : Math.min(POLL_INTERVAL * 2 ** failCount, MAX_INTERVAL)
+            timeoutId = setTimeout(tick, delay)
+        }
+
+        tick()
 
         // Pause polling when tab is hidden, resume when visible
         const handleVisibilityChange = () => {
-            if (document.hidden) {
-                clearInterval(interval)
-            } else {
-                fetchNotifications() // Refresh immediately when tab becomes visible
-                interval = setInterval(fetchNotifications, 60000)
-            }
+            clearTimeout(timeoutId)
+            if (!document.hidden) tick() // Refresh immediately when tab becomes visible
         }
         document.addEventListener('visibilitychange', handleVisibilityChange)
 
         return () => {
-            clearInterval(interval)
+            stopped = true
+            clearTimeout(timeoutId)
             document.removeEventListener('visibilitychange', handleVisibilityChange)
         }
     }, [])
@@ -56,16 +66,20 @@ export default function NotificationBell() {
         return () => document.removeEventListener('mousedown', handleClickOutside)
     }, [])
 
-    const fetchNotifications = async () => {
+    const fetchNotifications = async (): Promise<boolean> => {
         try {
             const res = await fetch('/api/notifications?limit=10')
             if (res.ok) {
                 const data = await res.json()
                 setNotifications(data.notifications || [])
                 setUnreadCount(data.unreadCount || 0)
+                return true
             }
+            console.warn(`Error fetching notifications: HTTP ${res.status}`)
+            return false
         } catch (error) {
-            console.error('Error fetching notifications:', error)
+            console.warn('Error fetching notifications:', error instanceof Error ? error.message : error)
+            return false
         }
     }
 

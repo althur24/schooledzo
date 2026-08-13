@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { gradeAnswer, needsManualGrading } from '@/lib/questionTypeUtils'
+import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 
 // Helper: send notification to teacher when student submits exam
 async function notifyTeacherExamSubmission(examId: string, studentName: string, isForceSubmit: boolean = false) {
@@ -534,12 +535,9 @@ export async function PUT(request: NextRequest) {
                     }
                 })
 
-                // Also check if there are unanswered essays in the exam
-                const { data: examQuestions } = await supabase
-                    .from('exam_questions')
-                    .select('question_type')
-                    .eq('exam_id', currentSubmission.exam_id)
-                hasEssays = hasEssays || (examQuestions?.some(q => needsManualGrading(q.question_type)) || false)
+                // Also check if there are unanswered essays in the exam (soal dari cache)
+                const examQuestions = await getExamQuestionsForGrading('exam_questions', currentSubmission.exam_id)
+                hasEssays = hasEssays || examQuestions.some(q => needsManualGrading(q.question_type))
 
                 await supabase
                     .from('exam_submissions')
@@ -568,15 +566,11 @@ export async function PUT(request: NextRequest) {
 
         // Handle saving/submitting answers
         if (answers && Array.isArray(answers) && answers.length > 0) {
-            // BATCH OPTIMIZATION: Fetch ALL exam questions in 1 query instead of N
-            const { data: allQuestions } = await supabase
-                .from('exam_questions')
-                .select('id, correct_answer, options, points, question_type')
-                .eq('exam_id', currentSubmission.exam_id)
+            // Soal dari cache in-memory (TTL 10 mnt) — tanpa ini setiap autosave mem-fetch ulang seluruh soal
+            const allQuestions = await getExamQuestionsForGrading('exam_questions', currentSubmission.exam_id)
 
             // Build a lookup map for instant grading
-            const questionMap = new Map<string, { correct_answer: string; options: string[] | null; points: number; question_type: string }>()
-            allQuestions?.forEach(q => questionMap.set(q.id, q))
+            const questionMap = new Map(allQuestions.map(q => [q.id, q]))
 
             // Grade all answers in memory
             const gradedAnswers = answers.map((ans: { question_id: string; answer: string }) => {
@@ -629,13 +623,10 @@ export async function PUT(request: NextRequest) {
 
             const totalScore = allAnswers?.reduce((sum, a) => sum + (a.points_earned || 0), 0) || 0
 
-            // Check if there are essay questions in the exam
-            const { data: examQuestions } = await supabase
-                .from('exam_questions')
-                .select('question_type')
-                .eq('exam_id', currentSubmission.exam_id)
+            // Check if there are essay questions in the exam (soal dari cache)
+            const examQuestions = await getExamQuestionsForGrading('exam_questions', currentSubmission.exam_id)
 
-            const hasEssays = examQuestions?.some(q => needsManualGrading(q.question_type)) || false;
+            const hasEssays = examQuestions.some(q => needsManualGrading(q.question_type));
             const isGraded = !hasEssays
 
             const { data: updatedSubmission, error } = await supabase
