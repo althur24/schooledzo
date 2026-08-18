@@ -193,8 +193,8 @@ function EditQuizPageInner() {
     const [dragInfo, setDragInfo] = useState<DragInfo | null>(null)
     const listContainerRef = useRef<HTMLDivElement | null>(null)
     const cardRefs = useRef(new Map<string, HTMLElement>())
-    // Drag is disabled while content is locked (published), while editing, or during bulk select
-    const dragDisabled = !!quiz?.is_active || !!editingQuestionId || isBulkSelectMode
+    // Drag is disabled while content is locked (published / menunggu review), while editing, or during bulk select
+    const dragDisabled = !!quiz?.is_active || !!quiz?.pending_publish || !!editingQuestionId || isBulkSelectMode
     // Passage questions (audio group or passage text) and standalone questions never mix in one drag group
     const getDragGroupKey = (q: QuizQuestion) =>
         q.passage_audio_url ? `audio:${q.passage_audio_url}` : q.passage_text ? 'passage' : 'standalone'
@@ -1462,9 +1462,10 @@ function EditQuizPageInner() {
                         )
 
                         // Small round dashed "+" under each question card — opens the manual form
-                        // with a preset taken from the question right above it
+                        // with a preset taken from the question right above it.
+                        // Terkunci saat kuis aktif / menunggu review — mengikuti kunci UI tambah-soal lainnya
                         const renderQuickAddButton = (q: typeof questions[0]) => {
-                            if (quiz?.is_active) return null
+                            if (quiz?.is_active || quiz?.pending_publish) return null
                             return (
                                 <div className="flex justify-center py-1">
                                     <button

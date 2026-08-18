@@ -886,6 +886,7 @@ function EditExamPageInner() {
     }
 
     // ===== Quick-add "+" — preset dari soal tepat di atasnya =====
+    // Terkunci saat ulangan aktif / menunggu review — mengikuti kunci UI tambah-soal lainnya
     const openQuickAdd = (afterQ: ExamQuestion) => {
         const type = afterQ.question_type
         let options: string[] | null = null
@@ -914,7 +915,7 @@ function EditExamPageInner() {
     }
 
     const renderQuickAdd = (q: ExamQuestion) => {
-        if (isBulkSelectMode) return null
+        if (isBulkSelectMode || exam?.is_active || exam?.pending_publish) return null
         return (
             <div className="flex justify-center py-1">
                 <button
