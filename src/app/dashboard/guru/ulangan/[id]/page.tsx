@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
@@ -11,19 +11,19 @@ const MathTextarea = dynamic(() => import('@/components/MathTextarea'), {
     ssr: false,
     loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={3} readOnly />
 })
-const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
-    ssr: false,
-    loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={4} readOnly />
-})
+// Static import for RichTextEditor — previously loaded as a lazy chunk via dynamic(),
+// which crashed the whole page white when the chunk no longer existed after a deploy
+import RichTextEditor from '@/components/RichTextEditor'
 import { plainToHtml } from '@/lib/richTextUtils'
+import EditorErrorBoundary from '@/components/EditorErrorBoundary'
 const PreviewModal = dynamic(() => import('@/components/PreviewModal'), { ssr: false })
 const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
 import { Edit, Discovery, Folder, Plus, Setting, Upload, Danger, InfoCircle, Document, TickSquare, CloseSquare, Delete, User } from 'react-iconly'
-import { Loader2, Eye, Brain, BarChart3, FileText, Download, RotateCcw, ChevronDown as ChevronDownIcon } from 'lucide-react'
+import { Loader2, Eye, Brain, BarChart3, FileText, Download, RotateCcw, ChevronDown as ChevronDownIcon, GripVertical } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
-import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
+import { Modal, PageHeader, Button, EmptyState, Toast, type ToastType } from '@/components/ui'
 import Card from '@/components/ui/Card'
 
 interface ExamQuestion {
@@ -67,7 +67,7 @@ interface Exam {
 type Mode = 'list' | 'manual' | 'clean' | 'ai' | 'bank'
 type TabType = 'soal' | 'hasil'
 
-export default function EditExamPage() {
+function EditExamPageInner() {
     const params = useParams()
     const searchParams = useSearchParams()
     const examId = params.id as string
@@ -194,6 +194,30 @@ export default function EditExamPage() {
         show_results_immediately: true
     })
     const [savingSettings, setSavingSettings] = useState(false)
+
+    // Toast kecil (mis. konfirmasi reorder berhasil/gagal)
+    const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
+
+    // Drag & drop reorder state (pointer events — support layar sentuh)
+    const [drag, setDrag] = useState<{
+        groupKey: string
+        questionId: string
+        ids: string[]
+        slotHeights: number[]
+        fromIndex: number
+        toIndex: number
+        offsetY: number
+        active: boolean
+    } | null>(null)
+    const dragMeta = useRef<{
+        startY: number
+        rects: { top: number; bottom: number; left: number; right: number; height: number }[]
+        bounds: { top: number; bottom: number; left: number; right: number }
+    } | null>(null)
+    const dragRef = useRef(drag)
+    const questionsRef = useRef<ExamQuestion[]>([])
+
+    useEffect(() => { questionsRef.current = questions }, [questions])
 
     const fetchExam = useCallback(async () => {
         try {
@@ -564,7 +588,7 @@ export default function EditExamPage() {
         }
     }
 
-    const handleAddManualQuestion = async () => {
+    const handleAddManualQuestion = async (addMore = false) => {
         // Passage mode: save all passage questions at once
         if (isPassageMode) {
             if ((!passageText.trim() && !passageAudioUrl) || passageQuestions.length === 0) return
@@ -587,11 +611,17 @@ export default function EditExamPage() {
                         text_direction: q.text_direction || 'ltr',
                         content_format: 'html'
                     }))
-                await fetch(`/api/exams/${examId}/questions`, {
+                const res = await fetch(`/api/exams/${examId}/questions`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ questions: questionsToSave })
                 })
+                if (!res.ok) {
+                    // Jangan reset form — guru tidak kehilangan pekerjaannya saat server menolak
+                    const errData = await res.json().catch(() => null)
+                    setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: errData?.error || 'Gagal menyimpan passage. Periksa jawaban benar setiap soal.' })
+                    return
+                }
                 setPassageText('')
                 setPassageAudioUrl('')
                 setPassageQuestions([{ question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, text_direction: 'ltr' }])
@@ -608,7 +638,7 @@ export default function EditExamPage() {
         if (!manualForm.question_text) return
         setSaving(true)
         try {
-            await fetch(`/api/exams/${examId}/questions`, {
+            const res = await fetch(`/api/exams/${examId}/questions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -620,17 +650,34 @@ export default function EditExamPage() {
                     }]
                 })
             })
-            setManualForm({
-                question_text: '',
-                question_type: 'MULTIPLE_CHOICE',
-                options: ['', '', '', ''],
-                correct_answer: '',
-                points: 10,
-                order_index: 0,
-                teacher_hots_claim: false,
-                text_direction: 'ltr'
-            })
-            setMode('list')
+            if (!res.ok) {
+                // Jangan reset form — guru tidak kehilangan isiannya saat server menolak
+                const errData = await res.json().catch(() => null)
+                setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: errData?.error || 'Gagal menyimpan soal. Periksa jawaban benar.' })
+                return
+            }
+            if (addMore) {
+                // "Simpan & Tambah Lagi": reset HANYA teks pertanyaan & jawaban benar —
+                // tipe, jumlah opsi, kesulitan, dan poin dipertahankan (juga jadi preset "+" berikutnya)
+                setManualForm(prev => ({
+                    ...prev,
+                    question_text: '',
+                    options: prev.question_type === 'TRUE_FALSE' ? ['Benar', 'Salah'] : prev.options ? prev.options.map(() => '') : null,
+                    correct_answer: prev.question_type === 'MULTIPLE_ANSWER' ? '[]' : ''
+                }))
+            } else {
+                setManualForm({
+                    question_text: '',
+                    question_type: 'MULTIPLE_CHOICE',
+                    options: ['', '', '', ''],
+                    correct_answer: '',
+                    points: 10,
+                    order_index: 0,
+                    teacher_hots_claim: false,
+                    text_direction: 'ltr'
+                })
+                setMode('list')
+            }
             fetchExam()
         } finally {
             setSaving(false)
@@ -692,6 +739,195 @@ export default function EditExamPage() {
         } catch (error) {
             console.error('Bulk delete error:', error)
         }
+    }
+
+    // ===== Drag & Drop Reorder (pointer events) =====
+    // Konten terkunci saat ulangan aktif / menunggu review, form edit terbuka, atau mode pilih-banyak
+    const canReorder = !!exam && !exam.is_active && !exam.pending_publish && !editingQuestionId && !isBulkSelectMode
+
+    const handleDragStart = (e: ReactPointerEvent, q: ExamQuestion, groupKey: string) => {
+        if (!canReorder || !q.id) return
+        e.preventDefault()
+        const els = Array.from(document.querySelectorAll('[data-drag-group]'))
+            .filter(el => el.getAttribute('data-drag-group') === groupKey) as HTMLElement[]
+        const rects = els.map(el => el.getBoundingClientRect())
+        const ids = els.map(el => el.getAttribute('data-drag-id') || '')
+        const fromIndex = ids.indexOf(q.id)
+        if (fromIndex === -1 || rects.length === 0) return
+        const slotHeights = rects.map((r, i) => (i + 1 < rects.length ? rects[i + 1].top - r.top : r.height))
+        dragMeta.current = {
+            startY: e.clientY,
+            rects,
+            bounds: {
+                top: Math.min(...rects.map(r => r.top)),
+                bottom: Math.max(...rects.map(r => r.bottom)),
+                left: Math.min(...rects.map(r => r.left)),
+                right: Math.max(...rects.map(r => r.right)),
+            },
+        }
+        const initial = { groupKey, questionId: q.id, ids, slotHeights, fromIndex, toIndex: fromIndex, offsetY: 0, active: false }
+        dragRef.current = initial
+        setDrag(initial)
+    }
+
+    // Susun order_index baru HANYA di dalam grupnya: anggota grup menerima kembali
+    // nilai order_index yang sebelumnya ditempati grup, sesuai urutan visual baru.
+    // Soal di luar grup tidak tersentuh — reorder tidak mengubah apapun selain order_index.
+    const commitReorder = async (ids: string[], fromIndex: number, toIndex: number) => {
+        const prev = questionsRef.current
+        const byId = new Map(prev.map(q => [q.id, q]))
+        const occupied = ids.map(id => byId.get(id)?.order_index ?? 0).sort((a, b) => a - b)
+        const newIds = ids.filter((_, i) => i !== fromIndex)
+        newIds.splice(toIndex, 0, ids[fromIndex])
+        const newIndexById = new Map<string, number>()
+        newIds.forEach((id, k) => newIndexById.set(id, occupied[k]))
+        const changed = newIds.filter(id => newIndexById.get(id) !== byId.get(id)?.order_index)
+        if (changed.length === 0) return
+
+        // Update UI secara optimis
+        setQuestions(prev
+            .map(q => (q.id && newIndexById.has(q.id) ? { ...q, order_index: newIndexById.get(q.id)! } : q))
+            .sort((a, b) => a.order_index - b.order_index))
+
+        try {
+            const res = await fetch(`/api/exams/${examId}/questions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reorder: changed.map(id => ({ id, order_index: newIndexById.get(id)! })) })
+            })
+            if (!res.ok) throw new Error('Reorder gagal')
+            setToast({ message: 'Urutan disimpan', type: 'success' })
+        } catch {
+            setQuestions(prev) // gagal → kembalikan urutan semula
+            setToast({ message: 'Gagal menyimpan urutan. Urutan dikembalikan.', type: 'error' })
+        }
+    }
+
+    // Listener window selama drag berlangsung — handler memakai refs agar tidak stale
+    useEffect(() => {
+        if (!drag) return
+        document.body.style.userSelect = 'none'
+
+        const onMove = (e: PointerEvent) => {
+            const meta = dragMeta.current
+            if (!meta) return
+            const dy = e.clientY - meta.startY
+            setDrag(prev => {
+                if (!prev) return prev
+                const active = prev.active || Math.abs(dy) > 5
+                let toIndex = prev.toIndex
+                if (active) {
+                    const draggedCenter = meta.rects[prev.fromIndex].top + meta.rects[prev.fromIndex].height / 2 + dy
+                    let count = 0
+                    meta.rects.forEach((r, i) => {
+                        if (i !== prev.fromIndex && r.top + r.height / 2 < draggedCenter) count++
+                    })
+                    toIndex = count
+                }
+                const next = { ...prev, active, offsetY: dy, toIndex }
+                dragRef.current = next
+                return next
+            })
+        }
+
+        const onUp = (e: PointerEvent) => {
+            const meta = dragMeta.current
+            const cur = dragRef.current
+            dragMeta.current = null
+            dragRef.current = null
+            setDrag(null)
+            if (!meta || !cur || !cur.active) return
+            // Drop di luar daftar → batal
+            const M = 40
+            const b = meta.bounds
+            const inside = e.clientX >= b.left - M && e.clientX <= b.right + M && e.clientY >= b.top - M && e.clientY <= b.bottom + M
+            if (!inside) return
+            if (cur.toIndex !== cur.fromIndex) commitReorder(cur.ids, cur.fromIndex, cur.toIndex)
+        }
+
+        const onCancel = () => {
+            dragMeta.current = null
+            dragRef.current = null
+            setDrag(null)
+        }
+
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+        window.addEventListener('pointercancel', onCancel)
+        return () => {
+            window.removeEventListener('pointermove', onMove)
+            window.removeEventListener('pointerup', onUp)
+            window.removeEventListener('pointercancel', onCancel)
+            document.body.style.userSelect = ''
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [!!drag])
+
+    // Style transform live saat drag: card lain bergeser memberi ruang (transisi CSS),
+    // card yang didrag mengikuti pointer dengan shadow besar
+    const getDragItemProps = (id: string | undefined, groupKey: string): { className: string; style: CSSProperties } => {
+        if (!drag || !id || drag.groupKey !== groupKey || !drag.active) return { className: '', style: {} }
+        const i = drag.ids.indexOf(id)
+        if (i === -1) return { className: '', style: {} }
+        if (i === drag.fromIndex) {
+            return {
+                className: 'relative z-40 shadow-2xl rounded-xl pointer-events-none',
+                style: { transform: `translateY(${drag.offsetY}px)` }
+            }
+        }
+        const size = drag.slotHeights[drag.fromIndex]
+        let shift = 0
+        if (drag.fromIndex < drag.toIndex && i > drag.fromIndex && i <= drag.toIndex) shift = -size
+        else if (drag.toIndex < drag.fromIndex && i >= drag.toIndex && i < drag.fromIndex) shift = size
+        return {
+            className: 'transition-transform duration-150 ease-out',
+            style: shift ? { transform: `translateY(${shift}px)` } : {}
+        }
+    }
+
+    // ===== Quick-add "+" — preset dari soal tepat di atasnya =====
+    const openQuickAdd = (afterQ: ExamQuestion) => {
+        const type = afterQ.question_type
+        let options: string[] | null = null
+        let correctAnswer: string | null = ''
+        if (type === 'MULTIPLE_CHOICE' || type === 'MULTIPLE_ANSWER') {
+            const count = Math.max(afterQ.options?.length || 4, 2)
+            options = Array(count).fill('')
+            correctAnswer = type === 'MULTIPLE_ANSWER' ? '[]' : ''
+        } else if (type === 'TRUE_FALSE') {
+            options = ['Benar', 'Salah']
+        }
+        setIsPassageMode(false)
+        setManualForm({
+            question_text: '',
+            question_type: type,
+            options,
+            correct_answer: correctAnswer,
+            difficulty: afterQ.difficulty,
+            points: afterQ.points || 10,
+            order_index: 0,
+            teacher_hots_claim: false,
+            text_direction: 'ltr'
+        })
+        setMode('manual')
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+
+    const renderQuickAdd = (q: ExamQuestion) => {
+        if (isBulkSelectMode) return null
+        return (
+            <div className="flex justify-center py-1">
+                <button
+                    type="button"
+                    aria-label="Tambah soal di sini"
+                    title="Tambah soal di sini"
+                    onClick={() => openQuickAdd(q)}
+                    className="w-8 h-8 rounded-full border-2 border-dashed border-secondary/40 text-text-secondary flex items-center justify-center transition-all hover:scale-125 hover:border-primary hover:text-primary hover:bg-primary/5 cursor-pointer"
+                >
+                    <Plus set="bold" primaryColor="currentColor" size={14} />
+                </button>
+            </div>
+        )
     }
 
     const handleSaveResults = async (results: ExamQuestion[]) => {
@@ -1326,9 +1562,20 @@ export default function EditExamPage() {
                             }
                         })
 
-                        const renderQuestionCard = (q: typeof questions[0], idx: number, isInGroup: boolean) => (
+                        const renderQuestionCard = (q: typeof questions[0], idx: number, isInGroup: boolean, dragGroupKey?: string) => (
                             <div key={q.id || idx} id={`question-${q.id}`} className={`${isInGroup ? 'p-5' : ''} ${highlightId === q.id ? 'ring-2 ring-red-500 rounded-xl animate-pulse-once transition-all duration-1000' : ''}`}>
                                 <div className="flex items-start gap-5">
+                                    {dragGroupKey && canReorder && q.id && (
+                                        <button
+                                            type="button"
+                                            aria-label="Geser untuk mengubah urutan soal"
+                                            title="Geser untuk mengubah urutan"
+                                            onPointerDown={(e) => handleDragStart(e, q, dragGroupKey)}
+                                            className="mt-1 -ml-3 p-1 text-text-secondary/50 hover:text-text-secondary cursor-grab active:cursor-grabbing flex-shrink-0 touch-none"
+                                        >
+                                            <GripVertical className="w-5 h-5" />
+                                        </button>
+                                    )}
                                     {isBulkSelectMode && (
                                         <input
                                             type="checkbox"
@@ -1520,17 +1767,41 @@ export default function EditExamPage() {
                                             )}
                                         </div>
                                         <div className="divide-y divide-violet-100 dark:divide-violet-800">
-                                            {item.items.map(({ question, originalIndex }) =>
-                                                renderQuestionCard(question, originalIndex, true)
-                                            )}
+                                            {item.items.map(({ question, originalIndex }) => {
+                                                const groupKey = `audio:${item.audioUrl}`
+                                                const dragProps = getDragItemProps(question.id, groupKey)
+                                                return (
+                                                    <div
+                                                        key={question.id || originalIndex}
+                                                        data-drag-id={question.id}
+                                                        data-drag-group={groupKey}
+                                                        className={dragProps.className}
+                                                        style={dragProps.style}
+                                                    >
+                                                        {renderQuestionCard(question, originalIndex, true, groupKey)}
+                                                        {renderQuickAdd(question)}
+                                                    </div>
+                                                )
+                                            })}
                                         </div>
                                     </div>
                                 )
                             } else {
+                                const dragProps = getDragItemProps(item.question.id, 'standalone')
                                 return (
-                                    <Card key={item.question.id || item.originalIndex} className={`p-5 ${selectedQuestionIds.has(item.question.id || '') ? 'ring-2 ring-primary' : ''}`}>
-                                        {renderQuestionCard(item.question, item.originalIndex, false)}
-                                    </Card>
+                                    <div key={item.question.id || item.originalIndex}>
+                                        <div
+                                            data-drag-id={item.question.id}
+                                            data-drag-group="standalone"
+                                            className={dragProps.className}
+                                            style={dragProps.style}
+                                        >
+                                            <Card className={`p-5 ${selectedQuestionIds.has(item.question.id || '') ? 'ring-2 ring-primary' : ''}`}>
+                                                {renderQuestionCard(item.question, item.originalIndex, false, 'standalone')}
+                                            </Card>
+                                        </div>
+                                        {renderQuickAdd(item.question)}
+                                    </div>
                                 )
                             }
                         })
@@ -1953,7 +2224,7 @@ export default function EditExamPage() {
                                     <div className="flex gap-3 pt-6 border-t border-secondary/10">
                                         <Button variant="secondary" onClick={() => { setMode('list'); setIsPassageMode(false) }} className="flex-1">Batal</Button>
                                         <Button
-                                            onClick={handleAddManualQuestion}
+                                            onClick={() => handleAddManualQuestion()}
                                             disabled={saving || (!passageText.trim() && !passageAudioUrl) || !passageQuestions.some(q => q.question_text.trim())}
                                             loading={saving}
                                             className="flex-1 !bg-teal-600 hover:!bg-teal-700"
@@ -2028,7 +2299,15 @@ export default function EditExamPage() {
                                     )}
                                     <div className="flex gap-3 pt-6 border-t border-secondary/10" data-tutorial="exam-manual-submit">
                                         <Button variant="secondary" onClick={() => setMode('list')} className="flex-1">Batal</Button>
-                                        <Button onClick={handleAddManualQuestion} disabled={saving || !manualForm.question_text || !manualForm.difficulty || (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(manualForm.question_type) && !manualForm.correct_answer)} loading={saving} className="flex-1">{saving ? 'Menyimpan...' : 'Tambah Soal'}</Button>
+                                        <Button
+                                            variant="secondary"
+                                            onClick={() => handleAddManualQuestion(true)}
+                                            disabled={saving || !manualForm.question_text || !manualForm.difficulty || (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(manualForm.question_type) && !manualForm.correct_answer)}
+                                            className="flex-1"
+                                        >
+                                            Simpan & Tambah Lagi
+                                        </Button>
+                                        <Button onClick={() => handleAddManualQuestion(false)} disabled={saving || !manualForm.question_text || !manualForm.difficulty || (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(manualForm.question_type) && !manualForm.correct_answer)} loading={saving} className="flex-1">{saving ? 'Menyimpan...' : 'Simpan & Kembali'}</Button>
                                     </div>
                                 </>
                             )}
@@ -2688,6 +2967,19 @@ export default function EditExamPage() {
                     </div>
                 </Modal>
             )}
+
+            {/* Toast kecil (mis. "Urutan disimpan") */}
+            {toast && (
+                <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
+            )}
         </div >
+    )
+}
+
+export default function EditExamPage() {
+    return (
+        <EditorErrorBoundary>
+            <EditExamPageInner />
+        </EditorErrorBoundary>
     )
 }

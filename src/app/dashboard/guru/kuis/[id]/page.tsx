@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
@@ -13,16 +13,16 @@ const MathTextarea = dynamic(() => import('@/components/MathTextarea'), {
 })
 const PreviewModal = dynamic(() => import('@/components/PreviewModal'), { ssr: false })
 const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
-const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
-    ssr: false,
-    loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={4} readOnly />
-})
+// Static import for RichTextEditor — previously loaded as a lazy chunk via dynamic(),
+// which crashed the whole page white when the chunk no longer existed after a deploy
+import RichTextEditor from '@/components/RichTextEditor'
 import { plainToHtml } from '@/lib/richTextUtils'
+import EditorErrorBoundary from '@/components/EditorErrorBoundary'
 import { Edit, Discovery, Folder, Plus, Upload, Danger, InfoCircle, TickSquare, CloseSquare, Delete, Document, Search, User } from 'react-iconly'
-import { Loader2, Eye, Brain } from 'lucide-react'
+import { Loader2, Eye, Brain, GripVertical } from 'lucide-react'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
-import { PageHeader, Button, Modal, EmptyState } from '@/components/ui'
+import { PageHeader, Button, Modal, EmptyState, Toast, type ToastType } from '@/components/ui'
 import Card from '@/components/ui/Card'
 
 interface QuizQuestion {
@@ -60,7 +60,22 @@ interface Quiz {
 
 type Mode = 'list' | 'manual' | 'clean' | 'ai' | 'bank'
 
-export default function EditQuizPage() {
+// Live drag state for pointer-based reorder (see handleDragStart/handleDragMove/handleDragEnd)
+interface DragInfo {
+    questionId: string
+    groupKey: string
+    memberIds: string[]       // ids of draggable members in the same group, in visual order
+    memberTops: number[]      // document-relative top of each member card at drag start
+    memberHeights: number[]
+    fromSlot: number          // dragged card's slot among members at drag start
+    insertionIndex: number    // k = how many member midpoints are above the dragged center (0..N)
+    startDocY: number         // pointer position (document-relative) at drag start
+    currentDy: number         // clamped pointer delta from drag start
+    height: number            // dragged card height
+    top: number               // dragged card document-relative top at drag start
+}
+
+function EditQuizPageInner() {
     const params = useParams()
     const searchParams = useSearchParams()
     const quizId = params.id as string
@@ -165,6 +180,24 @@ export default function EditQuizPage() {
     const [showSuccessModal, setShowSuccessModal] = useState<false | 'published' | 'pending'>(false)
     const [alertInfo, setAlertInfo] = useState<{ type: 'info' | 'warning' | 'error' | 'success', title: string, message: string } | null>(null)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
+
+    // Toast notification (design system)
+    const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
+    const showToast = (message: string, type: ToastType = 'success') => setToast({ message, type })
+
+    // Quick-add preset: remembers the last saved type & option count from the manual form
+    // (page state only, never persisted). Difficulty & points always follow the question above the "+" button.
+    const [quickAddPreset, setQuickAddPreset] = useState<{ question_type: string; optionCount: number } | null>(null)
+
+    // Drag & drop reorder state (pointer-events based, works on touch screens)
+    const [dragInfo, setDragInfo] = useState<DragInfo | null>(null)
+    const listContainerRef = useRef<HTMLDivElement | null>(null)
+    const cardRefs = useRef(new Map<string, HTMLElement>())
+    // Drag is disabled while content is locked (published), while editing, or during bulk select
+    const dragDisabled = !!quiz?.is_active || !!editingQuestionId || isBulkSelectMode
+    // Passage questions (audio group or passage text) and standalone questions never mix in one drag group
+    const getDragGroupKey = (q: QuizQuestion) =>
+        q.passage_audio_url ? `audio:${q.passage_audio_url}` : q.passage_text ? 'passage' : 'standalone'
 
     const fetchQuiz = useCallback(async () => {
         try {
@@ -302,6 +335,7 @@ export default function EditQuizPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ is_active: true })
             })
+
             if (res.ok) {
                 const resData = await res.json()
 
@@ -368,7 +402,7 @@ export default function EditQuizPage() {
         }
     }
 
-    const handleAddManualQuestion = async () => {
+    const handleAddManualQuestion = async (addAnother = false) => {
         // Passage mode: save all passage questions at once
         if (isPassageMode) {
             if ((!passageText.trim() && !passageAudioUrl) || passageQuestions.length === 0) return
@@ -391,11 +425,17 @@ export default function EditQuizPage() {
                         text_direction: q.text_direction || 'ltr',
                         content_format: 'html'
                     }))
-                await fetch(`/api/quizzes/${quizId}/questions`, {
+                const res = await fetch(`/api/quizzes/${quizId}/questions`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(questionsToSave)
                 })
+                if (!res.ok) {
+                    // Jangan reset form — guru tidak kehilangan pekerjaannya saat server menolak
+                    const errData = await res.json().catch(() => null)
+                    setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: errData?.error || 'Gagal menyimpan passage. Periksa jawaban benar setiap soal.' })
+                    return
+                }
                 setPassageText('')
                 setPassageAudioUrl('')
                 setPassageQuestions([{ question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, text_direction: 'ltr' }])
@@ -412,7 +452,7 @@ export default function EditQuizPage() {
         if (!manualForm.question_text) return
         setSaving(true)
         try {
-            await fetch(`/api/quizzes/${quizId}/questions`, {
+            const res = await fetch(`/api/quizzes/${quizId}/questions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -422,19 +462,47 @@ export default function EditQuizPage() {
                     content_format: 'html'
                 })
             })
-            setManualForm({
-                question_text: '',
-                question_type: 'MULTIPLE_CHOICE',
-                options: ['', '', '', ''],
-                correct_answer: '',
-                difficulty: undefined as any,
-                points: 10,
-                order_index: 0,
-                teacher_hots_claim: false,
-                text_direction: 'ltr'
+            if (!res.ok) {
+                const errData = await res.json().catch(() => null)
+                throw new Error(errData?.error || 'Gagal menyimpan soal')
+            }
+            // Remember the teacher's last used type & option count for the next quick-add "+" preset
+            setQuickAddPreset({
+                question_type: manualForm.question_type,
+                optionCount: manualForm.options?.length ?? 4
             })
-            setMode('list')
+            if (addAnother) {
+                // "Simpan & Tambah Lagi": reset ONLY the question text & correct answer —
+                // keep type, option count, difficulty, points (option texts are blanked, count preserved)
+                setManualForm(prev => ({
+                    ...prev,
+                    question_text: '',
+                    options: prev.question_type === 'TRUE_FALSE'
+                        ? ['Benar', 'Salah']
+                        : ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(prev.question_type)
+                            ? (prev.options || []).map(() => '')
+                            : null,
+                    correct_answer: prev.question_type === 'ESSAY' ? null : ''
+                }))
+                showToast('Soal tersimpan. Lanjut tambah soal berikutnya.', 'success')
+            } else {
+                setManualForm({
+                    question_text: '',
+                    question_type: 'MULTIPLE_CHOICE',
+                    options: ['', '', '', ''],
+                    correct_answer: '',
+                    difficulty: undefined as any,
+                    points: 10,
+                    order_index: 0,
+                    teacher_hots_claim: false,
+                    text_direction: 'ltr'
+                })
+                setMode('list')
+            }
             fetchQuiz()
+        } catch (error) {
+            console.error('Error adding question:', error)
+            setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: error instanceof Error ? error.message : 'Gagal menyimpan soal. Coba lagi.' })
         } finally {
             setSaving(false)
         }
@@ -618,6 +686,206 @@ export default function EditQuizPage() {
             setAlertInfo({ type: 'error', title: 'Gagal', message: 'Gagal menyimpan ke Bank Soal.' })
         }
     }
+
+    // === Quick-add "+" ===
+    // Build a blank manual form preset from the question right above the clicked "+" button.
+    // Type & option count come from the remembered quickAddPreset if the teacher already saved
+    // a question via the form; otherwise they follow the source question. Difficulty & points
+    // always follow the source question.
+    const buildPresetForm = (source: QuizQuestion): QuizQuestion => {
+        const type = quickAddPreset?.question_type ?? source.question_type
+        let options: string[] | null = null
+        if (type === 'MULTIPLE_CHOICE' || type === 'MULTIPLE_ANSWER') {
+            const sourceCount = source.options && source.options.length >= 2 ? source.options.length : 4
+            const count = quickAddPreset?.optionCount ?? sourceCount
+            options = Array.from({ length: count }, () => '')
+        } else if (type === 'TRUE_FALSE') {
+            options = ['Benar', 'Salah']
+        }
+        return {
+            question_text: '',
+            question_type: type,
+            options,
+            correct_answer: type === 'ESSAY' ? null : '',
+            difficulty: source.difficulty,
+            points: source.points,
+            order_index: 0,
+            teacher_hots_claim: false,
+            text_direction: source.text_direction || 'ltr'
+        }
+    }
+
+    const handleQuickAdd = (source: QuizQuestion) => {
+        setIsPassageMode(false)
+        setManualForm(buildPresetForm(source))
+        setMode('manual')
+    }
+
+    // === Drag & drop reorder (pointer events) ===
+    const setCardRef = (id: string | undefined) => (el: HTMLElement | null) => {
+        if (!id) return
+        if (el) cardRefs.current.set(id, el)
+        else cardRefs.current.delete(id)
+    }
+
+    const endDragCleanup = () => {
+        setDragInfo(null)
+        document.body.style.userSelect = ''
+    }
+
+    const handleDragStart = (e: ReactPointerEvent<HTMLElement>, q: QuizQuestion) => {
+        if (dragDisabled || !q.id) return
+        if (e.pointerType === 'mouse' && e.button !== 0) return
+        e.preventDefault()
+        const groupKey = getDragGroupKey(q)
+        const memberIds = questions.filter(x => x.id && getDragGroupKey(x) === groupKey).map(x => x.id!)
+        const tops: number[] = []
+        const heights: number[] = []
+        for (const id of memberIds) {
+            const el = cardRefs.current.get(id)
+            if (!el) return // cannot measure a member → abort drag entirely
+            const rect = el.getBoundingClientRect()
+            tops.push(rect.top + window.scrollY)
+            heights.push(rect.height)
+        }
+        const fromSlot = memberIds.indexOf(q.id)
+        if (fromSlot === -1) return
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+        document.body.style.userSelect = 'none'
+        setDragInfo({
+            questionId: q.id,
+            groupKey,
+            memberIds,
+            memberTops: tops,
+            memberHeights: heights,
+            fromSlot,
+            insertionIndex: fromSlot,
+            startDocY: e.clientY + window.scrollY,
+            currentDy: 0,
+            height: heights[fromSlot],
+            top: tops[fromSlot]
+        })
+    }
+
+    const handleDragMove = (e: ReactPointerEvent<HTMLElement>) => {
+        if (!dragInfo) return
+        const docY = e.clientY + window.scrollY
+        // Clamp so the dragged card never leaves the vertical span of its own group
+        const lastIdx = dragInfo.memberIds.length - 1
+        const minDy = dragInfo.memberTops[0] - dragInfo.top
+        const maxDy = dragInfo.memberTops[lastIdx] + dragInfo.memberHeights[lastIdx] - (dragInfo.top + dragInfo.height)
+        const dy = Math.max(minDy, Math.min(docY - dragInfo.startDocY, maxDy))
+        const center = dragInfo.top + dragInfo.height / 2 + dy
+        let k = 0
+        dragInfo.memberIds.forEach((_, i) => {
+            if (center > dragInfo.memberTops[i] + dragInfo.memberHeights[i] / 2) k = i + 1
+        })
+        if (dy !== dragInfo.currentDy || k !== dragInfo.insertionIndex) {
+            setDragInfo({ ...dragInfo, currentDy: dy, insertionIndex: k })
+        }
+    }
+
+    const handleDragEnd = (e: ReactPointerEvent<HTMLElement>) => {
+        if (!dragInfo) return
+        const info = dragInfo
+        endDragCleanup()
+        // Drop outside the question list → cancel, nothing changes
+        const container = listContainerRef.current
+        if (container) {
+            const rect = container.getBoundingClientRect()
+            const inside = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom
+            if (!inside) return
+        }
+        // Recompute the target slot from the actual pointer-up position (not the last move)
+        const lastIdx = info.memberIds.length - 1
+        const minDy = info.memberTops[0] - info.top
+        const maxDy = info.memberTops[lastIdx] + info.memberHeights[lastIdx] - (info.top + info.height)
+        const dy = Math.max(minDy, Math.min(e.clientY + window.scrollY - info.startDocY, maxDy))
+        const center = info.top + info.height / 2 + dy
+        let toSlot = 0
+        info.memberIds.forEach((_, i) => {
+            if (center > info.memberTops[i] + info.memberHeights[i] / 2) toSlot = i + 1
+        })
+        if (toSlot > info.fromSlot) toSlot -= 1
+        toSlot = Math.max(0, Math.min(toSlot, lastIdx))
+        if (toSlot === info.fromSlot) return
+        commitReorder(info, toSlot)
+    }
+
+    const handleDragCancel = () => {
+        if (dragInfo) endDragCleanup()
+    }
+
+    // Reorder only touches order_index of affected questions — everything else stays as-is
+    const commitReorder = async (info: DragInfo, toSlot: number) => {
+        const memberSet = new Set(info.memberIds)
+        const members = info.memberIds.map(id => questions.find(q => q.id === id)!).filter(Boolean)
+        const dragged = members.find(m => m.id === info.questionId)
+        if (!dragged) return
+        const remaining = members.filter(m => m.id !== info.questionId)
+        const newMembers = [...remaining.slice(0, toSlot), dragged, ...remaining.slice(toSlot)]
+        const memberQueue = [...newMembers]
+        const prev = questions
+        const next = questions.map(q => (q.id && memberSet.has(q.id)) ? memberQueue.shift()! : q)
+        const changed: { id: string; order_index: number }[] = []
+        const reordered = next.map((q, i) => {
+            if (q.order_index !== i) {
+                if (q.id) changed.push({ id: q.id, order_index: i })
+                return { ...q, order_index: i }
+            }
+            return q
+        })
+        if (changed.length === 0) return
+        // Optimistic UI update, then one batch request to the existing reorder endpoint
+        setQuestions(reordered)
+        try {
+            const res = await fetch(`/api/quizzes/${quizId}/questions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reorder: changed })
+            })
+            if (!res.ok) throw new Error('Gagal menyimpan urutan')
+            showToast('Urutan disimpan', 'success')
+        } catch (error) {
+            console.error('Reorder error:', error)
+            setQuestions(prev)
+            showToast('Gagal menyimpan urutan. Urutan dikembalikan.', 'error')
+        }
+    }
+
+    // Live styles: dragged card follows the pointer (no transition, lifted shadow),
+    // other members slide to their target slot with a CSS transition
+    const getDragStyle = (q: QuizQuestion): CSSProperties => {
+        if (!dragInfo || !q.id || dragInfo.groupKey !== getDragGroupKey(q)) return {}
+        const slot = dragInfo.memberIds.indexOf(q.id)
+        if (slot === -1) return {}
+        if (q.id === dragInfo.questionId) {
+            return {
+                transform: `translateY(${dragInfo.currentDy}px)`,
+                transition: 'none',
+                position: 'relative',
+                zIndex: 50,
+                boxShadow: '0 20px 45px rgba(0, 0, 0, 0.3)',
+                pointerEvents: 'none'
+            }
+        }
+        const lastIdx = dragInfo.memberIds.length - 1
+        let toSlot = dragInfo.insertionIndex
+        if (toSlot > dragInfo.fromSlot) toSlot -= 1
+        toSlot = Math.max(0, Math.min(toSlot, lastIdx))
+        const order = dragInfo.memberIds.filter(id => id !== dragInfo.questionId)
+        order.splice(toSlot, 0, dragInfo.questionId)
+        const newSlot = order.indexOf(q.id)
+        const dy = dragInfo.memberTops[newSlot] - dragInfo.memberTops[slot]
+        return {
+            transform: dy !== 0 ? `translateY(${dy}px)` : undefined,
+            transition: 'transform 200ms ease'
+        }
+    }
+
+    // Solid background while lifted so content underneath does not bleed through
+    const getDragClassName = (q: QuizQuestion) =>
+        dragInfo && q.id === dragInfo.questionId ? 'bg-white dark:bg-surface-dark rounded-xl' : ''
 
     if (loading) {
         return (
@@ -882,7 +1150,7 @@ export default function EditQuizPage() {
 
             {/* Question List */}
             {mode === 'list' && (
-                <div className="space-y-4" data-tutorial="quiz-question-list">
+                <div className="space-y-4" data-tutorial="quiz-question-list" ref={listContainerRef}>
                     {/* Simplified Selection Toolbar */}
                     {/* "Under Review" Banner */}
                     {quiz?.pending_publish && (
@@ -1017,6 +1285,21 @@ export default function EditQuizPage() {
                         const renderQuestionCard = (q: typeof questions[0], idx: number, isInGroup: boolean) => (
                             <div key={q.id || idx} id={`question-${q.id}`} className={`${isInGroup ? 'p-4' : ''} ${highlightId === q.id ? 'ring-2 ring-red-500 rounded-xl animate-pulse-once transition-all duration-1000' : ''}`}>
                                 <div className="flex items-start gap-4">
+                                    {!dragDisabled && q.id && (
+                                        <button
+                                            type="button"
+                                            aria-label="Geser untuk mengubah urutan soal"
+                                            title="Tahan & geser untuk mengubah urutan"
+                                            onPointerDown={(e) => handleDragStart(e, q)}
+                                            onPointerMove={handleDragMove}
+                                            onPointerUp={handleDragEnd}
+                                            onPointerCancel={handleDragCancel}
+                                            className="mt-1 -ml-2 p-1 text-text-secondary/50 hover:text-text-secondary dark:text-zinc-500 dark:hover:text-zinc-300 cursor-grab active:cursor-grabbing touch-none select-none shrink-0"
+                                            style={{ touchAction: 'none' }}
+                                        >
+                                            <GripVertical className="w-4 h-4" />
+                                        </button>
+                                    )}
                                     {isBulkSelectMode && (
                                         <input
                                             type="checkbox"
@@ -1178,6 +1461,25 @@ export default function EditQuizPage() {
                             </div>
                         )
 
+                        // Small round dashed "+" under each question card — opens the manual form
+                        // with a preset taken from the question right above it
+                        const renderQuickAddButton = (q: typeof questions[0]) => {
+                            if (quiz?.is_active) return null
+                            return (
+                                <div className="flex justify-center py-1">
+                                    <button
+                                        type="button"
+                                        aria-label="Tambah soal di sini"
+                                        title="Tambah soal di sini"
+                                        onClick={() => handleQuickAdd(q)}
+                                        className="w-7 h-7 rounded-full border-2 border-dashed border-secondary/40 dark:border-zinc-600 text-text-secondary dark:text-zinc-500 hover:border-primary hover:text-primary dark:hover:border-primary dark:hover:text-primary hover:scale-125 transition-all flex items-center justify-center cursor-pointer bg-white dark:bg-surface-dark"
+                                    >
+                                        <Plus set="bold" primaryColor="currentColor" size={14} />
+                                    </button>
+                                </div>
+                            )
+                        }
+
                         return displayItems.map((item, itemIdx) => {
                             if (item.type === 'audio_group') {
                                 return (
@@ -1193,19 +1495,36 @@ export default function EditQuizPage() {
                                                 </>
                                             )}
                                         </div>
-                                        {/* Individual questions */}
+                                        {/* Individual questions — reorderable only within this audio group */}
                                         <div className="divide-y divide-violet-100 dark:divide-violet-800">
-                                            {item.items.map(({ question, originalIndex }) =>
-                                                renderQuestionCard(question, originalIndex, true)
-                                            )}
+                                            {item.items.map(({ question, originalIndex }) => (
+                                                <div
+                                                    key={question.id || originalIndex}
+                                                    ref={setCardRef(question.id)}
+                                                    style={getDragStyle(question)}
+                                                    className={getDragClassName(question)}
+                                                >
+                                                    {renderQuestionCard(question, originalIndex, true)}
+                                                    {renderQuickAddButton(question)}
+                                                </div>
+                                            ))}
                                         </div>
                                     </div>
                                 )
                             } else {
                                 return (
-                                    <Card key={item.question.id || item.originalIndex} className={`p-4 ${selectedQuestionIds.has(item.question.id || '') ? 'ring-2 ring-primary' : ''}`}>
-                                        {renderQuestionCard(item.question, item.originalIndex, false)}
-                                    </Card>
+                                    <div key={item.question.id || item.originalIndex}>
+                                        <div
+                                            ref={setCardRef(item.question.id)}
+                                            style={getDragStyle(item.question)}
+                                            className={getDragClassName(item.question)}
+                                        >
+                                            <Card className={`p-4 ${selectedQuestionIds.has(item.question.id || '') ? 'ring-2 ring-primary' : ''}`}>
+                                                {renderQuestionCard(item.question, item.originalIndex, false)}
+                                            </Card>
+                                        </div>
+                                        {renderQuickAddButton(item.question)}
+                                    </div>
                                 )
                             }
                         })
@@ -1616,7 +1935,7 @@ export default function EditQuizPage() {
                                 <div className="flex gap-3 pt-4">
                                     <Button variant="secondary" onClick={() => { setMode('list'); setIsPassageMode(false) }} className="flex-1">Batal</Button>
                                     <Button
-                                        onClick={handleAddManualQuestion}
+                                        onClick={() => handleAddManualQuestion()}
                                         disabled={saving || (!passageText.trim() && !passageAudioUrl) || !passageQuestions.some(q => q.question_text.trim())}
                                         loading={saving}
                                         className="flex-1 !bg-teal-600 hover:!bg-teal-700"
@@ -1702,12 +2021,22 @@ export default function EditQuizPage() {
                                         Batal
                                     </Button>
                                     <Button
-                                        onClick={handleAddManualQuestion}
+                                        variant="outline"
+                                        onClick={() => handleAddManualQuestion(true)}
+                                        disabled={saving || !manualForm.question_text || !manualForm.difficulty || (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(manualForm.question_type) && !manualForm.correct_answer)}
+                                        loading={saving}
+                                        className="flex-1 !border-primary/40 text-primary"
+                                        title="Simpan soal ini, lalu lanjut menambah soal baru dengan tipe & pengaturan yang sama"
+                                    >
+                                        {saving ? 'Menyimpan...' : 'Simpan & Tambah Lagi'}
+                                    </Button>
+                                    <Button
+                                        onClick={() => handleAddManualQuestion(false)}
                                         disabled={saving || !manualForm.question_text || !manualForm.difficulty || (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(manualForm.question_type) && !manualForm.correct_answer)}
                                         loading={saving}
                                         className="flex-1"
                                     >
-                                        {saving ? 'Menyimpan...' : 'Tambah Soal'}
+                                        {saving ? 'Menyimpan...' : 'Simpan & Kembali'}
                                     </Button>
                                 </div>
                             </>
@@ -2056,6 +2385,23 @@ export default function EditQuizPage() {
                     </div>
                 </Modal>
             )}
+
+            {/* Toast notification (e.g. "Urutan disimpan" after drag & drop reorder) */}
+            {toast && (
+                <Toast
+                    message={toast.message}
+                    type={toast.type}
+                    onClose={() => setToast(null)}
+                />
+            )}
         </div >
+    )
+}
+
+export default function EditQuizPage() {
+    return (
+        <EditorErrorBoundary>
+            <EditQuizPageInner />
+        </EditorErrorBoundary>
     )
 }

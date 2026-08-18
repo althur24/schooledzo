@@ -104,6 +104,25 @@ export async function POST(
 
         const body = await request.json()
 
+        // Reorder action: { reorder: [{ id, order_index }] } — batch update urutan soal
+        if (body && !Array.isArray(body) && Array.isArray(body.reorder)) {
+            const items = body.reorder.filter((r: any) => r && typeof r.id === 'string' && Number.isFinite(r.order_index))
+            if (items.length === 0) {
+                return NextResponse.json({ error: 'Payload reorder tidak valid' }, { status: 400 })
+            }
+            let updated = 0
+            for (const r of items) {
+                const { error: updErr } = await supabase
+                    .from('quiz_questions')
+                    .update({ order_index: r.order_index })
+                    .eq('id', r.id)
+                    .eq('quiz_id', id)
+                if (updErr) throw updErr
+                updated++
+            }
+            return NextResponse.json({ updated })
+        }
+
         // Check AI review status ONCE before any insert
         const aiEnabled = await isAIReviewEnabled(schoolId)
 
