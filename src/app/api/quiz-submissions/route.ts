@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { gradeAnswer, isAutoGradeable, needsManualGrading } from '@/lib/questionTypeUtils'
+import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { resolveQuizExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/examExpiry'
 import { forceCloseQuizSubmission } from '@/lib/autoCloseExpired'
 
@@ -274,23 +275,18 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Quiz ID diperlukan' }, { status: 400 })
         }
 
-        // Get student
-        const { data: student } = await supabase
-            .from('students')
-            .select('id')
-            .eq('user_id', user.id)
-            .single()
+        // Student + quiz di-fetch PARALEL (independen) — memangkas 1 round-trip DB
+        // per request di hot path autosave 1000 siswa
+        const [studentRes, quizRes] = await Promise.all([
+            supabase.from('students').select('id').eq('user_id', user.id).single(),
+            supabase.from('quizzes').select('deadline, duration_minutes, is_remedial, allowed_student_ids').eq('id', quiz_id).single()
+        ])
+        const student = studentRes.data
+        const quiz = quizRes.data
 
         if (!student) {
             return NextResponse.json({ error: 'Student not found' }, { status: 404 })
         }
-
-        // Get quiz details for validation
-        const { data: quiz } = await supabase
-            .from('quizzes')
-            .select('deadline, duration_minutes, is_remedial, allowed_student_ids')
-            .eq('id', quiz_id)
-            .single()
 
         if (!quiz) {
             return NextResponse.json({ error: 'Quiz not found' }, { status: 404 })
@@ -303,15 +299,9 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Get quiz questions for auto-grading
-        const { data: questions } = await supabase
-            .from('quiz_questions')
-            .select('*')
-            .eq('quiz_id', quiz_id)
-
-        if (!questions) {
-            return NextResponse.json({ error: 'Quiz questions not found' }, { status: 404 })
-        }
+        // Soal dari cache in-memory (TTL 10 mnt) — tanpa ini setiap autosave mem-fetch ulang
+        // SELURUH soal (termasuk teks HTML/passage besar) dari database per siswa per simpan
+        const questions = await getExamQuestionsForGrading('quiz_questions', quiz_id)
 
         // Check if already submitted or exists
         const { data: existing } = await supabase

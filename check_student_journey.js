@@ -127,6 +127,8 @@ async function main() {
     const saveQ = await api('/api/quiz-submissions', token2, { method: 'POST', body: JSON.stringify({ quiz_id: quiz.id, answers: [{ question_id: quizDetail.questions[0].id, answer: 'A' }] }) });
     const saveQData = await saveQ.json();
     ok(saveQ.ok && saveQData.saved === true, 'kuis: save-progress diterima');
+    const { data: qSubCheck } = await supabase.from('quiz_submissions').select('answers').eq('id', startQData.id).single();
+    ok(Array.isArray(qSubCheck?.answers) && qSubCheck.answers.length === 1 && qSubCheck.answers[0].answer === 'A', 'kuis: save-progress terekam di server (dasar autosave)');
     const submQ = await api('/api/quiz-submissions', token2, { method: 'POST', body: JSON.stringify({ quiz_id: quiz.id, answers: [{ question_id: quizDetail.questions[0].id, answer: 'A' }], submit: true }) });
     ok(submQ.ok, 'kuis: kumpul diterima');
 

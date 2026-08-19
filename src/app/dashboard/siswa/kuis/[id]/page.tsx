@@ -122,6 +122,59 @@ export default function KerjakanKuisPage() {
         }
     }
 
+    // === Autosave jawaban ke server (debounce 1,5 dtk) ===
+    // Pola yang sama dengan ulangan/UTS-UAS: server selalu punya salinan terbaru,
+    // jadi penutupan paksa saat waktu habis memakai jawaban ASLI siswa — bukan array kosong.
+    // Save-progress = satu update kolom answers (JSONB); jawaban lokal tetap ada sampai server konfirmasi.
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+    const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+    const scheduleSaveToServer = () => {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = setTimeout(() => { flushSaveToServer() }, 1500)
+    }
+
+    const flushSaveToServer = async () => {
+        const current = answersRef.current
+        // Submission dibuat saat halaman dibuka (startTimeRef terisi) — tanpa itu belum ada yang bisa disimpan
+        if (!startTimeRef.current || Object.keys(current).length === 0) return
+        setSaveStatus('saving')
+        try {
+            const res = await fetch('/api/quiz-submissions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    quiz_id: quizId,
+                    answers: Object.entries(current).map(([question_id, answer]) => ({ question_id, answer }))
+                })
+            })
+            if (res.status === 409) {
+                const data = await res.json().catch(() => null)
+                if (data?.code === 'TIME_EXPIRED') {
+                    if (timerRef.current) clearInterval(timerRef.current)
+                    clearLocalAnswers()
+                    router.replace(`/dashboard/siswa/kuis/${quizId}/hasil`)
+                    return
+                }
+            }
+            setSaveStatus(res.ok ? 'saved' : 'error')
+        } catch {
+            setSaveStatus('error') // jawaban lokal aman; perubahan berikutnya / reconnect akan mengirim ulang
+        }
+    }
+
+    // Satu pintu perubahan jawaban: state + localStorage + jadwalkan autosave server
+    const applyAnswersChange = (newAnswers: Record<string, string>) => {
+        setAnswers(newAnswers)
+        saveAnswersToLocal(newAnswers)
+        scheduleSaveToServer()
+    }
+
+    // Bersihkan timer autosave saat unmount
+    useEffect(() => {
+        return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
+    }, [])
+
     // Sync local answers to server when called manually
     useEffect(() => {
         const handleOnline = () => {
@@ -487,6 +540,11 @@ export default function KerjakanKuisPage() {
                         <p className="text-xs text-text-secondary">Total: {quiz.questions.length} Soal</p>
                     </div>
                     <div className="flex items-center gap-2 md:gap-3">
+                        {saveStatus !== 'idle' && (
+                            <span className={`text-[10px] font-bold ${saveStatus === 'error' ? 'text-red-500' : saveStatus === 'saved' ? 'text-green-500' : 'text-text-secondary'}`}>
+                                {saveStatus === 'saving' ? 'Menyimpan…' : saveStatus === 'saved' ? 'Tersimpan' : 'Gagal menyimpan'}
+                            </span>
+                        )}
                         <NetworkBadge isOnline={isOnline} />
                         <div className={`px-3 py-1.5 md:px-4 md:py-2 rounded-xl font-mono text-base md:text-xl font-bold shadow-lg relative ${(timeLeft || 0) < 60000 ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 dark:bg-surface-dark text-primary dark:text-primary-light'}`}>
                             {timeLeft !== null ? formatTime(timeLeft) : '--:--:--'}
@@ -573,8 +631,8 @@ export default function KerjakanKuisPage() {
                                                     <StudentAnswerInput
                                                         question={q}
                                                         value={answers[q.id]}
-                                                        onChange={(val) => { const newAnswers = { ...answers, [q.id]: val }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
-                                                        onChangeImmediate={(val) => { const newAnswers = { ...answers, [q.id]: val }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
+                                                        onChange={(val) => { applyAnswersChange({ ...answers, [q.id]: val }) }}
+                                                        onChangeImmediate={(val) => { applyAnswersChange({ ...answers, [q.id]: val }) }}
                                                     />
                                                 </div>
                                             )
@@ -617,8 +675,8 @@ export default function KerjakanKuisPage() {
                                     <StudentAnswerInput
                                         question={q}
                                         value={answers[q.id]}
-                                        onChange={(val) => { const newAnswers = { ...answers, [q.id]: val }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
-                                        onChangeImmediate={(val) => { const newAnswers = { ...answers, [q.id]: val }; setAnswers(newAnswers); saveAnswersToLocal(newAnswers) }}
+                                        onChange={(val) => { applyAnswersChange({ ...answers, [q.id]: val }) }}
+                                        onChangeImmediate={(val) => { applyAnswersChange({ ...answers, [q.id]: val }) }}
                                     />
                                 </div>
                             )
