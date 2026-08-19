@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { batchedIn, IN_BATCH_SIZE } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { logError } from '@/lib/logError'
+import { canManageOfficialExam } from '@/lib/teacherScope'
 
 // GET single official exam
 export async function GET(
@@ -64,8 +65,20 @@ export async function PUT(
         if (isErrorResponse(ctx)) return ctx
         const { user } = ctx
 
-        if (user.role !== 'ADMIN') {
+        if (user.role !== 'ADMIN' && user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Kepemilikan: ADMIN selalu boleh; GURU hanya bila mapel & kelas target ujian ini diajarnya
+        if (user.role === 'GURU') {
+            const { data: examScope } = await supabase
+                .from('official_exams')
+                .select('subject_id, target_class_ids, academic_year_id')
+                .eq('id', id)
+                .single()
+            if (!examScope || !(await canManageOfficialExam(user, examScope))) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
         }
 
         const body = await request.json()

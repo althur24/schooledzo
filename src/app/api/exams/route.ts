@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
+import { getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
 
 // GET all exams
 export async function GET(request: NextRequest) {
@@ -89,11 +90,20 @@ export async function GET(request: NextRequest) {
 
         if (error) throw error
 
+        // Label pembuat (untuk badge "Dibuatkan Admin" di daftar guru)
+        let roleMap = new Map<string, string>()
+        const creatorIds = [...new Set((data || []).map((e: any) => e.created_by).filter(Boolean))] as string[]
+        if (creatorIds.length > 0) {
+            const { data: creators } = await supabase.from('users').select('id, role').in('id', creatorIds)
+            roleMap = new Map((creators || []).map((c: any) => [c.id, c.role]))
+        }
+
         // Add question count
         const examsWithCount = data?.map(exam => ({
             ...exam,
             question_count: exam.exam_questions?.length || 0,
-            exam_questions: undefined
+            exam_questions: undefined,
+            creator_role: exam.created_by ? roleMap.get(exam.created_by) || null : null
         }))
 
         return NextResponse.json(examsWithCount)
@@ -110,7 +120,7 @@ export async function POST(request: NextRequest) {
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'GURU') {
+        if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
@@ -119,6 +129,28 @@ export async function POST(request: NextRequest) {
 
         if (!title || !start_time || duration_minutes === undefined || !teaching_assignment_id) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+        }
+
+        // Validasi TA + kepemilikan: ADMIN boleh TA mana pun di sekolahnya (buat untuk guru);
+        // GURU hanya boleh TA miliknya sendiri (pengetatan — sebelumnya tidak dicek).
+        const { data: ta } = await supabase
+            .from('teaching_assignments')
+            .select('id, teacher_id, teacher:teachers(school_id)')
+            .eq('id', teaching_assignment_id)
+            .single()
+        if (!ta) {
+            return NextResponse.json({ error: 'Teaching assignment tidak ditemukan' }, { status: 404 })
+        }
+        if (user.role === 'ADMIN') {
+            const taSchoolId = (ta.teacher as any)?.school_id
+            if (schoolId && taSchoolId && taSchoolId !== schoolId) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+            }
+        } else {
+            const scope = await getTeacherScope(user.id)
+            if (!ownsTeachingAssignment(scope, ta.teacher_id)) {
+                return NextResponse.json({ error: 'Anda hanya dapat membuat ulangan untuk penugasan Anda sendiri' }, { status: 403 })
+            }
         }
 
         // Block writes to archived (COMPLETED) academic years
@@ -140,7 +172,8 @@ export async function POST(request: NextRequest) {
                 remedial_for_id: remedial_for_id || null,
                 allowed_student_ids: allowed_student_ids || null,
                 show_results_immediately: show_results_immediately ?? true,
-                batch_id: batch_id || null
+                batch_id: batch_id || null,
+                created_by: user.id
             })
             .select()
             .single()

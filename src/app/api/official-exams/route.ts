@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { checkEndedOfficialExams } from '@/lib/checkEndedExams'
 import { logError } from '@/lib/logError'
+import { getTeacherScope, canTeachScope } from '@/lib/teacherScope'
 
 // GET all official exams (UTS/UAS)
 export async function GET(request: NextRequest) {
@@ -130,21 +131,25 @@ export async function GET(request: NextRequest) {
             } else {
                 result = []
             }
-            // Guru sees active exams + exams that have ended (time-based)
-            result = result.filter((exam: any) => {
-                if (exam.is_active) return true
-                // Also show exams whose time has passed (ended naturally)
-                const endTime = new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60 * 1000)
-                return endTime < new Date()
-            })
+            // Guru melihat SEMUA ujian dalam scope mapel×kelas-nya — termasuk draft.
+            // Draft buatan admin untuk guru harus tampil agar bisa dilengkapi & dipublish guru.
         }
         // ADMIN sees everything (no filter)
+
+        // Label pembuat (untuk badge "Dibuatkan Admin" di daftar guru)
+        let roleMap = new Map<string, string>()
+        const creatorIds = [...new Set(result.map((e: any) => e.created_by).filter(Boolean))] as string[]
+        if (creatorIds.length > 0) {
+            const { data: creators } = await supabase.from('users').select('id, role').in('id', creatorIds)
+            roleMap = new Map((creators || []).map((c: any) => [c.id, c.role]))
+        }
 
         // Add question count
         const examsWithCount = result.map((exam: any) => ({
             ...exam,
             question_count: exam.official_exam_questions?.length || 0,
-            official_exam_questions: undefined
+            official_exam_questions: undefined,
+            creator_role: exam.created_by ? roleMap.get(exam.created_by) || null : null
         }))
 
         return NextResponse.json(examsWithCount)
@@ -161,7 +166,7 @@ export async function POST(request: NextRequest) {
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'ADMIN') {
+        if (user.role !== 'ADMIN' && user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
@@ -191,6 +196,15 @@ export async function POST(request: NextRequest) {
 
         if (!yearId) {
             return NextResponse.json({ error: 'No active academic year found' }, { status: 400 })
+        }
+
+        // GURU hanya boleh membuat untuk mapel & kelas yang diajar di tahun tsb (scope ketat);
+        // ADMIN tidak dibatasi (boleh membuat untuk guru mana pun)
+        if (user.role === 'GURU') {
+            const scope = await getTeacherScope(user.id, yearId)
+            if (!canTeachScope(scope, subject_id, target_class_ids)) {
+                return NextResponse.json({ error: 'Anda hanya dapat membuat ujian untuk mapel dan kelas yang Anda ajar' }, { status: 403 })
+            }
         }
 
         const { data, error } = await supabase

@@ -18,6 +18,8 @@ interface OfficialExam {
     target_class_ids: string[]
     subject: { id: string; name: string }
     is_remedial?: boolean
+    created_by?: string | null
+    creator_role?: string | null
 }
 
 export default function GuruUtsUasPage() {
@@ -45,9 +47,11 @@ export default function GuruUtsUasPage() {
         const startTime = new Date(exam.start_time)
         const endTime = new Date(startTime.getTime() + exam.duration_minutes * 60000)
 
+        if (now > endTime) return { label: 'Selesai', color: 'bg-secondary/10 text-text-secondary' }
+        if (now >= startTime && now <= endTime && exam.is_active) return { label: 'Berlangsung', color: 'bg-green-500/10 text-green-600 dark:text-green-400' }
+        if (!exam.is_active) return { label: 'Draft', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' }
         if (now < startTime) return { label: 'Terjadwal', color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' }
-        if (now >= startTime && now <= endTime) return { label: 'Berlangsung', color: 'bg-green-500/10 text-green-600 dark:text-green-400' }
-        return { label: 'Selesai', color: 'bg-secondary/10 text-text-secondary' }
+        return { label: 'Terjadwal', color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' }
     }
 
     const formatDateTime = (dateString: string) => {
@@ -73,8 +77,8 @@ export default function GuruUtsUasPage() {
                         <BookOpen className="w-5 h-5" />
                     </div>
                     <div>
-                        <h3 className="font-bold text-text-main dark:text-white text-sm">Hanya Baca & Koreksi Essay</h3>
-                        <p className="text-xs text-text-secondary">Anda hanya melihat ujian yang sesuai dengan mata pelajaran yang Anda ajar. Untuk soal essay, Anda dapat melakukan koreksi manual.</p>
+                        <h3 className="font-bold text-text-main dark:text-white text-sm">Buat, Kelola & Koreksi</h3>
+                        <p className="text-xs text-text-secondary">Anda dapat membuat UTS/UAS sendiri (dari halaman Ulangan → Buat → pilih UTS/UAS), melengkapi draft buatan admin, serta mengoreksi essay. Anda hanya melihat ujian sesuai mapel yang Anda ajar.</p>
                     </div>
                 </div>
             </Card>
@@ -94,9 +98,12 @@ export default function GuruUtsUasPage() {
                     {exams.map(exam => {
                         const status = getExamStatus(exam)
                         const isLive = status.label === 'Berlangsung'
-                        const targetHref = isLive 
-                            ? `/dashboard/guru/uts-uas/${exam.id}/monitor`
-                            : `/dashboard/guru/uts-uas/${exam.id}/hasil`
+                        // Draft (termasuk buatan admin) dibuka di editor agar bisa dilengkapi & dipublish
+                        const targetHref = status.label === 'Draft'
+                            ? `/dashboard/guru/uts-uas/${exam.id}`
+                            : isLive
+                                ? `/dashboard/guru/uts-uas/${exam.id}/monitor`
+                                : `/dashboard/guru/uts-uas/${exam.id}/hasil`
 
                         return (
                             <Link key={exam.id} href={targetHref}>
@@ -122,6 +129,11 @@ export default function GuruUtsUasPage() {
                                                 <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'}`}>
                                                     {exam.exam_type}
                                                 </span>
+                                                {exam.creator_role === 'ADMIN' && (
+                                                    <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
+                                                        Dibuatkan Admin
+                                                    </span>
+                                                )}
                                                 {exam.is_remedial && (
                                                     <span className="px-2.5 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full">
                                                         REMEDIAL

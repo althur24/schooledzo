@@ -19,6 +19,8 @@ interface Exam {
     is_active: boolean
     pending_publish: boolean
     is_randomized: boolean
+    created_by?: string | null
+    creator_role?: string | null
     max_violations: number
     question_count: number
     created_at: string
@@ -40,6 +42,8 @@ interface OfficialExam {
     question_count: number
     target_class_ids: string[]
     subject: { id: string; name: string }
+    created_by?: string | null
+    creator_role?: string | null
 }
 
 interface TeachingAssignment {
@@ -72,6 +76,8 @@ export default function GuruUlanganPage() {
         max_violations: 3,
         show_results_immediately: true
     })
+    // Jenis yang dibuat dari satu pintu form ini: ulangan harian atau UTS/UAS resmi
+    const [examKind, setExamKind] = useState<'ULANGAN' | 'UTS' | 'UAS'>('ULANGAN')
 
     // Copy States
     const [showCopy, setShowCopy] = useState(false)
@@ -217,7 +223,63 @@ export default function GuruUlanganPage() {
         }
     }
 
+    const resetCreateForm = () => {
+        setForm({
+            teaching_assignment_ids: [],
+            title: '',
+            description: '',
+            start_time: '',
+            duration_minutes: 60,
+            is_randomized: true,
+            max_violations: 3,
+            show_results_immediately: true
+        })
+        setExamKind('ULANGAN')
+    }
+
+    // Buat UTS/UAS (ujian resmi serentak) — satu mapel, kelas target = kelas TA terpilih
+    const handleCreateOfficial = async () => {
+        const selectedTAs = teachingAssignments.filter(ta => form.teaching_assignment_ids.includes(ta.id))
+        const subjectIds = [...new Set(selectedTAs.map(ta => ta.subject?.id).filter(Boolean))]
+        if (subjectIds.length !== 1) {
+            alert('Untuk UTS/UAS, pilih kelas dari SATU mata pelajaran yang sama.')
+            return
+        }
+        const targetClassIds = [...new Set(selectedTAs.map(ta => ta.class?.id).filter(Boolean))] as string[]
+        setCreating(true)
+        try {
+            const res = await fetch('/api/official-exams', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    exam_type: examKind,
+                    title: form.title,
+                    description: form.description,
+                    subject_id: subjectIds[0],
+                    start_time: new Date(form.start_time).toISOString(),
+                    duration_minutes: form.duration_minutes,
+                    is_randomized: form.is_randomized,
+                    max_violations: form.max_violations,
+                    target_class_ids: targetClassIds,
+                    show_results_immediately: form.show_results_immediately
+                })
+            })
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}))
+                alert(err.error || 'Gagal membuat ujian. Silakan coba lagi.')
+                return
+            }
+            setShowCreate(false)
+            resetCreateForm()
+            const created = await res.json()
+            router.push(`/dashboard/guru/uts-uas/${created.id}`)
+        } finally {
+            setCreating(false)
+        }
+    }
+
     const handleCreate = async () => {
+        if (examKind !== 'ULANGAN') return handleCreateOfficial()
         if (form.teaching_assignment_ids.length === 0 || !form.title || !form.start_time) return
         setCreating(true)
         try {
@@ -278,16 +340,7 @@ export default function GuruUlanganPage() {
             }
 
             setShowCreate(false)
-            setForm({
-                teaching_assignment_ids: [],
-                title: '',
-                description: '',
-                start_time: '',
-                duration_minutes: 60,
-                is_randomized: true,
-                max_violations: 3,
-                show_results_immediately: true
-            })
+            resetCreateForm()
             
             const siblingParam = siblingIds.length > 0 ? `?siblings=${siblingIds.join(',')}` : ''
             router.push(`/dashboard/guru/ulangan/${primaryExam.id}${siblingParam}`)
@@ -639,6 +692,11 @@ export default function GuruUlanganPage() {
                                                                     REMEDIAL
                                                                 </span>
                                                             )}
+                                                            {exam.creator_role === 'ADMIN' && (
+                                                                <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
+                                                                    Dibuatkan Admin
+                                                                </span>
+                                                            )}
                                                             {exam.is_randomized && <span className="text-xs text-text-secondary flex items-center gap-1 bg-secondary/10 px-2 py-1 rounded-full"><Swap set="bold" primaryColor="currentColor" size={12} /> Acak</span>}
                                                         </div>
                                                         <h3 className="font-bold text-text-main dark:text-white text-lg group-hover:text-primary transition-colors line-clamp-2">{exam.title}</h3>
@@ -783,9 +841,12 @@ export default function GuruUlanganPage() {
                                 {officialExams.map(exam => {
                                     const status = getOfficialExamStatus(exam)
                                     const isLive = status.label === 'Berlangsung'
-                                    const targetHref = isLive
-                                        ? `/dashboard/guru/uts-uas/${exam.id}/monitor`
-                                        : `/dashboard/guru/uts-uas/${exam.id}/hasil`
+                                    // Draft (termasuk buatan admin) dibuka di editor agar bisa dilengkapi & dipublish
+                                    const targetHref = status.label === 'Draft'
+                                        ? `/dashboard/guru/uts-uas/${exam.id}`
+                                        : isLive
+                                            ? `/dashboard/guru/uts-uas/${exam.id}/monitor`
+                                            : `/dashboard/guru/uts-uas/${exam.id}/hasil`
 
                                     return (
                                         <Link key={exam.id} href={targetHref}>
@@ -795,7 +856,7 @@ export default function GuruUlanganPage() {
                                                 }`}>
                                                 <div className="flex flex-col h-full gap-3">
                                                     <div className="flex items-center justify-between mb-1">
-                                                        <div className="flex items-center gap-2">
+                                                        <div className="flex items-center gap-2 flex-wrap">
                                                             <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${status.color}`}>
                                                                 {isLive ? (
                                                                     <span className="flex items-center gap-1.5">
@@ -807,6 +868,11 @@ export default function GuruUlanganPage() {
                                                                     </span>
                                                                 ) : status.label}
                                                             </span>
+                                                            {exam.creator_role === 'ADMIN' && (
+                                                                <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
+                                                                    Dibuatkan Admin
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </div>
 
@@ -953,9 +1019,32 @@ export default function GuruUlanganPage() {
             <Modal
                 open={showCreate}
                 onClose={() => setShowCreate(false)}
-                title="Buat Ulangan Baru"
+                title={examKind === 'ULANGAN' ? 'Buat Ulangan Baru' : `Buat ${examKind} Baru`}
             >
                 <div className="space-y-4">
+                    {/* Pilihan jenis: ulangan harian atau UTS/UAS resmi — satu pintu form */}
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jenis Ujian</label>
+                        <div className="grid grid-cols-3 gap-2">
+                            {(['ULANGAN', 'UTS', 'UAS'] as const).map(k => (
+                                <button
+                                    key={k}
+                                    type="button"
+                                    onClick={() => setExamKind(k)}
+                                    className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${examKind === k
+                                        ? 'border-primary bg-primary/10 text-primary'
+                                        : 'border-secondary/20 text-text-secondary hover:border-primary/40'}`}
+                                >
+                                    {k === 'ULANGAN' ? 'Ulangan' : k}
+                                </button>
+                            ))}
+                        </div>
+                        {examKind !== 'ULANGAN' && (
+                            <p className="text-xs text-text-secondary mt-2">
+                                {examKind} adalah ujian resmi serentak — semua kelas terpilih mengerjakan pada jendela waktu yang sama. Pilih kelas dari SATU mata pelajaran.
+                            </p>
+                        )}
+                    </div>
                     <div data-tutorial="exam-form-class">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran</label>
                         <ClassChipsSelector

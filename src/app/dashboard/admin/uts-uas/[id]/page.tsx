@@ -18,6 +18,7 @@ import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
+import { useAuth } from '@/contexts/AuthContext'
 
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
     ssr: false,
@@ -55,6 +56,10 @@ type SoalMode = 'list' | 'manual' | 'clean' | 'bank'
 export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id: examId } = use(params)
     const router = useRouter()
+    // Editor ini dipakai admin & guru (via wrapper guru/uts-uas/[id]) — link internal
+    // mengikuti role pemakai agar tidak terlempar ke area peran lain
+    const { user } = useAuth()
+    const basePath = user?.role === 'GURU' ? '/dashboard/guru/uts-uas' : '/dashboard/admin/uts-uas'
 
     const [exam, setExam] = useState<ExamDetail | null>(null)
     const [questions, setQuestions] = useState<Question[]>([])
@@ -517,7 +522,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
             {/* Header */}
             <div className="flex items-start justify-between">
                 <div>
-                    <button onClick={() => router.push('/dashboard/admin/uts-uas')} className="flex items-center gap-1 text-sm text-text-secondary hover:text-primary mb-2 transition-colors">
+                    <button onClick={() => router.push(basePath)} className="flex items-center gap-1 text-sm text-text-secondary hover:text-primary mb-2 transition-colors">
                         <ArrowLeft className="w-4 h-4" /> Kembali
                     </button>
                     <div className="flex items-center gap-3">
@@ -570,7 +575,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                             title={isMonitorDisabled ? 'Aktifkan ujian dulu untuk menggunakan Monitor' : undefined}
                             onClick={() => {
                                 if (tab.key === 'monitor') {
-                                    router.push(`/dashboard/admin/uts-uas/${examId}/monitor`);
+                                    router.push(`${basePath}/${examId}/monitor`);
                                     return;
                                 }
                                 setActiveTab(tab.key);
@@ -908,7 +913,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                     <td className="px-4 py-3 text-center">
                                                         {sub.is_submitted ? (
                                                             <div className="flex items-center justify-center gap-2">
-                                                                <Link href={`/dashboard/admin/uts-uas/${examId}/hasil/${sub.id}`}>
+                                                                <Link href={`${basePath}/${examId}/hasil/${sub.id}`}>
                                                                     <Button size="sm" variant={sub.is_graded ? 'ghost' : 'primary'} className={!sub.is_graded ? 'bg-gradient-to-r from-blue-600 to-cyan-600' : ''}>
                                                                         {sub.is_graded ? 'Lihat' : 'Koreksi'}
                                                                     </Button>

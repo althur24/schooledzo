@@ -31,6 +31,7 @@ export const guruNav: NavItem[] = [
     { icon: Edit, label: 'Tugas', path: '/dashboard/guru/tugas' },
     { icon: TimeCircle, label: 'Ulangan', path: '/dashboard/guru/ulangan' },
     { icon: Game, label: 'Kuis', path: '/dashboard/guru/kuis' },
+    { icon: Chart, label: 'UTS/UAS', path: '/dashboard/guru/uts-uas' },
     { icon: Folder, label: 'Bank Soal', path: '/dashboard/guru/bank-soal' },
     { icon: Graph, label: 'Nilai', path: '/dashboard/guru/nilai' },
     { icon: User, label: 'Wali Kelas', path: '/dashboard/guru/wali-kelas' },

@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncExamBatch } from '@/lib/examBatch'
+import { canManageExam } from '@/lib/teacherScope'
 
 // GET single exam
 export async function GET(
@@ -50,19 +51,26 @@ export async function PUT(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'GURU') {
+        if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id, results_released')
+            .select('teaching_assignment_id, results_released, teaching_assignment:teaching_assignments(teacher_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
             const yearStatus = await getYearStatusByTA(examForYear.teaching_assignment_id)
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
+        }
+
+        // Kepemilikan: hanya ADMIN atau guru pemilik TA yang boleh mengubah ulangan ini
+        // (pengetatan — sebelumnya semua guru bisa mengedit ulangan guru lain)
+        const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
+        if (!(await canManageExam(user, taTeacherId))) {
+            return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
         }
 
         const body = await request.json()
@@ -267,19 +275,25 @@ export async function DELETE(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'GURU') {
+        if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id')
+            .select('teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
             const yearStatus = await getYearStatusByTA(examForYear.teaching_assignment_id)
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
+        }
+
+        // Kepemilikan: hanya ADMIN atau guru pemilik TA yang boleh menghapus ulangan ini
+        const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
+        if (!(await canManageExam(user, taTeacherId))) {
+            return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
         }
 
         const { error } = await supabase

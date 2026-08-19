@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { logError } from '@/lib/logError'
+import { canManageOfficialExam } from '@/lib/teacherScope'
 
 // GET questions for an official exam
 export async function GET(
@@ -80,8 +81,20 @@ export async function POST(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'ADMIN') {
+        if (user.role !== 'ADMIN' && user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Kepemilikan: GURU hanya bila mapel & kelas target ujian ini diajarnya
+        if (user.role === 'GURU') {
+            const { data: examScope } = await supabase
+                .from('official_exams')
+                .select('subject_id, target_class_ids, academic_year_id')
+                .eq('id', id)
+                .single()
+            if (!examScope || !(await canManageOfficialExam(user, examScope))) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
         }
 
         const body = await request.json()
@@ -181,13 +194,25 @@ export async function PUT(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        await params // exam id — not needed for question update, but required by route
+        const { id } = await params // dipakai untuk cek scope kepemilikan GURU
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
         const { user } = ctx
 
-        if (user.role !== 'ADMIN') {
+        if (user.role !== 'ADMIN' && user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Kepemilikan: GURU hanya bila mapel & kelas target ujian ini diajarnya
+        if (user.role === 'GURU') {
+            const { data: examScope } = await supabase
+                .from('official_exams')
+                .select('subject_id, target_class_ids, academic_year_id')
+                .eq('id', id)
+                .single()
+            if (!examScope || !(await canManageOfficialExam(user, examScope))) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
         }
 
         const body = await request.json()
@@ -240,13 +265,25 @@ export async function DELETE(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        await params
+        const { id } = await params // dipakai untuk cek scope kepemilikan GURU
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
         const { user } = ctx
 
-        if (user.role !== 'ADMIN') {
+        if (user.role !== 'ADMIN' && user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Kepemilikan: GURU hanya bila mapel & kelas target ujian ini diajarnya
+        if (user.role === 'GURU') {
+            const { data: examScope } = await supabase
+                .from('official_exams')
+                .select('subject_id, target_class_ids, academic_year_id')
+                .eq('id', id)
+                .single()
+            if (!examScope || !(await canManageOfficialExam(user, examScope))) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
         }
 
         const { question_id } = await request.json()

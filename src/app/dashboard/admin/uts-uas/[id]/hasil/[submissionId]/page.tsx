@@ -8,6 +8,7 @@ import PassageBlock from '@/components/PassageBlock'
 import GradingAnswerDisplay from '@/components/GradingAnswerDisplay'
 import { isAutoGradeable } from '@/lib/questionTypeUtils'
 import { PageHeader, Card, Button } from '@/components/ui'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface Answer {
     id: string
@@ -51,6 +52,9 @@ export default function AdminUtsUasGradingPage() {
     const router = useRouter()
     const examId = params.id as string
     const submissionId = params.submissionId as string
+    // Halaman ini dipakai admin & guru (via wrapper guru/uts-uas/[id]/hasil/[submissionId])
+    const { user } = useAuth()
+    const basePath = user?.role === 'GURU' ? '/dashboard/guru/uts-uas' : '/dashboard/admin/uts-uas'
 
     const [submission, setSubmission] = useState<SubmissionDetail | null>(null)
     // Extracted & deduplicated questions from answers[].question
@@ -137,7 +141,7 @@ export default function AdminUtsUasGradingPage() {
             }
 
             alert('Penilaian berhasil disimpan!')
-            router.push(`/dashboard/admin/uts-uas/${examId}`)
+            router.push(`${basePath}/${examId}`)
         } catch (error: any) {
             console.error('Error saving:', error)
             alert(error.message || 'Gagal menyimpan penilaian')
@@ -162,7 +166,7 @@ export default function AdminUtsUasGradingPage() {
                 <PageHeader
                     title={`Penilaian: ${submission.student.user.full_name}`}
                     subtitle={`${submission.exam.title} • ${submission.violation_count > 0 ? `⚠️ ${submission.violation_count} Pelanggaran` : ''}`}
-                    backHref={`/dashboard/admin/uts-uas/${examId}`}
+                    backHref={`${basePath}/${examId}`}
                     action={
                         <div className="text-right">
                             <span className="text-2xl md:text-3xl font-bold text-primary">
@@ -255,7 +259,7 @@ export default function AdminUtsUasGradingPage() {
             {/* Save Action Sticky Footer */}
             <div className="fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-surface-dark/95 backdrop-blur border-t border-secondary/10 dark:border-white/5 p-4 z-20">
                 <div className="max-w-4xl mx-auto flex items-center justify-end gap-4">
-                    <Link href={`/dashboard/admin/uts-uas/${examId}`}>
+                    <Link href={`${basePath}/${examId}`}>
                         <Button variant="secondary">Batal</Button>
                     </Link>
                     <Button

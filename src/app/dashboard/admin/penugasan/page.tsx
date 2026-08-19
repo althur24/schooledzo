@@ -65,6 +65,53 @@ export default function PenugasanPage() {
     // Track the "saved" state per class (what the DB actually has)
     const [savedWaliMap, setSavedWaliMap] = useState<Record<string, string>>({})
 
+    // === Buat Ulangan untuk Guru (admin) ===
+    const [showCreateExam, setShowCreateExam] = useState(false)
+    const [allTAs, setAllTAs] = useState<any[]>([])
+    const [examForm, setExamForm] = useState({ teacherId: '', subjectId: '', teaching_assignment_id: '', title: '', start_time: '', duration_minutes: 60 })
+    const [creatingExam, setCreatingExam] = useState(false)
+
+    const openCreateExam = async () => {
+        setShowCreateExam(true)
+        if (allTAs.length === 0) {
+            try {
+                const res = await fetch(`/api/teaching-assignments?academic_year_id=${selectedYearId}`)
+                const data = await res.json()
+                const rows = Array.isArray(data) ? data : []
+                setAllTAs(rows.filter((t: any) => !selectedYearId || t.academic_year_id === selectedYearId))
+            } catch (e) {
+                console.error('Error fetching TAs:', e)
+            }
+        }
+    }
+
+    const handleCreateExamForTeacher = async () => {
+        if (!examForm.teaching_assignment_id || !examForm.title || !examForm.start_time) return
+        setCreatingExam(true)
+        try {
+            const res = await fetch('/api/exams', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: examForm.title,
+                    start_time: new Date(examForm.start_time).toISOString(),
+                    duration_minutes: examForm.duration_minutes,
+                    teaching_assignment_id: examForm.teaching_assignment_id
+                })
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+                alert(data.error || 'Gagal membuat ulangan. Coba lagi.')
+                return
+            }
+            alert('Ulangan berhasil dibuat sebagai DRAFT dan langsung muncul di daftar ulangan guru terkait (berlabel "Dibuatkan Admin"). Guru dapat melengkapi soal dan mempublikasikannya; Anda juga dapat mempublikasikannya dari halaman ulangan guru tersebut.')
+            setShowCreateExam(false)
+            setExamForm({ teacherId: '', subjectId: '', teaching_assignment_id: '', title: '', start_time: '', duration_minutes: 60 })
+        } finally {
+            setCreatingExam(false)
+        }
+    }
+
     const fetchData = async () => {
         try {
             setLoading(true)
@@ -408,9 +455,14 @@ export default function PenugasanPage() {
                 icon={<div className="text-teal-500"><BookOpen set="bold" primaryColor="currentColor" size={24} /></div>}
                 action={
                     activeTab === 'mengajar' ? (
-                        <Button onClick={() => openAddNew()} icon={<UserPlus set="bold" primaryColor="currentColor" size={16} />}>
-                            Tambah Penugasan
-                        </Button>
+                        <div className="flex gap-2">
+                            <Button variant="secondary" onClick={openCreateExam}>
+                                Buat Ulangan untuk Guru
+                            </Button>
+                            <Button onClick={() => openAddNew()} icon={<UserPlus set="bold" primaryColor="currentColor" size={16} />}>
+                                Tambah Penugasan
+                            </Button>
+                        </div>
                     ) : undefined
                 }
             />
@@ -942,6 +994,99 @@ export default function PenugasanPage() {
                     </Card>
                 </>
             )}
+
+            {/* Modal: Buat Ulangan untuk Guru (admin) — draft muncul di daftar guru terkait */}
+            <Modal open={showCreateExam} onClose={() => setShowCreateExam(false)} title="Buat Ulangan untuk Guru">
+                <div className="space-y-4">
+                    <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl text-xs text-blue-700 dark:text-blue-300">
+                        Ulangan dibuat sebagai <strong>DRAFT</strong> dan langsung muncul di daftar ulangan guru terkait (berlabel "Dibuatkan Admin"). Guru dapat melengkapi soal dan mempublikasikannya — Anda juga dapat mempublikasikannya kembali.
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Guru</label>
+                        <select
+                            value={examForm.teacherId}
+                            onChange={(e) => setExamForm({ ...examForm, teacherId: e.target.value, subjectId: '', teaching_assignment_id: '' })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white"
+                        >
+                            <option value="">Pilih guru…</option>
+                            {[...new Map(allTAs.map((t: any) => [t.teacher_id, t.teacher])).values()].map((t: any) => (
+                                <option key={t?.id} value={t?.id}>{t?.user?.full_name || t?.full_name || 'Guru'}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Mata Pelajaran</label>
+                        <select
+                            value={examForm.subjectId}
+                            onChange={(e) => setExamForm({ ...examForm, subjectId: e.target.value, teaching_assignment_id: '' })}
+                            disabled={!examForm.teacherId}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white disabled:opacity-50"
+                        >
+                            <option value="">Pilih mapel…</option>
+                            {[...new Map(allTAs.filter((t: any) => t.teacher_id === examForm.teacherId).map((t: any) => [t.subject_id, t.subject])).values()].map((s: any) => (
+                                <option key={s?.id} value={s?.id}>{s?.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas</label>
+                        <select
+                            value={examForm.teaching_assignment_id}
+                            onChange={(e) => setExamForm({ ...examForm, teaching_assignment_id: e.target.value })}
+                            disabled={!examForm.subjectId}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white disabled:opacity-50"
+                        >
+                            <option value="">Pilih kelas…</option>
+                            {allTAs.filter((t: any) => t.teacher_id === examForm.teacherId && t.subject_id === examForm.subjectId).map((t: any) => (
+                                <option key={t.id} value={t.id}>{t.class?.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ulangan</label>
+                        <input
+                            type="text"
+                            value={examForm.title}
+                            onChange={(e) => setExamForm({ ...examForm, title: e.target.value })}
+                            placeholder="Contoh: Ulangan Harian Bab 2"
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
+                            <input
+                                type="datetime-local"
+                                value={examForm.start_time}
+                                onChange={(e) => setExamForm({ ...examForm, start_time: e.target.value })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
+                            <input
+                                type="number"
+                                value={examForm.duration_minutes}
+                                onChange={(e) => setExamForm({ ...examForm, duration_minutes: parseInt(e.target.value) || 60 })}
+                                min={5}
+                                max={300}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        </div>
+                    </div>
+                    <div className="flex gap-3 pt-4 border-t border-secondary/10">
+                        <Button variant="secondary" onClick={() => setShowCreateExam(false)} className="flex-1">Batal</Button>
+                        <Button
+                            onClick={handleCreateExamForTeacher}
+                            loading={creatingExam}
+                            disabled={creatingExam || !examForm.teaching_assignment_id || !examForm.title || !examForm.start_time}
+                            className="flex-1"
+                        >
+                            Buat Draft Ulangan
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
         </div>
     )
 }
