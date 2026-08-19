@@ -157,6 +157,12 @@ export default function KerjakanKuisPage() {
                     return
                 }
             }
+            // 400 "Kuis sudah dikumpulkan": submission sudah tertutup rapi (mis. submit
+            // mendahului save yang tertunda) — bukan kegagalan, jangan tampilkan error
+            if (res.status === 400) {
+                setSaveStatus('idle')
+                return
+            }
             setSaveStatus(res.ok ? 'saved' : 'error')
         } catch {
             setSaveStatus('error') // jawaban lokal aman; perubahan berikutnya / reconnect akan mengirim ulang
@@ -467,6 +473,10 @@ export default function KerjakanKuisPage() {
         setShowSubmitConfirm(false)
         setShowOfflineTimeoutModal(false)
         if (timerRef.current) clearInterval(timerRef.current)
+        // Batalkan autosave terjadwal — submit ini membawa semua jawaban;
+        // tanpa ini save yang tertunda menembak submission yang sudah tertutup (400)
+        // dan indikator "Gagal menyimpan" muncul di kuis yang sebenarnya sudah terkumpul
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
 
         try {
             // Format answers for API
