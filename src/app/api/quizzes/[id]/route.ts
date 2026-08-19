@@ -39,6 +39,31 @@ export async function GET(
             data.questions.sort((a: any, b: any) => a.order_index - b.order_index)
         }
 
+        // C1 Security Fix (parity dgn route /questions): strip kunci jawaban untuk siswa
+        // yang belum mengumpulkan — halaman pengerjaan kuis memuat soal dari endpoint ini.
+        if (user.role === 'SISWA' && data.questions) {
+            const { data: student } = await supabase
+                .from('students')
+                .select('id')
+                .eq('user_id', user.id)
+                .single()
+
+            let hasSubmitted = false
+            if (student) {
+                const { data: submission } = await supabase
+                    .from('quiz_submissions')
+                    .select('submitted_at')
+                    .eq('quiz_id', id)
+                    .eq('student_id', student.id)
+                    .single()
+                hasSubmitted = !!submission?.submitted_at
+            }
+
+            if (!hasSubmitted) {
+                data.questions = data.questions.map(({ correct_answer, ...rest }: any) => rest)
+            }
+        }
+
         return NextResponse.json(data)
     } catch (error) {
         console.error('Error fetching quiz:', error)

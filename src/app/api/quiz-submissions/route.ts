@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { gradeAnswer, isAutoGradeable, needsManualGrading } from '@/lib/questionTypeUtils'
+import { resolveQuizExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/examExpiry'
+import { forceCloseQuizSubmission } from '@/lib/autoCloseExpired'
 
 // Helper function for sending notifications
 async function sendQuizSubmissionNotification(quizId: string, userFullName: string) {
@@ -75,79 +77,32 @@ export async function GET(request: NextRequest) {
             try {
                 const { data: quizData } = await supabase
                     .from('quizzes')
-                    .select('duration_minutes, start_time') // Assuming start_time exists or handled by creation date? 
-                    // Quiz usually doesn't have fixed start_time like Exam, 
-                    // but it has duration. Expiration is based on started_at + duration.
+                    .select('duration_minutes, deadline')
                     .eq('id', quizId)
                     .single()
 
                 if (quizData) {
-                    // Fetch questions for grading
-                    const { data: questions } = await supabase
-                        .from('quiz_questions')
-                        .select('*')
+                    const { data: inProgress } = await supabase
+                        .from('quiz_submissions')
+                        .select('id, started_at')
                         .eq('quiz_id', quizId)
+                        .is('submitted_at', null)
 
-                    if (questions) {
-                        const { data: inProgress } = await supabase
-                            .from('quiz_submissions')
-                            .select('id, started_at, answers')
-                            .eq('quiz_id', quizId)
-                            .is('submitted_at', null)
+                    // Satu sumber kebenaran: min(started_at + durasi, deadline) — src/lib/examExpiry.ts
+                    const withExpiry = (inProgress || []).map(sub => ({
+                        sub,
+                        expiry: resolveQuizExpiry(
+                            { deadline: quizData.deadline, duration_minutes: quizData.duration_minutes },
+                            { started_at: sub.started_at }
+                        )
+                    }))
+                    const expired = withExpiry.filter(x => isSweepDue(x.expiry))
 
-                        if (inProgress && inProgress.length > 0) {
-                            const now = Date.now()
-                            const durationMs = (quizData.duration_minutes || 0) * 60000
-                            const bufferMs = 2 * 60000 // 2 min buffer
-
-                            // Filter expired
-                            const expired = inProgress.filter(sub => {
-                                const start = new Date(sub.started_at).getTime()
-                                return now > (start + durationMs + bufferMs)
-                            })
-
-                            if (expired.length > 0) {
-                                console.log(`[Auto-Close] Found ${expired.length} expired quiz submissions for quiz ${quizId}`)
-
-                                await Promise.all(expired.map(async (sub) => {
-                                    // Grade answers
-                                    let totalScore = 0
-                                    const subAnswers = Array.isArray(sub.answers) ? sub.answers : []
-
-                                    const gradedAnswers = subAnswers.map((ans: any) => {
-                                        const q = questions.find(q => q.id === ans.question_id)
-                                        if (!q) return ans
-
-                                        if (isAutoGradeable(q.question_type)) {
-                                            const graded = gradeAnswer(
-                                                q.question_type,
-                                                ans.answer,
-                                                q.correct_answer,
-                                                q.options,
-                                                q.points || 1
-                                            )
-                                            totalScore += graded.pointsEarned
-                                            return { ...ans, is_correct: graded.isCorrect, score: graded.pointsEarned }
-                                        }
-                                        return ans
-                                    })
-
-                                    const examMaxScore = questions.reduce((acc, q) => acc + q.points, 0)
-                                    const hasManualGrading = questions.some(q => needsManualGrading(q.question_type))
-
-                                    await supabase
-                                        .from('quiz_submissions')
-                                        .update({
-                                            answers: gradedAnswers,
-                                            submitted_at: new Date().toISOString(),
-                                            total_score: totalScore,
-                                            max_score: examMaxScore,
-                                            is_graded: !hasManualGrading
-                                        })
-                                        .eq('id', sub.id)
-                                }))
-                            }
-                        }
+                    if (expired.length > 0) {
+                        console.log(`[Auto-Close] Found ${expired.length} expired quiz submissions for quiz ${quizId}`)
+                        await Promise.all(expired.map(x =>
+                            forceCloseQuizSubmission(x.sub.id, x.expiry.limited ? x.expiry.endAt : null)
+                        ))
                     }
                 }
             } catch (sweepError) {
@@ -162,6 +117,8 @@ export async function GET(request: NextRequest) {
                 quiz:quizzes!inner(
                     id,
                     title,
+                    duration_minutes,
+                    deadline,
                     teaching_assignment:teaching_assignments!inner(
                         academic_year_id,
                         subject:subjects(name)
@@ -281,7 +238,19 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        return NextResponse.json(finalData)
+        // Lampirkan ends_at (batas efektif, dihitung server) per submission —
+        // client countdown ke nilai ini; server_time dikirim via header untuk koreksi jam HP.
+        const serverTimeIso = new Date().toISOString()
+        finalData = finalData.map((s: any) => {
+            const qz = Array.isArray(s.quiz) ? s.quiz[0] : s.quiz
+            const expiry = resolveQuizExpiry(
+                { deadline: qz?.deadline ?? null, duration_minutes: qz?.duration_minutes ?? null },
+                { started_at: s.started_at }
+            )
+            return { ...s, ends_at: endsAtIso(expiry) }
+        })
+
+        return NextResponse.json(finalData, { headers: { 'x-server-time': serverTimeIso } })
     } catch (error) {
         console.error('Error fetching quiz submissions:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
@@ -299,7 +268,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { quiz_id, answers, started_at, submit } = await request.json()
+        const { quiz_id, answers, submit } = await request.json()
 
         if (!quiz_id) {
             return NextResponse.json({ error: 'Quiz ID diperlukan' }, { status: 400 })
@@ -319,24 +288,15 @@ export async function POST(request: NextRequest) {
         // Get quiz details for validation
         const { data: quiz } = await supabase
             .from('quizzes')
-            .select('deadline, is_remedial, allowed_student_ids')
+            .select('deadline, duration_minutes, is_remedial, allowed_student_ids')
             .eq('id', quiz_id)
             .single()
-            
+
         if (!quiz) {
             return NextResponse.json({ error: 'Quiz not found' }, { status: 404 })
         }
-        
-        // 1. Deadline check
-        if (quiz.deadline) {
-            const now = new Date()
-            const deadline = new Date(quiz.deadline)
-            if (now > deadline) {
-                return NextResponse.json({ error: 'Kuis sudah melewati deadline' }, { status: 400 })
-            }
-        }
-        
-        // 2. Remedial guard
+
+        // Remedial guard
         if (quiz.is_remedial && quiz.allowed_student_ids && quiz.allowed_student_ids.length > 0) {
             if (!quiz.allowed_student_ids.includes(student.id)) {
                 return NextResponse.json({ error: 'Anda tidak terdaftar untuk kuis remedial ini' }, { status: 403 })
@@ -356,10 +316,40 @@ export async function POST(request: NextRequest) {
         // Check if already submitted or exists
         const { data: existing } = await supabase
             .from('quiz_submissions')
-            .select('id, answers')
+            .select('id, answers, started_at, submitted_at')
             .eq('quiz_id', quiz_id)
             .eq('student_id', student.id)
             .single()
+
+        // Deadline hanya menggerbang sesi BARU. Attempt yang sudah berjalan ditangani
+        // enforcement di bawah — jawaban tersimpan tidak boleh hilang hanya karena
+        // deadline lewat di tengah jalan (siswa punya grace 60 dtk untuk flush terakhir).
+        if (!existing && quiz.deadline && new Date() > new Date(quiz.deadline)) {
+            return NextResponse.json({ error: 'Kuis sudah melewati deadline' }, { status: 400 })
+        }
+
+        // Attempt yang sudah dikumpulkan tidak boleh ditimpa ulang (selaras ulangan/UTS-UAS)
+        if (existing?.submitted_at) {
+            return NextResponse.json({ error: 'Kuis sudah dikumpulkan' }, { status: 400 })
+        }
+
+        // Penegakan batas waktu di server untuk attempt berjalan:
+        // endAt = min(started_at + durasi, deadline). Lewat endAt + grace → jawaban yang
+        // dikirim DIABAIKAN; submission ditutup paksa dengan jawaban yang sudah tersimpan.
+        if (existing) {
+            const expiry = resolveQuizExpiry(
+                { deadline: quiz.deadline, duration_minutes: quiz.duration_minutes },
+                { started_at: existing.started_at }
+            )
+            if (!isWriteAllowed(expiry)) {
+                await forceCloseQuizSubmission(existing.id, expiry.limited ? expiry.endAt : null)
+                return NextResponse.json({
+                    code: 'TIME_EXPIRED',
+                    force_submitted: true,
+                    message: 'Waktu pengerjaan sudah berakhir. Jawaban yang tersimpan di server otomatis dikumpulkan.'
+                }, { status: 409 })
+            }
+        }
 
         // Determine which answers to process
         // If submitting existing attempt with no new answers, use existing answers
@@ -411,6 +401,12 @@ export async function POST(request: NextRequest) {
         }
 
         if (existing) {
+            const contractExpiry = resolveQuizExpiry(
+                { deadline: quiz.deadline, duration_minutes: quiz.duration_minutes },
+                { started_at: existing.started_at }
+            )
+            const contract = { server_time: new Date().toISOString(), ends_at: endsAtIso(contractExpiry) }
+
             // If just saving progress (no submit flag), update answers only
             if (!submit) {
                 const updateData: any = {}
@@ -423,7 +419,7 @@ export async function POST(request: NextRequest) {
                         .update(updateData)
                         .eq('id', existing.id)
                 }
-                return NextResponse.json({ id: existing.id, saved: true })
+                return NextResponse.json({ id: existing.id, saved: true, ...contract })
             }
 
             // Final submission — set submitted_at
@@ -446,14 +442,14 @@ export async function POST(request: NextRequest) {
             await sendQuizSubmissionNotification(quiz_id, user.full_name || 'Siswa')
             if (allGraded) await sendQuizResultNotification(quiz_id, user.id, totalScore, maxScore)
 
-            return NextResponse.json(data)
+            return NextResponse.json({ ...data, ...contract })
         }
 
-        // Create new submission
+        // Create new submission — started_at otoritatif server (jangan percaya jam HP siswa)
         const insertData: any = {
             quiz_id,
             student_id: student.id,
-            started_at: started_at || new Date().toISOString(),
+            started_at: new Date().toISOString(),
             answers: gradedAnswers,
         }
 
@@ -479,7 +475,11 @@ export async function POST(request: NextRequest) {
             if (allGraded) await sendQuizResultNotification(quiz_id, user.id, totalScore, maxScore)
         }
 
-        return NextResponse.json(data)
+        const insertExpiry = resolveQuizExpiry(
+            { deadline: quiz.deadline, duration_minutes: quiz.duration_minutes },
+            { started_at: data.started_at }
+        )
+        return NextResponse.json({ ...data, server_time: new Date().toISOString(), ends_at: endsAtIso(insertExpiry) })
     } catch (error) {
         console.error('Error submitting quiz:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

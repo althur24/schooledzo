@@ -137,8 +137,8 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
     // Reset attempt handler
     const handleResetAttempt = async (submissionId: string, studentName: string, mode: 'soft' | 'hard') => {
         const confirmMsg = mode === 'soft'
-            ? `Soft Reset: Izinkan "${studentName}" melanjutkan ujian?\n\nTimer tetap berjalan dan pelanggaran di-reset. Jawaban yang sudah tersimpan tetap ada.`
-            : `Hard Reset: Mulai ulang ujian untuk "${studentName}"?\n\nSiswa akan mendapat durasi penuh baru, TETAPI SEMUA JAWABAN AKAN DIHAPUS.`;
+            ? `Soft Reset: Izinkan "${studentName}" melanjutkan ujian?\n\nTimer melanjutkan sisa waktu jendela ujian (semua siswa selesai serentak) dan pelanggaran di-reset. Jawaban yang sudah tersimpan tetap ada. Hanya bisa selama jendela masih terbuka.`
+            : `Hard Reset: Mulai ulang ujian untuk "${studentName}"?\n\nSiswa akan mendapat durasi penuh baru terhitung sejak saat reset (terlepas dari jadwal berakhir ujian), TETAPI SEMUA JAWABAN AKAN DIHAPUS.`;
         if (!confirm(confirmMsg)) { setResetMenuId(null); return }
         setResettingId(submissionId)
         setResetMenuId(null)

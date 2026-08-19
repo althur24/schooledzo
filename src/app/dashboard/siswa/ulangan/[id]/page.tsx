@@ -70,6 +70,16 @@ export default function TakeExamPage() {
     const hasStarted = useRef(false)
     const timerRef = useRef<NodeJS.Timeout | null>(null)
     const answersRef = useRef(answers)
+    // Patokan waktu dari server: ends_at (batas efektif, sudah termasuk override hard reset)
+    // + offset jam HP vs server. Semua hitungan sisa waktu memakai keduanya — kebal jam HP ngaco.
+    const endsAtRef = useRef<number | null>(null)
+    const offsetMsRef = useRef(0)
+
+    // Sisa waktu (detik) dihitung ulang dari patokan server — kebal throttle background tab / HP sleep
+    const computeRemaining = () => {
+        if (endsAtRef.current === null) return 0
+        return Math.max(0, Math.ceil((endsAtRef.current - (Date.now() + offsetMsRef.current)) / 1000))
+    }
 
     useEffect(() => {
         answersRef.current = answers
@@ -166,17 +176,10 @@ export default function TakeExamPage() {
                     question_id, answer
                 }))
 
-                // Check if exam time is expired
-                const currentExam = examRef.current
-                const currentSub = submissionRef.current
-                let isTimeUp = false
-                if (currentExam && currentSub) {
-                    const durationMs = currentExam.duration_minutes * 60 * 1000
-                    const elapsed = Date.now() - new Date(currentSub.started_at).getTime()
-                    isTimeUp = durationMs > 0 && elapsed >= durationMs
-                }
+                // Kedaluwarsa dinilai dari patokan server (ends_at + offset), bukan jam HP mentah
+                const isTimeUp = endsAtRef.current !== null && (Date.now() + offsetMsRef.current) >= endsAtRef.current
 
-                await fetch('/api/exam-submissions', {
+                const res = await fetch('/api/exam-submissions', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -186,8 +189,9 @@ export default function TakeExamPage() {
                     })
                 })
 
-                if (isTimeUp) {
-                    clearLocalAnswers()
+                // 409 TIME_EXPIRED: server sudah menutup submission dengan jawaban yang tersimpan — aman dibersihkan
+                if (isTimeUp || res.status === 409) {
+                    if (res.ok || res.status === 409) clearLocalAnswers()
                     router.replace(`/dashboard/siswa/ulangan/${examId}/hasil`)
                 }
             } catch (error) {
@@ -225,6 +229,12 @@ export default function TakeExamPage() {
                 router.push('/dashboard/siswa/ulangan')
                 return
             }
+
+            // Patokan waktu server: koreksi jam HP + batas efektif (jendela global / override hard reset)
+            if (subData.server_time) {
+                offsetMsRef.current = new Date(subData.server_time).getTime() - Date.now()
+            }
+            endsAtRef.current = subData.ends_at ? new Date(subData.ends_at).getTime() : null
 
             setSubmission(subData)
             setViolationCount(subData.violation_count || 0)
@@ -267,21 +277,19 @@ export default function TakeExamPage() {
                 initialAnswers = localAnswers
             }
 
-            // Check for Resume
-            const startedAt = new Date(subData.started_at).getTime()
-            const durationMs = examData.duration_minutes * 60000
-            const elapsed = Date.now() - startedAt
-            const remaining = Math.max(0, Math.floor((durationMs - elapsed) / 1000))
+            // Check for Resume — sisa waktu dari patokan server (ends_at + offset), bukan jam HP
+            const elapsed = Date.now() - new Date(subData.started_at).getTime()
+            const remaining = computeRemaining()
 
-            if (remaining <= 0) {
-                // Auto-submit if time expired
+            if (endsAtRef.current !== null && remaining <= 0) {
+                // Auto-submit if time expired — server tetap yang menilai batas; ini hanya pemicu
                 try {
                     const formattedAnswers = Object.entries(initialAnswers).map(([qId, val]) => ({
                         question_id: qId,
                         answer: val as string
                     }))
 
-                    await fetch('/api/exam-submissions', {
+                    const res = await fetch('/api/exam-submissions', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -291,8 +299,11 @@ export default function TakeExamPage() {
                         })
                     })
 
-                    if (typeof window !== 'undefined') {
-                        localStorage.removeItem(`exam_${examId}_answers`)
+                    // 409 TIME_EXPIRED: server sudah menutup dengan jawaban tersimpan — aman dibersihkan
+                    if (res.ok || res.status === 409) {
+                        if (typeof window !== 'undefined') {
+                            localStorage.removeItem(`exam_${examId}_answers`)
+                        }
                     }
                     router.replace('/dashboard/siswa/ulangan')
                 } catch (e) {
@@ -335,23 +346,22 @@ export default function TakeExamPage() {
         }
     }, [startExam])
 
-    // Timer countdown - reacts to timeLeft and submission changes
+    // Timer countdown — dihitung ulang dari patokan server setiap detik (bukan kurang-1),
+    // sehingga kebal throttle background tab / HP sleep dan jam HP yang ngaco
     useEffect(() => {
         if (timeLeft <= 0 || !submission) return
 
         timerRef.current = setInterval(() => {
-            setTimeLeft(prev => {
-                if (prev <= 1) {
-                    if (timerRef.current) clearInterval(timerRef.current)
-                    if (navigator.onLine) {
-                        handleSubmit(true)
-                    } else {
-                        setShowOfflineTimeoutModal(true)
-                    }
-                    return 0
+            const remaining = computeRemaining()
+            setTimeLeft(remaining)
+            if (remaining <= 0) {
+                if (timerRef.current) clearInterval(timerRef.current)
+                if (navigator.onLine) {
+                    handleSubmit(true)
+                } else {
+                    setShowOfflineTimeoutModal(true)
                 }
-                return prev - 1
-            })
+            }
         }, 1000)
 
         return () => {
@@ -595,6 +605,17 @@ export default function TakeExamPage() {
                     answers: [{ question_id: questionId, answer }]
                 })
             })
+            // Waktu habis terdeteksi di server saat autosave — tutup sesi ini dengan rapi
+            if (res.status === 409) {
+                const data = await res.json().catch(() => null)
+                if (data?.code === 'TIME_EXPIRED') {
+                    if (timerRef.current) clearInterval(timerRef.current)
+                    clearLocalAnswers()
+                    alert('Waktu pengerjaan sudah berakhir. Jawaban yang tersimpan otomatis dikumpulkan.')
+                    router.replace(`/dashboard/siswa/ulangan/${examId}/hasil`)
+                    return
+                }
+            }
             setLastLatencyMs(performance.now() - t0)
             setSaveStatus(res.ok ? 'saved' : 'error')
         } catch (error) {
@@ -615,7 +636,7 @@ export default function TakeExamPage() {
                 question_id, answer
             }))
 
-            await fetch('/api/exam-submissions', {
+            const res = await fetch('/api/exam-submissions', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -624,6 +645,13 @@ export default function TakeExamPage() {
                     submit: true
                 })
             })
+
+            // 400 "Already submitted" / 409 TIME_EXPIRED: submission sudah tertutup rapi di server
+            // (409 = ditutup paksa dengan jawaban yang tersimpan) — keduanya aman untuk lanjut
+            if (!res.ok && res.status !== 400 && res.status !== 409) {
+                const errData = await res.json().catch(() => null)
+                throw new Error(errData?.error || 'Gagal mengumpulkan ulangan')
+            }
 
             // Clear localStorage after successful submit
             clearLocalAnswers()

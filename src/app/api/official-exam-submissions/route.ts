@@ -4,6 +4,8 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { gradeAnswer, needsManualGrading } from '@/lib/questionTypeUtils'
 import { logError } from '@/lib/logError'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
+import { resolveWindowExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/examExpiry'
+import { forceCloseOfficialSubmission } from '@/lib/autoCloseExpired'
 
 // GET official exam submissions
 export async function GET(request: NextRequest) {
@@ -20,10 +22,10 @@ export async function GET(request: NextRequest) {
             .from('official_exam_submissions')
             .select(`
                 id, exam_id, student_id, started_at, submitted_at, is_submitted,
-                total_score, max_score, violation_count, violations_log, is_graded, created_at,
+                total_score, max_score, violation_count, violations_log, is_graded, created_at, timer_override_until,
                 student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name), class:classes(id, school_level, grade_level)),
                 exam:official_exams(
-                    id, title, exam_type, duration_minutes, is_active, subject_id, school_id,
+                    id, title, exam_type, duration_minutes, start_time, is_active, subject_id, school_id,
                     academic_year_id, target_class_ids,
                     show_results_immediately, results_released,
                     subject:subjects(id, name, kkm)
@@ -128,53 +130,36 @@ export async function GET(request: NextRequest) {
         // Server-side auto-submit: detect and submit expired but unsubmitted entries
         // This catches submissions where the student's browser closed before auto-submit could fire.
         // SISWA disertakan: entri mereka sendiri sudah terfilter di atas, jadi aman & self-scoped.
+        // Rumus kedaluwarsa dari satu sumber: src/lib/examExpiry.ts (jendela global + override hard reset)
         if (['GURU', 'ADMIN', 'SISWA'].includes(user.role)) {
-            const now = Date.now()
             const expiredSubs = result.filter((sub: any) => {
                 if (sub.is_submitted) return false
                 const examObj = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
-                if (!examObj?.duration_minutes || !sub.started_at) return false
-                const startedAt = new Date(sub.started_at).getTime()
-                const endTime = startedAt + examObj.duration_minutes * 60 * 1000
-                return now > endTime
+                const expiry = resolveWindowExpiry(
+                    { start_time: examObj?.start_time ?? null, duration_minutes: examObj?.duration_minutes ?? null },
+                    { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
+                )
+                return isSweepDue(expiry)
             })
 
             if (expiredSubs.length > 0) {
                 for (const sub of expiredSubs) {
                     const examObj = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
-                    const durationMs = examObj.duration_minutes * 60 * 1000
-                    const startedAt = new Date(sub.started_at).getTime()
-                    const expectedSubmittedAt = new Date(startedAt + durationMs).toISOString()
+                    const expiry = resolveWindowExpiry(
+                        { start_time: examObj?.start_time ?? null, duration_minutes: examObj?.duration_minutes ?? null },
+                        { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
+                    )
+                    const expectedSubmittedAt = endsAtIso(expiry) || new Date().toISOString()
 
-                    // Calculate score from existing answers
-                    const { data: existingAnswers } = await supabase
-                        .from('official_exam_answers')
-                        .select('points_earned')
-                        .eq('submission_id', sub.id)
-                    const totalScore = existingAnswers?.reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) || 0
-
-                    // Check if exam has essays
-                    const { data: examQuestions } = await supabase
-                        .from('official_exam_questions')
-                        .select('question_type')
-                        .eq('exam_id', sub.exam_id)
-                    const hasEssays = examQuestions?.some((q: any) => needsManualGrading(q.question_type)) || false
-
-                    await supabase
-                        .from('official_exam_submissions')
-                        .update({
-                            is_submitted: true,
-                            submitted_at: expectedSubmittedAt,
-                            total_score: totalScore,
-                            is_graded: !hasEssays
-                        })
-                        .eq('id', sub.id)
+                    const closed = await forceCloseOfficialSubmission(sub.id, sub.exam_id, expiry.limited ? expiry.endAt : null)
 
                     // Update local data so the response reflects the change
                     sub.is_submitted = true
                     sub.submitted_at = expectedSubmittedAt
-                    sub.total_score = totalScore
-                    sub.is_graded = !hasEssays
+                    if (closed) {
+                        sub.total_score = closed.totalScore
+                        sub.is_graded = closed.isGraded
+                    }
                 }
             }
         }
@@ -303,7 +288,7 @@ export async function POST(request: NextRequest) {
         // (mis. auto-deaktivasi saat window lewat, atau reload di tengah ujian)
         const { data: existingSubmission } = await supabase
             .from('official_exam_submissions')
-            .select('id, is_submitted, question_order, started_at, violation_count, max_score')
+            .select('id, is_submitted, question_order, started_at, violation_count, max_score, timer_override_until')
             .eq('exam_id', exam_id)
             .eq('student_id', student.id)
             .single()
@@ -313,7 +298,15 @@ export async function POST(request: NextRequest) {
         }
 
         if (existingSubmission) {
-            return NextResponse.json(existingSubmission)
+            const expiry = resolveWindowExpiry(
+                { start_time: exam.start_time, duration_minutes: exam.duration_minutes },
+                { started_at: existingSubmission.started_at, timer_override_until: existingSubmission.timer_override_until }
+            )
+            return NextResponse.json({
+                ...existingSubmission,
+                server_time: new Date().toISOString(),
+                ends_at: endsAtIso(expiry)
+            })
         }
 
         // === Sesi baru: semua gate wajib lolos ===
@@ -396,7 +389,15 @@ export async function POST(request: NextRequest) {
 
         if (error) throw error
 
-        return NextResponse.json(submission)
+        const newExpiry = resolveWindowExpiry(
+            { start_time: exam.start_time, duration_minutes: exam.duration_minutes },
+            { started_at: submission.started_at, timer_override_until: submission.timer_override_until }
+        )
+        return NextResponse.json({
+            ...submission,
+            server_time: new Date().toISOString(),
+            ends_at: endsAtIso(newExpiry)
+        })
     } catch (error) {
         console.error('Error starting official exam:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
@@ -420,7 +421,7 @@ export async function PUT(request: NextRequest) {
         // Get current submission
         const { data: currentSubmission } = await supabase
             .from('official_exam_submissions')
-            .select('*, exam:official_exams(max_violations, show_results_immediately, results_released)')
+            .select('*, exam:official_exams(max_violations, show_results_immediately, results_released, duration_minutes, start_time)')
             .eq('id', submission_id)
             .single()
 
@@ -438,6 +439,20 @@ export async function PUT(request: NextRequest) {
                 return NextResponse.json({ error: 'Submission belum di-submit, tidak perlu di-reset' }, { status: 400 })
             }
 
+            // Semantik jendela global: batas default = start_time + durasi (serentak).
+            // Hard Reset = pengecualian sengaja oleh admin: durasi penuh baru via timer_override_until.
+            const examCfg: any = Array.isArray(currentSubmission.exam) ? currentSubmission.exam[0] : currentSubmission.exam || {}
+            const durationMs = (examCfg.duration_minutes || 0) * 60000
+            const windowEndMs = examCfg.start_time && durationMs > 0
+                ? new Date(examCfg.start_time).getTime() + durationMs
+                : null
+
+            if (reset_attempt === 'soft' && windowEndMs !== null && Date.now() > windowEndMs) {
+                return NextResponse.json({
+                    error: 'Jendela waktu pengerjaan sudah berakhir — soft reset tidak menambah waktu. Gunakan Hard Reset untuk memberi attempt baru dengan durasi penuh.'
+                }, { status: 400 })
+            }
+
             if (reset_attempt === 'hard') {
                 // Delete existing answers for Hard Reset
                 const { error: deleteAnswersError } = await supabase
@@ -448,18 +463,23 @@ export async function PUT(request: NextRequest) {
                 if (deleteAnswersError) throw deleteAnswersError
             }
 
+            const now = new Date()
             const updateData: any = {
                 is_submitted: false,
                 submitted_at: null,
                 violation_count: 0,
                 violations_log: [],
                 total_score: 0,
-                is_graded: false
+                is_graded: false,
+                // Soft: kembali murni ikut jendela global. Hard: override = now + durasi (durasi penuh baru).
+                timer_override_until: reset_attempt === 'hard' && durationMs > 0
+                    ? new Date(now.getTime() + durationMs).toISOString()
+                    : null
             }
 
             // Hard reset: fresh timer
             if (reset_attempt === 'hard') {
-                updateData.started_at = new Date().toISOString()
+                updateData.started_at = now.toISOString()
             }
 
             const { data: resetSubmission, error: resetError } = await supabase
@@ -471,11 +491,17 @@ export async function PUT(request: NextRequest) {
 
             if (resetError) throw resetError
 
+            const expiryAfter = resolveWindowExpiry(
+                { start_time: examCfg.start_time ?? null, duration_minutes: examCfg.duration_minutes ?? null },
+                { started_at: resetSubmission.started_at, timer_override_until: resetSubmission.timer_override_until }
+            )
+
             return NextResponse.json({
                 reset_success: true,
-                message: reset_attempt === 'hard' 
-                    ? 'Hard reset berhasil. Jawaban dihapus dan timer di-reset.' 
-                    : 'Soft reset berhasil. Siswa dapat melanjutkan dengan sisa waktu.',
+                message: reset_attempt === 'hard'
+                    ? 'Hard reset berhasil. Jawaban dihapus dan siswa mendapat durasi penuh baru.'
+                    : 'Soft reset berhasil. Siswa dapat melanjutkan dengan sisa waktu jendela.',
+                effective_ends_at: endsAtIso(expiryAfter),
                 submission: resetSubmission
             })
         }
@@ -496,6 +522,23 @@ export async function PUT(request: NextRequest) {
 
         if (currentSubmission.is_submitted) {
             return NextResponse.json({ error: 'Already submitted' }, { status: 400 })
+        }
+
+        // Penegakan batas waktu di server: jendela global + override hard reset.
+        // Lewat batas + grace → jawaban yang dikirim DIABAIKAN; submission ditutup paksa
+        // dengan jawaban yang sudah tersimpan di server (anti "jam habis tapi masih bisa mengerjakan").
+        const writeExamCfg: any = Array.isArray(currentSubmission.exam) ? currentSubmission.exam[0] : currentSubmission.exam
+        const writeExpiry = resolveWindowExpiry(
+            { start_time: writeExamCfg?.start_time ?? null, duration_minutes: writeExamCfg?.duration_minutes ?? null },
+            { started_at: currentSubmission.started_at, timer_override_until: currentSubmission.timer_override_until }
+        )
+        if (!isWriteAllowed(writeExpiry)) {
+            await forceCloseOfficialSubmission(submission_id, currentSubmission.exam_id, writeExpiry.limited ? writeExpiry.endAt : null)
+            return NextResponse.json({
+                code: 'TIME_EXPIRED',
+                force_submitted: true,
+                message: 'Waktu pengerjaan sudah berakhir. Jawaban yang tersimpan di server otomatis dikumpulkan.'
+            }, { status: 409 })
         }
 
         // Handle violation logging

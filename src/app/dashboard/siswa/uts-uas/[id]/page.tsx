@@ -68,6 +68,16 @@ export default function TakeOfficialExamPage() {
     const hasStarted = useRef(false)
     const timerRef = useRef<NodeJS.Timeout | null>(null)
     const answersRef = useRef(answers)
+    // Patokan waktu dari server: ends_at (batas efektif, sudah termasuk override hard reset)
+    // + offset jam HP vs server. Semua hitungan sisa waktu memakai keduanya — kebal jam HP ngaco.
+    const endsAtRef = useRef<number | null>(null)
+    const offsetMsRef = useRef(0)
+
+    // Sisa waktu (detik) dihitung ulang dari patokan server — kebal throttle background tab / HP sleep
+    const computeRemaining = () => {
+        if (endsAtRef.current === null) return 0
+        return Math.max(0, Math.ceil((endsAtRef.current - (Date.now() + offsetMsRef.current)) / 1000))
+    }
 
     useEffect(() => { answersRef.current = answers }, [answers])
 
@@ -115,6 +125,12 @@ export default function TakeOfficialExamPage() {
                 return
             }
 
+            // Patokan waktu server: koreksi jam HP + batas efektif (jendela global / override hard reset)
+            if (subData.server_time) {
+                offsetMsRef.current = new Date(subData.server_time).getTime() - Date.now()
+            }
+            endsAtRef.current = subData.ends_at ? new Date(subData.ends_at).getTime() : null
+
             setSubmission(subData)
             setViolationCount(subData.violation_count || 0)
 
@@ -153,19 +169,19 @@ export default function TakeOfficialExamPage() {
                 initialAnswers = localAnswers
             }
 
-            // Calculate time — use exam's fixed end time so all students end together
-            const examEndTime = new Date(examData.start_time).getTime() + examData.duration_minutes * 60000
-            const remaining = Math.max(0, Math.floor((examEndTime - Date.now()) / 1000))
+            // Sisa waktu dari patokan server (ends_at: jendela global / override hard reset) — semua siswa selesai serentak
+            const remaining = computeRemaining()
 
-            if (remaining <= 0) {
-                // Auto-submit expired
+            if (endsAtRef.current !== null && remaining <= 0) {
+                // Auto-submit expired — server tetap yang menilai batas; ini hanya pemicu
                 const formattedAnswers = Object.entries(initialAnswers).map(([qId, val]) => ({ question_id: qId, answer: val }))
                 const res = await fetch('/api/official-exam-submissions', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ submission_id: subData.id, answers: formattedAnswers, submit: true })
                 })
-                if (!res.ok) {
+                // 409 TIME_EXPIRED: server sudah menutup dengan jawaban tersimpan — aman dibersihkan
+                if (!res.ok && res.status !== 409) {
                     // Submit gagal — jawaban lokal jangan dihapus; siswa bisa buka ulang untuk coba lagi
                     alert('Gagal mengumpulkan jawaban otomatis. Jawaban Anda tersimpan di perangkat; buka kembali ujian untuk mencoba lagi.')
                 } else {
@@ -203,13 +219,8 @@ export default function TakeOfficialExamPage() {
                 try {
                     const answersArray = Object.entries(localAnswers).map(([question_id, answer]) => ({ question_id, answer }))
 
-                    // Check if exam time is expired
-                    const currentExam = examRef.current
-                    let isTimeUp = false
-                    if (currentExam) {
-                        const examEndTime = new Date(currentExam.start_time).getTime() + currentExam.duration_minutes * 60 * 1000
-                        isTimeUp = Date.now() >= examEndTime
-                    }
+                    // Kedaluwarsa dinilai dari patokan server (ends_at + offset), bukan jam HP mentah
+                    const isTimeUp = endsAtRef.current !== null && (Date.now() + offsetMsRef.current) >= endsAtRef.current
 
                     const res = await fetch('/api/official-exam-submissions', {
                         method: 'PUT',
@@ -221,8 +232,9 @@ export default function TakeOfficialExamPage() {
                         })
                     })
 
-                    if (isTimeUp) {
-                        if (!res.ok) return // submit gagal — jawaban lokal jangan dihapus
+                    // 409 TIME_EXPIRED: server sudah menutup dengan jawaban tersimpan — aman dibersihkan
+                    if (isTimeUp || res.status === 409) {
+                        if (!res.ok && res.status !== 409) return // submit gagal — jawaban lokal jangan dihapus
                         clearLocal()
                         router.replace('/dashboard/siswa/ulangan')
                     }
@@ -238,18 +250,17 @@ export default function TakeOfficialExamPage() {
         return () => { if (timerRef.current) clearInterval(timerRef.current) }
     }, [startExam])
 
-    // Timer
+    // Timer — dihitung ulang dari patokan server setiap detik (bukan kurang-1),
+    // sehingga kebal throttle background tab / HP sleep dan jam HP yang ngaco
     useEffect(() => {
         if (timeLeft <= 0 || !submission) return
         timerRef.current = setInterval(() => {
-            setTimeLeft(prev => {
-                if (prev <= 1) {
-                    if (timerRef.current) clearInterval(timerRef.current)
-                    handleSubmit(true)
-                    return 0
-                }
-                return prev - 1
-            })
+            const remaining = computeRemaining()
+            setTimeLeft(remaining)
+            if (remaining <= 0) {
+                if (timerRef.current) clearInterval(timerRef.current)
+                handleSubmit(true)
+            }
         }, 1000)
         return () => { if (timerRef.current) clearInterval(timerRef.current) }
     }, [submission, timeLeft > 0])
@@ -442,6 +453,17 @@ export default function TakeOfficialExamPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ submission_id: submission.id, answers: [{ question_id: questionId, answer }] })
             })
+            // Waktu habis terdeteksi di server saat autosave — tutup sesi ini dengan rapi
+            if (res.status === 409) {
+                const data = await res.json().catch(() => null)
+                if (data?.code === 'TIME_EXPIRED') {
+                    if (timerRef.current) clearInterval(timerRef.current)
+                    clearLocal()
+                    setAlertMessage('Waktu pengerjaan sudah berakhir. Jawaban yang tersimpan otomatis dikumpulkan.')
+                    setTimeout(() => router.replace('/dashboard/siswa/ulangan'), 2000)
+                    return
+                }
+            }
             setLastLatencyMs(performance.now() - t0)
             setSaveStatus(res.ok ? 'saved' : 'error')
         } catch (error) {
@@ -460,7 +482,9 @@ export default function TakeOfficialExamPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ submission_id: submission.id, answers: answersArray, submit: true })
             })
-            if (!res.ok) {
+            // 400 "Already submitted" / 409 TIME_EXPIRED: submission sudah tertutup rapi di server
+            // (409 = ditutup paksa dengan jawaban yang tersimpan) — keduanya aman untuk lanjut
+            if (!res.ok && res.status !== 400 && res.status !== 409) {
                 const errData = await res.json().catch(() => ({}))
                 alert(errData?.error || 'Gagal mengumpulkan ujian. Jawaban Anda masih tersimpan — coba lagi.')
                 return // JANGAN clearLocal: jawaban siswa tetap tersimpan di perangkat

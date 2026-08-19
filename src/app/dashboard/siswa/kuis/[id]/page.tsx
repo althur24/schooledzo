@@ -78,6 +78,17 @@ export default function KerjakanKuisPage() {
     useEffect(() => { quizRef.current = quiz }, [quiz])
     useEffect(() => { startTimeRef.current = startTime }, [startTime])
 
+    // Patokan waktu dari server: ends_at (batas efektif = min(started_at + durasi, deadline))
+    // + offset jam HP vs server. Semua hitungan sisa waktu memakai keduanya — kebal jam HP ngaco.
+    const endsAtRef = useRef<number | null>(null)
+    const offsetMsRef = useRef(0)
+
+    // Sisa waktu (milidetik — konvensi halaman ini) dihitung ulang dari patokan server tiap tick
+    const computeRemainingMs = () => {
+        if (endsAtRef.current === null) return 0
+        return Math.max(0, endsAtRef.current - (Date.now() + offsetMsRef.current))
+    }
+
     // Status online/offline kini dari hook useOnlineStatus (blok listener di sini dihapus).
 
     // LocalStorage helpers
@@ -131,7 +142,6 @@ export default function KerjakanKuisPage() {
     const syncLocalToServer = async () => {
         const localAnswers = loadAnswersFromLocal()
         const currentStartTime = startTimeRef.current
-        const currentQuiz = quizRef.current
         if (Object.keys(localAnswers).length === 0 || !currentStartTime) return
 
         try {
@@ -140,12 +150,10 @@ export default function KerjakanKuisPage() {
                 answer: val
             }))
 
-            // Check if time is already up
-            const durationMs = currentQuiz ? currentQuiz.duration_minutes * 60 * 1000 : 0
-            const elapsed = Date.now() - new Date(currentStartTime).getTime()
-            const isTimeUp = durationMs > 0 && elapsed >= durationMs
+            // Kedaluwarsa dinilai dari patokan server (ends_at + offset), bukan jam HP mentah
+            const isTimeUp = endsAtRef.current !== null && (Date.now() + offsetMsRef.current) >= endsAtRef.current
 
-            await fetch('/api/quiz-submissions', {
+            const res = await fetch('/api/quiz-submissions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -156,8 +164,9 @@ export default function KerjakanKuisPage() {
                 })
             })
 
-            if (isTimeUp) {
-                clearLocalAnswers()
+            // 409 TIME_EXPIRED: server sudah menutup dengan jawaban tersimpan — aman dibersihkan
+            if (isTimeUp || res.status === 409) {
+                if (res.ok || res.status === 409) clearLocalAnswers()
                 router.replace(`/dashboard/siswa/kuis/${quizId}/hasil`)
             }
         } catch (error) {
@@ -171,7 +180,8 @@ export default function KerjakanKuisPage() {
         }
     }, [quizId, user])
 
-    // Continuous Timer Effect
+    // Continuous Timer Effect — dihitung ulang dari patokan server (ends_at + offset),
+    // bukan dari startTime lokal: kebal jam HP ngaco & konsisten dengan enforcement server
     useEffect(() => {
         // Don't run if critical data is missing or submitting
         if (!quiz || !startTime || submitting || timeLeft === null) return
@@ -180,25 +190,13 @@ export default function KerjakanKuisPage() {
         if (timeLeft <= 0) return
 
         timerRef.current = setInterval(() => {
-            const now = new Date().getTime()
-            const startStr = startTime
-            if (!startStr) return
-
-            const durationMs = quiz.duration_minutes * 60 * 1000
-            const start = new Date(startStr).getTime()
-            const currentElapsed = now - start
-            const currentRemaining = Math.max(0, durationMs - currentElapsed)
+            const currentRemaining = computeRemainingMs()
 
             setTimeLeft(currentRemaining)
 
             if (currentRemaining <= 0) {
                 if (timerRef.current) clearInterval(timerRef.current)
                 if (navigator.onLine) {
-                    // Call handleSubmit directly here. 
-                    // Note: accessing handleSubmit inside useEffect might require it to be dependency 
-                    // or wrapped in useCallback. Since it's defined in component, it changes on render.
-                    // But handleSubmit functionality is static enough.
-                    // Better to just copy the submit logic or call the confirmSubmit(true)
                     confirmSubmit(true)
                 } else {
                     setShowOfflineTimeoutModal(true)
@@ -264,13 +262,9 @@ export default function KerjakanKuisPage() {
         // Timer handled by useEffect
     }
 
-    // Helper for new attempt initialization
-    const startNewAttemptTimer = (quizData: Quiz, startedAt: Date) => {
-        const durationMs = quizData.duration_minutes * 60 * 1000
-        const elapsed = new Date().getTime() - startedAt.getTime()
-        const remaining = Math.max(0, durationMs - elapsed)
-
-        setTimeLeft(remaining)
+    // Helper for new attempt initialization — sisa waktu dari patokan server (ends_at)
+    const startNewAttemptTimer = (_quizData: Quiz, _startedAt: Date) => {
+        if (endsAtRef.current !== null) setTimeLeft(computeRemainingMs())
         setLoading(false)
         // Timer handled by useEffect
     }
@@ -278,8 +272,12 @@ export default function KerjakanKuisPage() {
     const initializeAttempt = async (quizData: Quiz, myStudent: any) => {
         // Check existing submission
         const subRes = await fetch(`/api/quiz-submissions?quiz_id=${quizData.id}&student_id=${myStudent.id}`)
+        // Patokan waktu server: koreksi jam HP via header response
+        const hdrServerTime = subRes.headers.get('x-server-time')
+        if (hdrServerTime) offsetMsRef.current = new Date(hdrServerTime).getTime() - Date.now()
         const subs = await subRes.json()
         const existingSub = subs[0]
+        if (existingSub?.ends_at) endsAtRef.current = new Date(existingSub.ends_at).getTime()
 
 
         let startedAt = new Date()
@@ -307,20 +305,18 @@ export default function KerjakanKuisPage() {
                 ? { ...dbAnswers, ...localAnswers }
                 : { ...localAnswers, ...dbAnswers } // If DB has more, maybe we cleared local?
 
-            const startedAtDate = new Date(existingSub.started_at)
-            const durationMs = quizData.duration_minutes * 60 * 1000
-            const elapsed = new Date().getTime() - startedAtDate.getTime()
-            const remaining = Math.max(0, durationMs - elapsed)
+            // Sisa waktu dari patokan server (ends_at), bukan jam HP
+            const remaining = computeRemainingMs()
 
-            if (remaining <= 0) {
-                // Auto-submit immediately if time expired
+            if (endsAtRef.current !== null && remaining <= 0) {
+                // Auto-submit immediately if time expired — server tetap yang menilai batas
                 try {
                     const formattedAnswers = Object.entries(mergedAnswers).map(([qId, val]) => ({
                         question_id: qId,
                         answer: val as string
                     }))
 
-                    await fetch('/api/quiz-submissions', {
+                    const res = await fetch('/api/quiz-submissions', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -331,8 +327,8 @@ export default function KerjakanKuisPage() {
                         })
                     })
 
-                    clearLocalAnswers()
-                    // alert('Waktu pengerjaan telah habis. Jawaban Anda otomatis dikumpulkan.')
+                    // 409 TIME_EXPIRED: server sudah menutup dengan jawaban tersimpan — aman dibersihkan
+                    if (res.ok || res.status === 409) clearLocalAnswers()
                     router.replace(`/dashboard/siswa/kuis/${quizData.id}/hasil`)
                 } catch (e) {
                     console.error('Auto-submit error:', e)
@@ -348,7 +344,7 @@ export default function KerjakanKuisPage() {
             })
             setAnswers(mergedAnswers)
             setStartTime(existingSub.started_at)
-            setTimeLeft(remaining) // Set timeLeft so modal shows live timer
+            if (endsAtRef.current !== null) setTimeLeft(remaining) // Set timeLeft so modal shows live timer
 
             // Show modal to ask user to resume
             setShowResumeModal(true)
@@ -356,21 +352,19 @@ export default function KerjakanKuisPage() {
             return
 
         } else {
-            // Start new attempt (implicitly by setting start time now, will be saved on first save/submit)
-            // Ideally we create the submission record NOW so the server knows when we started.
-            // Let's send a "start" request or just create a submission with null submitted_at
-
-            // Create initial submission to record start time
-            await fetch('/api/quiz-submissions', {
+            // Start new attempt — started_at & ends_at otoritatif dari server (jam HP tidak dipercaya)
+            const res = await fetch('/api/quiz-submissions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     quiz_id: quizData.id,
-                    answers: [],
-                    started_at: startedAt.toISOString()
+                    answers: []
                 })
             })
-            setStartTime(startedAt.toISOString())
+            const startData = await res.json().catch(() => null)
+            if (startData?.server_time) offsetMsRef.current = new Date(startData.server_time).getTime() - Date.now()
+            if (startData?.ends_at) endsAtRef.current = new Date(startData.ends_at).getTime()
+            setStartTime(startData?.started_at || startedAt.toISOString())
         }
 
         // Randomize questions if needed
@@ -428,7 +422,7 @@ export default function KerjakanKuisPage() {
                 answer: val
             }))
 
-            await fetch('/api/quiz-submissions', {
+            const res = await fetch('/api/quiz-submissions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -438,6 +432,13 @@ export default function KerjakanKuisPage() {
                     submit: true
                 })
             })
+
+            // 400 "sudah dikumpulkan" / 409 TIME_EXPIRED: submission sudah tertutup rapi di server
+            // (409 = ditutup paksa dengan jawaban yang tersimpan) — keduanya aman untuk lanjut
+            if (!res.ok && res.status !== 400 && res.status !== 409) {
+                const errData = await res.json().catch(() => null)
+                throw new Error(errData?.error || 'Gagal mengumpulkan kuis')
+            }
 
             // Clear localStorage after successful submit
             clearLocalAnswers()

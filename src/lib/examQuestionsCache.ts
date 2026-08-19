@@ -25,14 +25,15 @@ const TTL_MS = 10 * 60 * 1000 // 10 menit
 const GRADING_SELECT = 'id, correct_answer, options, points, question_type'
 
 export async function getExamQuestionsForGrading(
-    table: 'exam_questions' | 'official_exam_questions',
+    table: 'exam_questions' | 'official_exam_questions' | 'quiz_questions',
     examId: string
 ): Promise<GradableQuestion[]> {
     const key = `${table}:${examId}`
     const hit = cache.get(key)
     if (hit && hit.expiresAt > Date.now()) return hit.data
 
-    const { data, error } = await supabaseAdmin.from(table).select(GRADING_SELECT).eq('exam_id', examId)
+    const fkColumn = table === 'quiz_questions' ? 'quiz_id' : 'exam_id'
+    const { data, error } = await supabaseAdmin.from(table).select(GRADING_SELECT).eq(fkColumn, examId)
     if (error) throw error
 
     const questions = (data || []) as GradableQuestion[]

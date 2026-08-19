@@ -305,8 +305,8 @@ function EditExamPageInner() {
     const handleResetAttempt = async (submissionId: string, studentName: string, mode: 'soft' | 'hard') => {
         const isHard = mode === 'hard'
         if (!confirm(isHard
-            ? `PERINGATAN HARD RESET!\n\nApakah Anda yakin ingin melakukan HARD RESET untuk ulangan milik ${studentName}?\n\nSELURUH JAWABAN SAAT INI AKAN DIHAPUS dan siswa akan mengulang dari awal dengan durasi penuh.`
-            : `Konfirmasi Soft Reset\n\nApakah Anda yakin ingin membuka akses kembali (Soft Reset) untuk ulangan milik ${studentName}?\n\nJawaban sebelumnya tidak akan dihapus, dan timer akan melanjutkan sisa waktu sebelumnya.`
+            ? `PERINGATAN HARD RESET!\n\nApakah Anda yakin ingin melakukan HARD RESET untuk ulangan milik ${studentName}?\n\nSELURUH JAWABAN SAAT INI AKAN DIHAPUS dan siswa akan mengulang dari awal dengan durasi penuh baru, terhitung sejak saat reset (terlepas dari jadwal berakhir ulangan).`
+            : `Konfirmasi Soft Reset\n\nApakah Anda yakin ingin membuka akses kembali (Soft Reset) untuk ulangan milik ${studentName}?\n\nJawaban sebelumnya tidak akan dihapus, dan timer melanjutkan sisa waktu jendela ulangan (semua siswa selesai serentak). Hanya bisa dilakukan selama jendela waktu masih terbuka.`
         )) return
         
         setResettingId(submissionId)
