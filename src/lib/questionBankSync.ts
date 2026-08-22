@@ -75,6 +75,7 @@ export interface BankSyncQuestion {
     teacher_hots_claim?: boolean
     content_format?: string
     image_url?: string | null
+    tags?: string[] | null
 }
 
 /**
@@ -110,6 +111,7 @@ export async function syncQuestionsToBank(params: {
             teacher_hots_claim: q.teacher_hots_claim,
             content_format: q.content_format,
             image_url: q.image_url ?? null,
+            tags: q.tags && q.tags.length > 0 ? q.tags : null,
             source_type: sourceType,
             ...(sourceType === 'exam' ? { source_exam_id: sourceId } : { source_quiz_id: sourceId }),
             source_name: sourceName,

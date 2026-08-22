@@ -18,6 +18,9 @@ import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
+import TagInput from '@/components/TagInput'
+import BankQuestionPicker from '@/components/BankQuestionPicker'
+import { TagBadge } from '@/components/BankQuestionPicker'
 import { useAuth } from '@/contexts/AuthContext'
 
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
@@ -57,6 +60,7 @@ interface Question {
     teacher_hots_claim?: boolean
     text_direction?: 'ltr' | 'rtl'
     content_format?: 'html' | 'plain'
+    tags?: string[] | null
 }
 
 type TabType = 'soal' | 'pengaturan' | 'hasil' | 'monitor'
@@ -109,8 +113,17 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         id: '', question_text: '', question_type: 'MULTIPLE_CHOICE',
         options: ['', '', '', ''], correct_answer: '', points: 10,
         order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false,
-        text_direction: 'ltr', content_format: 'html'
+        text_direction: 'ltr', content_format: 'html', tags: []
     })
+
+    // Tag suggestions dari bank soal (untuk autocomplete input tag)
+    const [tagSuggestions, setTagSuggestions] = useState<string[]>([])
+    useEffect(() => {
+        fetch('/api/question-bank/tags')
+            .then(r => r.ok ? r.json() : [])
+            .then((d: { tag: string }[]) => setTagSuggestions(d.map(t => t.tag)))
+            .catch(() => { })
+    }, [])
 
     // Passage mode
     const [isPassageMode, setIsPassageMode] = useState(false)
@@ -424,9 +437,10 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 correct_answer: manualForm.correct_answer || null, points: manualForm.points,
                 difficulty: manualForm.difficulty, teacher_hots_claim: manualForm.teacher_hots_claim || false,
                 order_index: questions.length, text_direction: manualForm.text_direction || 'ltr',
-                content_format: 'html'
+                content_format: 'html',
+                tags: manualForm.tags || []
             })
-            setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false, text_direction: 'ltr', content_format: 'html' })
+            setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false, text_direction: 'ltr', content_format: 'html', tags: [] })
             setSoalMode('list'); fetchQuestions()
         } finally { setSaving(false) }
     }
@@ -478,10 +492,43 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     text_direction: editQuestionForm.text_direction || 'ltr',
                     passage_text: editQuestionForm.passage_text || null,
                     passage_audio_url: (editQuestionForm as any).passage_audio_url || null,
-                    content_format: 'html'
+                    content_format: 'html',
+                    tags: editQuestionForm.tags || []
                 })
             })
             setEditingQuestionId(null); setEditQuestionForm(null); fetchQuestions()
+        } finally { setSaving(false) }
+    }
+
+    // Tambah soal terpilih dari Bank Soal (dipanggil oleh BankQuestionPicker)
+    const handleAddBankQuestions = async () => {
+        if (selectedBankIds.size === 0) return
+        setSaving(true)
+        try {
+            // Soal passage dibawa bersama teks bacaannya; soal mandiri terpisah
+            const pQs = bankPassages.flatMap((p: any) =>
+                (p.questions || []).map((q: any) => ({
+                    ...q,
+                    passage_text: p.passage_text,
+                    passage_audio_url: p.audio_url || null
+                }))
+            )
+            const all = [...bankQuestions.filter((q: any) => q.passage_id == null), ...pQs]
+            const sel = all
+                .filter((q: any) => selectedBankIds.has(q.id))
+                .map((q: any, idx: number) => ({
+                    question_text: q.question_text, question_type: q.question_type,
+                    options: q.options, correct_answer: q.correct_answer,
+                    difficulty: q.difficulty || 'MEDIUM', points: 10,
+                    order_index: questions.length + idx,
+                    passage_text: q.passage_text || null,
+                    passage_audio_url: q.passage_audio_url || null,
+                    teacher_hots_claim: q.teacher_hots_claim || false,
+                    tags: q.tags || null,
+                    bank_status: q.status
+                }))
+            await postQuestions({ questions: sel })
+            setSelectedBankIds(new Set()); setSoalMode('list'); fetchQuestions()
         } finally { setSaving(false) }
     }
 
@@ -748,6 +795,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                             <div className="flex items-center gap-2 mb-3">
                                                 <span className={`px-2.5 py-1 text-xs font-bold rounded-full border bg-secondary/10 text-text-main dark:text-white border-secondary/20`}>{q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}</span>
                                                 {q.passage_text && <span className="px-2 py-0.5 text-xs rounded-full bg-teal-500/20 text-teal-600 dark:text-teal-400">📖 Passage</span>}
+                                                {(q.tags || []).map((t: string) => (
+                                                    <TagBadge key={t} tag={t} />
+                                                ))}
                                                 {q.status === 'approved' && <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">✅</span>}
                                                 {q.difficulty && <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/10 text-text-secondary font-medium">{q.difficulty}</span>}
                                             </div>
@@ -1238,6 +1288,16 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                         <input type="number" value={manualForm.points} onChange={(e) => setManualForm({ ...manualForm, points: parseInt(e.target.value) || 10 })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary font-bold text-center" min={1} />
                                     </div>
                                 </div>
+                                {/* Tags (opsional) */}
+                                <div>
+                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tag Soal <span className="text-text-secondary font-normal">(opsional)</span></label>
+                                    <TagInput
+                                        value={manualForm.tags || []}
+                                        onChange={(tags) => setManualForm({ ...manualForm, tags })}
+                                        suggestions={tagSuggestions}
+                                    />
+                                    <p className="text-xs text-text-secondary mt-1.5">Tag memudahkan pencarian soal di Bank Soal (mis. #pecahan, #aljabar).</p>
+                                </div>
                                 {aiReviewEnabled && (
                                     <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
                                         <input type="checkbox" id="hots-uts" checked={manualForm.teacher_hots_claim || false} onChange={e => setManualForm({ ...manualForm, teacher_hots_claim: e.target.checked })} className="w-5 h-5 accent-emerald-600 rounded" />
@@ -1271,64 +1331,17 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
 
             {/* Bank Soal Mode */}
             {soalMode === 'bank' && (
-                <Card className="p-6">
-                    <div className="flex items-center justify-between mb-6">
-                        <h2 className="text-xl font-bold text-text-main dark:text-white">🗃️ Ambil dari Bank Soal</h2>
-                        <Button variant="ghost" onClick={() => { setSoalMode('list'); setSelectedBankIds(new Set()) }}>✕</Button>
-                    </div>
-                    {bankLoading ? (
-                        <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
-                    ) : bankQuestions.length === 0 && bankPassages.length === 0 ? (
-                        <EmptyState icon="🗃️" title="Bank Soal Kosong" description="Belum ada soal tersimpan untuk mata pelajaran ini." />
-                    ) : (
-                        <>
-                            <p className="text-sm text-text-secondary dark:text-zinc-400 mb-4">Pilih soal yang ingin ditambahkan:</p>
-                            {bankPassages.length > 0 && (
-                                <div className="mb-6">
-                                    <h3 className="text-md font-bold text-text-main dark:text-white mb-3">📖 Passage ({bankPassages.length})</h3>
-                                    <div className="space-y-3">
-                                        {bankPassages.map((p: any) => (
-                                            <div key={p.id} className="bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl overflow-hidden">
-                                                <div className="p-4 cursor-pointer hover:bg-teal-100 dark:hover:bg-teal-900/30 transition-colors" onClick={() => { const ids = (p.questions || []).map((q: any) => q.id); const all = ids.every((id: string) => selectedBankIds.has(id)); const s = new Set(selectedBankIds); if (all) ids.forEach((id: string) => s.delete(id)); else ids.forEach((id: string) => s.add(id)); setSelectedBankIds(s) }}>
-                                                    <div className="flex items-center gap-3">
-                                                        <input type="checkbox" checked={(p.questions||[]).length > 0 && (p.questions||[]).every((q: any) => selectedBankIds.has(q.id))} readOnly className="w-5 h-5 rounded bg-teal-100 border-teal-300 text-teal-600" />
-                                                        <div className="flex-1">
-                                                            <h4 className="font-bold text-text-main dark:text-white">{p.title || 'Untitled'}</h4>
-                                                            <span className="text-xs text-teal-600 dark:text-teal-400">{p.questions?.length || 0} soal</span>
-                                                        </div>
-                                                    </div>
-                                                    <p className="text-sm text-text-secondary mt-2 line-clamp-2">{p.passage_text}</p>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                            {bankQuestions.filter((q: any) => q.passage_id == null).length > 0 && (
-                                <div className="mb-4">
-                                    <h3 className="text-md font-bold text-text-main dark:text-white mb-3">❓ Soal Mandiri ({bankQuestions.filter((q: any) => q.passage_id == null).length})</h3>
-                                    <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
-                                        {bankQuestions.filter((q: any) => q.passage_id == null).map((q: any) => (
-                                            <label key={q.id} className={`flex items-start gap-3 p-4 rounded-xl cursor-pointer transition-all border ${selectedBankIds.has(q.id) ? 'bg-primary/10 border-primary' : 'bg-secondary/5 border-transparent hover:bg-secondary/10'}`}>
-                                                <input type="checkbox" checked={selectedBankIds.has(q.id)} onChange={(e) => { const s = new Set(selectedBankIds); e.target.checked ? s.add(q.id) : s.delete(q.id); setSelectedBankIds(s) }} className="mt-1 w-5 h-5 rounded" />
-                                                <div className="flex-1">
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-100 text-blue-700' : q.question_type === 'MULTIPLE_ANSWER' ? 'bg-indigo-100 text-indigo-700' : q.question_type === 'TRUE_FALSE' ? 'bg-green-100 text-green-700' : q.question_type === 'SHORT_ANSWER' ? 'bg-cyan-100 text-cyan-700' : 'bg-amber-100 text-amber-700'}`}>{q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}</span>
-                                                    </div>
-                                                    <SmartText text={q.question_text} className="text-text-main dark:text-white text-sm line-clamp-2" />
-                                                </div>
-                                            </label>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                            <div className="flex gap-3 pt-4 border-t border-secondary/20 mt-4">
-                                <Button variant="secondary" onClick={() => { const all = [...bankQuestions.filter((q: any) => q.passage_id == null).map((q: any) => q.id), ...bankPassages.flatMap((p: any) => (p.questions||[]).map((q: any) => q.id))]; selectedBankIds.size === all.length ? setSelectedBankIds(new Set()) : setSelectedBankIds(new Set(all)) }}>Pilih Semua</Button>
-                                <Button onClick={async () => { if (selectedBankIds.size === 0) return; setSaving(true); try { const pQs = bankPassages.flatMap((p: any) => (p.questions||[]).map((q: any) => ({ ...q, passage_text: p.passage_text, passage_audio_url: p.audio_url || null }))); const all = [...bankQuestions.filter((q: any) => q.passage_id == null), ...pQs]; const sel = all.filter((q: any) => selectedBankIds.has(q.id)).map((q: any, idx: number) => ({ question_text: q.question_text, question_type: q.question_type, options: q.options, correct_answer: q.correct_answer, difficulty: q.difficulty || 'MEDIUM', points: 10, order_index: questions.length + idx, passage_text: q.passage_text || null, passage_audio_url: q.passage_audio_url || null, teacher_hots_claim: q.teacher_hots_claim || false, bank_status: q.status })); await postQuestions({ questions: sel }); setSelectedBankIds(new Set()); setSoalMode('list'); fetchQuestions() } finally { setSaving(false) } }} disabled={saving || selectedBankIds.size === 0} loading={saving} className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600">{saving ? 'Menyimpan...' : `Tambahkan ${selectedBankIds.size} Soal`}</Button>
-                            </div>
-                        </>
-                    )}
-                </Card>
+                <BankQuestionPicker
+                    questions={bankQuestions}
+                    passages={bankPassages}
+                    loading={bankLoading}
+                    selectedIds={selectedBankIds}
+                    onSelectedIdsChange={setSelectedBankIds}
+                    onClose={() => setSoalMode('list')}
+                    onConfirm={handleAddBankQuestions}
+                    saving={saving}
+                    targetLabel="UTS/UAS"
+                />
             )}
 
             {/* Edit Question Modal */}
@@ -1463,6 +1476,17 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                 <label htmlFor="hots-edit" className="cursor-pointer"><p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">🧠 Klaim HOTS</p></label>
                             </div>
                         )}
+
+                        {/* Tags (opsional) */}
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tag Soal <span className="text-text-secondary font-normal">(opsional)</span></label>
+                            <TagInput
+                                value={editQuestionForm.tags || []}
+                                onChange={(tags) => setEditQuestionForm({ ...editQuestionForm, tags })}
+                                suggestions={tagSuggestions}
+                            />
+                            <p className="text-xs text-text-secondary mt-1.5">Tag memudahkan pencarian soal di Bank Soal (mis. #pecahan, #aljabar).</p>
+                        </div>
                         <div className="flex gap-3 pt-4 border-t border-secondary/10">
                             <Button variant="secondary" onClick={() => { setEditingQuestionId(null); setEditQuestionForm(null) }} className="flex-1">Batal</Button>
                             <Button onClick={handleSaveEdit} loading={saving} disabled={!editQuestionForm.question_text || !validateCorrectAnswer(editQuestionForm.question_type, editQuestionForm.correct_answer, editQuestionForm.options).valid} className="flex-1">Simpan Perubahan</Button>

@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
             .select(`
                 *,
                 subject:subjects(id, name),
-                questions:question_bank(id, question_text, question_type, options, correct_answer, difficulty, order_in_passage, status, teacher_hots_claim)
+                questions:question_bank(id, question_text, question_type, options, correct_answer, difficulty, order_in_passage, status, teacher_hots_claim, tags)
             `)
             .eq('teacher_id', teacher.id)
             .order('created_at', { ascending: false })

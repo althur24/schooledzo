@@ -357,6 +357,21 @@ export type Database = {
           },
         ]
       }
+      cron_runs: {
+        Row: {
+          job: string
+          last_run_at: string
+        }
+        Insert: {
+          job: string
+          last_run_at?: string
+        }
+        Update: {
+          job?: string
+          last_run_at?: string
+        }
+        Relationships: []
+      }
       exam_answers: {
         Row: {
           answer: string | null
@@ -419,6 +434,7 @@ export type Database = {
           question_text: string
           question_type: string | null
           status: string | null
+          tags: string[] | null
           teacher_hots_claim: boolean | null
           text_direction: string
         }
@@ -438,6 +454,7 @@ export type Database = {
           question_text: string
           question_type?: string | null
           status?: string | null
+          tags?: string[] | null
           teacher_hots_claim?: boolean | null
           text_direction?: string
         }
@@ -457,6 +474,7 @@ export type Database = {
           question_text?: string
           question_type?: string | null
           status?: string | null
+          tags?: string[] | null
           teacher_hots_claim?: boolean | null
           text_direction?: string
         }
@@ -482,6 +500,7 @@ export type Database = {
           started_at: string | null
           student_id: string
           submitted_at: string | null
+          timer_override_until: string | null
           total_score: number | null
           violation_count: number | null
           violations_log: Json | null
@@ -497,6 +516,7 @@ export type Database = {
           started_at?: string | null
           student_id: string
           submitted_at?: string | null
+          timer_override_until?: string | null
           total_score?: number | null
           violation_count?: number | null
           violations_log?: Json | null
@@ -512,6 +532,7 @@ export type Database = {
           started_at?: string | null
           student_id?: string
           submitted_at?: string | null
+          timer_override_until?: string | null
           total_score?: number | null
           violation_count?: number | null
           violations_log?: Json | null
@@ -536,7 +557,9 @@ export type Database = {
       exams: {
         Row: {
           allowed_student_ids: string[] | null
+          batch_id: string | null
           created_at: string | null
+          created_by: string | null
           description: string | null
           duration_minutes: number
           id: string
@@ -555,7 +578,9 @@ export type Database = {
         }
         Insert: {
           allowed_student_ids?: string[] | null
+          batch_id?: string | null
           created_at?: string | null
+          created_by?: string | null
           description?: string | null
           duration_minutes?: number
           id?: string
@@ -574,7 +599,9 @@ export type Database = {
         }
         Update: {
           allowed_student_ids?: string[] | null
+          batch_id?: string | null
           created_at?: string | null
+          created_by?: string | null
           description?: string | null
           duration_minutes?: number
           id?: string
@@ -784,6 +811,7 @@ export type Database = {
           question_text: string
           question_type: string
           status: string | null
+          tags: string[] | null
           teacher_hots_claim: boolean | null
           text_direction: string
         }
@@ -803,6 +831,7 @@ export type Database = {
           question_text: string
           question_type: string
           status?: string | null
+          tags?: string[] | null
           teacher_hots_claim?: boolean | null
           text_direction?: string
         }
@@ -822,6 +851,7 @@ export type Database = {
           question_text?: string
           question_type?: string
           status?: string | null
+          tags?: string[] | null
           teacher_hots_claim?: boolean | null
           text_direction?: string
         }
@@ -847,6 +877,7 @@ export type Database = {
           started_at: string | null
           student_id: string
           submitted_at: string | null
+          timer_override_until: string | null
           total_score: number | null
           violation_count: number | null
           violations_log: Json | null
@@ -862,6 +893,7 @@ export type Database = {
           started_at?: string | null
           student_id: string
           submitted_at?: string | null
+          timer_override_until?: string | null
           total_score?: number | null
           violation_count?: number | null
           violations_log?: Json | null
@@ -877,6 +909,7 @@ export type Database = {
           started_at?: string | null
           student_id?: string
           submitted_at?: string | null
+          timer_override_until?: string | null
           total_score?: number | null
           violation_count?: number | null
           violations_log?: Json | null
@@ -1227,6 +1260,7 @@ export type Database = {
           question_type: string
           quiz_id: string | null
           status: string | null
+          tags: string[] | null
           teacher_hots_claim: boolean | null
           text_direction: string
         }
@@ -1246,6 +1280,7 @@ export type Database = {
           question_type: string
           quiz_id?: string | null
           status?: string | null
+          tags?: string[] | null
           teacher_hots_claim?: boolean | null
           text_direction?: string
         }
@@ -1265,6 +1300,7 @@ export type Database = {
           question_type?: string
           quiz_id?: string | null
           status?: string | null
+          tags?: string[] | null
           teacher_hots_claim?: boolean | null
           text_direction?: string
         }
@@ -1332,6 +1368,7 @@ export type Database = {
       quizzes: {
         Row: {
           allowed_student_ids: string[] | null
+          batch_id: string | null
           created_at: string | null
           deadline: string | null
           description: string | null
@@ -1348,6 +1385,7 @@ export type Database = {
         }
         Insert: {
           allowed_student_ids?: string[] | null
+          batch_id?: string | null
           created_at?: string | null
           deadline?: string | null
           description?: string | null
@@ -1364,6 +1402,7 @@ export type Database = {
         }
         Update: {
           allowed_student_ids?: string[] | null
+          batch_id?: string | null
           created_at?: string | null
           deadline?: string | null
           description?: string | null
@@ -2025,6 +2064,15 @@ export type Database = {
           similarity: number
           text: string
         }[]
+      }
+      move_student_to_class: {
+        Args: {
+          p_notes?: string
+          p_school_id?: string
+          p_student_id: string
+          p_to_class_id: string
+        }
+        Returns: Json
       }
       promote_students_batch: {
         Args: { p_graduations?: Json; p_notes?: string; p_targets?: Json }

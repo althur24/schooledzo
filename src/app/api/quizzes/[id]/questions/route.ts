@@ -151,6 +151,7 @@ export async function POST(
                 teacher_hots_claim: q.teacher_hots_claim || false,
                 text_direction: q.text_direction || 'ltr',
                 content_format: q.content_format || 'plain',
+                tags: Array.isArray(q.tags) && q.tags.length > 0 ? q.tags : null,
                 // Set initial status: approved from bank, 'draft' for AI review, 'approved' if AI off
                 status: q.bank_status === 'approved' ? 'approved' : (aiEnabled ? 'draft' : 'approved')
             }))
@@ -230,7 +231,7 @@ export async function POST(
         }
 
         // Single insert
-        const { question_text, question_type, options, correct_answer, difficulty, points, order_index, image_url, passage_text, passage_audio_url, teacher_hots_claim, content_format } = body
+        const { question_text, question_type, options, correct_answer, difficulty, points, order_index, image_url, passage_text, passage_audio_url, teacher_hots_claim, content_format, tags } = body
 
         // Validate correct_answer for objective types (single insert)
         const v = validateCorrectAnswer(question_type || 'MULTIPLE_CHOICE', correct_answer, options)
@@ -253,6 +254,7 @@ export async function POST(
                 teacher_hots_claim: teacher_hots_claim || false,
                 text_direction: body.text_direction || 'ltr',
                 content_format: content_format || 'plain',
+                tags: Array.isArray(tags) && tags.length > 0 ? tags : null,
                 // Set initial status based on AI review setting
                 status: aiEnabled ? 'draft' : 'approved'
             })
@@ -348,7 +350,7 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { question_id, question_text, question_type, options, correct_answer, difficulty, points, image_url, passage_text, passage_audio_url, teacher_hots_claim, text_direction, content_format } = body
+        const { question_id, question_text, question_type, options, correct_answer, difficulty, points, image_url, passage_text, passage_audio_url, teacher_hots_claim, text_direction, content_format, tags } = body
 
         if (!question_id) {
             return NextResponse.json({ error: 'question_id required' }, { status: 400 })
@@ -373,6 +375,7 @@ export async function PUT(
         if (teacher_hots_claim !== undefined) updateData.teacher_hots_claim = teacher_hots_claim
         if (text_direction !== undefined) updateData.text_direction = text_direction
         if (content_format !== undefined) updateData.content_format = content_format
+        if (tags !== undefined) updateData.tags = Array.isArray(tags) && tags.length > 0 ? tags : null
 
         // Reset status & re-trigger HOTS hanya bila konten soal berubah.
         // Perubahan poin semata tidak menyentuh status (menghindari publish terblokir).

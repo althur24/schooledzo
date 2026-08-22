@@ -23,6 +23,9 @@ import { Loader2, Eye, Brain, BarChart3, FileText, Download, RotateCcw, ChevronD
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
+import TagInput from '@/components/TagInput'
+import BankQuestionPicker from '@/components/BankQuestionPicker'
+import { TagBadge } from '@/components/BankQuestionPicker'
 import { Modal, PageHeader, Button, EmptyState, Toast, type ToastType } from '@/components/ui'
 import Card from '@/components/ui/Card'
 
@@ -43,6 +46,7 @@ interface ExamQuestion {
     text_direction?: 'ltr' | 'rtl'
     admin_review?: any
     content_format?: 'html' | 'plain'
+    tags?: string[] | null
 }
 
 interface Exam {
@@ -103,6 +107,7 @@ function EditExamPageInner() {
                 correct_answer: '',
                 difficulty: undefined,
                 question_type: 'MULTIPLE_CHOICE',
+                tags: []
             }))
             setMode('manual')
             setShowAddDropdown(false)
@@ -133,8 +138,18 @@ function EditExamPageInner() {
         points: 10,
         order_index: 0,
         teacher_hots_claim: false,
-        text_direction: 'ltr'
+        text_direction: 'ltr',
+        tags: []
     })
+
+    // Tag suggestions dari bank soal guru (untuk autocomplete input tag)
+    const [tagSuggestions, setTagSuggestions] = useState<string[]>([])
+    useEffect(() => {
+        fetch('/api/question-bank/tags')
+            .then(r => r.ok ? r.json() : [])
+            .then((d: { tag: string }[]) => setTagSuggestions(d.map(t => t.tag)))
+            .catch(() => { })
+    }, [])
 
     // Passage mode state
     const [isPassageMode, setIsPassageMode] = useState(false)
@@ -675,7 +690,8 @@ function EditExamPageInner() {
                     points: 10,
                     order_index: 0,
                     teacher_hots_claim: false,
-                    text_direction: 'ltr'
+                    text_direction: 'ltr',
+                    tags: []
                 })
                 setMode('list')
             }
@@ -711,7 +727,8 @@ function EditExamPageInner() {
                     text_direction: editQuestionForm.text_direction || 'ltr',
                     passage_text: editQuestionForm.passage_text || null,
                     passage_audio_url: (editQuestionForm as any).passage_audio_url || null,
-                    content_format: 'html'
+                    content_format: 'html',
+                    tags: editQuestionForm.tags || []
                 })
             })
             if (!res.ok) {
@@ -739,6 +756,53 @@ function EditExamPageInner() {
             fetchExam()
         } catch (error) {
             console.error('Bulk delete error:', error)
+        }
+    }
+
+    // Tambah soal terpilih dari Bank Soal ke ulangan (dipanggil oleh BankQuestionPicker)
+    const handleAddBankQuestions = async () => {
+        if (selectedBankIds.size === 0) return
+        setSaving(true)
+        try {
+            // Soal passage dibawa bersama teks bacaannya; soal mandiri terpisah
+            const passageQuestionsWithText = bankPassages.flatMap((p: any) =>
+                (p.questions || []).map((q: any) => ({
+                    ...q,
+                    passage_text: p.passage_text,
+                    passage_audio_url: p.audio_url || null
+                }))
+            )
+            const standaloneQuestions = bankQuestions.filter((q: any) => q.passage_id == null)
+            const allBankQuestions = [...standaloneQuestions, ...passageQuestionsWithText]
+            const selectedQuestions = allBankQuestions
+                .filter((q: any) => selectedBankIds.has(q.id))
+                .map((q: any, idx: number) => ({
+                    question_text: q.question_text,
+                    question_type: q.question_type,
+                    options: q.options,
+                    correct_answer: q.correct_answer,
+                    difficulty: q.difficulty || 'MEDIUM',
+                    points: 10,
+                    order_index: questions.length + idx,
+                    passage_text: q.passage_text || null,
+                    passage_audio_url: q.passage_audio_url || null,
+                    teacher_hots_claim: q.teacher_hots_claim || false,
+                    tags: q.tags || null,
+                    // Inherit approved status from bank soal (skip re-review)
+                    bank_status: q.status
+                }))
+
+            await fetch(`/api/exams/${examId}/questions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ questions: selectedQuestions })
+            })
+
+            setSelectedBankIds(new Set())
+            setMode('list')
+            fetchExam()
+        } finally {
+            setSaving(false)
         }
     }
 
@@ -1609,6 +1673,9 @@ function EditExamPageInner() {
                                                     📖 Passage
                                                 </span>
                                             )}
+                                            {(q.tags || []).map((t: string) => (
+                                                <TagBadge key={t} tag={t} />
+                                            ))}
                                             {q.status === 'approved' && <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 flex items-center gap-1"><TickSquare set="bold" primaryColor="currentColor" size={10} /> Approved</span>}
                                             {aiReviewEnabled && q.status === 'admin_review' && <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 flex items-center gap-1"><InfoCircle set="bold" primaryColor="currentColor" size={10} /> Menunggu Review</span>}
                                             {q.status === 'returned' && <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 flex items-center gap-1"><CloseSquare set="bold" primaryColor="currentColor" size={10} /> Dikembalikan</span>}
@@ -1975,6 +2042,17 @@ function EditExamPageInner() {
                                         </label>
                                     </div>
                                 )}
+
+                                {/* Tags (opsional) */}
+                                <div>
+                                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tag Soal <span className="text-text-secondary font-normal">(opsional)</span></label>
+                                    <TagInput
+                                        value={editQuestionForm.tags || []}
+                                        onChange={(tags) => setEditQuestionForm({ ...editQuestionForm, tags })}
+                                        suggestions={tagSuggestions}
+                                    />
+                                    <p className="text-xs text-text-secondary mt-1.5">Tag memudahkan pencarian soal di Bank Soal (mis. #pecahan, #aljabar).</p>
+                                </div>
                             </div>
 
                             <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-secondary/20">
@@ -2286,6 +2364,17 @@ function EditExamPageInner() {
                                             <input type="number" value={manualForm.points} onChange={(e) => setManualForm({ ...manualForm, points: parseInt(e.target.value) || 10 })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary font-bold text-center" min={1} />
                                         </div>
                                     </div>
+                                    {/* Tags (opsional) */}
+                                    <div>
+                                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tag Soal <span className="text-text-secondary font-normal">(opsional)</span></label>
+                                        <TagInput
+                                            value={manualForm.tags || []}
+                                            onChange={(tags) => setManualForm({ ...manualForm, tags })}
+                                            suggestions={tagSuggestions}
+                                        />
+                                        <p className="text-xs text-text-secondary mt-1.5">Tag memudahkan pencarian soal di Bank Soal (mis. #pecahan, #aljabar). Soal juga otomatis tersimpan ke Bank Soal.</p>
+                                    </div>
+
                                     {/* HOTS Toggle */}
                                     {aiReviewEnabled && (
                                         <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
@@ -2333,220 +2422,19 @@ function EditExamPageInner() {
             />
 
             {/* Bank Soal Mode */}
-            {
-                mode === 'bank' && (
-                    <Card className="p-6">
-                        <div className="flex items-center justify-between mb-6">
-                            <h2 className="text-xl font-bold text-text-main dark:text-white">🗃️ Ambil dari Bank Soal</h2>
-                            <Button variant="ghost" icon={<>✕</>} onClick={() => { setMode('list'); setSelectedBankIds(new Set()) }} />
-                        </div>
-
-                        {bankLoading ? (
-                            <div className="flex justify-center py-12">
-                                <div className="animate-spin text-3xl text-primary">⏳</div>
-                            </div>
-                        ) : bankQuestions.length === 0 && bankPassages.length === 0 ? (
-                            <EmptyState
-                                icon="🗃️"
-                                title="Bank Soal Kosong"
-                                description="Belum ada soal tersimpan untuk mata pelajaran ini."
-                            />
-                        ) : (
-                            <>
-                                <p className="text-sm text-text-secondary dark:text-zinc-400 mb-4">Pilih soal yang ingin ditambahkan ke ulangan ini:</p>
-
-                                {/* Passages Section */}
-                                {bankPassages.length > 0 && (
-                                    <div className="mb-6">
-                                        <h3 className="text-md font-bold text-text-main dark:text-white mb-3 flex items-center gap-2">
-                                            📖 Passage ({bankPassages.length})
-                                        </h3>
-                                        <div className="space-y-3">
-                                            {bankPassages.map((p: any) => (
-                                                <div key={p.id} className="bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-xl overflow-hidden">
-                                                    <div
-                                                        className="p-4 cursor-pointer hover:bg-teal-100 dark:hover:bg-teal-900/30 transition-colors"
-                                                        onClick={() => {
-                                                            const passageQuestionIds = (p.questions || []).map((q: any) => q.id)
-                                                            const allSelected = passageQuestionIds.every((id: string) => selectedBankIds.has(id))
-                                                            const newSet = new Set(selectedBankIds)
-                                                            if (allSelected) {
-                                                                passageQuestionIds.forEach((id: string) => newSet.delete(id))
-                                                            } else {
-                                                                passageQuestionIds.forEach((id: string) => newSet.add(id))
-                                                            }
-                                                            setSelectedBankIds(newSet)
-                                                        }}
-                                                    >
-                                                        <div className="flex items-center gap-3">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={(p.questions || []).length > 0 && (p.questions || []).every((q: any) => selectedBankIds.has(q.id))}
-                                                                readOnly
-                                                                className="w-5 h-5 rounded bg-teal-100 border-teal-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
-                                                            />
-                                                            <div className="flex-1">
-                                                                <h4 className="font-bold text-text-main dark:text-white">{p.title || 'Untitled Passage'}</h4>
-                                                                <span className="text-xs text-teal-600 dark:text-teal-400">{p.questions?.length || 0} soal terkait</span>
-                                                            </div>
-                                                        </div>
-                                                        <p className="text-sm text-text-secondary dark:text-zinc-400 mt-2 line-clamp-2">{p.passage_text}</p>
-                                                    </div>
-                                                    {/* Questions inside passage */}
-                                                    {(p.questions || []).length > 0 && (
-                                                        <div className="border-t border-teal-200 dark:border-teal-700 px-4 py-2 bg-white/50 dark:bg-black/10 space-y-2">
-                                                            {p.questions.map((q: any, idx: number) => (
-                                                                <label
-                                                                    key={q.id}
-                                                                    className={`flex items-start gap-2 p-2 rounded-lg cursor-pointer text-sm ${selectedBankIds.has(q.id) ? 'bg-teal-100 dark:bg-teal-800/30' : 'hover:bg-teal-50 dark:hover:bg-teal-900/20'}`}
-                                                                    onClick={(e) => e.stopPropagation()}
-                                                                >
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={selectedBankIds.has(q.id)}
-                                                                        onChange={(e) => {
-                                                                            const newSet = new Set(selectedBankIds)
-                                                                            e.target.checked ? newSet.add(q.id) : newSet.delete(q.id)
-                                                                            setSelectedBankIds(newSet)
-                                                                        }}
-                                                                        className="mt-0.5 w-4 h-4 rounded bg-teal-100 border-teal-300 text-teal-600 focus:ring-teal-500"
-                                                                    />
-                                                                    <span className="w-5 h-5 rounded-full bg-teal-500 text-white text-xs flex items-center justify-center font-bold flex-shrink-0">{idx + 1}</span>
-                                                                    <SmartText text={q.question_text} as="span" className="flex-1 text-text-main dark:text-white line-clamp-2" />
-                                                                </label>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Individual Questions Section - Only questions without passage_id */}
-                                {bankQuestions.filter((q: any) => q.passage_id == null).length > 0 && (
-                                    <div className="mb-4">
-                                        <h3 className="text-md font-bold text-text-main dark:text-white mb-3">❓ Soal Mandiri ({bankQuestions.filter((q: any) => q.passage_id == null).length})</h3>
-                                        <div className="space-y-3 max-h-72 overflow-y-auto pr-2 custom-scrollbar">
-                                            {bankQuestions.filter((q: any) => q.passage_id == null).map((q: any) => (
-                                                <label
-                                                    key={q.id}
-                                                    className={`flex items-start gap-3 p-4 rounded-xl cursor-pointer transition-all border ${selectedBankIds.has(q.id)
-                                                        ? 'bg-primary/10 border-primary'
-                                                        : 'bg-secondary/5 border-transparent hover:bg-secondary/10'
-                                                        }`}
-                                                >
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={selectedBankIds.has(q.id)}
-                                                        onChange={(e) => {
-                                                            const newSet = new Set(selectedBankIds)
-                                                            if (e.target.checked) {
-                                                                newSet.add(q.id)
-                                                            } else {
-                                                                newSet.delete(q.id)
-                                                            }
-                                                            setSelectedBankIds(newSet)
-                                                        }}
-                                                        className="mt-1 w-5 h-5 rounded bg-secondary/10 border-secondary/30 text-primary focus:ring-primary"
-                                                    />
-                                                    <div className="flex-1">
-                                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                                            <span className={`px-2 py-0.5 text-xs rounded ${q.question_type === 'MULTIPLE_CHOICE' ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400' : q.question_type === 'MULTIPLE_ANSWER' ? 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400' : q.question_type === 'TRUE_FALSE' ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400' : q.question_type === 'SHORT_ANSWER' ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-700 dark:text-cyan-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'}`}>
-                                                                {q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
-                                                            </span>
-                                                            <span className={`px-2 py-0.5 text-xs rounded ${q.difficulty === 'EASY' ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400' :
-                                                                q.difficulty === 'HARD' ? 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'
-                                                                }`}>
-                                                                {q.difficulty === 'EASY' ? 'Mudah' : q.difficulty === 'HARD' ? 'Sulit' : 'Sedang'}
-                                                            </span>
-                                                        </div>
-                                                        <SmartText text={q.question_text} className="text-text-main dark:text-white text-sm line-clamp-2" />
-                                                    </div>
-                                                </label>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="flex gap-3 pt-4 border-t border-secondary/20 mt-4">
-                                    <Button
-                                        variant="secondary"
-                                        onClick={() => {
-                                            const allQuestionIds = [
-                                                ...bankQuestions.filter((q: any) => q.passage_id == null).map((q: any) => q.id),
-                                                ...bankPassages.flatMap((p: any) => (p.questions || []).map((q: any) => q.id))
-                                            ]
-                                            if (selectedBankIds.size === allQuestionIds.length) {
-                                                setSelectedBankIds(new Set())
-                                            } else {
-                                                setSelectedBankIds(new Set(allQuestionIds))
-                                            }
-                                        }}
-                                    >
-                                        Pilih Semua
-                                    </Button>
-                                    <Button
-                                        onClick={async () => {
-                                            if (selectedBankIds.size === 0) return
-                                            setSaving(true)
-                                            try {
-                                                // Collect selected questions from both individual and passages
-                                                // For passage questions, include the passage_text
-                                                const passageQuestionsWithText = bankPassages.flatMap((p: any) =>
-                                                    (p.questions || []).map((q: any) => ({
-                                                        ...q,
-                                                        passage_text: p.passage_text,
-                                                        passage_audio_url: p.audio_url || null
-                                                    }))
-                                                )
-                                                const standaloneQuestions = bankQuestions.filter((q: any) => q.passage_id == null)
-                                                const allBankQuestions = [
-                                                    ...standaloneQuestions,
-                                                    ...passageQuestionsWithText
-                                                ]
-                                                const selectedQuestions = allBankQuestions
-                                                    .filter((q: any) => selectedBankIds.has(q.id))
-                                                    .map((q: any, idx: number) => ({
-                                                        question_text: q.question_text,
-                                                        question_type: q.question_type,
-                                                        options: q.options,
-                                                        correct_answer: q.correct_answer,
-                                                        difficulty: q.difficulty || 'MEDIUM',
-                                                        points: 10,
-                                                        order_index: questions.length + idx,
-                                                        passage_text: q.passage_text || null,
-                                                        passage_audio_url: q.passage_audio_url || null,
-                                                        teacher_hots_claim: q.teacher_hots_claim || false,
-                                                        // Inherit approved status from bank soal (skip re-review)
-                                                        bank_status: q.status
-                                                    }))
-
-                                                await fetch(`/api/exams/${examId}/questions`, {
-                                                    method: 'POST',
-                                                    headers: { 'Content-Type': 'application/json' },
-                                                    body: JSON.stringify({ questions: selectedQuestions })
-                                                })
-
-                                                setSelectedBankIds(new Set())
-                                                setMode('list')
-                                                fetchExam()
-                                            } finally {
-                                                setSaving(false)
-                                            }
-                                        }}
-                                        disabled={saving || selectedBankIds.size === 0}
-                                        loading={saving}
-                                        className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600"
-                                    >
-                                        {saving ? 'Menyimpan...' : `Tambahkan ${selectedBankIds.size} Soal ke Ulangan`}
-                                    </Button>
-                                </div>
-                            </>
-                        )}
-                    </Card>
-                )
-            }
+            {mode === 'bank' && (
+                <BankQuestionPicker
+                    questions={bankQuestions}
+                    passages={bankPassages}
+                    loading={bankLoading}
+                    selectedIds={selectedBankIds}
+                    onSelectedIdsChange={setSelectedBankIds}
+                    onClose={() => setMode('list')}
+                    onConfirm={handleAddBankQuestions}
+                    saving={saving}
+                    targetLabel="Ulangan"
+                />
+            )}
 
                 </div>
             )}

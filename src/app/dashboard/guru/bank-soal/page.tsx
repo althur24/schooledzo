@@ -12,6 +12,8 @@ import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import FilterSelect from '@/components/FilterSelect'
 import Pagination from '@/components/Pagination'
+import TagInput from '@/components/TagInput'
+import { TagBadge } from '@/components/BankQuestionPicker'
 import HotsToggle from '@/components/HotsToggle'
 import AudioUploadField from '@/components/AudioUploadField'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -49,6 +51,7 @@ interface QuestionBankItem {
     content_format?: 'html' | 'plain'
     source_type?: string
     source_name?: string
+    tags?: string[] | null
 }
 
 interface Subject {
@@ -87,6 +90,7 @@ interface Passage {
         content_format?: 'html' | 'plain'
         source_type?: string
         source_name?: string
+        tags?: string[] | null
     }>
     created_at: string
 }
@@ -101,6 +105,7 @@ interface QuestionFormState {
     image_url: string
     teacher_hots_claim: boolean
     content_format: 'html' | 'plain'
+    tags: string[]
 }
 
 interface PassageFormState {
@@ -148,7 +153,8 @@ const emptyQuestionForm = (): QuestionFormState => ({
     subject_id: '',
     image_url: '',
     teacher_hots_claim: false,
-    content_format: 'html'
+    content_format: 'html',
+    tags: []
 })
 
 const emptyPassageQuestion = (): PassageQuestion => ({
@@ -214,6 +220,11 @@ export default function BankSoalPage() {
     const [passagePage, setPassagePage] = useState(1)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
 
+    // Filter tag (multi-tag, OR)
+    const [selectedTags, setSelectedTags] = useState<string[]>([])
+    // Daftar tag yang sudah dipakai (filter chips + autocomplete)
+    const [availableTags, setAvailableTags] = useState<string[]>([])
+
     // Selection mode for export
     const [selectionMode, setSelectionMode] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -265,6 +276,17 @@ export default function BankSoalPage() {
         const statusParam = searchParams.get('status')
         if (statusParam) setSelectedStatus(statusParam)
     }, [searchParams])
+
+    const fetchTags = () => {
+        fetch('/api/question-bank/tags')
+            .then(r => r.ok ? r.json() : [])
+            .then((d: { tag: string }[]) => setAvailableTags(d.map(t => t.tag)))
+            .catch(() => { })
+    }
+
+    useEffect(() => {
+        fetchTags()
+    }, [])
 
     const fetchData = async () => {
         try {
@@ -372,7 +394,8 @@ export default function BankSoalPage() {
             subject_id: q.subject?.id || '',
             image_url: q.image_url || '',
             teacher_hots_claim: q.teacher_hots_claim || false,
-            content_format: 'html'
+            content_format: 'html',
+            tags: q.tags || []
         })
         setWizardStep(1) // Edit dibuka langsung di langkah isi soal (tipe bisa diubah via Kembali)
         setShowWizard(true)
@@ -440,6 +463,7 @@ export default function BankSoalPage() {
             const data = await res.json().catch(() => ({}))
             if (!res.ok) throw new Error(data.error || 'Gagal menyimpan soal')
             await fetchData()
+            fetchTags()
             if (addAnother && !editingQuestionId) {
                 const keepType = questionForm.question_type
                 const keepSubject = questionForm.subject_id
@@ -586,6 +610,7 @@ export default function BankSoalPage() {
         if (selectedDifficulty && q.difficulty !== selectedDifficulty) return false
         if (selectedType && q.question_type !== selectedType) return false
         if (selectedStatus && q.status !== selectedStatus) return false
+        if (selectedTags.length > 0 && !(q.tags || []).some(t => selectedTags.includes(t))) return false
         if (searchQuery && !q.question_text.toLowerCase().includes(searchQuery.toLowerCase())) return false
         return true
     })
@@ -595,6 +620,7 @@ export default function BankSoalPage() {
         if (selectedDifficulty && !p.questions?.some(q => q.difficulty === selectedDifficulty)) return false
         if (selectedType && !p.questions?.some(q => q.question_type === selectedType)) return false
         if (selectedStatus && !p.questions?.some(q => q.status === selectedStatus)) return false
+        if (selectedTags.length > 0 && !p.questions?.some(q => (q.tags || []).some(t => selectedTags.includes(t)))) return false
         if (searchQuery) {
             const passageMatch = p.passage_text.toLowerCase().includes(searchQuery.toLowerCase())
             const titleMatch = p.title?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -647,6 +673,57 @@ export default function BankSoalPage() {
         if (newSet.has(id)) newSet.delete(id)
         else newSet.add(id)
         setSelectedPassageIds(newSet)
+    }
+
+    // ─── Bulk actions (tag massal & hapus massal) — berlaku untuk soal satuan terpilih ───
+    const [showBulkTagModal, setShowBulkTagModal] = useState(false)
+    const [bulkTagMode, setBulkTagMode] = useState<'add_tags' | 'remove_tags' | 'set_tags'>('add_tags')
+    const [bulkTagForm, setBulkTagForm] = useState<string[]>([])
+    const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
+
+    const openBulkTagModal = (mode: 'add_tags' | 'remove_tags' | 'set_tags') => {
+        setBulkTagMode(mode)
+        setBulkTagForm([])
+        setShowBulkTagModal(true)
+    }
+
+    const handleBulkTag = async () => {
+        if (selectedIds.size === 0 || bulkTagForm.length === 0) return
+        setSaving(true)
+        try {
+            const res = await fetch('/api/question-bank/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: bulkTagMode, ids: Array.from(selectedIds), tags: bulkTagForm })
+            })
+            if (!res.ok) throw new Error('Gagal memperbarui tag')
+            await fetchData()
+            fetchTags()
+            setShowBulkTagModal(false)
+            showToast(`Tag ${selectedIds.size} soal berhasil diperbarui`, 'success')
+        } catch (error: any) {
+            showToast(error?.message || 'Gagal memperbarui tag')
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.size === 0) return
+        setDeleting(true)
+        try {
+            const res = await fetch(`/api/question-bank?ids=${Array.from(selectedIds).join(',')}`, { method: 'DELETE' })
+            if (!res.ok) throw new Error('Gagal menghapus soal')
+            await fetchData()
+            fetchTags()
+            setSelectedIds(new Set())
+            setShowBulkDeleteModal(false)
+            showToast(`${selectedIds.size} soal berhasil dihapus`, 'success')
+        } catch (error: any) {
+            showToast(error?.message || 'Gagal menghapus soal')
+        } finally {
+            setDeleting(false)
+        }
     }
 
     // ─── Export Word (.doc) — logika sama persis dengan implementasi lama ───
@@ -973,7 +1050,32 @@ export default function BankSoalPage() {
                         ]}
                     />
                 </div>
-                {(searchQuery || selectedSubject || selectedDifficulty || selectedType || selectedStatus) && (
+                {availableTags.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs font-bold text-text-secondary">Tag:</span>
+                        {availableTags.slice(0, 20).map((tag) => (
+                            <button
+                                key={tag}
+                                onClick={() => { setSelectedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]); resetPages() }}
+                                className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer ${selectedTags.includes(tag)
+                                    ? 'bg-primary text-white border-primary'
+                                    : 'bg-secondary/10 text-text-secondary border-secondary/20 hover:border-primary/40 hover:text-primary'
+                                    }`}
+                            >
+                                #{tag}
+                            </button>
+                        ))}
+                        {selectedTags.length > 0 && (
+                            <button
+                                onClick={() => { setSelectedTags([]); resetPages() }}
+                                className="px-2.5 py-1 text-xs font-medium rounded-full border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+                            >
+                                Hapus Filter Tag
+                            </button>
+                        )}
+                    </div>
+                )}
+                {(searchQuery || selectedSubject || selectedDifficulty || selectedType || selectedStatus || selectedTags.length > 0) && (
                     <span className="text-xs text-text-secondary">
                         Ditemukan: {filteredQuestions.length} soal, {filteredPassages.length} bacaan
                     </span>
@@ -1042,6 +1144,9 @@ export default function BankSoalPage() {
                                                     <SourceBadge source={q.source_type} sourceName={q.source_name} />
                                                     <QuestionStatusBadge status={q.status} aiReviewEnabled={aiReviewEnabled} />
                                                     {aiReviewEnabled && q.teacher_hots_claim && <HotsBadge />}
+                                                    {(q.tags || []).map((t: string) => (
+                                                        <TagBadge key={t} tag={t} />
+                                                    ))}
                                                     {q.subject && (
                                                         <span className="inline-flex items-center px-2 py-0.5 text-xs rounded-full font-medium border bg-secondary/10 text-text-secondary border-secondary/20">
                                                             {q.subject.name}
@@ -1223,6 +1328,9 @@ export default function BankSoalPage() {
                                                                 <SourceBadge source={pq.source_type} sourceName={pq.source_name} />
                                                                 <QuestionStatusBadge status={pq.status} aiReviewEnabled={aiReviewEnabled} />
                                                                 {aiReviewEnabled && pq.teacher_hots_claim && <HotsBadge />}
+                                                                {(pq.tags || []).map((t: string) => (
+                                                                    <TagBadge key={t} tag={t} />
+                                                                ))}
                                                             </div>
                                                             <SmartText text={pq.question_text} className="text-text-main dark:text-white text-sm" />
                                                             <div className="mt-2">
@@ -1296,13 +1404,42 @@ export default function BankSoalPage() {
 
             {/* Bulk bar melayang (mode seleksi) */}
             {selectionMode && (
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-white dark:bg-surface-dark border border-secondary/20 rounded-2xl shadow-2xl shadow-primary/20 animate-in fade-in slide-in-from-bottom-3 duration-300">
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-wrap items-center justify-center gap-2 px-5 py-3 bg-white dark:bg-surface-dark border border-secondary/20 rounded-2xl shadow-2xl shadow-primary/20 animate-in fade-in slide-in-from-bottom-3 duration-300">
                     <span className="text-sm font-bold text-text-main dark:text-white whitespace-nowrap">
                         {totalSelected} dipilih
                     </span>
                     <Button size="sm" variant="ghost" onClick={toggleSelectAll}>
                         Pilih Semua
                     </Button>
+                    {selectedIds.size > 0 && (
+                        <>
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => openBulkTagModal('add_tags')}
+                                disabled={saving}
+                            >
+                                + Tag
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => openBulkTagModal('remove_tags')}
+                                disabled={saving}
+                            >
+                                − Tag
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="danger"
+                                onClick={() => setShowBulkDeleteModal(true)}
+                                disabled={deleting}
+                                icon={<Delete set="bold" primaryColor="currentColor" size={16} />}
+                            >
+                                Hapus
+                            </Button>
+                        </>
+                    )}
                     <Button
                         size="sm"
                         onClick={() => setShowExportConfirm(true)}
@@ -1316,6 +1453,44 @@ export default function BankSoalPage() {
                     </Button>
                 </div>
             )}
+
+            {/* Modal tag massal */}
+            <Modal
+                open={showBulkTagModal}
+                onClose={() => setShowBulkTagModal(false)}
+                title={bulkTagMode === 'add_tags' ? `Tambah Tag — ${selectedIds.size} Soal` : bulkTagMode === 'remove_tags' ? `Hapus Tag — ${selectedIds.size} Soal` : `Atur Tag — ${selectedIds.size} Soal`}
+            >
+                <div className="space-y-4">
+                    <p className="text-sm text-text-secondary">
+                        {bulkTagMode === 'add_tags'
+                            ? 'Tag berikut akan ditambahkan ke semua soal satuan yang dipilih:'
+                            : bulkTagMode === 'remove_tags'
+                                ? 'Tag berikut akan dihapus dari semua soal satuan yang dipilih:'
+                                : 'Semua tag soal terpilih akan diganti dengan tag berikut:'}
+                    </p>
+                    <TagInput
+                        value={bulkTagForm}
+                        onChange={setBulkTagForm}
+                        suggestions={availableTags}
+                    />
+                    <div className="flex justify-end gap-3 pt-2 border-t border-secondary/20">
+                        <Button variant="secondary" onClick={() => setShowBulkTagModal(false)}>Batal</Button>
+                        <Button onClick={handleBulkTag} disabled={saving || bulkTagForm.length === 0} loading={saving}>
+                            {saving ? 'Menyimpan...' : 'Terapkan'}
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Modal hapus massal */}
+            <ConfirmDialog
+                open={showBulkDeleteModal}
+                title="Hapus Soal Terpilih"
+                message={`Yakin ingin menghapus ${selectedIds.size} soal satuan yang dipilih? Tindakan ini tidak bisa dibatalkan.`}
+                confirmLabel="Hapus"
+                onConfirm={handleBulkDelete}
+                onCancel={() => setShowBulkDeleteModal(false)}
+            />
 
             {/* ─── Wizard Tambah/Edit Soal ─── */}
             <Modal
@@ -1432,6 +1607,15 @@ export default function BankSoalPage() {
                                         { value: 'HARD', label: 'Sulit' }
                                     ]}
                                 />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tag Soal <span className="text-text-secondary font-normal">(opsional)</span></label>
+                                <TagInput
+                                    value={questionForm.tags}
+                                    onChange={(tags) => setQuestionForm({ ...questionForm, tags })}
+                                    suggestions={availableTags}
+                                />
+                                <p className="text-xs text-text-secondary mt-1.5">Tag memudahkan pencarian soal di Bank Soal (mis. #pecahan, #aljabar).</p>
                             </div>
                             {aiReviewEnabled && (
                                 <HotsToggle

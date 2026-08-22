@@ -22,6 +22,9 @@ export async function GET(request: NextRequest) {
         const search = request.nextUrl.searchParams.get('search')
         const filterTeacherId = request.nextUrl.searchParams.get('teacher_id')
         const sourceType = request.nextUrl.searchParams.get('source_type')
+        const questionType = request.nextUrl.searchParams.get('question_type')
+        const difficulty = request.nextUrl.searchParams.get('difficulty')
+        const tagsParam = request.nextUrl.searchParams.get('tags')
 
         // Get teacher id if user is GURU
         let currentTeacherId = null
@@ -61,6 +64,23 @@ export async function GET(request: NextRequest) {
 
         if (sourceType) {
             query = query.eq('source_type', sourceType)
+        }
+
+        if (questionType) {
+            query = query.eq('question_type', questionType)
+        }
+
+        if (difficulty) {
+            query = query.eq('difficulty', difficulty)
+        }
+
+        // Filter multi-tag (OR): soal yang punya salah satu tag terpilih ditampilkan.
+        // `ov` = Postgres array overlap, memanfaatkan GIN index idx_question_bank_tags.
+        if (tagsParam) {
+            const tags = tagsParam.split(',').map((t: string) => t.trim()).filter(Boolean)
+            if (tags.length > 0) {
+                query = query.filter('tags', 'ov', `{${tags.join(',')}}`)
+            }
         }
 
         if (search) {
@@ -151,11 +171,32 @@ export async function PUT(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { question_text, question_type, options, correct_answer, difficulty, subject_id, teacher_hots_claim, image_url, content_format } = body
+        const { question_text, question_type, options, correct_answer, difficulty, subject_id, teacher_hots_claim, image_url, content_format, tags } = body
         const id = request.nextUrl.searchParams.get('id') || body.id
 
         if (!id) {
             return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 })
+        }
+
+        // Guru hanya boleh mengubah soal miliknya sendiri
+        const { data: teacher } = await supabase
+            .from('teachers')
+            .select('id')
+            .eq('user_id', user.id)
+            .single()
+        if (!teacher) {
+            return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
+        }
+        const { data: existing } = await supabase
+            .from('question_bank')
+            .select('id, teacher_id')
+            .eq('id', id)
+            .single()
+        if (!existing) {
+            return NextResponse.json({ error: 'Soal tidak ditemukan' }, { status: 404 })
+        }
+        if (existing.teacher_id !== teacher.id) {
+            return NextResponse.json({ error: 'Tidak boleh mengubah soal guru lain' }, { status: 403 })
         }
 
         // Validate correct_answer for objective types
@@ -174,6 +215,7 @@ export async function PUT(request: NextRequest) {
         if (teacher_hots_claim !== undefined) updateData.teacher_hots_claim = teacher_hots_claim
         if (image_url !== undefined) updateData.image_url = image_url || null
         if (content_format !== undefined) updateData.content_format = content_format
+        if (tags !== undefined) updateData.tags = (Array.isArray(tags) ? tags : null)
 
         // Check if AI review is enabled
         const aiEnabled = await isAIReviewEnabled(schoolId)
@@ -386,7 +428,7 @@ export async function POST(request: NextRequest) {
     }
 }
 
-// DELETE from question bank
+// DELETE from question bank (single via ?id=, bulk via ?ids=a,b,c)
 export async function DELETE(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
@@ -398,14 +440,30 @@ export async function DELETE(request: NextRequest) {
         }
 
         const id = request.nextUrl.searchParams.get('id')
-        if (!id) {
+        const idsParam = request.nextUrl.searchParams.get('ids')
+        const ids = idsParam
+            ? idsParam.split(',').map((s: string) => s.trim()).filter(Boolean)
+            : (id ? [id] : [])
+
+        if (ids.length === 0) {
             return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 })
+        }
+
+        // Guru hanya boleh menghapus soal miliknya sendiri
+        const { data: teacher } = await supabase
+            .from('teachers')
+            .select('id')
+            .eq('user_id', user.id)
+            .single()
+        if (!teacher) {
+            return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
         }
 
         const { error } = await supabase
             .from('question_bank')
             .delete()
-            .eq('id', id)
+            .in('id', ids)
+            .eq('teacher_id', teacher.id)
 
         if (error) throw error
 
