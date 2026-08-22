@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
-import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
+import { archivedYearResponse } from '@/lib/academicYear'
 
 // DELETE material
 export async function DELETE(
@@ -18,16 +18,35 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Block writes to archived (COMPLETED) academic years
-        const { data: materialForYear } = await supabase
+        // Ownership + archived year check in one query
+        const { data: material, error: fetchError } = await supabase
             .from('materials')
-            .select('teaching_assignment_id')
+            .select(`
+                id,
+                teaching_assignment:teaching_assignments(
+                    teacher:teachers(user_id),
+                    academic_year:academic_years(status)
+                )
+            `)
             .eq('id', id)
             .single()
-        if (materialForYear?.teaching_assignment_id) {
-            const yearStatus = await getYearStatusByTA(materialForYear.teaching_assignment_id)
-            if (yearStatus === 'COMPLETED') return archivedYearResponse()
+
+        if (fetchError || !material) {
+            // PGRST116 = no rows found; anything else is a real query failure
+            if (fetchError && fetchError.code !== 'PGRST116') throw fetchError
+            return NextResponse.json({ error: 'Materi tidak ditemukan' }, { status: 404 })
         }
+
+        const ta: any = material.teaching_assignment
+        const ownerUserId = Array.isArray(ta?.teacher) ? ta.teacher[0]?.user_id : ta?.teacher?.user_id
+
+        // Guru hanya boleh menghapus materi dari penugasan miliknya sendiri
+        if (user.role === 'GURU' && ownerUserId !== user.id) {
+            return NextResponse.json({ error: 'Anda tidak berhak menghapus materi ini' }, { status: 403 })
+        }
+
+        const yearStatus = Array.isArray(ta?.academic_year) ? ta.academic_year[0]?.status : ta?.academic_year?.status
+        if (yearStatus === 'COMPLETED') return archivedYearResponse()
 
         const { error } = await supabase
             .from('materials')

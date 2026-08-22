@@ -140,9 +140,12 @@ export default function MateriPage() {
                 }
             })
 
+            // Hanya tampilkan materi dari penugasan milik guru ini sendiri (bukan sekadar mapel sama)
+            const myAssignmentIds = new Set(validAssignments.map(a => a.id))
             validMaterials.forEach((m: Material) => {
+                const taId = m.teaching_assignment?.id
                 const subjectId = m.teaching_assignment?.subject?.id
-                if (subjectId && groups[subjectId]) {
+                if (taId && myAssignmentIds.has(taId) && subjectId && groups[subjectId]) {
                     groups[subjectId].materials.push(m)
                 }
             })

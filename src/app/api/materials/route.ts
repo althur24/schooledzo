@@ -20,6 +20,18 @@ export async function GET(request: NextRequest) {
         const teachingAssignmentId = request.nextUrl.searchParams.get('teaching_assignment_id')
         const allYears = request.nextUrl.searchParams.get('all_years')
 
+        // Guru hanya melihat materi dari penugasan miliknya sendiri (anti campur antar guru)
+        let teacherId: string | null = null
+        if (user.role === 'GURU') {
+            const { data: teacher } = await supabase
+                .from('teachers')
+                .select('id')
+                .eq('user_id', user.id)
+                .maybeSingle()
+            if (!teacher) return NextResponse.json([])
+            teacherId = teacher.id
+        }
+
         let query = supabase
             .from('materials')
             .select(`
@@ -53,6 +65,10 @@ export async function GET(request: NextRequest) {
                 // No active year: return empty instead of leaking content across years
                 return NextResponse.json([])
             }
+        }
+
+        if (teacherId) {
+            query = query.eq('teaching_assignment.teacher_id', teacherId)
         }
 
         const { data, error } = await query
