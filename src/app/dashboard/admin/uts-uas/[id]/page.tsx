@@ -60,6 +60,9 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     // mengikuti role pemakai agar tidak terlempar ke area peran lain
     const { user } = useAuth()
     const basePath = user?.role === 'GURU' ? '/dashboard/guru/uts-uas' : '/dashboard/admin/uts-uas'
+    // Guru tidak punya halaman list uts-uas lagi (terpadu di halaman ulangan) — tombol
+    // Kembali langsung ke sana, tanpa lewat redirect
+    const backPath = user?.role === 'GURU' ? '/dashboard/guru/ulangan' : '/dashboard/admin/uts-uas'
 
     const [exam, setExam] = useState<ExamDetail | null>(null)
     const [questions, setQuestions] = useState<Question[]>([])
@@ -522,7 +525,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
             {/* Header */}
             <div className="flex items-start justify-between">
                 <div>
-                    <button onClick={() => router.push(basePath)} className="flex items-center gap-1 text-sm text-text-secondary hover:text-primary mb-2 transition-colors">
+                    <button onClick={() => router.push(backPath)} className="flex items-center gap-1 text-sm text-text-secondary hover:text-primary mb-2 transition-colors">
                         <ArrowLeft className="w-4 h-4" /> Kembali
                     </button>
                     <div className="flex items-center gap-3">

@@ -243,7 +243,7 @@ export async function PUT(
                                     type: 'UJIAN_RESMI',
                                     title: teacherTitle,
                                     message: teacherMessage,
-                                    link: '/dashboard/guru/uts-uas'
+                                    link: '/dashboard/guru/ulangan'
                                 }))
                             )
                         }

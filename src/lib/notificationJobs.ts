@@ -214,7 +214,7 @@ async function sendExamReminders(user: AuthUser, counter: Counter) {
                             type: 'EXAM_REMINDER',
                             title: `⏰ ${label} Segera: ${exam.title}`,
                             message: `${(exam as any).subject?.name || ''} — Mulai: ${startStr}`,
-                            link: '/dashboard/siswa/uts-uas'
+                            link: '/dashboard/siswa/ulangan'
                         })
                         counter.inserts++
                     }
@@ -266,7 +266,7 @@ async function sendScheduledExamNotifications(user: AuthUser, counter: Counter) 
                             type: 'UJIAN_RESMI',
                             title: `📅 ${label} Dijadwalkan: ${exam.title}`,
                             message: `${(exam as any).subject?.name || ''} — Dimulai pada: ${startStr}`,
-                            link: '/dashboard/siswa/uts-uas'
+                            link: '/dashboard/siswa/ulangan'
                         })
                         counter.inserts++
                     }
@@ -338,7 +338,7 @@ async function sendTeacherExamReminders(user: AuthUser, counter: Counter) {
                                     type: 'EXAM_REMINDER',
                                     title: `⏰ ${label} Segera: ${exam.title}`,
                                     message: `${(exam as any).subject?.name || ''} — Mulai: ${startStr}`,
-                                    link: '/dashboard/guru/uts-uas'
+                                    link: '/dashboard/guru/ulangan'
                                 })
                                 counter.inserts++
                             }
@@ -381,7 +381,7 @@ async function sendTeacherExamReminders(user: AuthUser, counter: Counter) {
                                     type: 'UJIAN_RESMI',
                                     title: dimulaiTitle,
                                     message: `${(exam as any).subject?.name || ''} — Siswa sedang mengerjakan sejak ${startStr}`,
-                                    link: '/dashboard/guru/uts-uas'
+                                    link: '/dashboard/guru/ulangan'
                                 })
                                 counter.inserts++
                             }

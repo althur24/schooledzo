@@ -759,7 +759,7 @@ export default function GuruUlanganPage() {
                                                 {/* Button footer — inside card but with its own padding */}
                                                 <div className="px-5 pb-5 flex flex-col gap-2">
                                                     {status.label === 'Berlangsung' && (
-                                                        <Link href={`/dashboard/guru/uts-uas/${exam.id}/monitor?type=ulangan`}>
+                                                        <Link href={`/dashboard/guru/ulangan/${exam.id}/monitor`}>
                                                             <Button variant="secondary" size="sm" className="w-full justify-center text-red-600 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 border-red-200 dark:border-red-800/50 gap-1.5">
                                                                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" /> Monitor Live
                                                             </Button>
