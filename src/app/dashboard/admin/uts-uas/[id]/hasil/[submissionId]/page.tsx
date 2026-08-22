@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, use } from 'react'
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import SmartText from '@/components/SmartText'
 import PassageBlock from '@/components/PassageBlock'
 import GradingAnswerDisplay from '@/components/GradingAnswerDisplay'
@@ -16,7 +16,10 @@ interface Answer {
     answer: string
     is_correct?: boolean | null
     points_earned?: number | null
-    question?: Question // joined from API
+    // Mode ulangan: score/feedback (bukan points_earned), tanpa join question per answer
+    score?: number | null
+    feedback?: string
+    question?: Question // joined from API (official)
 }
 
 interface Question {
@@ -44,17 +47,25 @@ interface SubmissionDetail {
     }
     exam: {
         title: string
+        questions?: Question[] // mode ulangan: soal di-join di exam
     }
 }
 
-export default function AdminUtsUasGradingPage() {
-    const params = useParams()
+export default function AdminUtsUasGradingPage({ params, searchParams }: {
+    params: Promise<{ id: string, submissionId: string }>
+    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
+    const { id: examId, submissionId } = use(params)
+    const spRaw = use(searchParams ?? Promise.resolve({}))
     const router = useRouter()
-    const examId = params.id as string
-    const submissionId = params.submissionId as string
     // Halaman ini dipakai admin & guru (via wrapper guru/uts-uas/[id]/hasil/[submissionId])
     const { user } = useAuth()
     const basePath = user?.role === 'GURU' ? '/dashboard/guru/uts-uas' : '/dashboard/admin/uts-uas'
+
+    // Mode ulangan (tabel exams): endpoint & format payload berbeda dari official
+    const isUlangan = (spRaw as { type?: string } | undefined)?.type === 'ulangan'
+    const submissionsApi = isUlangan ? '/api/exam-submissions' : '/api/official-exam-submissions'
+    const typeParam = isUlangan ? '?type=ulangan' : ''
 
     const [submission, setSubmission] = useState<SubmissionDetail | null>(null)
     // Extracted & deduplicated questions from answers[].question
@@ -71,24 +82,30 @@ export default function AdminUtsUasGradingPage() {
 
     const fetchData = async () => {
         try {
-            const res = await fetch(`/api/official-exam-submissions/${submissionId}`)
+            const res = await fetch(`${submissionsApi}/${submissionId}`)
             const data = await res.json()
             // Normalize answers to always be an array
             const answers: Answer[] = Array.isArray(data.answers) ? data.answers : []
             setSubmission({ ...data, answers })
 
-            // Extract questions from each answer's joined `question` field (deduplicated)
             const questionMap = new Map<string, Question>()
             const initialGrades: Record<string, { score: number }> = {}
 
-            answers.forEach((ans: any) => {
-                if (ans.question) {
-                    questionMap.set(ans.question.id, ans.question as Question)
-                }
-                initialGrades[ans.question_id] = {
-                    score: ans.points_earned ?? 0
-                }
-            })
+            if (isUlangan) {
+                // Mode ulangan: soal di-join di exam.questions, skor di field `score`
+                (data.exam?.questions || []).forEach((q: Question) => questionMap.set(q.id, q))
+                answers.forEach((ans: any) => {
+                    initialGrades[ans.question_id] = { score: ans.score ?? 0 }
+                })
+            } else {
+                // Official: soal di-join per answer, skor di field `points_earned`
+                answers.forEach((ans: any) => {
+                    if (ans.question) {
+                        questionMap.set(ans.question.id, ans.question as Question)
+                    }
+                    initialGrades[ans.question_id] = { score: ans.points_earned ?? 0 }
+                })
+            }
 
             // Sort by order_index
             const sortedQuestions = Array.from(questionMap.values()).sort(
@@ -118,22 +135,46 @@ export default function AdminUtsUasGradingPage() {
         setSaving(true)
 
         try {
-            // Reconstruct payload for the API
-            const gradesPayload = submission.answers.map(ans => {
-                const grade = grades[ans.question_id]
-                const currentScore = grade ? grade.score : (ans.points_earned || 0)
+            let response: Response
+            if (isUlangan) {
+                // API exams: { answers: [{question_id, score, ...}], is_graded }
+                let totalScore = 0
+                const answersPayload = submission.answers.map(ans => {
+                    const grade = grades[ans.question_id]
+                    const currentScore = grade ? grade.score : (ans.score || 0)
+                    totalScore += currentScore
+                    return {
+                        ...ans,
+                        score: currentScore
+                    }
+                })
+                response = await fetch(`${submissionsApi}/${submissionId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        answers: answersPayload,
+                        total_score: totalScore,
+                        is_graded: true
+                    })
+                })
+            } else {
+                // API official: { grades: [{answer_id, points_earned}] }
+                const gradesPayload = submission.answers.map(ans => {
+                    const grade = grades[ans.question_id]
+                    const currentScore = grade ? grade.score : (ans.points_earned || 0)
 
-                return {
-                    answer_id: ans.id,
-                    points_earned: currentScore
-                }
-            })
+                    return {
+                        answer_id: ans.id,
+                        points_earned: currentScore
+                    }
+                })
 
-            const response = await fetch(`/api/official-exam-submissions/${submissionId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ grades: gradesPayload })
-            })
+                response = await fetch(`${submissionsApi}/${submissionId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ grades: gradesPayload })
+                })
+            }
 
             if (!response.ok) {
                 const errorData = await response.json()
@@ -141,7 +182,8 @@ export default function AdminUtsUasGradingPage() {
             }
 
             alert('Penilaian berhasil disimpan!')
-            router.push(`${basePath}/${examId}`)
+            // Kembali ke tab Hasil di halaman detail (#hasil dibaca saat mount)
+            router.push(`${basePath}/${examId}${typeParam}#hasil`)
         } catch (error: any) {
             console.error('Error saving:', error)
             alert(error.message || 'Gagal menyimpan penilaian')
@@ -166,7 +208,7 @@ export default function AdminUtsUasGradingPage() {
                 <PageHeader
                     title={`Penilaian: ${submission.student.user.full_name}`}
                     subtitle={`${submission.exam.title} • ${submission.violation_count > 0 ? `⚠️ ${submission.violation_count} Pelanggaran` : ''}`}
-                    backHref={`${basePath}/${examId}`}
+                    backHref={`${basePath}/${examId}${typeParam}`}
                     action={
                         <div className="text-right">
                             <span className="text-2xl md:text-3xl font-bold text-primary">
@@ -259,7 +301,7 @@ export default function AdminUtsUasGradingPage() {
             {/* Save Action Sticky Footer */}
             <div className="fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-surface-dark/95 backdrop-blur border-t border-secondary/10 dark:border-white/5 p-4 z-20">
                 <div className="max-w-4xl mx-auto flex items-center justify-end gap-4">
-                    <Link href={`${basePath}/${examId}`}>
+                    <Link href={`${basePath}/${examId}${typeParam}`}>
                         <Button variant="secondary">Batal</Button>
                     </Link>
                     <Button

@@ -38,6 +38,15 @@ interface ExamDetail {
     is_remedial?: boolean
     remedial_for_id?: string | null
     allowed_student_ids?: string[] | null
+    // Mode ulangan (tabel exams) — bentuk data berbeda dari official_exams
+    pending_publish?: boolean
+    teaching_assignment?: {
+        id: string
+        teacher?: { id: string; user?: { full_name: string } }
+        subject?: { id: string; name: string; kkm?: number }
+        class?: { id: string; name: string; school_level?: string; grade_level?: number }
+        academic_year?: { id: string; name: string }
+    }
 }
 
 interface Question {
@@ -53,8 +62,12 @@ interface Question {
 type TabType = 'soal' | 'pengaturan' | 'hasil' | 'monitor'
 type SoalMode = 'list' | 'manual' | 'clean' | 'bank'
 
-export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default function AdminUtsUasDetailPage({ params, searchParams }: {
+    params: Promise<{ id: string }>
+    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
     const { id: examId } = use(params)
+    const spRaw = use(searchParams ?? Promise.resolve({}))
     const router = useRouter()
     // Editor ini dipakai admin & guru (via wrapper guru/uts-uas/[id]) — link internal
     // mengikuti role pemakai agar tidak terlempar ke area peran lain
@@ -64,9 +77,18 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     // Kembali langsung ke sana, tanpa lewat redirect
     const backPath = user?.role === 'GURU' ? '/dashboard/guru/ulangan' : '/dashboard/admin/uts-uas'
 
+    // Mode ulangan (tabel exams, dikelola guru): semua endpoint & shape data di-switch
+    // mengikuti pola ?type=ulangan yang sudah ada di halaman monitor
+    const isUlangan = (spRaw as { type?: string } | undefined)?.type === 'ulangan'
+    const examApi = isUlangan ? '/api/exams' : '/api/official-exams'
+    const submissionsApi = isUlangan ? '/api/exam-submissions' : '/api/official-exam-submissions'
+    const typeParam = isUlangan ? '?type=ulangan' : ''
+
     const [exam, setExam] = useState<ExamDetail | null>(null)
     const [questions, setQuestions] = useState<Question[]>([])
     const [loading, setLoading] = useState(true)
+    // Deep-link ?...#hasil dari kartu list — langsung buka tab Hasil.
+    // Dibaca di useEffect (bukan initializer) agar aman dari hydration mismatch.
     const [activeTab, setActiveTab] = useState<TabType>('soal')
     const [saving, setSaving] = useState(false)
     const [soalMode, setSoalMode] = useState<SoalMode>('list')
@@ -141,9 +163,15 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     const totalPoints = questions.reduce((sum, q) => sum + (q.points || 0), 0)
     const getDefaultPoints = () => Math.floor(100 / (questions.length + 1))
 
+    // Bentuk data ulangan vs official: subject/class dari teaching_assignment
+    const examSubject = isUlangan ? (exam as any)?.teaching_assignment?.subject : (exam as any)?.subject
+    const examClass = isUlangan ? (exam as any)?.teaching_assignment?.class : null
+    const examTeacherName = isUlangan ? (exam as any)?.teaching_assignment?.teacher?.user?.full_name : null
+
     const getStudentKkm = (student: any) => {
-        const baseKkm = (exam?.subject as any)?.kkm || 75;
-        const studentClass = allClasses.find(c => c.id === student?.class_id);
+        const baseKkm = examSubject?.kkm || 75;
+        // Ulangan: satu kelas per TA; official: cari kelas dari student.class_id
+        const studentClass = isUlangan ? examClass : allClasses.find(c => c.id === student?.class_id);
         if (studentClass && studentClass.school_level && studentClass.grade_level) {
             const granular = granularKkms.find((k: any) => k.school_level === studentClass.school_level && k.grade_level === studentClass.grade_level);
             if (granular) return granular.kkm;
@@ -170,7 +198,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
 
     const fetchExam = useCallback(async () => {
         try {
-            const res = await fetch(`/api/official-exams/${examId}`)
+            const res = await fetch(`${examApi}/${examId}`)
             const data = await res.json()
             setExam(data)
             setSettingsForm({
@@ -183,9 +211,10 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                 max_violations: data.max_violations || 3,
                 target_class_ids: data.target_class_ids || []
             })
-            if (data.subject?.id) {
+            const subjectId = isUlangan ? data.teaching_assignment?.subject?.id : data.subject?.id
+            if (subjectId) {
                 try {
-                    const kkmRes = await fetch(`/api/subject-kkm?subject_id=${data.subject.id}`)
+                    const kkmRes = await fetch(`/api/subject-kkm?subject_id=${subjectId}`)
                     if (kkmRes.ok) {
                         setGranularKkms(await kkmRes.json())
                     }
@@ -198,17 +227,17 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
         } finally {
             setLoading(false)
         }
-    }, [examId])
+    }, [examId, examApi, isUlangan])
 
     const fetchQuestions = useCallback(async () => {
         try {
-            const res = await fetch(`/api/official-exams/${examId}/questions`)
+            const res = await fetch(`${examApi}/${examId}/questions`)
             const data = await res.json()
             setQuestions(Array.isArray(data) ? data : [])
         } catch (error) {
             console.error('Error:', error)
         }
-    }, [examId])
+    }, [examId, examApi])
 
     useEffect(() => {
         fetchExam()
@@ -219,11 +248,18 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
         }).catch(() => {})
     }, [fetchExam, fetchQuestions])
 
+    // Deep-link #hasil (dari kartu list / redirect setelah koreksi) — setelah mount,
+    // hash sudah pasti terbaca (initializer state berisiko race saat client-side nav)
+    useEffect(() => {
+        if (window.location.hash === '#hasil') setActiveTab('hasil')
+    }, [])
+
     const fetchResults = async () => {
         setResultsLoading(true)
         try {
-            let url = `/api/official-exam-submissions?exam_id=${examId}`
-            if (resultsClassFilter) url += `&class_id=${resultsClassFilter}`
+            // API exams tidak punya filter class_id — ulangan satu kelas per TA, cukup fetch semua
+            let url = `${submissionsApi}?exam_id=${examId}`
+            if (!isUlangan && resultsClassFilter) url += `&class_id=${resultsClassFilter}`
             const res = await fetch(url)
             const data = await res.json()
             setSubmissions(Array.isArray(data) ? data : [])
@@ -234,6 +270,33 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     useEffect(() => {
         if (activeTab === 'hasil') fetchResults()
     }, [activeTab, resultsClassFilter])
+
+    // Abstraksi perbedaan format API soal: official-exams vs exams
+    // POST: official terima objek tunggal / {questions}; exams HANYA {questions: [...]}
+    const postQuestions = (payload: any) => {
+        if (isUlangan) {
+            const arr = Array.isArray(payload) ? payload : (payload.questions || [payload])
+            return fetch(`${examApi}/${examId}/questions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ questions: arr })
+            })
+        }
+        return fetch(`${examApi}/${examId}/questions`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+    }
+
+    // DELETE: official pakai body; exams pakai query param
+    const deleteQuestion = (questionId: string) => {
+        if (isUlangan) {
+            return fetch(`${examApi}/${examId}/questions?question_id=${questionId}`, { method: 'DELETE' })
+        }
+        return fetch(`${examApi}/${examId}/questions`, {
+            method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question_id: questionId })
+        })
+    }
 
 
     const handleDownloadExcel = () => {
@@ -256,7 +319,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                 'No': index + 1,
                 'Nama Siswa': sub.student?.user?.full_name || '-',
                 'NIS': sub.student?.nis || '-',
-                'Kelas': allClasses.find(c => c.id === sub.student?.class_id)?.name || '-',
+                'Kelas': isUlangan ? (examClass?.name || '-') : (allClasses.find(c => c.id === sub.student?.class_id)?.name || '-'),
                 'Skor': `${sub.total_score || 0}/${sub.max_score || 0}`,
                 'Nilai': percentage,
                 'Pelanggaran': sub.violation_count || 0,
@@ -285,11 +348,11 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
         const wb = XLSX.utils.book_new()
         XLSX.utils.book_append_sheet(wb, ws, "Hasil_Ujian")
 
-        const filterClassName = resultsClassFilter 
-            ? allClasses.find(c => c.id === resultsClassFilter)?.name?.replace(/ /g, '_') || 'Filter'
+        const filterClassName = resultsClassFilter
+            ? (isUlangan ? examClass?.name : allClasses.find(c => c.id === resultsClassFilter)?.name)?.replace(/ /g, '_') || 'Filter'
             : 'Semua_Kelas'
 
-        const fileName = `Hasil_${exam.exam_type}_${exam.title.replace(/ /g, '_')}_${filterClassName}.xlsx`
+        const fileName = `Hasil_${isUlangan ? 'Ulangan' : exam.exam_type}_${exam.title.replace(/ /g, '_')}_${filterClassName}.xlsx`
         
         XLSX.writeFile(wb, fileName)
     }
@@ -301,13 +364,32 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
         if (newActive && questions.length === 0) { showToast('Tambahkan soal dulu!', 'warning'); return }
         setSaving(true)
         try {
-            const res = await fetch(`/api/official-exams/${examId}`, {
+            const res = await fetch(`${examApi}/${examId}`, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ is_active: newActive })
             })
             if (res.ok) {
                 const updated = await res.json()
-                setExam(prev => prev ? { ...prev, is_active: updated.is_active } : null)
+                // Merge skalar saja — respons PUT exams membawa teaching_assignment
+                // versi tipis (class_id + subject.name) yang akan menimpa data guru/kelas
+                // lengkap di state bila di-spread mentah
+                setExam(prev => prev ? {
+                    ...prev,
+                    is_active: updated.is_active ?? prev.is_active,
+                    ...(updated.pending_publish !== undefined && { pending_publish: updated.pending_publish }),
+                    ...(updated.results_released !== undefined && { results_released: updated.results_released }),
+                } : null)
+                // Gerbang khas ulangan: publish ditahan sampai semua soal selesai direview
+                if (isUlangan && newActive) {
+                    if (updated.pending_publish) {
+                        showToast('Publish ditahan — ada soal yang masih menunggu review. Ulangan otomatis terkirim setelah semua soal disetujui.', 'warning')
+                    } else {
+                        showToast('Ulangan berhasil dipublish!', 'success')
+                    }
+                }
+            } else if (isUlangan) {
+                const err = await res.json().catch(() => null)
+                showToast(err?.error || 'Gagal mempublikasikan ulangan.', 'error')
             }
         } finally { setSaving(false) }
     }
@@ -326,10 +408,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     passage_audio_url: passageAudioUrl || null, teacher_hots_claim: q.teacher_hots_claim || false,
                     text_direction: q.text_direction || 'ltr', content_format: 'html'
                 }))
-                await fetch(`/api/official-exams/${examId}/questions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ questions: questionsToSave })
-                })
+                await postQuestions({ questions: questionsToSave })
                 setPassageText(''); setPassageAudioUrl('')
                 setPassageQuestions([{ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: null, passage_text: null, text_direction: 'ltr', content_format: 'html' }])
                 setIsPassageMode(false); setSoalMode('list'); fetchQuestions()
@@ -339,16 +418,13 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
         if (!manualForm.question_text) return
         setSaving(true)
         try {
-            await fetch(`/api/official-exams/${examId}/questions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    question_text: manualForm.question_text, question_type: manualForm.question_type,
-                    options: ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(manualForm.question_type) ? manualForm.options : null,
-                    correct_answer: manualForm.correct_answer || null, points: manualForm.points,
-                    difficulty: manualForm.difficulty, teacher_hots_claim: manualForm.teacher_hots_claim || false,
-                    order_index: questions.length, text_direction: manualForm.text_direction || 'ltr',
-                    content_format: 'html'
-                })
+            await postQuestions({
+                question_text: manualForm.question_text, question_type: manualForm.question_type,
+                options: ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(manualForm.question_type) ? manualForm.options : null,
+                correct_answer: manualForm.correct_answer || null, points: manualForm.points,
+                difficulty: manualForm.difficulty, teacher_hots_claim: manualForm.teacher_hots_claim || false,
+                order_index: questions.length, text_direction: manualForm.text_direction || 'ltr',
+                content_format: 'html'
             })
             setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false, text_direction: 'ltr', content_format: 'html' })
             setSoalMode('list'); fetchQuestions()
@@ -361,10 +437,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
             title: 'Hapus Soal',
             message: 'Yakin ingin menghapus soal ini?',
             onConfirm: async () => {
-                await fetch(`/api/official-exams/${examId}/questions`, {
-                    method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question_id: questionId })
-                })
+                await deleteQuestion(questionId)
                 fetchQuestions()
                 setConfirmDialog(null)
             }
@@ -379,10 +452,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
             message: `Yakin ingin menghapus ${selectedQuestionIds.size} soal?`,
             onConfirm: async () => {
                 for (const qId of selectedQuestionIds) {
-                    await fetch(`/api/official-exams/${examId}/questions`, {
-                        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ question_id: qId })
-                    })
+                    await deleteQuestion(qId)
                 }
                 setSelectedQuestionIds(new Set()); setIsBulkSelectMode(false); fetchQuestions()
                 setConfirmDialog(null)
@@ -395,7 +465,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
         if (!editQuestionForm || !editingQuestionId) return
         setSaving(true)
         try {
-            await fetch(`/api/official-exams/${examId}/questions`, {
+            await fetch(`${examApi}/${examId}/questions`, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     question_id: editingQuestionId, question_text: editQuestionForm.question_text,
@@ -426,10 +496,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                 order_index: questions.length + idx, passage_text: q.passage_text || null,
                 teacher_hots_claim: q.teacher_hots_claim || false
             }))
-            const res = await fetch(`/api/official-exams/${examId}/questions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ questions: newQuestions })
-            })
+            const res = await postQuestions({ questions: newQuestions })
             if (res.ok) { setSoalMode('list'); fetchQuestions() }
         } finally { setRapihSaving(false) }
     }
@@ -437,7 +504,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
     const handleRapihSaveToBank = async (results: any[]) => {
         setRapihSaving(true)
         try {
-            const subjectId = exam?.subject?.id || null
+            const subjectId = examSubject?.id || null
             const standalone = results.filter((q: any) => !q.passage_text)
             if (standalone.length > 0) {
                 await fetch('/api/question-bank', {
@@ -457,19 +524,31 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
         setSettingsSaving(true)
         try {
             const localDate = new Date(settingsForm.start_time)
-            const res = await fetch(`/api/official-exams/${examId}`, {
+            const res = await fetch(`${examApi}/${examId}`, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     title: settingsForm.title, description: settingsForm.description,
                     start_time: localDate.toISOString(), duration_minutes: settingsForm.duration_minutes,
                     is_randomized: settingsForm.is_randomized, max_violations: settingsForm.max_violations,
                     show_results_immediately: settingsForm.show_results_immediately,
-                    target_class_ids: settingsForm.target_class_ids
+                    // Kelas target hanya dimiliki official (ulangan satu kelas per teaching assignment)
+                    ...(isUlangan ? {} : { target_class_ids: settingsForm.target_class_ids })
                 })
             })
             if (res.ok) {
-                const updated = await res.json()
-                setExam(prev => prev ? { ...prev, ...updated } : null)
+                // Merge skalar saja — respons PUT exams membawa teaching_assignment
+                // tipis yang akan menimpa data guru/kelas lengkap bila di-spread mentah
+                setExam(prev => prev ? {
+                    ...prev,
+                    title: settingsForm.title,
+                    description: settingsForm.description,
+                    start_time: localDate.toISOString(),
+                    duration_minutes: settingsForm.duration_minutes,
+                    is_randomized: settingsForm.is_randomized,
+                    max_violations: settingsForm.max_violations,
+                    show_results_immediately: settingsForm.show_results_immediately,
+                    ...(!isUlangan && { target_class_ids: settingsForm.target_class_ids })
+                } : null)
                 showToast('Pengaturan berhasil disimpan!', 'success')
             }
         } finally { setSettingsSaving(false) }
@@ -480,7 +559,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
         if (!confirm('Apakah Anda yakin ingin membagikan hasil ke siswa sekarang? Siswa akan bisa melihat nilai mereka.')) return
         
         try {
-            const res = await fetch(`/api/official-exams/${examId}`, {
+            const res = await fetch(`${examApi}/${examId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ results_released: true })
@@ -504,7 +583,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
         setQuestions(balanced)
         balanced.forEach(async (q) => {
             if (q.id) {
-                await fetch(`/api/official-exams/${examId}/questions`, {
+                await fetch(`${examApi}/${examId}/questions`, {
                     method: 'PUT', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ question_id: q.id, points: q.points })
                 })
@@ -529,15 +608,28 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         <ArrowLeft className="w-4 h-4" /> Kembali
                     </button>
                     <div className="flex items-center gap-3">
-                        <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'}`}>{exam.exam_type}</span>
+                        {isUlangan ? (
+                            <span className="px-3 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-sm font-bold rounded-full">Ulangan</span>
+                        ) : (
+                            <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'}`}>{exam.exam_type}</span>
+                        )}
                         {exam.is_remedial && (
                             <span className="px-3 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-sm font-bold rounded-full">
                                 REMEDIAL
                             </span>
                         )}
+                        {(exam as any).pending_publish && (
+                            <span className="px-3 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-sm font-bold rounded-full">
+                                ⏳ Menunggu Review
+                            </span>
+                        )}
                         <h1 className="text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
                     </div>
-                    <p className="text-sm text-text-secondary mt-1">{exam.subject?.name} • {exam.target_classes?.length || 0} kelas • {questions.length} soal ({totalPoints} poin)</p>
+                    <p className="text-sm text-text-secondary mt-1">
+                        {isUlangan
+                            ? `${examSubject?.name || '-'} • ${examClass?.name || '-'}${examTeacherName ? ` • ${examTeacherName}` : ''} • ${questions.length} soal (${totalPoints} poin)`
+                            : `${exam.subject?.name} • ${exam.target_classes?.length || 0} kelas • ${questions.length} soal (${totalPoints} poin)`}
+                    </p>
                 </div>
                 <div className="flex items-center gap-3">
                     <Button variant="secondary" onClick={() => setShowPreview(true)} disabled={questions.length === 0}><Eye className="w-4 h-4 mr-1" /> Preview</Button>
@@ -578,7 +670,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                             title={isMonitorDisabled ? 'Aktifkan ujian dulu untuk menggunakan Monitor' : undefined}
                             onClick={() => {
                                 if (tab.key === 'monitor') {
-                                    router.push(`${basePath}/${examId}/monitor`);
+                                    router.push(`${basePath}/${examId}/monitor${typeParam}`);
                                     return;
                                 }
                                 setActiveTab(tab.key);
@@ -611,7 +703,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                         <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0"><Discovery set="bold" primaryColor="currentColor" size={16} /></div>
                                         <div className="text-left"><div className="text-sm font-semibold text-text-main dark:text-white">Rapih AI</div><div className="text-xs text-text-secondary">Rapikan, generate, atau upload soal</div></div>
                                     </button>
-                                    <button onClick={async () => { setShowAddDropdown(false); setSoalMode('bank'); setBankLoading(true); try { const subjectId = exam?.subject?.id || ''; const [qR, pR] = await Promise.all([fetch(`/api/question-bank?subject_id=${subjectId}`), fetch(`/api/passages?subject_id=${subjectId}`)]); setBankQuestions(Array.isArray(await qR.json()) ? await [] : []); const qData = await fetch(`/api/question-bank?subject_id=${subjectId}`).then(r => r.json()); const pData = await fetch(`/api/passages?subject_id=${subjectId}`).then(r => r.json()); setBankQuestions(Array.isArray(qData) ? qData : []); setBankPassages(Array.isArray(pData) ? pData : []) } catch(e) { console.error(e) } finally { setBankLoading(false) } }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors cursor-pointer">
+                                    <button onClick={async () => { setShowAddDropdown(false); setSoalMode('bank'); setBankLoading(true); try { const subjectId = examSubject?.id || ''; const [qR, pR] = await Promise.all([fetch(`/api/question-bank?subject_id=${subjectId}`), fetch(`/api/passages?subject_id=${subjectId}`)]); setBankQuestions(Array.isArray(await qR.json()) ? await [] : []); const qData = await fetch(`/api/question-bank?subject_id=${subjectId}`).then(r => r.json()); const pData = await fetch(`/api/passages?subject_id=${subjectId}`).then(r => r.json()); setBankQuestions(Array.isArray(qData) ? qData : []); setBankPassages(Array.isArray(pData) ? pData : []) } catch(e) { console.error(e) } finally { setBankLoading(false) } }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors cursor-pointer">
                                         <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center flex-shrink-0"><Folder set="bold" primaryColor="currentColor" size={16} /></div>
                                         <div className="text-left"><div className="text-sm font-semibold text-text-main dark:text-white">Bank Soal</div><div className="text-xs text-text-secondary">Pilih dari soal tersimpan</div></div>
                                     </button>
@@ -681,7 +773,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                         </div>
                                         <div className="flex flex-col gap-3 items-end border-l border-secondary/10 pl-5">
                                             <div className="flex flex-col items-center">
-                                                <input type="number" value={q.points} onChange={(e) => { const v = parseInt(e.target.value) || 1; setQuestions(questions.map((qq, i) => i === idx ? { ...qq, points: v } : qq)) }} onBlur={async (e) => { if (q.id) { await fetch(`/api/official-exams/${examId}/questions`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: q.id, points: parseInt(e.target.value) || 1 }) }) } }} className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary" min={1} max={100} disabled={exam?.is_active} />
+                                                <input type="number" value={q.points} onChange={(e) => { const v = parseInt(e.target.value) || 1; setQuestions(questions.map((qq, i) => i === idx ? { ...qq, points: v } : qq)) }} onBlur={async (e) => { if (q.id) { await fetch(`${examApi}/${examId}/questions`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: q.id, points: parseInt(e.target.value) || 1 }) }) } }} className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary" min={1} max={100} disabled={exam?.is_active} />
                                                 <span className="text-[10px] uppercase font-bold text-text-secondary mt-1">Poin</span>
                                             </div>
                                             <div className="w-full h-px bg-secondary/10 my-1"></div>
@@ -689,7 +781,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                 imageUrl={q.image_url}
                                                 onImageChange={async (url) => {
                                                     if (q.id) {
-                                                        await fetch(`/api/official-exams/${examId}/questions`, {
+                                                        await fetch(`${examApi}/${examId}/questions`, {
                                                             method: 'PUT',
                                                             headers: { 'Content-Type': 'application/json' },
                                                             body: JSON.stringify({ question_id: q.id, image_url: url })
@@ -768,7 +860,8 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                         </div>
                     </div>
 
-                    {/* Target classes */}
+                    {/* Target classes — hanya official (ulangan satu kelas per teaching assignment) */}
+                    {!isUlangan && (
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas Target ({settingsForm.target_class_ids.length} terpilih)</label>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
@@ -791,6 +884,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                             })}
                         </div>
                     </div>
+                    )}
 
                     <div className="pt-4 border-t border-secondary/10">
                         <Button onClick={handleSaveSettings} loading={settingsSaving} icon={<Save className="w-4 h-4" />}>
@@ -806,16 +900,19 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     {/* Class/Action Bar */}
                     <div className="flex justify-between items-center bg-white dark:bg-surface-dark border border-secondary/20 p-3 rounded-xl shadow-sm">
                         <div className="flex gap-3 items-center">
-                            <select
-                                value={resultsClassFilter}
-                                onChange={(e) => setResultsClassFilter(e.target.value)}
-                                className="px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm font-bold"
-                            >
-                                <option value="">Semua Kelas</option>
-                                {(exam.target_classes || []).map(c => (
-                                    <option key={c.id} value={c.id}>{c.name}</option>
-                                ))}
-                            </select>
+                            {/* Ulangan: satu kelas per TA — filter kelas tidak relevan */}
+                            {!isUlangan && (
+                                <select
+                                    value={resultsClassFilter}
+                                    onChange={(e) => setResultsClassFilter(e.target.value)}
+                                    className="px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm font-bold"
+                                >
+                                    <option value="">Semua Kelas</option>
+                                    {(exam.target_classes || []).map(c => (
+                                        <option key={c.id} value={c.id}>{c.name}</option>
+                                    ))}
+                                </select>
+                            )}
                             <span className="text-sm font-medium text-text-secondary border-l border-secondary/20 pl-3">{submissions.length} submission</span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -836,8 +933,8 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                     {submissions.length > 0 && (
                         <AssessmentAnalytics
                             assessmentId={examId}
-                            assessmentType="official-exam"
-                            classId={resultsClassFilter || undefined}
+                            assessmentType={isUlangan ? 'exam' : 'official-exam'}
+                            classId={!isUlangan ? (resultsClassFilter || undefined) : undefined}
                         />
                     )}
 
@@ -916,7 +1013,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                                                     <td className="px-4 py-3 text-center">
                                                         {sub.is_submitted ? (
                                                             <div className="flex items-center justify-center gap-2">
-                                                                <Link href={`${basePath}/${examId}/hasil/${sub.id}`}>
+                                                                <Link href={`${basePath}/${examId}/hasil/${sub.id}${typeParam}`}>
                                                                     <Button size="sm" variant={sub.is_graded ? 'ghost' : 'primary'} className={!sub.is_graded ? 'bg-gradient-to-r from-blue-600 to-cyan-600' : ''}>
                                                                         {sub.is_graded ? 'Lihat' : 'Koreksi'}
                                                                     </Button>
@@ -1227,7 +1324,7 @@ export default function AdminUtsUasDetailPage({ params }: { params: Promise<{ id
                             )}
                             <div className="flex gap-3 pt-4 border-t border-secondary/20 mt-4">
                                 <Button variant="secondary" onClick={() => { const all = [...bankQuestions.filter((q: any) => q.passage_id == null).map((q: any) => q.id), ...bankPassages.flatMap((p: any) => (p.questions||[]).map((q: any) => q.id))]; selectedBankIds.size === all.length ? setSelectedBankIds(new Set()) : setSelectedBankIds(new Set(all)) }}>Pilih Semua</Button>
-                                <Button onClick={async () => { if (selectedBankIds.size === 0) return; setSaving(true); try { const pQs = bankPassages.flatMap((p: any) => (p.questions||[]).map((q: any) => ({ ...q, passage_text: p.passage_text, passage_audio_url: p.audio_url || null }))); const all = [...bankQuestions.filter((q: any) => q.passage_id == null), ...pQs]; const sel = all.filter((q: any) => selectedBankIds.has(q.id)).map((q: any, idx: number) => ({ question_text: q.question_text, question_type: q.question_type, options: q.options, correct_answer: q.correct_answer, difficulty: q.difficulty || 'MEDIUM', points: 10, order_index: questions.length + idx, passage_text: q.passage_text || null, passage_audio_url: q.passage_audio_url || null, teacher_hots_claim: q.teacher_hots_claim || false, bank_status: q.status })); await fetch(`/api/official-exams/${examId}/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: sel }) }); setSelectedBankIds(new Set()); setSoalMode('list'); fetchQuestions() } finally { setSaving(false) } }} disabled={saving || selectedBankIds.size === 0} loading={saving} className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600">{saving ? 'Menyimpan...' : `Tambahkan ${selectedBankIds.size} Soal`}</Button>
+                                <Button onClick={async () => { if (selectedBankIds.size === 0) return; setSaving(true); try { const pQs = bankPassages.flatMap((p: any) => (p.questions||[]).map((q: any) => ({ ...q, passage_text: p.passage_text, passage_audio_url: p.audio_url || null }))); const all = [...bankQuestions.filter((q: any) => q.passage_id == null), ...pQs]; const sel = all.filter((q: any) => selectedBankIds.has(q.id)).map((q: any, idx: number) => ({ question_text: q.question_text, question_type: q.question_type, options: q.options, correct_answer: q.correct_answer, difficulty: q.difficulty || 'MEDIUM', points: 10, order_index: questions.length + idx, passage_text: q.passage_text || null, passage_audio_url: q.passage_audio_url || null, teacher_hots_claim: q.teacher_hots_claim || false, bank_status: q.status })); await postQuestions({ questions: sel }); setSelectedBankIds(new Set()); setSoalMode('list'); fetchQuestions() } finally { setSaving(false) } }} disabled={saving || selectedBankIds.size === 0} loading={saving} className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600">{saving ? 'Menyimpan...' : `Tambahkan ${selectedBankIds.size} Soal`}</Button>
                             </div>
                         </>
                     )}

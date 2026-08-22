@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { title, description, start_time, duration_minutes, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, show_results_immediately, batch_id } = body
+        const { title, description, start_time, duration_minutes, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, duplicate_from_exam_id, show_results_immediately, batch_id } = body
 
         if (!title || !start_time || duration_minutes === undefined || !teaching_assignment_id) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -180,14 +180,22 @@ export async function POST(request: NextRequest) {
 
         if (error) throw error
 
-        // Handle question duplication if requested for Remedial
-        if (is_remedial && remedial_for_id && duplicate_questions) {
+        // Handle question duplication: remedial (salin dari exam sumber remedial)
+        // atau duplikasi biasa (duplicate_from_exam_id, meniru official-exams/duplicate)
+        const duplicateSourceId = duplicate_from_exam_id || (is_remedial ? remedial_for_id : null)
+        if (duplicate_questions && duplicateSourceId) {
             const { data: originalQuestions, error: fetchError } = await supabase
                 .from('exam_questions')
                 .select('*')
-                .eq('exam_id', remedial_for_id)
+                .eq('exam_id', duplicateSourceId)
 
-            if (!fetchError && originalQuestions && originalQuestions.length > 0) {
+            if (fetchError) {
+                console.error('Error fetching source questions for duplicate:', fetchError)
+                await supabase.from('exams').delete().eq('id', data.id)
+                return NextResponse.json({ error: 'Gagal membaca soal sumber. Duplikasi dibatalkan.' }, { status: 500 })
+            }
+
+            if (originalQuestions && originalQuestions.length > 0) {
                 const newQuestions = originalQuestions.map((q: any) => ({
                     exam_id: data.id,
                     question_text: q.question_text,
@@ -195,10 +203,22 @@ export async function POST(request: NextRequest) {
                     options: q.options,
                     correct_answer: q.correct_answer,
                     points: q.points,
-                    order_index: q.order_index
+                    order_index: q.order_index,
+                    difficulty: q.difficulty,
+                    passage_text: q.passage_text,
+                    passage_audio_url: q.passage_audio_url,
+                    image_url: q.image_url,
+                    status: q.status, // Inherit approval status
+                    teacher_hots_claim: q.teacher_hots_claim,
+                    text_direction: q.text_direction,
+                    content_format: q.content_format
                 }))
                 const { error: duplicateError } = await supabase.from('exam_questions').insert(newQuestions)
-                if (duplicateError) throw duplicateError
+                if (duplicateError) {
+                    console.error('Error inserting duplicated questions:', duplicateError)
+                    await supabase.from('exams').delete().eq('id', data.id)
+                    return NextResponse.json({ error: 'Gagal menyalin soal. Duplikasi dibatalkan.' }, { status: 500 })
+                }
             }
         }
 
@@ -217,7 +237,7 @@ export async function POST(request: NextRequest) {
                             user_id: s.user_id,
                             type: 'REMEDIAL',
                             title: `Remedial Ulangan: ${title}`,
-                            message: `Guru telah membuat ulangan remedial untuk Anda. Mulai: ${startDate}`,
+                            message: `Ulangan remedial telah dibuat untuk Anda. Mulai: ${startDate}`,
                             link: '/dashboard/siswa/ulangan'
                         }))
                     )

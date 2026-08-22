@@ -48,8 +48,8 @@ export async function GET(request: NextRequest) {
         const studentId = request.nextUrl.searchParams.get('student_id')
         const allYears = request.nextUrl.searchParams.get('all_years')
 
-        // Lazy Sweep: Auto-close expired submissions if examId is provided (Teacher View)
-        if (examId && user.role === 'GURU') {
+        // Lazy Sweep: Auto-close expired submissions if examId is provided (Teacher/Admin View)
+        if (examId && (user.role === 'GURU' || user.role === 'ADMIN')) {
             try {
                 const { data: examData } = await supabase
                     .from('exams')
@@ -151,8 +151,8 @@ export async function GET(request: NextRequest) {
 
         let finalData = data || []
 
-        // If filtering by examId and the user is a teacher, fetch remedial submissions and merge by highest score
-        if (examId && user.role === 'GURU') {
+        // If filtering by examId and the user is a teacher/admin, fetch remedial submissions and merge by highest score
+        if (examId && (user.role === 'GURU' || user.role === 'ADMIN')) {
             const { data: remedials } = await supabase
                 .from('exams')
                 .select('id')

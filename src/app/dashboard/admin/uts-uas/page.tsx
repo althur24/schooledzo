@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import { Plus, ChevronDown } from 'react-iconly'
-import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BookOpen, BarChart3, Activity, Copy, RefreshCw } from 'lucide-react'
+import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BookOpen, BarChart3, Copy, RefreshCw } from 'lucide-react'
 
 interface OfficialExam {
     id: string
@@ -56,14 +56,17 @@ export default function AdminUtsUasPage() {
     const [ulanganCounts, setUlanganCounts] = useState<Record<string, { submitted: number; total: number }>>({})
     const [ulanganLoading, setUlanganLoading] = useState(true)
 
-    // Duplicate & Remedial states
+    // Duplicate & Remedial states (dipakai UTS/UAS & Ulangan — source membedakan endpoint)
     const [showDuplicate, setShowDuplicate] = useState(false)
-    const [duplicateExam, setDuplicateExam] = useState<OfficialExam | null>(null)
+    const [duplicateExam, setDuplicateExam] = useState<OfficialExam | any | null>(null)
+    const [duplicateSource, setDuplicateSource] = useState<'official' | 'ulangan'>('official')
     const [duplicateMode, setDuplicateMode] = useState<'BIASA' | 'REMEDIAL'>('BIASA')
     const [duplicating, setDuplicating] = useState(false)
     const [remedialStudents, setRemedialStudents] = useState<any[]>([])
     const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
     const [remedialLoading, setRemedialLoading] = useState(false)
+    // Ulangan remedial: pilihan soal ASLI (disalin) atau BARU (kosong) — ala halaman guru
+    const [ulanganRemedialMethod, setUlanganRemedialMethod] = useState<'ASLI' | 'BARU'>('ASLI')
     const [duplicateForm, setDuplicateForm] = useState({
         title: '',
         start_time: '',
@@ -225,70 +228,131 @@ export default function AdminUtsUasPage() {
         })
     }
 
-    const handleOpenDuplicate = async (exam: OfficialExam, mode: 'BIASA' | 'REMEDIAL') => {
+    const handleDeleteUlangan = (id: string) => {
+        setConfirmDialog({
+            title: 'Hapus Ulangan',
+            message: 'Hapus ulangan ini? Semua soal dan submission akan dihapus.',
+            onConfirm: async () => {
+                const res = await fetch(`/api/exams/${id}`, { method: 'DELETE' })
+                if (res.ok) {
+                    showToast('Ulangan berhasil dihapus', 'success')
+                } else {
+                    const err = await res.json().catch(() => null)
+                    showToast(err?.error || 'Gagal menghapus ulangan', 'error')
+                }
+                fetchUlangan()
+                setConfirmDialog(null)
+            }
+        })
+    }
+
+    const handleOpenDuplicate = async (exam: OfficialExam | any, mode: 'BIASA' | 'REMEDIAL', source: 'official' | 'ulangan' = 'official') => {
         setDuplicateExam(exam)
+        setDuplicateSource(source)
         setDuplicateMode(mode)
         setRemedialStudents([])
         setSelectedStudentIds([])
-        
+        setUlanganRemedialMethod('ASLI')
+
         const pad = (n: number) => n.toString().padStart(2, '0')
         const now = new Date()
         now.setDate(now.getDate() + 1)
         now.setHours(8, 0, 0, 0)
-        
+
         const defaultTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
 
         setDuplicateForm({
             title: mode === 'REMEDIAL' ? `Remedial ${exam.title}` : `Copy of ${exam.title}`,
             start_time: defaultTime,
             duration_minutes: exam.duration_minutes,
-            target_class_ids: exam.target_class_ids
+            target_class_ids: exam.target_class_ids || []
         })
 
         if (mode === 'REMEDIAL') {
             setRemedialLoading(true)
             setShowDuplicate(true)
             try {
-                const res = await fetch(`/api/official-exam-submissions?exam_id=${exam.id}`)
-                if (res.ok) {
-                    const submissions = await res.json()
-                    const baseKkm = exam.subject?.kkm || 75
-                    let granularKkms: any[] = []
-                    
-                    try {
-                        const kkmRes = await fetch(`/api/subject-kkm?subject_id=${exam.subject?.id}`)
-                        if (kkmRes.ok) {
-                            granularKkms = await kkmRes.json()
+                if (source === 'ulangan') {
+                    // Ulangan: submissions dari /api/exam-submissions; kelas dari teaching_assignment
+                    const res = await fetch(`/api/exam-submissions?exam_id=${exam.id}`)
+                    if (res.ok) {
+                        const submissions = await res.json()
+                        const ta = ulanganTA(exam)
+                        const subject = Array.isArray(ta?.subject) ? ta?.subject[0] : ta?.subject
+                        const cls = Array.isArray(ta?.class) ? ta?.class[0] : ta?.class
+                        const baseKkm = subject?.kkm || 75
+                        let granularKkms: any[] = []
+                        try {
+                            const kkmRes = await fetch(`/api/subject-kkm?subject_id=${subject?.id}`)
+                            if (kkmRes.ok) granularKkms = await kkmRes.json()
+                        } catch (e) {
+                            console.error('Failed to fetch granular KKM', e)
                         }
-                    } catch (e) {
-                        console.error('Failed to fetch granular KKM', e)
-                    }
-
-                    const studentsList = submissions.map((sub: any) => {
-                        const pct = (sub.total_score || 0) / (sub.max_score || 1) * 100
                         let studentKkm = baseKkm
-                        
-                        const classLevel = sub.student?.class?.school_level
-                        const gradeLevel = sub.student?.class?.grade_level
-                        
-                        if (classLevel && gradeLevel) {
-                            const granular = granularKkms.find((k: any) => k.school_level === classLevel && k.grade_level === gradeLevel)
+                        if (cls?.school_level && cls?.grade_level) {
+                            const granular = granularKkms.find((k: any) => k.school_level === cls.school_level && k.grade_level === cls.grade_level)
                             if (granular) studentKkm = granular.kkm
                         }
-                        
-                        return {
-                            id: sub.student?.id,
-                            name: sub.student?.user?.full_name,
-                            nis: sub.student?.nis,
-                            score: sub.total_score,
-                            max_score: sub.max_score,
-                            pct,
-                            needsRemedial: pct < studentKkm,
-                            kkmApplied: studentKkm
+                        const studentsList = (Array.isArray(submissions) ? submissions : [])
+                            .filter((sub: any) => sub.is_submitted)
+                            .map((sub: any) => {
+                                const pct = (sub.total_score || 0) / (sub.max_score || 1) * 100
+                                return {
+                                    id: sub.student?.id,
+                                    name: sub.student?.user?.full_name,
+                                    nis: sub.student?.nis,
+                                    score: sub.total_score,
+                                    max_score: sub.max_score,
+                                    pct,
+                                    needsRemedial: pct < studentKkm,
+                                    kkmApplied: studentKkm
+                                }
+                            })
+                        setRemedialStudents(studentsList)
+                        setSelectedStudentIds(studentsList.filter((s: any) => s.needsRemedial).map((s: any) => s.id))
+                    }
+                } else {
+                    const res = await fetch(`/api/official-exam-submissions?exam_id=${exam.id}`)
+                    if (res.ok) {
+                        const submissions = await res.json()
+                        const baseKkm = exam.subject?.kkm || 75
+                        let granularKkms: any[] = []
+
+                        try {
+                            const kkmRes = await fetch(`/api/subject-kkm?subject_id=${exam.subject?.id}`)
+                            if (kkmRes.ok) {
+                                granularKkms = await kkmRes.json()
+                            }
+                        } catch (e) {
+                            console.error('Failed to fetch granular KKM', e)
                         }
-                    })
-                    setRemedialStudents(studentsList)
-                    setSelectedStudentIds(studentsList.filter((s: any) => s.needsRemedial).map((s: any) => s.id))
+
+                        const studentsList = submissions.map((sub: any) => {
+                            const pct = (sub.total_score || 0) / (sub.max_score || 1) * 100
+                            let studentKkm = baseKkm
+
+                            const classLevel = sub.student?.class?.school_level
+                            const gradeLevel = sub.student?.class?.grade_level
+
+                            if (classLevel && gradeLevel) {
+                                const granular = granularKkms.find((k: any) => k.school_level === classLevel && k.grade_level === gradeLevel)
+                                if (granular) studentKkm = granular.kkm
+                            }
+
+                            return {
+                                id: sub.student?.id,
+                                name: sub.student?.user?.full_name,
+                                nis: sub.student?.nis,
+                                score: sub.total_score,
+                                max_score: sub.max_score,
+                                pct,
+                                needsRemedial: pct < studentKkm,
+                                kkmApplied: studentKkm
+                            }
+                        })
+                        setRemedialStudents(studentsList)
+                        setSelectedStudentIds(studentsList.filter((s: any) => s.needsRemedial).map((s: any) => s.id))
+                    }
                 }
             } catch (err) {
                 console.error("Failed to fetch remedial students", err)
@@ -305,31 +369,70 @@ export default function AdminUtsUasPage() {
         setDuplicating(true)
         try {
             const localDate = new Date(duplicateForm.start_time)
-            const payload = {
-                source_exam_id: duplicateExam.id,
-                title: duplicateForm.title,
-                start_time: localDate.toISOString(),
-                duration_minutes: duplicateForm.duration_minutes,
-                target_class_ids: duplicateForm.target_class_ids,
-                is_remedial: duplicateMode === 'REMEDIAL',
-                allowed_student_ids: duplicateMode === 'REMEDIAL' ? selectedStudentIds : null
-            }
+            let newExam: any = null
 
-            const res = await fetch('/api/official-exams/duplicate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            })
-
-            if (res.ok) {
-                const newExam = await res.json()
-                setShowDuplicate(false)
-                showToast(duplicateMode === 'REMEDIAL' ? 'Ujian remedial berhasil dibuat' : 'Ujian berhasil diduplikasi', 'success')
-                router.push(`/dashboard/admin/uts-uas/${newExam.id}`)
+            if (duplicateSource === 'ulangan') {
+                // Ulangan (tabel exams): create baru + salin soal via POST /api/exams
+                const ta = ulanganTA(duplicateExam)
+                const isRemedial = duplicateMode === 'REMEDIAL'
+                const payload: any = {
+                    teaching_assignment_id: ta?.id,
+                    title: duplicateForm.title,
+                    description: duplicateExam.description,
+                    start_time: localDate.toISOString(),
+                    duration_minutes: duplicateForm.duration_minutes,
+                    is_randomized: duplicateExam.is_randomized,
+                    max_violations: duplicateExam.max_violations,
+                    show_results_immediately: duplicateExam.show_results_immediately ?? true,
+                    duplicate_from_exam_id: duplicateExam.id,
+                    duplicate_questions: isRemedial ? ulanganRemedialMethod === 'ASLI' : true
+                }
+                if (isRemedial) {
+                    payload.is_remedial = true
+                    payload.remedial_for_id = duplicateExam.id
+                    payload.allowed_student_ids = selectedStudentIds
+                }
+                const res = await fetch('/api/exams', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                })
+                if (res.ok) {
+                    newExam = await res.json()
+                } else {
+                    const err = await res.json().catch(() => null)
+                    showToast(err?.error || 'Gagal menduplikasi ulangan', 'error')
+                    return
+                }
             } else {
-                const err = await res.json()
-                showToast(err.error || 'Gagal menduplikasi ujian', 'error')
+                const payload = {
+                    source_exam_id: duplicateExam.id,
+                    title: duplicateForm.title,
+                    start_time: localDate.toISOString(),
+                    duration_minutes: duplicateForm.duration_minutes,
+                    target_class_ids: duplicateForm.target_class_ids,
+                    is_remedial: duplicateMode === 'REMEDIAL',
+                    allowed_student_ids: duplicateMode === 'REMEDIAL' ? selectedStudentIds : null
+                }
+
+                const res = await fetch('/api/official-exams/duplicate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                })
+
+                if (res.ok) {
+                    newExam = await res.json()
+                } else {
+                    const err = await res.json()
+                    showToast(err.error || 'Gagal menduplikasi ujian', 'error')
+                    return
+                }
             }
+
+            setShowDuplicate(false)
+            showToast(duplicateMode === 'REMEDIAL' ? 'Ujian remedial berhasil dibuat' : 'Ujian berhasil diduplikasi', 'success')
+            router.push(`/dashboard/admin/uts-uas/${newExam.id}${duplicateSource === 'ulangan' ? '?type=ulangan' : ''}`)
         } catch (e) {
             showToast('Terjadi kesalahan', 'error')
         } finally {
@@ -613,7 +716,7 @@ export default function AdminUtsUasPage() {
                     <EmptyState
                         icon={<div className="text-indigo-400"><GraduationCap className="w-12 h-12" /></div>}
                         title="Belum Ada Ulangan"
-                        description="Ulangan yang dibuat guru akan muncul di sini untuk dimonitor."
+                        description="Ulangan yang dibuat guru akan muncul di sini untuk dikelola, dimonitor, dan dikoreksi."
                     />
                 ) : (
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -632,6 +735,14 @@ export default function AdminUtsUasPage() {
                                                 <div className="flex flex-wrap items-center gap-2 mb-2">
                                                     <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${status.color}`}>{status.label}</span>
                                                     <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400">Ulangan</span>
+                                                    {exam.is_remedial && (
+                                                        <span className="px-2.5 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full">
+                                                            REMEDIAL
+                                                        </span>
+                                                    )}
+                                                    {exam.pending_publish && (
+                                                        <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">⏳ Review</span>
+                                                    )}
                                                 </div>
                                                 <h3 className="font-bold text-text-main dark:text-white text-lg group-hover:text-primary transition-colors line-clamp-2">{exam.title}</h3>
                                             </div>
@@ -671,11 +782,51 @@ export default function AdminUtsUasPage() {
                                             )}
                                         </div>
                                         <div className="flex flex-wrap gap-2 mt-auto pt-3">
-                                            <Link href={`/dashboard/admin/uts-uas/${exam.id}/monitor?type=ulangan`} className="flex-1 min-w-[140px]">
-                                                <Button variant="outline" size="sm" className="w-full justify-center text-primary border-primary/20 hover:bg-primary/5 gap-1.5">
-                                                    <Activity className="w-4 h-4" /> Monitor
+                                            {status.label === 'Berlangsung' && (
+                                                <Link href={`/dashboard/admin/uts-uas/${exam.id}/monitor?type=ulangan`} className="flex-1 min-w-[120px]">
+                                                    <Button variant="outline" size="sm" className="w-full justify-center text-red-600 border-red-200 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-900/20 whitespace-nowrap gap-1.5">
+                                                        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+                                                        Monitor Live
+                                                    </Button>
+                                                </Link>
+                                            )}
+                                            {status.label === 'Selesai' && (
+                                                <Link href={`/dashboard/admin/uts-uas/${exam.id}?type=ulangan#hasil`} className="flex-1 min-w-[80px]">
+                                                    <Button variant="outline" size="sm" className="w-full justify-center text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:border-emerald-900/50 dark:hover:bg-emerald-900/20">
+                                                        <BarChart3 className="w-4 h-4 mr-1" /> Hasil
+                                                    </Button>
+                                                </Link>
+                                            )}
+                                            <Link href={`/dashboard/admin/uts-uas/${exam.id}?type=ulangan`} className="flex-1 min-w-[80px]">
+                                                <Button variant="outline" size="sm" className="w-full justify-center border-primary/20 text-primary hover:bg-primary/5">
+                                                    <Edit3 className="w-4 h-4 mr-1" /> Detail
                                                 </Button>
                                             </Link>
+                                            <Button
+                                                variant="outline" size="sm"
+                                                onClick={() => handleOpenDuplicate(exam, 'BIASA', 'ulangan')}
+                                                title="Duplikasi Ulangan"
+                                                className="text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-blue-200 dark:border-blue-900/30"
+                                            >
+                                                <Copy className="w-4 h-4" />
+                                            </Button>
+                                            {status.label === 'Selesai' && !exam.is_remedial && (
+                                                <Button
+                                                    variant="outline" size="sm"
+                                                    onClick={() => handleOpenDuplicate(exam, 'REMEDIAL', 'ulangan')}
+                                                    title="Buat Remedial"
+                                                    className="text-orange-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 border-orange-200 dark:border-orange-900/30"
+                                                >
+                                                    <RefreshCw className="w-4 h-4" />
+                                                </Button>
+                                            )}
+                                            <Button
+                                                variant="outline" size="sm"
+                                                onClick={() => handleDeleteUlangan(exam.id)}
+                                                className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-900/30"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </Button>
                                         </div>
                                     </div>
                                 </Card>
@@ -874,8 +1025,12 @@ export default function AdminUtsUasPage() {
                         <div className="flex items-center gap-3 p-3 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 rounded-xl">
                             <Copy className="w-5 h-5 flex-shrink-0" />
                             <div className="text-sm">
-                                <div>Sumber: <span className="font-bold">{duplicateExam.title}</span></div>
-                                <div className="text-xs opacity-80">{duplicateExam.question_count} soal akan disalin otomatis</div>
+                                <div>Sumber: <span className="font-bold">{duplicateExam.title}</span>{duplicateSource === 'ulangan' && <span className="ml-1 text-xs">(Ulangan)</span>}</div>
+                                <div className="text-xs opacity-80">
+                                    {duplicateSource === 'ulangan' && duplicateMode === 'REMEDIAL' && ulanganRemedialMethod === 'BARU'
+                                        ? 'Ulangan baru akan dibuat dengan soal kosong'
+                                        : `${duplicateExam.question_count} soal akan disalin otomatis`}
+                                </div>
                             </div>
                         </div>
 
@@ -917,6 +1072,27 @@ export default function AdminUtsUasPage() {
                         {/* Remedial Student Selection */}
                         {duplicateMode === 'REMEDIAL' && (
                             <div className="pt-2 border-t border-secondary/20">
+                                {duplicateSource === 'ulangan' && (
+                                    <div className="mb-3">
+                                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Soal Remedial</label>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setUlanganRemedialMethod('ASLI')}
+                                                className={`px-3 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${ulanganRemedialMethod === 'ASLI' ? 'border-primary bg-primary/5 text-primary' : 'border-secondary/20 text-text-main dark:text-white hover:border-primary/50'}`}
+                                            >
+                                                Soal Asli (disalin)
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setUlanganRemedialMethod('BARU')}
+                                                className={`px-3 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${ulanganRemedialMethod === 'BARU' ? 'border-primary bg-primary/5 text-primary' : 'border-secondary/20 text-text-main dark:text-white hover:border-primary/50'}`}
+                                            >
+                                                Soal Baru (kosong)
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                                 <div className="flex items-center justify-between mb-3">
                                     <label className="block text-sm font-bold text-text-main dark:text-white">Pilih Siswa Remedial</label>
                                     <div className="text-xs text-text-secondary">

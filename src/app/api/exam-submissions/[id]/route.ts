@@ -98,29 +98,31 @@ export async function PUT(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'GURU') {
+        if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
         const id = params.id
         const { answers, is_graded } = await request.json()
 
-        // Verify teacher owns the teaching assignment for this exam
-        const { data: teacher } = await supabase
-            .from('teachers')
-            .select('id')
-            .eq('user_id', user.id)
-            .single()
+        // Verify teacher owns the teaching assignment for this exam (ADMIN bypass)
+        if (user.role === 'GURU') {
+            const { data: teacher } = await supabase
+                .from('teachers')
+                .select('id')
+                .eq('user_id', user.id)
+                .single()
 
-        const { data: submissionData } = await supabase
-            .from('exam_submissions')
-            .select('exam:exams(teaching_assignment:teaching_assignments(teacher_id))')
-            .eq('id', id)
-            .single()
+            const { data: submissionData } = await supabase
+                .from('exam_submissions')
+                .select('exam:exams(teaching_assignment:teaching_assignments(teacher_id))')
+                .eq('id', id)
+                .single()
 
-        const assignmentTeacherId = (submissionData?.exam as any)?.teaching_assignment?.teacher_id
-        if (!teacher || assignmentTeacherId !== teacher.id) {
-            return NextResponse.json({ error: 'Forbidden: You do not have access to grade this class' }, { status: 403 })
+            const assignmentTeacherId = (submissionData?.exam as any)?.teaching_assignment?.teacher_id
+            if (!teacher || assignmentTeacherId !== teacher.id) {
+                return NextResponse.json({ error: 'Forbidden: You do not have access to grade this class' }, { status: 403 })
+            }
         }
 
         // BATCH UPDATE: Update all exam_answers scores at once instead of one-by-one
