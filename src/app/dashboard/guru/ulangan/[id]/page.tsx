@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import Link from 'next/link'
-import { useParams, useSearchParams } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
@@ -69,6 +69,7 @@ type TabType = 'soal' | 'hasil'
 
 function EditExamPageInner() {
     const params = useParams()
+    const router = useRouter()
     const searchParams = useSearchParams()
     const examId = params.id as string
     const highlightId = searchParams.get('highlight')
@@ -1251,7 +1252,10 @@ function EditExamPageInner() {
             {/* Tabs */}
             <div className="flex gap-1 bg-secondary/5 p-1 rounded-xl border border-secondary/10 mt-4 mb-6">
                 {([{ key: 'soal' as TabType, label: 'Soal', icon: FileText }, { key: 'hasil' as TabType, label: 'Hasil', icon: BarChart3 }]).map(tab => (
-                    <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-bold transition-all ${activeTab === tab.key ? 'bg-white dark:bg-surface-dark text-primary shadow-sm' : 'text-text-secondary hover:text-text-main'}`}>
+                    <button key={tab.key} onClick={() => {
+                        setActiveTab(tab.key)
+                        router.replace(`/dashboard/guru/ulangan/${examId}?tab=${tab.key}`, { scroll: false })
+                    }} className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-bold transition-all ${activeTab === tab.key ? 'bg-white dark:bg-surface-dark text-primary shadow-sm' : 'text-text-secondary hover:text-text-main'}`}>
                         <tab.icon className="w-5 h-5" /> {tab.label}
                     </button>
                 ))}

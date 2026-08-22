@@ -137,7 +137,7 @@ export default function ExamGradingPage() {
             if (!saveRes.ok) throw new Error('Failed to save grading')
 
             alert('Penilaian berhasil disimpan!')
-            router.push(`/dashboard/guru/ulangan/${examId}/hasil`)
+            router.push(`/dashboard/guru/ulangan/${examId}?tab=hasil`)
         } catch (error) {
             console.error('Error saving:', error)
             alert('Gagal menyimpan penilaian')
@@ -164,7 +164,7 @@ export default function ExamGradingPage() {
                 <PageHeader
                     title={`Penilaian: ${submission.student.user.full_name}`}
                     subtitle={`${submission.exam.title} • ${submission.violation_count > 0 ? `⚠️ ${submission.violation_count} Pelanggaran` : ''}`}
-                    backHref={`/dashboard/guru/ulangan/${examId}/hasil`}
+                    backHref={`/dashboard/guru/ulangan/${examId}?tab=hasil`}
                     action={
                         <div className="text-right">
                             <span className="text-2xl md:text-3xl font-bold text-primary">
@@ -268,7 +268,7 @@ export default function ExamGradingPage() {
             {/* Save Action Sticky Footer */}
             <div className="fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-surface-dark/95 backdrop-blur border-t border-secondary/10 dark:border-white/5 p-4 z-20">
                 <div className="max-w-4xl mx-auto flex items-center justify-end gap-4">
-                    <Link href={`/dashboard/guru/ulangan/${examId}/hasil`}>
+                    <Link href={`/dashboard/guru/ulangan/${examId}?tab=hasil`}>
                         <Button variant="secondary">Batal</Button>
                     </Link>
                     <Button
