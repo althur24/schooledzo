@@ -3,7 +3,9 @@
  *
  * Dua pemakaian:
  *  1. Endpoint write (save/submit) — siswa mengirim data lewat batas + grace:
- *     jawaban yang dikirim diabaikan, submission ditutup dengan jawaban tersimpan.
+ *     jawaban yang dikirim DI-merge dengan snapshot server (kuis: JSONB per soal;
+ *     ulangan/UTS-UAS: upsert ke tabel answers) lalu submission ditutup —
+ *     jawaban terakhir siswa ikut terselamatkan.
  *  2. Sweep aktif scheduler (closeExpiredSubmissions) — menutup submission yatim
  *     yang browser-nya mati/offline, tanpa menunggu guru buka monitor.
  *
@@ -15,7 +17,7 @@
 
 import { supabaseAdmin as supabase } from './supabase'
 import { getExamQuestionsForGrading } from './examQuestionsCache'
-import { needsManualGrading } from './questionTypeUtils'
+import { gradeAnswer, isAutoGradeable, needsManualGrading } from './questionTypeUtils'
 import { resolveWindowExpiry, resolveQuizExpiry, isSweepDue } from './examExpiry'
 import { logError } from './logError'
 
@@ -30,9 +32,61 @@ export interface CloseResult {
     isGraded: boolean
 }
 
-/** Ulangan: tutup satu submission dengan jawaban tersimpan di exam_answers. */
-export async function forceCloseExamSubmission(submissionId: string, examId: string, endsAt?: number | null): Promise<CloseResult | null> {
+/** Ulangan: tutup satu submission. Jawaban terakhir yang dikirim client (incoming)
+ *  di-grade lalu di-upsert ke exam_answers (menang per soal via onConflict) supaya
+ *  jawaban yang diketik saat offline terselamatkan — bukan dibuang.
+ *  Idempoten penuh: submission yang sudah submitted tidak disentuh lagi (upsert jawaban
+ *  tanpa update skor akan membuat jawaban vs total_score tidak konsisten). */
+export async function forceCloseExamSubmission(
+    submissionId: string,
+    examId: string,
+    endsAt?: number | null,
+    incomingAnswers?: { question_id: string; answer: string }[] | null
+): Promise<CloseResult | null> {
     try {
+        // Guard dulu: sudah ditutup jalur lain (race dgn scheduler/lazy sweep) → jangan sentuh jawaban
+        const { data: current } = await supabase
+            .from('exam_submissions')
+            .select('is_submitted')
+            .eq('id', submissionId)
+            .single()
+        if (!current || current.is_submitted) return null
+
+        if (Array.isArray(incomingAnswers) && incomingAnswers.length > 0) {
+            const questions = await getExamQuestionsForGrading('exam_questions', examId)
+            const questionMap = new Map(questions.map(q => [q.id, q]))
+            const gradedRows = incomingAnswers
+                .filter(a => a?.question_id)
+                .map((ans) => {
+                    const question = questionMap.get(ans.question_id)
+                    let isCorrect = false
+                    let pointsEarned = 0
+                    if (question) {
+                        const graded = gradeAnswer(
+                            question.question_type,
+                            ans.answer,
+                            question.correct_answer,
+                            question.options,
+                            question.points || 1
+                        )
+                        isCorrect = graded.isCorrect
+                        pointsEarned = graded.pointsEarned
+                    }
+                    return {
+                        submission_id: submissionId,
+                        question_id: ans.question_id,
+                        answer: ans.answer,
+                        is_correct: isCorrect,
+                        points_earned: Math.round(pointsEarned)
+                    }
+                })
+            if (gradedRows.length > 0) {
+                await supabase
+                    .from('exam_answers')
+                    .upsert(gradedRows, { onConflict: 'submission_id,question_id' })
+            }
+        }
+
         const { data: answers } = await supabase
             .from('exam_answers').select('points_earned').eq('submission_id', submissionId)
         const totalScore = (answers || []).reduce((s, a) => s + (a.points_earned || 0), 0)
@@ -56,9 +110,59 @@ export async function forceCloseExamSubmission(submissionId: string, examId: str
     }
 }
 
-/** UTS/UAS: tutup satu submission dengan jawaban tersimpan di official_exam_answers. */
-export async function forceCloseOfficialSubmission(submissionId: string, examId: string, endsAt?: number | null): Promise<CloseResult | null> {
+/** UTS/UAS: tutup satu submission. Sama seperti ulangan — jawaban incoming di-upsert
+ *  ke official_exam_answers supaya jawaban offline terselamatkan.
+ *  Idempoten penuh: submission yang sudah submitted tidak disentuh lagi. */
+export async function forceCloseOfficialSubmission(
+    submissionId: string,
+    examId: string,
+    endsAt?: number | null,
+    incomingAnswers?: { question_id: string; answer: string }[] | null
+): Promise<CloseResult | null> {
     try {
+        // Guard dulu: sudah ditutup jalur lain (race dgn scheduler/lazy sweep) → jangan sentuh jawaban
+        const { data: current } = await supabase
+            .from('official_exam_submissions')
+            .select('is_submitted')
+            .eq('id', submissionId)
+            .single()
+        if (!current || current.is_submitted) return null
+
+        if (Array.isArray(incomingAnswers) && incomingAnswers.length > 0) {
+            const questions = await getExamQuestionsForGrading('official_exam_questions', examId)
+            const questionMap = new Map(questions.map(q => [q.id, q]))
+            const gradedRows = incomingAnswers
+                .filter(a => a?.question_id)
+                .map((ans) => {
+                    const question = questionMap.get(ans.question_id)
+                    let isCorrect = false
+                    let pointsEarned = 0
+                    if (question) {
+                        const graded = gradeAnswer(
+                            question.question_type,
+                            ans.answer,
+                            question.correct_answer,
+                            question.options,
+                            question.points || 1
+                        )
+                        isCorrect = graded.isCorrect
+                        pointsEarned = graded.pointsEarned
+                    }
+                    return {
+                        submission_id: submissionId,
+                        question_id: ans.question_id,
+                        answer: ans.answer,
+                        is_correct: isCorrect,
+                        points_earned: Math.round(pointsEarned)
+                    }
+                })
+            if (gradedRows.length > 0) {
+                await supabase
+                    .from('official_exam_answers')
+                    .upsert(gradedRows, { onConflict: 'submission_id,question_id' })
+            }
+        }
+
         const { data: answers } = await supabase
             .from('official_exam_answers').select('points_earned').eq('submission_id', submissionId)
         const totalScore = (answers || []).reduce((s: number, a: any) => s + (a.points_earned || 0), 0)
@@ -82,20 +186,40 @@ export async function forceCloseOfficialSubmission(submissionId: string, examId:
     }
 }
 
-/** Kuis: tutup satu submission dengan jawaban tersimpan di kolom answers (JSONB). */
-export async function forceCloseQuizSubmission(submissionId: string, endsAt?: number | null): Promise<CloseResult | null> {
+/** Kuis: tutup satu submission. Jawaban final = merge snapshot kolom answers +
+ *  jawaban terakhir yang dikirim client (incoming, menang per soal) lalu dinilai ulang.
+ *  Tanpa merge ini, jawaban yang diketik saat offline hilang saat force-close. */
+export async function forceCloseQuizSubmission(
+    submissionId: string,
+    endsAt?: number | null,
+    incomingAnswers?: { question_id: string; answer: string }[] | null
+): Promise<CloseResult | null> {
     try {
         const { data: sub } = await supabase
             .from('quiz_submissions').select('id, quiz_id, answers').eq('id', submissionId).single()
         if (!sub) return null
         const stored: any[] = Array.isArray(sub.answers) ? sub.answers : []
+        // Merge per question_id: snapshot server dulu, incoming (terbaru) menimpa
+        const mergedMap = new Map<string, any>()
+        stored.forEach(a => { if (a?.question_id) mergedMap.set(a.question_id, a) })
+        ;(Array.isArray(incomingAnswers) ? incomingAnswers : []).forEach(a => {
+            if (!a?.question_id) return
+            mergedMap.set(a.question_id, { ...mergedMap.get(a.question_id), question_id: a.question_id, answer: a.answer })
+        })
         const questions = await getExamQuestionsForGrading('quiz_questions', sub.quiz_id)
         const qMap = new Map(questions.map(q => [q.id, q]))
+        // Nilai ulang seluruh jawaban hasil merge — idempoten & konsisten
+        // (jawaban incoming belum dinilai, jawaban lama dinilai ulang dengan hasil sama)
         let totalScore = 0
-        stored.forEach(a => {
+        const finalAnswers = Array.from(mergedMap.values()).map((a: any) => {
             const q = qMap.get(a.question_id)
-            if (!q) return
-            totalScore += a.score || 0 // jawaban kuis sudah dinilai saat disimpan
+            if (!q) return a
+            if (isAutoGradeable(q.question_type)) {
+                const graded = gradeAnswer(q.question_type, a.answer ?? '', q.correct_answer, q.options, q.points || 1)
+                totalScore += graded.pointsEarned
+                return { ...a, is_correct: graded.isCorrect, score: graded.pointsEarned }
+            }
+            return { ...a, is_correct: null, score: null }
         })
         // maxScore = total seluruh soal (selaras lazy sweep kuis yang sudah ada)
         const maxScore = questions.reduce((acc, q) => acc + (q.points || 1), 0)
@@ -103,6 +227,7 @@ export async function forceCloseQuizSubmission(submissionId: string, endsAt?: nu
         await supabase
             .from('quiz_submissions')
             .update({
+                answers: finalAnswers,
                 submitted_at: closedAtIso(endsAt),
                 total_score: totalScore,
                 max_score: maxScore,

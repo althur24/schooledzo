@@ -50,7 +50,7 @@ export default function TakeOfficialExamPage() {
     const [submission, setSubmission] = useState<Submission | null>(null)
     const [answers, setAnswers] = useState<{ [key: string]: string }>({})
     const [currentIndex, setCurrentIndex] = useState(0)
-    const [timeLeft, setTimeLeft] = useState(0)
+    const [timeLeft, setTimeLeft] = useState<number | null>(0)
     const [loading, setLoading] = useState(true)
     const [submitting, setSubmitting] = useState(false)
     const [showConfirmSubmit, setShowConfirmSubmit] = useState(false)
@@ -59,6 +59,7 @@ export default function TakeOfficialExamPage() {
     const [isFullscreen, setIsFullscreen] = useState(false)
     const [forceSubmitted, setForceSubmitted] = useState(false)
     const [alertMessage, setAlertMessage] = useState<string | null>(null)
+    const [loadError, setLoadError] = useState<string | null>(null) // gagal load (network dsb.) — bisa dicoba ulang
     const isOnline = useOnlineStatus()
     const isOffline = !isOnline
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -73,9 +74,11 @@ export default function TakeOfficialExamPage() {
     const endsAtRef = useRef<number | null>(null)
     const offsetMsRef = useRef(0)
 
-    // Sisa waktu (detik) dihitung ulang dari patokan server — kebal throttle background tab / HP sleep
-    const computeRemaining = () => {
-        if (endsAtRef.current === null) return 0
+    // Sisa waktu (detik) dihitung ulang dari patokan server — kebal throttle background tab / HP sleep.
+    // null = patokan belum diketahui / ujian tanpa batas waktu — BUKAN "waktu habis":
+    // memakai 0 di sini membuat ujian tanpa durasi salah tampil 00:00 merah + auto-submit.
+    const computeRemaining = (): number | null => {
+        if (endsAtRef.current === null) return null
         return Math.max(0, Math.ceil((endsAtRef.current - (Date.now() + offsetMsRef.current)) / 1000))
     }
 
@@ -163,16 +166,26 @@ export default function TakeOfficialExamPage() {
                 clearLocal()
             }
 
+            // Jawaban tersimpan di server (resume lintas device / localStorage kosong)
+            // digabung dengan draft lokal — draft lokal menang per soal (paling baru).
+            const dbAnswers: Record<string, string> = {}
+            if (Array.isArray(subData.saved_answers)) {
+                subData.saved_answers.forEach((a: { question_id: string; answer: string }) => {
+                    if (a?.question_id) dbAnswers[a.question_id] = a.answer
+                })
+            }
+            const mergedAnswers = { ...dbAnswers, ...localAnswers }
+
             let initialAnswers: { [key: string]: string } = {}
-            if (Object.keys(localAnswers).length > 0) {
-                setAnswers(localAnswers)
-                initialAnswers = localAnswers
+            if (Object.keys(mergedAnswers).length > 0) {
+                setAnswers(mergedAnswers)
+                initialAnswers = mergedAnswers
             }
 
             // Sisa waktu dari patokan server (ends_at: jendela global / override hard reset) — semua siswa selesai serentak
             const remaining = computeRemaining()
 
-            if (endsAtRef.current !== null && remaining <= 0) {
+            if (remaining !== null && remaining <= 0) {
                 // Auto-submit expired — server tetap yang menilai batas; ini hanya pemicu
                 const formattedAnswers = Object.entries(initialAnswers).map(([qId, val]) => ({ question_id: qId, answer: val }))
                 const res = await fetch('/api/official-exam-submissions', {
@@ -195,8 +208,13 @@ export default function TakeOfficialExamPage() {
             setLoading(false)
         } catch (error) {
             console.error('Error starting exam:', error)
-            setAlertMessage('Gagal memulai ujian')
-            setTimeout(() => router.push('/dashboard/siswa/ulangan'), 2000)
+            // Gagal memuat (drop koneksi dsb.) BUKAN berarti ujiannya selesai/terkunci —
+            // attempt & draft jawaban tetap aman (server + localStorage). Jangan usir siswa;
+            // beri pesan sesuai kondisi jaringan + tombol coba lagi.
+            hasStarted.current = false
+            setLoadError(!navigator.onLine
+                ? 'Koneksi terputus. Jawaban tersimpan lokal akan dikirim otomatis saat online. Periksa koneksi Anda lalu coba lagi.'
+                : 'Gagal memuat ujian. Periksa koneksi Anda lalu coba lagi.')
             setLoading(false)
         }
     }, [examId, router])
@@ -211,9 +229,22 @@ export default function TakeOfficialExamPage() {
         examRef.current = exam
     }, [exam])
 
+    // Ref pendamping listener 'online' (stale-closure-safe): retry load saat koneksi kembali
+    const loadFailedRef = useRef(false)
+    useEffect(() => { loadFailedRef.current = !!loadError }, [loadError])
+
     // Sync local answers when reconnected
     useEffect(() => {
         const handleOnline = async () => {
+            // Halaman gagal dimuat saat offline → muat ulang begitu koneksi kembali
+            if (loadFailedRef.current) {
+                setLoadError(null)
+                setLoading(true)
+                hasStarted.current = false
+                startExam()
+                return
+            }
+
             const localAnswers = loadLocal()
             if (Object.keys(localAnswers).length > 0 && submissionRef.current) {
                 try {
@@ -232,9 +263,15 @@ export default function TakeOfficialExamPage() {
                         })
                     })
 
-                    // 409 TIME_EXPIRED: server sudah menutup dengan jawaban tersimpan — aman dibersihkan
-                    if (isTimeUp || res.status === 409) {
-                        if (!res.ok && res.status !== 409) return // submit gagal — jawaban lokal jangan dihapus
+                    // 409 TIME_EXPIRED: server sudah menutup (jawaban request ikut terselamatkan
+                    // via upsert). 400 "Already submitted": submission tertutup dari jalur lain.
+                    // Keduanya = state final di server, draft lokal aman dibersihkan.
+                    const errBody = res.ok ? null : await res.json().catch(() => null)
+                    const alreadySubmitted = res.status === 400 && errBody?.error === 'Already submitted'
+                    if (res.status === 409 || alreadySubmitted) {
+                        clearLocal()
+                        router.replace('/dashboard/siswa/ulangan')
+                    } else if (isTimeUp && res.ok) {
                         clearLocal()
                         router.replace('/dashboard/siswa/ulangan')
                     }
@@ -253,9 +290,11 @@ export default function TakeOfficialExamPage() {
     // Timer — dihitung ulang dari patokan server setiap detik (bukan kurang-1),
     // sehingga kebal throttle background tab / HP sleep dan jam HP yang ngaco
     useEffect(() => {
-        if (timeLeft <= 0 || !submission) return
+        if (timeLeft === null || timeLeft <= 0 || !submission) return
         timerRef.current = setInterval(() => {
             const remaining = computeRemaining()
+            // null = tanpa batas waktu / patokan belum diketahui — tidak ada yang perlu di-tick
+            if (remaining === null) return
             setTimeLeft(remaining)
             if (remaining <= 0) {
                 if (timerRef.current) clearInterval(timerRef.current)
@@ -263,7 +302,7 @@ export default function TakeOfficialExamPage() {
             }
         }, 1000)
         return () => { if (timerRef.current) clearInterval(timerRef.current) }
-    }, [submission, timeLeft > 0])
+    }, [submission, (timeLeft ?? 0) > 0])
 
     // Tab lock — multi-layered violation detection for PWA + browser
     // Strategy: DEFER violations until user returns. This prevents false positives
@@ -509,6 +548,36 @@ export default function TakeOfficialExamPage() {
         return `${mins}:${secs.toString().padStart(2, '0')}`
     }
 
+    if (loadError) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
+                <div className="text-center space-y-4 max-w-md px-4">
+                    <div className="text-red-500 dark:text-red-400 flex justify-center"><Danger set="bold" primaryColor="currentColor" size="xlarge" /></div>
+                    <p className="text-text-secondary">{loadError}</p>
+                    <div className="flex gap-3 justify-center">
+                        <button
+                            onClick={() => {
+                                setLoadError(null)
+                                setLoading(true)
+                                hasStarted.current = false
+                                startExam()
+                            }}
+                            className="px-6 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-bold"
+                        >
+                            Coba Lagi
+                        </button>
+                        <button
+                            onClick={() => router.push('/dashboard/siswa/ulangan')}
+                            className="px-6 py-2 bg-slate-800 text-white rounded-xl hover:bg-slate-700 transition-colors"
+                        >
+                            Kembali
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )
+    }
+
     if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
@@ -593,8 +662,8 @@ export default function TakeOfficialExamPage() {
                         <div className={`px-3 py-1 rounded-lg flex items-center gap-1.5 ${violationCount > 0 ? 'bg-red-500/20 text-red-500' : 'bg-gray-100 dark:bg-gray-800 text-text-secondary'}`}>
                             <Danger set="bold" primaryColor="currentColor" size={16} /> {violationCount}/{maxViolations}
                         </div>
-                        <div className={`px-3 py-1.5 md:px-4 md:py-2 rounded-lg font-mono text-sm md:text-lg font-bold flex items-center gap-2 ${timeLeft <= 300 ? 'bg-red-500 text-white animate-pulse' : timeLeft <= 600 ? 'bg-amber-500 text-white' : 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'}`}>
-                            <TimeCircle set="bold" primaryColor="currentColor" size={20} /> {formatTime(timeLeft)}
+                        <div className={`px-3 py-1.5 md:px-4 md:py-2 rounded-lg font-mono text-sm md:text-lg font-bold flex items-center gap-2 ${timeLeft !== null && timeLeft <= 300 ? 'bg-red-500 text-white animate-pulse' : timeLeft !== null && timeLeft <= 600 ? 'bg-amber-500 text-white' : 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'}`}>
+                            <TimeCircle set="bold" primaryColor="currentColor" size={20} /> {timeLeft !== null ? formatTime(timeLeft) : 'Tanpa Batas'}
                         </div>
                     </div>
                 </div>

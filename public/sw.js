@@ -91,17 +91,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Strategy 4: NetworkFirst for API
+  // Strategy 4: NetworkOnly for API — data live (status attempt/submission) tidak boleh
+  // dilayani dari cache: fallback cache basi membuat client menganggap attempt belum
+  // ada (insert duplikat gagal UNIQUE) atau membaca state submission lama saat
+  // jaringan flaky. Draft jawaban siswa aman di localStorage — tidak butuh cache API.
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (response.ok) safeCachePut(request, response.clone());
-          return response;
-        })
-        .catch(() => caches.match(request))
-    );
-    return;
+    return; // tanpa interception: fetch jalan normal, gagal = gagal (client yang retry)
   }
 
   // Strategy 5: NetworkFirst for navigation (HTML pages)

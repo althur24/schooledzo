@@ -63,6 +63,7 @@ export default function SiswaUlanganPage() {
     const [officialExams, setOfficialExams] = useState<OfficialExam[]>([])
     const [officialSubmissions, setOfficialSubmissions] = useState<OfficialSubmission[]>([])
     const [loading, setLoading] = useState(true)
+    const [loadError, setLoadError] = useState(false)
     const [currentTime, setCurrentTime] = useState(new Date())
 
     useEffect(() => {
@@ -79,6 +80,7 @@ export default function SiswaUlanganPage() {
 
     const fetchData = async () => {
         try {
+            setLoadError(false)
             const [examsRes, submissionsRes, officialRes, officialSubsRes] = await Promise.all([
                 fetch('/api/exams'),
                 fetch('/api/exam-submissions'),
@@ -97,6 +99,8 @@ export default function SiswaUlanganPage() {
             setOfficialSubmissions(Array.isArray(officialSubsData) ? officialSubsData : [])
         } catch (error) {
             console.error('Error:', error)
+            // Gagal fetch (offline dsb.) — jangan tampilkan "Belum Ada Ulangan" yang menyesatkan
+            setLoadError(true)
         } finally {
             setLoading(false)
         }
@@ -214,6 +218,17 @@ export default function SiswaUlanganPage() {
                 <div className="flex justify-center py-12">
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />
                 </div>
+            ) : loadError ? (
+                <div className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl p-6 text-center space-y-3">
+                    <p className="text-red-600 dark:text-red-400 font-bold">Gagal memuat daftar ulangan</p>
+                    <p className="text-sm text-text-secondary">Periksa koneksi internet Anda lalu coba lagi.</p>
+                    <button
+                        onClick={() => { setLoading(true); fetchData() }}
+                        className="px-6 py-2 bg-primary text-white rounded-xl hover:bg-primary-dark transition-colors font-bold"
+                    >
+                        Coba Lagi
+                    </button>
+                </div>
             ) : !hasAnyExams ? (
                 <EmptyState
                     icon={<div className="text-red-500 dark:text-red-200 flex"><Document set="bold" primaryColor="currentColor" size="xlarge" /></div>}
@@ -235,7 +250,10 @@ export default function SiswaUlanganPage() {
                                 {officialExams.map((exam) => {
                                     const { status, label, color, icon: StatusIcon } = getOfficialExamStatus(exam)
                                     const submission = officialSubmissions.find(s => s.exam_id === exam.id)
-                                    const canStart = status === 'available' || status === 'in_progress'
+                                    // Tombol tidak disembunyikan berdasar jam HP (rawan salah jika jam ngaco):
+                                    // selama belum terkumpulkan, tampilkan tombol — server yang menolak
+                                    // dengan pesan jelas jika memang belum dibuka / sudah berakhir.
+                                    const canStart = status !== 'submitted' && status !== 'expired_open'
 
                                     return (
                                         <div key={exam.id} className="bg-white dark:bg-surface-dark border-2 border-indigo-300 dark:border-indigo-500/40 rounded-xl p-4 md:p-5 hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-500/10 transition-all">
@@ -342,7 +360,10 @@ export default function SiswaUlanganPage() {
                                 {exams.map((exam) => {
                                     const { status, label, color, icon: StatusIcon } = getExamStatus(exam)
                                     const submission = submissions.find(s => s.exam_id === exam.id)
-                                    const canStart = status === 'available' || status === 'in_progress'
+                                    // Tombol tidak disembunyikan berdasar jam HP (rawan salah jika jam ngaco):
+                                    // selama belum terkumpulkan, tampilkan tombol — server yang menolak
+                                    // dengan pesan jelas jika memang belum dibuka / sudah berakhir.
+                                    const canStart = status !== 'submitted' && status !== 'expired_open'
 
                                     return (
                                         <div key={exam.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-4 md:p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all cursor-pointer">

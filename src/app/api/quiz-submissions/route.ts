@@ -324,19 +324,20 @@ export async function POST(request: NextRequest) {
         }
 
         // Penegakan batas waktu di server untuk attempt berjalan:
-        // endAt = min(started_at + durasi, deadline). Lewat endAt + grace → jawaban yang
-        // dikirim DIABAIKAN; submission ditutup paksa dengan jawaban yang sudah tersimpan.
+        // endAt = min(started_at + durasi, deadline). Lewat endAt + grace → submission
+        // ditutup paksa, TAPI jawaban yang dikirim ikut di-merge (menang per soal)
+        // supaya jawaban yang diketik saat offline tidak hilang.
         if (existing) {
             const expiry = resolveQuizExpiry(
                 { deadline: quiz.deadline, duration_minutes: quiz.duration_minutes },
                 { started_at: existing.started_at }
             )
             if (!isWriteAllowed(expiry)) {
-                await forceCloseQuizSubmission(existing.id, expiry.limited ? expiry.endAt : null)
+                await forceCloseQuizSubmission(existing.id, expiry.limited ? expiry.endAt : null, answers)
                 return NextResponse.json({
                     code: 'TIME_EXPIRED',
                     force_submitted: true,
-                    message: 'Waktu pengerjaan sudah berakhir. Jawaban yang tersimpan di server otomatis dikumpulkan.'
+                    message: 'Waktu pengerjaan sudah berakhir. Jawaban terakhirmu otomatis dikumpulkan.'
                 }, { status: 409 })
             }
         }

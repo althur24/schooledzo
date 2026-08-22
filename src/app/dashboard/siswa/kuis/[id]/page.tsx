@@ -55,6 +55,7 @@ export default function KerjakanKuisPage() {
     const [showTimeoutModal, setShowTimeoutModal] = useState(false)
     const [showOfflineTimeoutModal, setShowOfflineTimeoutModal] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [loadFailed, setLoadFailed] = useState(false) // error yang bisa dicoba ulang (kegagalan jaringan)
     const isOnline = useOnlineStatus()
     const isOffline = !isOnline
 
@@ -78,14 +79,20 @@ export default function KerjakanKuisPage() {
     useEffect(() => { quizRef.current = quiz }, [quiz])
     useEffect(() => { startTimeRef.current = startTime }, [startTime])
 
+    // Ref pendamping listener 'online' (stale-closure-safe): retry load saat koneksi kembali
+    const loadFailedRef = useRef(false)
+    useEffect(() => { loadFailedRef.current = loadFailed }, [loadFailed])
+
     // Patokan waktu dari server: ends_at (batas efektif = min(started_at + durasi, deadline))
     // + offset jam HP vs server. Semua hitungan sisa waktu memakai keduanya — kebal jam HP ngaco.
     const endsAtRef = useRef<number | null>(null)
     const offsetMsRef = useRef(0)
 
-    // Sisa waktu (milidetik — konvensi halaman ini) dihitung ulang dari patokan server tiap tick
-    const computeRemainingMs = () => {
-        if (endsAtRef.current === null) return 0
+    // Sisa waktu (milidetik — konvensi halaman ini) dihitung ulang dari patokan server
+    // tiap tick. null = patokan belum diketahui / kuis tanpa batas waktu — BUKAN "waktu
+    // habis": memakai 0 di sini membuat kuis tanpa durasi salah tampil 00:00:00 merah.
+    const computeRemainingMs = (): number | null => {
+        if (endsAtRef.current === null) return null
         return Math.max(0, endsAtRef.current - (Date.now() + offsetMsRef.current))
     }
 
@@ -101,20 +108,22 @@ export default function KerjakanKuisPage() {
         }
     }
 
-    const loadAnswersFromLocal = (): Record<string, string> => {
+    const loadLocalDraft = (): { answers: Record<string, string>; lastSaved: string | null } => {
         if (typeof window !== 'undefined') {
             const data = localStorage.getItem(`quiz_${quizId}_answers`)
             if (data) {
                 try {
                     const parsed = JSON.parse(data)
-                    return parsed.answers || {}
+                    return { answers: parsed.answers || {}, lastSaved: parsed.lastSaved || null }
                 } catch (e) {
-                    return {}
+                    return { answers: {}, lastSaved: null }
                 }
             }
         }
-        return {}
+        return { answers: {}, lastSaved: null }
     }
+
+    const loadAnswersFromLocal = (): Record<string, string> => loadLocalDraft().answers
 
     const clearLocalAnswers = () => {
         if (typeof window !== 'undefined') {
@@ -184,6 +193,14 @@ export default function KerjakanKuisPage() {
     // Sync local answers to server when called manually
     useEffect(() => {
         const handleOnline = () => {
+            // Halaman gagal dimuat saat offline → muat ulang begitu koneksi kembali
+            if (loadFailedRef.current) {
+                setError(null)
+                setLoadFailed(false)
+                setLoading(true)
+                fetchQuizData()
+                return
+            }
             syncLocalToServer()
         }
 
@@ -223,9 +240,17 @@ export default function KerjakanKuisPage() {
                 })
             })
 
-            // 409 TIME_EXPIRED: server sudah menutup dengan jawaban tersimpan — aman dibersihkan
-            if (isTimeUp || res.status === 409) {
-                if (res.ok || res.status === 409) clearLocalAnswers()
+            // 409 TIME_EXPIRED: server sudah menutup (jawaban request ikut terselamatkan
+            // via merge). 400 "Kuis sudah dikumpulkan": submission tertutup dari jalur lain
+            // (submit mendahului sync / device lain). Keduanya = state final di server,
+            // draft lokal aman dibersihkan supaya tidak bocor ke attempt berikutnya.
+            const errBody = res.ok ? null : await res.json().catch(() => null)
+            const alreadySubmitted = res.status === 400 && errBody?.error === 'Kuis sudah dikumpulkan'
+            if (res.status === 409 || alreadySubmitted) {
+                clearLocalAnswers()
+                router.replace(`/dashboard/siswa/kuis/${quizId}/hasil`)
+            } else if (isTimeUp && res.ok) {
+                clearLocalAnswers()
                 router.replace(`/dashboard/siswa/kuis/${quizId}/hasil`)
             }
         } catch (error) {
@@ -250,6 +275,8 @@ export default function KerjakanKuisPage() {
 
         timerRef.current = setInterval(() => {
             const currentRemaining = computeRemainingMs()
+            // null = tanpa batas waktu / patokan belum diketahui — tidak ada yang perlu di-tick
+            if (currentRemaining === null) return
 
             setTimeLeft(currentRemaining)
 
@@ -286,11 +313,9 @@ export default function KerjakanKuisPage() {
             }
             const quizData = await quizRes.json()
 
-            if (quizData.deadline && new Date() > new Date(quizData.deadline)) {
-                setError('Kuis ini sudah melewati deadline.')
-                setLoading(false)
-                return
-            }
+            // Deadline TIDAK dicek client-side: penegakan ada di server dengan kontrak
+            // "deadline hanya menggerbang attempt BARU" (attempt berjalan tetap bisa
+            // diselesaikan). Cek lokal pakai jam HP mentah pernah memblokir siswa keliru.
 
             // Fetch Student Data
             const studentsRes = await fetch(`/api/students?user_id=${user?.id}`)
@@ -310,9 +335,22 @@ export default function KerjakanKuisPage() {
 
         } catch (error) {
             console.error('Error:', error)
-            setError('Terjadi kesalahan saat memuat kuis.')
+            // Gagal memuat (drop koneksi dsb.) BUKAN berarti kuisnya selesai/terkunci —
+            // attempt & draft jawaban tetap aman (server + localStorage). Beri pesan
+            // sesuai kondisi jaringan + tombol coba lagi.
+            setLoadFailed(true)
+            setError(!navigator.onLine
+                ? 'Koneksi terputus. Jawaban tersimpan lokal akan dikirim otomatis saat online. Periksa koneksi Anda lalu coba lagi.'
+                : 'Gagal memuat kuis. Periksa koneksi Anda lalu coba lagi.')
             setLoading(false)
         }
+    }
+
+    const handleRetry = () => {
+        setError(null)
+        setLoadFailed(false)
+        setLoading(true)
+        fetchQuizData()
     }
 
     const initializeAttemptFromResume = (quizData: Quiz, remainingTime: number) => {
@@ -334,8 +372,12 @@ export default function KerjakanKuisPage() {
         // Patokan waktu server: koreksi jam HP via header response
         const hdrServerTime = subRes.headers.get('x-server-time')
         if (hdrServerTime) offsetMsRef.current = new Date(hdrServerTime).getTime() - Date.now()
+        // Body error ({error:...}) TIDAK BOLEH dianggap submission — dulu object error
+        // (truthy) lolos sebagai existingSub → started_at/ends_at undefined → autosave
+        // mati & resume modal kacau saat blip jaringan.
+        if (!subRes.ok) throw new Error('GAGAL_MEMUAT_STATUS_ATTEMPT')
         const subs = await subRes.json()
-        const existingSub = subs[0]
+        const existingSub = Array.isArray(subs) ? subs[0] : undefined
         if (existingSub?.ends_at) endsAtRef.current = new Date(existingSub.ends_at).getTime()
 
 
@@ -349,7 +391,8 @@ export default function KerjakanKuisPage() {
             }
 
             // Show resume modal/logic
-            const localAnswers = loadAnswersFromLocal()
+            const localDraft = loadLocalDraft()
+            const localAnswers = localDraft.answers
             const dbAnswers: Record<string, string> = {}
 
             if (existingSub.answers) {
@@ -358,16 +401,22 @@ export default function KerjakanKuisPage() {
                 })
             }
 
-            // Merge: prefer localStorage if it has more answers or same
-            // Actually usually we want the latest. But here we assume local is latest if valid.
-            const mergedAnswers = Object.keys(localAnswers).length >= Object.keys(dbAnswers).length
-                ? { ...dbAnswers, ...localAnswers }
-                : { ...localAnswers, ...dbAnswers } // If DB has more, maybe we cleared local?
+            // Draft dari attempt lama (lastSaved mendahului started_at server, mis. setelah
+            // reset manual di DB) diabaikan supaya tidak mencampur attempt sebelumnya.
+            const draftStale = localDraft.lastSaved !== null && existingSub.started_at != null
+                && new Date(localDraft.lastSaved).getTime() < new Date(existingSub.started_at).getTime()
 
-            // Sisa waktu dari patokan server (ends_at), bukan jam HP
+            // Merge per soal: draft lokal (device ini) dianggap terbaru untuk soal yang
+            // sama-sama terjawab; jawaban server dipertahankan untuk soal yang tak ada di lokal.
+            // (Autosave gagal saat offline → server tertinggal, localStorage yang lengkap.)
+            const mergedAnswers = draftStale
+                ? dbAnswers
+                : { ...dbAnswers, ...localAnswers }
+
+            // Sisa waktu dari patokan server (ends_at), bukan jam HP. null = tanpa batas.
             const remaining = computeRemainingMs()
 
-            if (endsAtRef.current !== null && remaining <= 0) {
+            if (endsAtRef.current !== null && remaining !== null && remaining <= 0) {
                 // Auto-submit immediately if time expired — server tetap yang menilai batas
                 try {
                     const formattedAnswers = Object.entries(mergedAnswers).map(([qId, val]) => ({
@@ -399,7 +448,7 @@ export default function KerjakanKuisPage() {
             setResumeData({
                 answeredCount: Object.keys(mergedAnswers).length,
                 totalQuestions: quizData.questions.length,
-                timeRemaining: remaining
+                timeRemaining: remaining ?? 0
             })
             setAnswers(mergedAnswers)
             setStartTime(existingSub.started_at)
@@ -524,6 +573,14 @@ export default function KerjakanKuisPage() {
                 <div className="text-red-500 mb-4 flex"><Danger set="bold" size="xlarge" primaryColor="currentColor" /></div>
                 <h2 className="text-xl font-bold text-white">Oops!</h2>
                 <p className="text-slate-400 text-center max-w-md">{error}</p>
+                {loadFailed && (
+                    <button
+                        onClick={handleRetry}
+                        className="px-6 py-2 bg-primary text-white rounded-xl hover:bg-primary-dark transition-colors font-bold"
+                    >
+                        Coba Lagi
+                    </button>
+                )}
                 <Link href="/dashboard/siswa" className="px-6 py-2 bg-slate-800 text-white rounded-xl hover:bg-slate-700 transition-colors">
                     Kembali ke Dashboard
                 </Link>
@@ -556,7 +613,7 @@ export default function KerjakanKuisPage() {
                             </span>
                         )}
                         <NetworkBadge isOnline={isOnline} />
-                        <div className={`px-3 py-1.5 md:px-4 md:py-2 rounded-xl font-mono text-base md:text-xl font-bold shadow-lg relative ${(timeLeft || 0) < 60000 ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 dark:bg-surface-dark text-primary dark:text-primary-light'}`}>
+                        <div className={`px-3 py-1.5 md:px-4 md:py-2 rounded-xl font-mono text-base md:text-xl font-bold shadow-lg relative ${timeLeft !== null && timeLeft < 60000 ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 dark:bg-surface-dark text-primary dark:text-primary-light'}`}>
                             {timeLeft !== null ? formatTime(timeLeft) : '--:--:--'}
                         </div>
                     </div>
@@ -811,7 +868,7 @@ export default function KerjakanKuisPage() {
                             <div className="p-4 bg-blue-500/10 rounded-xl">
                                 <p className="text-xs text-text-secondary mb-1">Sisa Waktu</p>
                                 <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 font-mono">
-                                    {formatTime(timeLeft || 0)}
+                                    {timeLeft !== null ? formatTime(timeLeft) : 'Tanpa Batas'}
                                 </p>
                             </div>
                         </div>
@@ -819,8 +876,8 @@ export default function KerjakanKuisPage() {
                         <button
                             onClick={() => {
                                 setShowResumeModal(false)
-                                if (quiz && timeLeft) {
-                                    initializeAttemptFromResume(quiz, timeLeft)
+                                if (quiz) {
+                                    initializeAttemptFromResume(quiz, timeLeft ?? 0)
                                 }
                             }}
                             className="w-full px-6 py-4 bg-primary text-white rounded-xl font-bold hover:bg-primary-dark transition-all text-lg shadow-lg shadow-primary/20"

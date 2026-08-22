@@ -292,8 +292,15 @@ export async function POST(request: NextRequest) {
                 { start_time: exam.start_time, duration_minutes: exam.duration_minutes },
                 { started_at: existingSubmission.started_at, timer_override_until: existingSubmission.timer_override_until }
             )
+            // Jawaban tersimpan ikut dikirim — resume lintas device (localStorage kosong)
+            // tidak menampilkan soal kosong padahal server punya jawaban
+            const { data: savedAnswers } = await supabase
+                .from('exam_answers')
+                .select('question_id, answer')
+                .eq('submission_id', existingSubmission.id)
             return NextResponse.json({
                 ...existingSubmission,
+                saved_answers: savedAnswers || [],
                 server_time: new Date().toISOString(),
                 ends_at: endsAtIso(expiry)
             })
@@ -490,18 +497,24 @@ export async function PUT(request: NextRequest) {
         }
 
         // Penegakan batas waktu di server: jendela global + override hard reset.
-        // Lewat batas + grace → jawaban yang dikirim DIABAIKAN; submission ditutup paksa
-        // dengan jawaban yang sudah tersimpan di server (anti "jam habis tapi masih bisa mengerjakan").
+        // Lewat batas + grace → submission ditutup paksa, TAPI jawaban yang dikirim
+        // ikut di-upsert (menang per soal) supaya jawaban yang diketik saat offline
+        // tidak hilang (anti "jam habis tapi masih bisa mengerjakan").
         const writeExpiry = resolveWindowExpiry(
             { start_time: currentSubmission.exam?.start_time ?? null, duration_minutes: currentSubmission.exam?.duration_minutes ?? null },
             { started_at: currentSubmission.started_at, timer_override_until: currentSubmission.timer_override_until }
         )
         if (!isWriteAllowed(writeExpiry)) {
-            await forceCloseExamSubmission(submission_id, currentSubmission.exam_id, writeExpiry.limited ? writeExpiry.endAt : null)
+            await forceCloseExamSubmission(
+                submission_id,
+                currentSubmission.exam_id,
+                writeExpiry.limited ? writeExpiry.endAt : null,
+                answers
+            )
             return NextResponse.json({
                 code: 'TIME_EXPIRED',
                 force_submitted: true,
-                message: 'Waktu pengerjaan sudah berakhir. Jawaban yang tersimpan di server otomatis dikumpulkan.'
+                message: 'Waktu pengerjaan sudah berakhir. Jawaban terakhirmu otomatis dikumpulkan.'
             }, { status: 409 })
         }
 
