@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
+import { pickBatchRepresentativeIds } from '@/lib/examBatch'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,6 +44,9 @@ export async function GET(request: NextRequest) {
             .select(`
                 id,
                 title,
+                batch_id,
+                pending_publish,
+                created_at,
                 questions:exam_questions(id, status)
             `)
             .in('teaching_assignment_id', assignmentIds)
@@ -52,7 +56,12 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Database error' }, { status: 500 })
         }
 
+        // Batch multi-kelas berbagi soal identik (mirror) — badge "Perlu Diperbaiki"
+        // cukup di satu representative exam, bukan di setiap sibling
+        const representativeIds = new Set(pickBatchRepresentativeIds(exams || []))
+
         const returnedSummary = (exams || [])
+            .filter(e => representativeIds.has(e.id))
             .map(e => {
                 const returnedQuestions = (e.questions || []).filter((question: any) => question.status === 'returned')
                 return {

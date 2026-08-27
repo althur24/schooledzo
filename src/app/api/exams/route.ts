@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
+import { getBatchSizes } from '@/lib/examBatch'
 
 // GET all exams
 export async function GET(request: NextRequest) {
@@ -98,12 +99,17 @@ export async function GET(request: NextRequest) {
             roleMap = new Map((creators || []).map((c: any) => [c.id, c.role]))
         }
 
+        // Ukuran batch (untuk badge "N Kelas Paralel" di daftar guru)
+        const batchIds = [...new Set((data || []).map((e: any) => e.batch_id).filter(Boolean))] as string[]
+        const batchSizes = await getBatchSizes('exams', batchIds)
+
         // Add question count
         const examsWithCount = data?.map(exam => ({
             ...exam,
             question_count: exam.exam_questions?.length || 0,
             exam_questions: undefined,
-            creator_role: exam.created_by ? roleMap.get(exam.created_by) || null : null
+            creator_role: exam.created_by ? roleMap.get(exam.created_by) || null : null,
+            batch_size: exam.batch_id ? batchSizes.get(exam.batch_id) || 1 : 1
         }))
 
         return NextResponse.json(examsWithCount)

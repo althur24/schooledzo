@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { pickBatchRepresentativeIds } from '@/lib/examBatch'
 
 /**
  * GET /api/admin/review-queue
@@ -133,9 +134,10 @@ export async function GET(request: NextRequest) {
             if (schoolTAIds) {
                 const { data: schoolQuizzes } = await supabase
                     .from('quizzes')
-                    .select('id')
+                    .select('id, batch_id, pending_publish, created_at')
                     .in('teaching_assignment_id', schoolTAIds.length > 0 ? schoolTAIds : [])
-                quizIdFilter = schoolQuizzes?.map(q => q.id) || []
+                // Batch multi-kelas berbagi soal identik — tampilkan satu representative
+                quizIdFilter = pickBatchRepresentativeIds(schoolQuizzes || [])
             }
             const quizData = await fetchBySource(
                 'quiz_questions', 'quiz',
@@ -150,9 +152,10 @@ export async function GET(request: NextRequest) {
             if (schoolTAIds) {
                 const { data: schoolExams } = await supabase
                     .from('exams')
-                    .select('id')
+                    .select('id, batch_id, pending_publish, created_at')
                     .in('teaching_assignment_id', schoolTAIds.length > 0 ? schoolTAIds : [])
-                examIdFilter = schoolExams?.map(e => e.id) || []
+                // Batch multi-kelas berbagi soal identik — tampilkan satu representative
+                examIdFilter = pickBatchRepresentativeIds(schoolExams || [])
             }
             const examData = await fetchBySource(
                 'exam_questions', 'exam',

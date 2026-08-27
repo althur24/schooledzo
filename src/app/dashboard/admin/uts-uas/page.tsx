@@ -611,7 +611,8 @@ export default function AdminUtsUasPage() {
             ? new Date(exam.window_end_time)
             : new Date(startTime.getTime() + exam.duration_minutes * 60000)
 
-        if (now > endTime) return { label: 'Selesai', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' }
+        // Draft dicek sebelum waktu — draft yang jendela waktunya sudah lewat
+        // tetap tampil "Draft" (bisa diedit/dilengkapi), bukan "Selesai"
         if (!exam.is_active) return { label: 'Draft', color: 'bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-500/20 dark:text-amber-400' }
         if (now < startTime) return { label: 'Terjadwal', color: 'bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-500/20 dark:text-blue-400' }
         if (now >= startTime && now <= endTime) return { label: 'Berlangsung', color: 'bg-green-500/10 text-green-600 border-green-200 dark:border-green-500/20 dark:text-green-400' }

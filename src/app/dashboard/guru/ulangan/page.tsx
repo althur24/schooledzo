@@ -3,13 +3,15 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Modal, PageHeader, Button } from '@/components/ui'
+import { Modal, PageHeader, Button, DropdownMenu } from '@/components/ui'
+import type { DropdownMenuItem } from '@/components/ui/DropdownMenu'
 import Card from '@/components/ui/Card'
+import ExamCard from '@/components/exam/ExamCard'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import { useAuth } from '@/contexts/AuthContext'
-import { Paper as FileText, TimeCircle as Clock, Calendar, Plus, Lock, ShieldDone, User, Swap, Graph, Edit, Delete, ChevronDown, Document } from 'react-iconly'
-import { Loader2, CheckSquare, Square, RefreshCw, GraduationCap, BookOpen, Users, Copy } from 'lucide-react'
+import { TimeCircle as Clock, Plus, Lock, ShieldDone, Swap, Graph, Edit, Document } from 'react-iconly'
+import { Loader2, CheckSquare, Square, RefreshCw, GraduationCap, BookOpen, Copy, Trash2, Activity } from 'lucide-react'
 
 interface Exam {
     id: string
@@ -21,6 +23,8 @@ interface Exam {
     is_active: boolean
     pending_publish: boolean
     is_randomized: boolean
+    batch_id?: string | null
+    batch_size?: number
     created_by?: string | null
     creator_role?: string | null
     max_violations: number
@@ -599,11 +603,10 @@ export default function GuruUlanganPage() {
             ? new Date(exam.window_end_time)
             : new Date(startTime.getTime() + exam.duration_minutes * 60000)
 
-        if (now > endTime) return { label: 'Selesai', color: 'bg-secondary/10 text-text-secondary border-secondary/20' }
-        if (now >= startTime && now <= endTime && exam.is_active) return { label: 'Berlangsung', color: 'bg-green-500/10 text-green-600 border-green-200 dark:border-green-500/20 dark:text-green-400' }
-        if (exam.is_active && now < startTime) return { label: 'Terjadwal', color: 'bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-500/20 dark:text-blue-400' }
         if (!exam.is_active) return { label: 'Draft', color: 'bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-500/20 dark:text-amber-400' }
-        return { label: 'Terjadwal', color: 'bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-500/20 dark:text-blue-400' }
+        if (now < startTime) return { label: 'Terjadwal', color: 'bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-500/20 dark:text-blue-400' }
+        if (now >= startTime && now <= endTime) return { label: 'Berlangsung', color: 'bg-green-500/10 text-green-600 border-green-200 dark:border-green-500/20 dark:text-green-400' }
+        return { label: 'Selesai', color: 'bg-secondary/10 text-text-secondary border-secondary/20' }
     }
 
     return (
@@ -703,146 +706,86 @@ export default function GuruUlanganPage() {
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                                 {exams.map((exam) => {
                                     const status = getExamStatus(exam as any)
+                                    const classId = exam.teaching_assignment?.class?.id
+                                    const total = classId ? (studentCounts[classId] || 0) : 0
+                                    const submitted = submissionCounts[exam.id] || 0
+                                    const pendingGrading = pendingGradingCounts[exam.id] || 0
+                                    const isLive = status.label === 'Berlangsung'
+                                    const isDone = status.label === 'Selesai'
+                                    const isActive = exam.is_active
+
+                                    // Aksi utama kontekstual: Monitor saat live, Hasil saat selesai, Edit selebihnya
+                                    const primaryAction = isLive
+                                        ? { label: 'Monitor Live', href: `/dashboard/guru/ulangan/${exam.id}/monitor`, icon: <Activity className="w-4 h-4" /> }
+                                        : isActive && isDone
+                                            ? { label: 'Lihat Hasil', href: `/dashboard/guru/ulangan/${exam.id}?tab=hasil`, icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> }
+                                            : { label: exam.pending_publish ? 'Perbaiki Soal' : 'Edit Soal', href: `/dashboard/guru/ulangan/${exam.id}`, icon: <Edit set="bold" primaryColor="currentColor" size={16} /> }
+
+                                    const menuItems: DropdownMenuItem[] = [
+                                        {
+                                            label: 'Lihat Hasil',
+                                            show: isActive,
+                                            icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={14} /></span>,
+                                            onClick: () => router.push(`/dashboard/guru/ulangan/${exam.id}?tab=hasil`),
+                                        },
+                                        {
+                                            label: 'Buat Remedial',
+                                            show: isActive && !(exam as any).is_remedial && isDone,
+                                            icon: <RefreshCw className="w-4 h-4" />,
+                                            onClick: () => handleOpenRemedial(exam),
+                                        },
+                                        {
+                                            label: 'Pakai Ulang',
+                                            show: isActive,
+                                            icon: <Copy className="w-4 h-4" />,
+                                            onClick: () => openCopyModal(exam),
+                                        },
+                                        {
+                                            label: 'Hapus',
+                                            danger: true,
+                                            icon: <Trash2 className="w-4 h-4" />,
+                                            onClick: () => handleDelete(exam.id),
+                                        },
+                                    ]
+
+                                    const extraBadges = [
+                                        ...(exam as any).is_remedial ? [(
+                                            <span key="remedial" className="px-2 py-0.5 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm animate-pulse-slow">
+                                                REMEDIAL
+                                            </span>
+                                        )] : [],
+                                        ...exam.creator_role === 'ADMIN' ? [(
+                                            <span key="admin" className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
+                                                Dibuatkan Admin
+                                            </span>
+                                        )] : [],
+                                        ...exam.is_randomized ? [(
+                                            <span key="acak" className="text-xs text-text-secondary flex items-center gap-1 bg-secondary/10 px-2 py-1 rounded-full">
+                                                <Swap set="bold" primaryColor="currentColor" size={12} /> Acak
+                                            </span>
+                                        )] : [],
+                                    ]
+
                                     return (
-                                        <Card key={exam.id} padding="p-0" className="group overflow-hidden hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all">
-                                            <div className="flex flex-col h-full">
-                                                <div className="p-5 flex flex-col gap-4 flex-1">
-                                                <div className="flex items-start justify-between">
-                                                    <div className="flex-1">
-                                                        <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                            <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${status.color}`}>{status.label}</span>
-                                                            {(exam as any).is_remedial && (
-                                                                <span className="px-2 py-0.5 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm animate-pulse-slow">
-                                                                    REMEDIAL
-                                                                </span>
-                                                            )}
-                                                            {exam.creator_role === 'ADMIN' && (
-                                                                <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
-                                                                    Dibuatkan Admin
-                                                                </span>
-                                                            )}
-                                                            {exam.is_randomized && <span className="text-xs text-text-secondary flex items-center gap-1 bg-secondary/10 px-2 py-1 rounded-full"><Swap set="bold" primaryColor="currentColor" size={12} /> Acak</span>}
-                                                        </div>
-                                                        <h3 className="font-bold text-text-main dark:text-white text-lg group-hover:text-primary transition-colors line-clamp-2">{exam.title}</h3>
-                                                    </div>
-                                                </div>
-
-                                                <p className="text-sm text-text-secondary dark:text-zinc-400 line-clamp-2 flex-grow">{exam.description || 'Tidak ada deskripsi'}</p>
-
-                                                <div className="space-y-3 pt-4 border-t border-secondary/10">
-                                                    <div className="flex items-center text-xs text-text-secondary dark:text-zinc-500 mb-2">
-                                                        <Calendar set="bold" primaryColor="currentColor" size={14} />
-                                                        <span className="ml-1.5">Dibuat: {new Date(exam.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                                                    </div>
-                                                    <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                        <span>Kelas & Mapel</span>
-                                                        <div className="flex gap-1">
-                                                            <span className="px-2 py-1 bg-secondary/10 rounded font-bold text-text-main dark:text-white">{exam.teaching_assignment?.class?.name}</span>
-                                                            <span className="px-2 py-1 bg-primary/10 rounded font-bold text-primary">{exam.teaching_assignment?.subject?.name}</span>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                        <span>Waktu & Soal</span>
-                                                        <div className="flex gap-3">
-                                                            <span className="flex items-center gap-1 font-medium">
-                                                                <Clock set="bold" primaryColor="currentColor" size={14} /> {exam.duration_minutes}m
-                                                            </span>
-                                                            <span className={`flex items-center gap-1 ${(exam.question_count || 0) === 0 ? 'font-bold text-red-500' : 'font-medium'}`}>
-                                                                <Edit set="bold" primaryColor="currentColor" size={14} /> {exam.question_count || 0}
-                                                                {(exam.question_count || 0) === 0 && <span className="px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded text-[10px] font-bold">BELUM ADA SOAL</span>}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    {(() => {
-                                                        const classId = exam.teaching_assignment?.class?.id
-                                                        const total = classId ? (studentCounts[classId] || 0) : 0
-                                                        const submitted = submissionCounts[exam.id] || 0
-                                                        const pendingGrading = pendingGradingCounts[exam.id] || 0
-                                                        return (
-                                                            <>
-                                                                <div className="flex items-center justify-between text-xs mt-1">
-                                                                    <span className="text-text-secondary">Pengumpulan</span>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className={`font-bold ${submitted >= total && total > 0 ? 'text-green-600' : 'text-primary'}`}>{submitted}/{total}</span>
-                                                                    </div>
-                                                                </div>
-                                                                {pendingGrading > 0 && (
-                                                                    <Link href={`/dashboard/guru/ulangan/${exam.id}?tab=hasil`} className="block">
-                                                                        <div className="flex items-center justify-between text-xs mt-1 px-2 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition-colors cursor-pointer">
-                                                                            <span className="text-amber-600 dark:text-amber-400 font-medium">📝 Perlu Dikoreksi</span>
-                                                                            <span className="font-bold text-amber-600 dark:text-amber-400">{pendingGrading}</span>
-                                                                        </div>
-                                                                    </Link>
-                                                                )}
-                                                            </>
-                                                        )
-                                                    })()}
-                                                </div>
-                                                </div>
-
-                                                {/* Button footer — inside card but with its own padding */}
-                                                <div className="px-5 pb-5 flex flex-col gap-2">
-                                                    {status.label === 'Berlangsung' && (
-                                                        <Link href={`/dashboard/guru/ulangan/${exam.id}/monitor`}>
-                                                            <Button variant="secondary" size="sm" className="w-full justify-center text-red-600 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 border-red-200 dark:border-red-800/50 gap-1.5">
-                                                                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" /> Monitor Live
-                                                            </Button>
-                                                        </Link>
-                                                    )}
-                                                    <div className="flex gap-2 w-full">
-                                                        {exam.is_active ? (
-                                                            <>
-                                                                <Link href={`/dashboard/guru/ulangan/${exam.id}?tab=hasil`} className="flex-1">
-                                                                    <Button variant="secondary" size="sm" className="w-full justify-center">
-                                                                        <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> Hasil
-                                                                    </Button>
-                                                                </Link>
-                                                                {!(exam as any).is_remedial && status.label === 'Selesai' && (
-                                                                    <Button
-                                                                        variant="secondary"
-                                                                        size="sm"
-                                                                        onClick={() => handleOpenRemedial(exam)}
-                                                                        className="flex-1 justify-center bg-orange-100 dark:bg-orange-900/30 text-orange-600 hover:bg-orange-200 dark:hover:bg-orange-800/50 border-orange-200 dark:border-orange-800/50"
-                                                                    >
-                                                                        <RefreshCw className="w-4 h-4 mr-1 hidden sm:inline" /> Remedial
-                                                                    </Button>
-                                                                )}
-                                                            </>
-                                                        ) : (
-                                                            <Button variant="secondary" size="sm" disabled className="w-full justify-center opacity-50 cursor-not-allowed">
-                                                                <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> Hasil
-                                                            </Button>
-                                                        )}
-                                                    </div>
-
-                                                    <div className="flex gap-2 w-full">
-                                                        <Link href={`/dashboard/guru/ulangan/${exam.id}`} className="flex-1">
-                                                            <Button variant="secondary" size="sm" className="w-full justify-center text-primary bg-primary/10 hover:bg-primary/20 border-0">
-                                                                <Edit set="bold" primaryColor="currentColor" size={16} /> Edit
-                                                            </Button>
-                                                        </Link>
-                                                        {exam.is_active && (
-                                                            <Button
-                                                                variant="secondary"
-                                                                size="sm"
-                                                                onClick={() => openCopyModal(exam)}
-                                                                className="flex-1 justify-center text-blue-600 bg-blue-100 hover:bg-blue-200 dark:bg-blue-500/20 dark:hover:bg-blue-500/30 border-0"
-                                                            >
-                                                                <Copy className="w-4 h-4 mr-1 hidden sm:inline" /> Pakai Ulang
-                                                            </Button>
-                                                        )}
-                                                        <Button
-                                                            variant="secondary"
-                                                            size="sm"
-                                                            onClick={() => handleDelete(exam.id)}
-                                                            className="flex-1 justify-center text-red-500 bg-red-100 hover:bg-red-200 dark:bg-red-500/20 dark:hover:bg-red-500/30 border-0"
-                                                        >
-                                                            <span className="text-red-500"><Delete set="bold" primaryColor="currentColor" size={16} /></span> Hapus
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </Card>
+                                        <ExamCard
+                                            key={exam.id}
+                                            status={status}
+                                            typeBadge={{ label: 'ULANGAN', className: 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/20' }}
+                                            title={exam.title}
+                                            description={exam.description}
+                                            extraBadges={extraBadges}
+                                            isLive={isLive}
+                                            subjectName={exam.teaching_assignment?.subject?.name}
+                                            classNameLabel={exam.teaching_assignment?.class?.name}
+                                            durationMinutes={exam.duration_minutes}
+                                            questionCount={exam.question_count}
+                                            batchSize={exam.batch_size}
+                                            submission={{ submitted, total }}
+                                            pendingGrading={pendingGrading}
+                                            onPendingGradingClick={() => router.push(`/dashboard/guru/ulangan/${exam.id}?tab=hasil`)}
+                                            primaryAction={primaryAction}
+                                            menuItems={menuItems}
+                                        />
                                     )
                                 })}
                             </div>
@@ -865,54 +808,37 @@ export default function GuruUlanganPage() {
                                 {officialExams.map(exam => {
                                     const status = getOfficialExamStatus(exam)
                                     const isLive = status.label === 'Berlangsung'
+
                                     // Draft (termasuk buatan admin) dibuka di editor agar bisa dilengkapi & dipublish
-                                    const targetHref = status.label === 'Draft'
-                                        ? `/dashboard/guru/uts-uas/${exam.id}`
+                                    const primaryAction = status.label === 'Draft'
+                                        ? { label: 'Edit Soal', href: `/dashboard/guru/uts-uas/${exam.id}`, icon: <Edit set="bold" primaryColor="currentColor" size={16} /> }
                                         : isLive
-                                            ? `/dashboard/guru/uts-uas/${exam.id}/monitor`
-                                            : `/dashboard/guru/uts-uas/${exam.id}/hasil`
+                                            ? { label: 'Monitor Live', href: `/dashboard/guru/uts-uas/${exam.id}/monitor`, icon: <Activity className="w-4 h-4" /> }
+                                            : { label: 'Lihat Hasil', href: `/dashboard/guru/uts-uas/${exam.id}/hasil`, icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> }
+
+                                    const extraBadges = exam.creator_role === 'ADMIN' ? [(
+                                        <span key="admin" className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
+                                            Dibuatkan Admin
+                                        </span>
+                                    )] : []
 
                                     return (
-                                        <Link key={exam.id} href={targetHref}>
-                                            <Card padding="p-5" className={`group hover:shadow-lg transition-all cursor-pointer h-full ${isLive
-                                                    ? 'hover:border-red-500/50 hover:shadow-red-500/10 border-red-500/20 bg-gradient-to-br from-red-500/5 to-transparent'
-                                                    : 'hover:border-primary/50 hover:shadow-primary/5'
-                                                }`}>
-                                                <div className="flex flex-col h-full gap-3">
-                                                    <div className="flex items-center justify-between mb-1">
-                                                        <div className="flex items-center gap-2 flex-wrap">
-                                                            <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${status.color}`}>
-                                                                {isLive ? (
-                                                                    <span className="flex items-center gap-1.5">
-                                                                        <span className="relative flex h-2 w-2">
-                                                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                                                                        </span>
-                                                                        {status.label}
-                                                                    </span>
-                                                                ) : status.label}
-                                                            </span>
-                                                            {exam.creator_role === 'ADMIN' && (
-                                                                <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
-                                                                    Dibuatkan Admin
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    <h3 className={`font-bold text-lg transition-colors ${isLive ? 'text-red-700 dark:text-red-400 group-hover:text-red-600' : 'text-text-main dark:text-white group-hover:text-primary'}`}>{exam.title}</h3>
-                                                    <p className="text-sm text-text-secondary line-clamp-1">{exam.description || 'Tidak ada deskripsi'}</p>
-                                                    
-                                                    {status.label === 'Selesai' && (
-                                                        <div className="mt-auto pt-3 border-t border-secondary/10 flex justify-center">
-                                                            <span className="flex items-center gap-1.5 text-sm font-bold text-primary group-hover:text-primary-dark transition-colors">
-                                                                <Graph set="bold" primaryColor="currentColor" size={16} /> Lihat Hasil
-                                                            </span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </Card>
-                                        </Link>
+                                        <ExamCard
+                                            key={exam.id}
+                                            status={status}
+                                            typeBadge={exam.exam_type === 'UTS'
+                                                ? { label: 'UTS', className: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/20' }
+                                                : { label: 'UAS', className: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20' }}
+                                            title={exam.title}
+                                            description={exam.description}
+                                            extraBadges={extraBadges}
+                                            isLive={isLive}
+                                            subjectName={exam.subject?.name}
+                                            classNameLabel={`${exam.target_class_ids?.length ?? 0} kelas`}
+                                            durationMinutes={exam.duration_minutes}
+                                            questionCount={exam.question_count}
+                                            primaryAction={primaryAction}
+                                        />
                                     )
                                 })}
                             </div>

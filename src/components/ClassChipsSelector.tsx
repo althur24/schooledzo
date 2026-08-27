@@ -42,10 +42,18 @@ export default function ClassChipsSelector({
         return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
     }, [assignments])
 
-    // Classes of the chosen subject
+    // Classes of the chosen subject — deduped by class identity
+    // (duplicate teaching_assignments rows for the same class must not show twice)
     const classesForSubject = useMemo(() => {
+        const seen = new Set<string>()
         return assignments
-            .filter(a => a.subject?.id === subjectId)
+            .filter(a => {
+                if (a.subject?.id !== subjectId) return false
+                const key = a.class?.id ?? a.class?.name ?? ''
+                if (seen.has(key)) return false
+                seen.add(key)
+                return true
+            })
             .sort((a, b) => (a.class?.name || '').localeCompare(b.class?.name || ''))
     }, [assignments, subjectId])
 

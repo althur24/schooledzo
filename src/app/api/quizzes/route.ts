@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
+import { getBatchSizes } from '@/lib/examBatch'
 
 // GET all quizzes (filtered by teacher)
 export async function GET(request: NextRequest) {
@@ -83,7 +84,15 @@ export async function GET(request: NextRequest) {
 
         if (error) throw error
 
-        return NextResponse.json(data)
+        // Ukuran batch (untuk badge "N Kelas Paralel" di daftar guru)
+        const batchIds = [...new Set((data || []).map((q: any) => q.batch_id).filter(Boolean))] as string[]
+        const batchSizes = await getBatchSizes('quizzes', batchIds)
+        const quizzesWithBatch = (data || []).map(quiz => ({
+            ...quiz,
+            batch_size: quiz.batch_id ? batchSizes.get(quiz.batch_id) || 1 : 1
+        }))
+
+        return NextResponse.json(quizzesWithBatch)
     } catch (error) {
         console.error('Error fetching quizzes:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

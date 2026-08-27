@@ -5,6 +5,22 @@ import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type T
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncQuestionsToBank } from '@/lib/questionBankSync'
+import { syncDraftQuizQuestions } from '@/lib/examBatch'
+
+/**
+ * Mirror soal ke sibling batch (draft) setelah mutasi sukses.
+ * Kegagalan sync tidak boleh menggagalkan simpan guru — cukup dilog.
+ */
+async function syncBatchDraft(quizId: string): Promise<void> {
+    try {
+        const result = await syncDraftQuizQuestions(quizId)
+        if (result.failed.length > 0) {
+            console.error(`[questions] draft-sync gagal untuk ${result.failed.length}/${result.total} sibling quiz ${quizId}`)
+        }
+    } catch (e) {
+        console.error('[questions] draft-sync error:', e)
+    }
+}
 
 // GET questions for a quiz
 export async function GET(
@@ -120,6 +136,7 @@ export async function POST(
                 if (updErr) throw updErr
                 updated++
             }
+            await syncBatchDraft(id)
             return NextResponse.json({ updated })
         }
 
@@ -227,6 +244,8 @@ export async function POST(
                 })
             }
 
+            await syncBatchDraft(id)
+
             return NextResponse.json(data)
         }
 
@@ -315,6 +334,8 @@ export async function POST(
                 })
             }
         }
+
+        await syncBatchDraft(id)
 
         return NextResponse.json(data)
     } catch (error) {
@@ -415,6 +436,8 @@ export async function PUT(
             }).catch(err => console.error('HOTS re-analysis error:', err))
         }
 
+        await syncBatchDraft(id)
+
         return NextResponse.json(data)
     } catch (error) {
         console.error('Error updating quiz question:', error)
@@ -468,6 +491,8 @@ export async function DELETE(
 
             if (error) throw error
         }
+
+        await syncBatchDraft(id)
 
         return NextResponse.json({ success: true })
     } catch (error) {

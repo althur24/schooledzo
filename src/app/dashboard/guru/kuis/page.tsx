@@ -8,7 +8,7 @@ import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import { TimeCircle as Clock, Document as FileText, Graph as BarChart3, Game as Brain, Calendar, Plus, Game, Graph, Edit, Swap } from 'react-iconly'
-import { Loader2, CheckSquare, Square, RefreshCw, Copy, CalendarDays, Clock as LuClock, FileText as LuFileText, Shuffle } from 'lucide-react'
+import { Loader2, CheckSquare, Square, RefreshCw, Copy, CalendarDays, Clock as LuClock, FileText as LuFileText, Shuffle, Layers } from 'lucide-react'
 
 interface Quiz {
     id: string
@@ -18,6 +18,8 @@ interface Quiz {
     is_active: boolean
     pending_publish: boolean
     is_randomized: boolean
+    batch_id?: string | null
+    batch_size?: number
     created_at: string
     teaching_assignment: {
         id: string
@@ -525,6 +527,14 @@ export default function GuruKuisPage() {
                                         {(quiz as any).is_remedial && (
                                             <span className="px-2 py-0.5 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm animate-pulse-slow">
                                                 REMEDIAL
+                                            </span>
+                                        )}
+                                        {(quiz.batch_size || 1) > 1 && (
+                                            <span
+                                                title={`Soal kuis ini tersinkron otomatis ke ${quiz.batch_size} kelas paralel`}
+                                                className="flex items-center gap-1 px-2 py-0.5 bg-sky-500/10 text-sky-600 dark:text-sky-400 text-xs rounded-full border border-sky-200 dark:border-sky-500/20 font-bold"
+                                            >
+                                                <Layers className="w-3.5 h-3.5" /> {quiz.batch_size} Kelas Paralel
                                             </span>
                                         )}
                                         {quiz.pending_publish ? (

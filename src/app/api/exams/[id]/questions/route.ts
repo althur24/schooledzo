@@ -6,6 +6,22 @@ import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncQuestionsToBank } from '@/lib/questionBankSync'
 import { canManageExam } from '@/lib/teacherScope'
+import { syncDraftExamQuestions } from '@/lib/examBatch'
+
+/**
+ * Mirror soal ke sibling batch (draft) setelah mutasi sukses.
+ * Kegagalan sync tidak boleh menggagalkan simpan guru — cukup dilog.
+ */
+async function syncBatchDraft(examId: string): Promise<void> {
+    try {
+        const result = await syncDraftExamQuestions(examId)
+        if (result.failed.length > 0) {
+            console.error(`[questions] draft-sync gagal untuk ${result.failed.length}/${result.total} sibling exam ${examId}`)
+        }
+    } catch (e) {
+        console.error('[questions] draft-sync error:', e)
+    }
+}
 
 // GET questions for exam
 export async function GET(
@@ -127,6 +143,7 @@ export async function POST(
                 if (updErr) throw updErr
                 updated++
             }
+            await syncBatchDraft(id)
             return NextResponse.json({ updated })
         }
 
@@ -244,6 +261,8 @@ export async function POST(
             })
         }
 
+        await syncBatchDraft(id)
+
         return NextResponse.json(data)
     } catch (error) {
         console.error('Error adding exam questions:', error)
@@ -349,6 +368,8 @@ export async function PUT(
             }).catch(err => console.error('HOTS re-analysis error:', err))
         }
 
+        await syncBatchDraft(id)
+
         return NextResponse.json(data)
     } catch (error) {
         console.error('Error updating exam question:', error)
@@ -408,6 +429,8 @@ export async function DELETE(
 
             if (error) throw error
         }
+
+        await syncBatchDraft(id)
 
         return NextResponse.json({ success: true })
     } catch (error) {
