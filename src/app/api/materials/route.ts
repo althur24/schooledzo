@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
         // Verify every assignment exists, belongs to this school, and is not in an archived year
         const { data: tas, error: taError } = await supabase
             .from('teaching_assignments')
-            .select('id, class_id, subject:subjects(name), teacher:teachers(user_id), academic_year:academic_years(school_id, status)')
+            .select('id, class_id, teacher_id, subject:subjects(name), teacher:teachers(user_id), academic_year:academic_years(school_id, status)')
             .in('id', taIds)
 
         if (taError) throw taError
@@ -117,6 +117,26 @@ export async function POST(request: NextRequest) {
         if (foundIds.size !== taIds.length) {
             return NextResponse.json({ error: 'Penugasan tidak valid' }, { status: 400 })
         }
+
+        // Guru hanya boleh membuat materi di penugasan miliknya sendiri
+        // (anti injeksi materi ke kelas guru lain via API langsung)
+        let myTeacherId: string | null = null
+        if (user.role === 'GURU') {
+            const { data: me } = await supabase
+                .from('teachers')
+                .select('id')
+                .eq('user_id', user.id)
+                .maybeSingle()
+            myTeacherId = me?.id || null
+            if (!myTeacherId) {
+                return NextResponse.json({ error: 'Data guru tidak ditemukan' }, { status: 404 })
+            }
+            const foreignTa = (tas || []).find((t: any) => t.teacher_id !== myTeacherId)
+            if (foreignTa) {
+                return NextResponse.json({ error: 'Anda hanya dapat membuat materi untuk penugasan Anda sendiri' }, { status: 403 })
+            }
+        }
+
         for (const ta of tas || []) {
             const year = (ta as any).academic_year
             if (schoolId && year?.school_id !== schoolId) {
