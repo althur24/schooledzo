@@ -6,6 +6,7 @@ import { Card, Button, EmptyState } from '@/components/ui'
 import FilterSelect from '@/components/FilterSelect'
 import SmartText from '@/components/SmartText'
 import { QuestionTypeBadge, DifficultyBadge } from '@/components/QuestionBadges'
+import { AnswerOptionsView, TextAnswerView } from '@/components/QuestionAnswerView'
 
 export interface BankPickerQuestion {
     id: string
@@ -309,6 +310,18 @@ export default function BankQuestionPicker({
                                                                         {(q.tags || []).map((t) => <TagBadge key={t} tag={t} />)}
                                                                     </span>
                                                                 )}
+                                                                {/* Opsi + kunci jawaban — konsisten dengan card soal mandiri */}
+                                                                <span className="block mt-1.5" onClick={(e) => e.stopPropagation()}>
+                                                                    <AnswerOptionsView
+                                                                        questionType={q.question_type}
+                                                                        options={(q.options as string[] | null) ?? null}
+                                                                        correctAnswer={(q.correct_answer as string | null) ?? null}
+                                                                    />
+                                                                    <TextAnswerView
+                                                                        questionType={q.question_type}
+                                                                        correctAnswer={(q.correct_answer as string | null) ?? null}
+                                                                    />
+                                                                </span>
                                                             </span>
                                                         </label>
                                                     ))}
@@ -347,6 +360,18 @@ export default function BankQuestionPicker({
                                                 {(q.tags || []).map((t) => <TagBadge key={t} tag={t} />)}
                                             </div>
                                             <SmartText text={q.question_text} className="text-text-main dark:text-white text-sm" />
+                                            {/* Opsi + kunci jawaban — guru bisa memverifikasi jawaban sebelum memilih */}
+                                            <div className="mt-2" onClick={(e) => e.preventDefault()}>
+                                                <AnswerOptionsView
+                                                    questionType={q.question_type}
+                                                    options={(q.options as string[] | null) ?? null}
+                                                    correctAnswer={(q.correct_answer as string | null) ?? null}
+                                                />
+                                                <TextAnswerView
+                                                    questionType={q.question_type}
+                                                    correctAnswer={(q.correct_answer as string | null) ?? null}
+                                                />
+                                            </div>
                                         </div>
                                     </label>
                                 ))}
