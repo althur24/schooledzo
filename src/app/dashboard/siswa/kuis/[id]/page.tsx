@@ -470,6 +470,14 @@ export default function KerjakanKuisPage() {
                 })
             })
             const startData = await res.json().catch(() => null)
+            // Start ditolak server (belum dibuka / lewat deadline / dsb.) — JANGAN render
+            // editor "hantu": submission tidak dibuat, autosave akan gagal terus-menerus.
+            if (!res.ok) {
+                setError(startData?.error || 'Tidak bisa memulai kuis ini.')
+                setLoadFailed(true)
+                setLoading(false)
+                return
+            }
             if (startData?.server_time) offsetMsRef.current = new Date(startData.server_time).getTime() - Date.now()
             if (startData?.ends_at) endsAtRef.current = new Date(startData.ends_at).getTime()
             setStartTime(startData?.started_at || startedAt.toISOString())

@@ -13,6 +13,7 @@ interface Exam {
     description: string | null
     start_time: string
     duration_minutes: number
+    window_end_time?: string | null
     is_active: boolean
     max_violations: number
     created_at: string
@@ -39,6 +40,7 @@ interface OfficialExam {
     description: string | null
     start_time: string
     duration_minutes: number
+    window_end_time?: string | null
     is_active: boolean
     max_violations: number
     question_count: number
@@ -108,8 +110,10 @@ export default function SiswaUlanganPage() {
 
     const getExamStatus = (exam: Exam) => {
         const startTime = new Date(exam.start_time)
-        // Default strict end time (if no submission)
-        const strictEndTime = new Date(startTime.getTime() + exam.duration_minutes * 60000)
+        // Mode jendela: batas akhir = jam tutup; mode serentak = start + durasi
+        const strictEndTime = exam.window_end_time
+            ? new Date(exam.window_end_time)
+            : new Date(startTime.getTime() + exam.duration_minutes * 60000)
 
         const submission = submissions.find(s => s.exam_id === exam.id)
 
@@ -118,11 +122,12 @@ export default function SiswaUlanganPage() {
         }
 
         if (submission && !submission.is_submitted) {
-            // Check personal expiration
+            // Check personal expiration — min(started_at + durasi, jam tutup), buffer 1 menit
             const subStartedAt = new Date(submission.started_at).getTime()
             const durationMs = exam.duration_minutes * 60000
-            // Allow 1 min buffer
-            const isExpired = currentTime.getTime() > (subStartedAt + durationMs + 60000)
+            const perStudentEnd = durationMs > 0 ? subStartedAt + durationMs : null
+            const effectiveEnd = Math.min(...[perStudentEnd, strictEndTime.getTime()].filter((v): v is number => v !== null))
+            const isExpired = currentTime.getTime() > (effectiveEnd + 60000)
 
             if (isExpired) {
                 return { status: 'expired_open', label: 'Waktu Habis', icon: TimeCircle, color: 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300' }
@@ -136,7 +141,7 @@ export default function SiswaUlanganPage() {
             const mins = Math.floor((diff % 3600000) / 60000)
             const secs = Math.floor((diff % 60000) / 1000)
 
-            let label = 'Mulai dalam '
+            let label = 'Dibuka dalam '
             if (hours > 0) label += `${hours}j `
             if (mins > 0 || hours > 0) label += `${mins}m `
             label += `${secs}d`
@@ -153,7 +158,10 @@ export default function SiswaUlanganPage() {
 
     const getOfficialExamStatus = (exam: OfficialExam) => {
         const startTime = new Date(exam.start_time)
-        const strictEndTime = new Date(startTime.getTime() + exam.duration_minutes * 60000)
+        // Mode jendela: batas akhir = jam tutup; mode serentak = start + durasi
+        const strictEndTime = exam.window_end_time
+            ? new Date(exam.window_end_time)
+            : new Date(startTime.getTime() + exam.duration_minutes * 60000)
         const submission = officialSubmissions.find(s => s.exam_id === exam.id)
 
         if (submission?.is_submitted) {
@@ -162,7 +170,9 @@ export default function SiswaUlanganPage() {
         if (submission && !submission.is_submitted) {
             const subStartedAt = new Date(submission.started_at).getTime()
             const durationMs = exam.duration_minutes * 60000
-            const isExpired = currentTime.getTime() > (subStartedAt + durationMs + 60000)
+            const perStudentEnd = durationMs > 0 ? subStartedAt + durationMs : null
+            const effectiveEnd = Math.min(...[perStudentEnd, strictEndTime.getTime()].filter((v): v is number => v !== null))
+            const isExpired = currentTime.getTime() > (effectiveEnd + 60000)
             if (isExpired) return { status: 'expired_open', label: 'Waktu Habis', icon: TimeCircle, color: 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300' }
             return { status: 'in_progress', label: 'Lanjutkan', icon: Play, color: 'bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400' }
         }
@@ -171,7 +181,7 @@ export default function SiswaUlanganPage() {
             const hours = Math.floor(diff / 3600000)
             const mins = Math.floor((diff % 3600000) / 60000)
             const secs = Math.floor((diff % 60000) / 1000)
-            let label = 'Mulai dalam '
+            let label = 'Dibuka dalam '
             if (hours > 0) label += `${hours}j `
             if (mins > 0 || hours > 0) label += `${mins}m `
             label += `${secs}d`
@@ -287,21 +297,28 @@ export default function SiswaUlanganPage() {
                                                         <span className="font-bold text-text-main dark:text-zinc-300">{exam.subject?.name}</span>
                                                     </div>
                                                     <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                        <span>Waktu Mulai</span>
+                                                        <span>{exam.window_end_time ? 'Dibuka Pukul' : 'Waktu Mulai'}</span>
                                                         <span className="font-medium">{formatDateTime(exam.start_time)}</span>
                                                     </div>
                                                     <div className="flex items-center justify-between text-xs text-text-secondary">
                                                         <span>Durasi</span>
                                                         <span className="font-medium flex items-center gap-1">
-                                                            <TimeCircle set="bold" primaryColor="currentColor" size={14} /> {exam.duration_minutes} menit
+                                                            <TimeCircle set="bold" primaryColor="currentColor" size={14} /> {exam.duration_minutes} menit{exam.window_end_time ? ' / siswa' : ''}
                                                         </span>
                                                     </div>
                                                     <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                        <span>Waktu Berakhir</span>
+                                                        <span>{exam.window_end_time ? 'Ditutup Pukul' : 'Waktu Berakhir'}</span>
                                                         <span className="font-medium text-red-500 dark:text-red-400">
-                                                            {formatDateTime(new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
+                                                            {formatDateTime(exam.window_end_time
+                                                                ? exam.window_end_time
+                                                                : new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
                                                         </span>
                                                     </div>
+                                                    {exam.window_end_time && (
+                                                        <p className="text-[11px] text-text-secondary">
+                                                            Kamu boleh mulai kapan saja antara jam buka dan jam tutup — setelah mulai, durasi dipotong di jam tutup bila sisa waktumu lebih pendek.
+                                                        </p>
+                                                    )}
                                                     <div className="flex items-center justify-between text-xs text-text-secondary">
                                                         <span>Max Pelanggaran</span>
                                                         <span className="font-medium text-red-500 flex items-center gap-1">
@@ -392,21 +409,28 @@ export default function SiswaUlanganPage() {
                                                         <span className="font-bold text-text-main dark:text-zinc-300">{exam.teaching_assignment?.subject?.name}</span>
                                                     </div>
                                                     <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                        <span>Waktu Mulai</span>
+                                                        <span>{exam.window_end_time ? 'Dibuka Pukul' : 'Waktu Mulai'}</span>
                                                         <span className="font-medium">{formatDateTime(exam.start_time)}</span>
                                                     </div>
                                                     <div className="flex items-center justify-between text-xs text-text-secondary">
                                                         <span>Durasi</span>
                                                         <span className="font-medium flex items-center gap-1">
-                                                            <TimeCircle set="bold" primaryColor="currentColor" size={14} /> {exam.duration_minutes} menit
+                                                            <TimeCircle set="bold" primaryColor="currentColor" size={14} /> {exam.duration_minutes} menit{exam.window_end_time ? ' / siswa' : ''}
                                                         </span>
                                                     </div>
                                                     <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                        <span>Waktu Berakhir</span>
+                                                        <span>{exam.window_end_time ? 'Ditutup Pukul' : 'Waktu Berakhir'}</span>
                                                         <span className="font-medium text-red-500 dark:text-red-400">
-                                                            {formatDateTime(new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
+                                                            {formatDateTime(exam.window_end_time
+                                                                ? exam.window_end_time
+                                                                : new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
                                                         </span>
                                                     </div>
+                                                    {exam.window_end_time && (
+                                                        <p className="text-[11px] text-text-secondary">
+                                                            Kamu boleh mulai kapan saja antara jam buka dan jam tutup — setelah mulai, durasi dipotong di jam tutup bila sisa waktumu lebih pendek.
+                                                        </p>
+                                                    )}
                                                     <div className="flex items-center justify-between text-xs text-text-secondary">
                                                         <span>Max Pelanggaran</span>
                                                         <span className="font-medium text-red-500 flex items-center gap-1">

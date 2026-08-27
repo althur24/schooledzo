@@ -175,7 +175,10 @@ export default function SiswaDashboard() {
                         if (!e.is_active) return
 
                         const startTime = new Date(e.start_time).getTime()
-                        const endTime = startTime + (e.duration_minutes * 60 * 1000)
+                        // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
+                        const endTime = e.window_end_time
+                            ? new Date(e.window_end_time).getTime()
+                            : startTime + (e.duration_minutes * 60 * 1000)
 
                         // Show if exam hasn't ended yet
                         if (endTime > nowTime) {
@@ -206,6 +209,8 @@ export default function SiswaDashboard() {
 
                         // If there's a deadline and it has passed, don't show
                         if (deadlineTime > 0 && deadlineTime <= nowTime) return
+                        // Jendela kuis: jam buka belum tiba → jangan tampilkan dulu
+                        if (q.available_from && new Date(q.available_from).getTime() > nowTime) return
 
                         newDeadlines.push({
                             id: q.id,
@@ -225,7 +230,10 @@ export default function SiswaDashboard() {
                         if (officialExamSubs.some((s: any) => s.exam_id === oe.id && s.is_submitted)) return
 
                         const startTime = new Date(oe.start_time).getTime()
-                        const endTime = startTime + (oe.duration_minutes * 60 * 1000)
+                        // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
+                        const endTime = oe.window_end_time
+                            ? new Date(oe.window_end_time).getTime()
+                            : startTime + (oe.duration_minutes * 60 * 1000)
 
                         // Show if exam hasn't ended yet
                         if (endTime > nowTime) {
@@ -292,10 +300,13 @@ export default function SiswaDashboard() {
                 if (Array.isArray(exams)) {
                     for (const e of exams) {
                         if (!e.is_submitted && e.exam?.is_active) {
-                            const startedAt = new Date(e.started_at).getTime()
-                            const durationMs = (e.exam.duration_minutes || 0) * 60 * 1000
+                            // ends_at dari server: satu sumber kebenaran (mode serentak/jendela + override);
+                            // fallback ke rumus lama bila tidak tersedia
                             const now = Date.now()
-                            const isExpired = now > (startedAt + durationMs + 60000)
+                            const effectiveEnd = e.ends_at
+                                ? new Date(e.ends_at).getTime()
+                                : new Date(e.started_at).getTime() + (e.exam.duration_minutes || 0) * 60 * 1000
+                            const isExpired = now > (effectiveEnd + 60000)
 
                             if (isExpired) {
                                 await fetch('/api/exam-submissions', {
@@ -320,10 +331,12 @@ export default function SiswaDashboard() {
                 if (Array.isArray(quizzes)) {
                     for (const q of quizzes) {
                         if (!q.submitted_at && q.quiz?.is_active) {
-                            const startedAt = new Date(q.started_at).getTime()
-                            const durationMs = (q.quiz.duration_minutes || 0) * 60 * 1000
+                            // ends_at dari server: min(started_at + durasi, deadline); fallback rumus lama
                             const now = Date.now()
-                            const isExpired = now > (startedAt + durationMs + 60000)
+                            const effectiveEnd = q.ends_at
+                                ? new Date(q.ends_at).getTime()
+                                : new Date(q.started_at).getTime() + (q.quiz.duration_minutes || 0) * 60 * 1000
+                            const isExpired = now > (effectiveEnd + 60000)
 
                             if (isExpired) {
                                 await fetch('/api/quiz-submissions', {
@@ -339,7 +352,7 @@ export default function SiswaDashboard() {
                                 foundResumeItem = {
                                     type: 'Kuis' as const,
                                     title: q.quiz?.title || 'Kuis Tanpa Judul',
-                                    link: `/dashboard/siswa/kuis/${q.quiz_id}`
+                                    link: `/dashboard/siswa/kuis/${q.quiz_id}`,
                                 }
                             }
                         }
@@ -350,10 +363,12 @@ export default function SiswaDashboard() {
                 if (Array.isArray(officialExamSubs)) {
                     for (const oe of officialExamSubs) {
                         if (!oe.is_submitted && oe.exam?.is_active) {
-                            const startedAt = new Date(oe.started_at).getTime()
-                            const durationMs = (oe.exam.duration_minutes || 0) * 60 * 1000
+                            // ends_at dari server: satu sumber kebenaran; fallback rumus lama
                             const now = Date.now()
-                            const isExpired = now > (startedAt + durationMs + 60000)
+                            const effectiveEnd = oe.ends_at
+                                ? new Date(oe.ends_at).getTime()
+                                : new Date(oe.started_at).getTime() + (oe.exam.duration_minutes || 0) * 60 * 1000
+                            const isExpired = now > (effectiveEnd + 60000)
 
                             if (isExpired) {
                                 await fetch('/api/official-exam-submissions', {

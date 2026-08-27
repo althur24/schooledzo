@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Modal, PageHeader, Button } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
+import TimeWindowFields from '@/components/TimeWindowFields'
 import { useAuth } from '@/contexts/AuthContext'
 import { Paper as FileText, TimeCircle as Clock, Calendar, Plus, Lock, ShieldDone, User, Swap, Graph, Edit, Delete, ChevronDown, Document } from 'react-iconly'
 import { Loader2, CheckSquare, Square, RefreshCw, GraduationCap, BookOpen, Users, Copy } from 'lucide-react'
@@ -16,6 +17,7 @@ interface Exam {
     description: string | null
     start_time: string
     duration_minutes: number
+    window_end_time?: string | null
     is_active: boolean
     pending_publish: boolean
     is_randomized: boolean
@@ -38,6 +40,7 @@ interface OfficialExam {
     description: string | null
     start_time: string
     duration_minutes: number
+    window_end_time?: string | null
     is_active: boolean
     question_count: number
     target_class_ids: string[]
@@ -72,6 +75,8 @@ export default function GuruUlanganPage() {
         description: '',
         start_time: '',
         duration_minutes: 60,
+        schedule_mode: 'sync' as 'sync' | 'window',
+        window_end_time: '',
         is_randomized: true,
         max_violations: 3,
         show_results_immediately: true
@@ -89,6 +94,8 @@ export default function GuruUlanganPage() {
         description: '',
         start_time: '',
         duration_minutes: 60,
+        schedule_mode: 'sync' as 'sync' | 'window',
+        window_end_time: '',
         is_randomized: true,
         max_violations: 3,
         show_results_immediately: true
@@ -230,6 +237,8 @@ export default function GuruUlanganPage() {
             description: '',
             start_time: '',
             duration_minutes: 60,
+            schedule_mode: 'sync',
+            window_end_time: '',
             is_randomized: true,
             max_violations: 3,
             show_results_immediately: true
@@ -258,6 +267,7 @@ export default function GuruUlanganPage() {
                     subject_id: subjectIds[0],
                     start_time: new Date(form.start_time).toISOString(),
                     duration_minutes: form.duration_minutes,
+                    window_end_time: form.schedule_mode === 'window' && form.window_end_time ? new Date(form.window_end_time).toISOString() : null,
                     is_randomized: form.is_randomized,
                     max_violations: form.max_violations,
                     target_class_ids: targetClassIds,
@@ -287,7 +297,12 @@ export default function GuruUlanganPage() {
             const utcStart = localStart.toISOString()
             // Satu batch multi-kelas diikat batch_id di DB — tahan tab tertutup
             const batchId = form.teaching_assignment_ids.length > 1 ? crypto.randomUUID() : null
-            const payload = { ...form, start_time: utcStart, batch_id: batchId }
+            const payload = {
+                ...form,
+                start_time: utcStart,
+                window_end_time: form.schedule_mode === 'window' && form.window_end_time ? new Date(form.window_end_time).toISOString() : null,
+                batch_id: batchId
+            }
 
             // Create first (primary) exam
             const primaryRes = await fetch('/api/exams', {
@@ -357,6 +372,8 @@ export default function GuruUlanganPage() {
             description: exam.description || '',
             start_time: '', // Waktu mulai wajib diisi baru
             duration_minutes: exam.duration_minutes,
+            schedule_mode: exam.window_end_time ? 'window' : 'sync',
+            window_end_time: '',
             is_randomized: exam.is_randomized,
             max_violations: exam.max_violations,
             show_results_immediately: true
@@ -384,6 +401,7 @@ export default function GuruUlanganPage() {
                             description: copyForm.description,
                             start_time: utcStart,
                             duration_minutes: copyForm.duration_minutes,
+                            window_end_time: copyForm.schedule_mode === 'window' && copyForm.window_end_time ? new Date(copyForm.window_end_time).toISOString() : null,
                             is_randomized: copyForm.is_randomized,
                             max_violations: copyForm.max_violations,
                             show_results_immediately: copyForm.show_results_immediately
@@ -561,7 +579,10 @@ export default function GuruUlanganPage() {
     const getExamStatus = (exam: Exam) => {
         const now = new Date()
         const startTime = new Date(exam.start_time)
-        const endTime = new Date(startTime.getTime() + exam.duration_minutes * 60000)
+        // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
+        const endTime = exam.window_end_time
+            ? new Date(exam.window_end_time)
+            : new Date(startTime.getTime() + exam.duration_minutes * 60000)
 
         if (exam.pending_publish) return { label: '🔍 Under Review', color: 'bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-500/20 dark:text-amber-400 font-bold' }
         if (!exam.is_active) return { label: 'Draft', color: 'bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-500/20 dark:text-amber-400' }
@@ -573,7 +594,10 @@ export default function GuruUlanganPage() {
     const getOfficialExamStatus = (exam: OfficialExam) => {
         const now = new Date()
         const startTime = new Date(exam.start_time)
-        const endTime = new Date(startTime.getTime() + exam.duration_minutes * 60000)
+        // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
+        const endTime = exam.window_end_time
+            ? new Date(exam.window_end_time)
+            : new Date(startTime.getTime() + exam.duration_minutes * 60000)
 
         if (now > endTime) return { label: 'Selesai', color: 'bg-secondary/10 text-text-secondary border-secondary/20' }
         if (now >= startTime && now <= endTime && exam.is_active) return { label: 'Berlangsung', color: 'bg-green-500/10 text-green-600 border-green-200 dark:border-green-500/20 dark:text-green-400' }
@@ -937,41 +961,26 @@ export default function GuruUlanganPage() {
                             rows={2}
                         />
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai Baru <span className="text-red-500">*</span></label>
-                            <input
-                                type="datetime-local"
-                                value={copyForm.start_time}
-                                onChange={(e) => setCopyForm({ ...copyForm, start_time: e.target.value })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
-                            <input
-                                type="number"
-                                value={copyForm.duration_minutes}
-                                onChange={(e) => setCopyForm({ ...copyForm, duration_minutes: parseInt(e.target.value) || 60 })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                min={5}
-                                max={180}
-                            />
-                        </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jadwal Pengerjaan</label>
+                        <TimeWindowFields
+                            value={{
+                                mode: copyForm.schedule_mode,
+                                start_time: copyForm.start_time,
+                                window_end_time: copyForm.window_end_time,
+                                duration_minutes: String(copyForm.duration_minutes)
+                            }}
+                            onChange={(v) => setCopyForm({
+                                ...copyForm,
+                                schedule_mode: v.mode,
+                                start_time: v.start_time,
+                                duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || 0 : 0,
+                                window_end_time: v.mode === 'window' ? v.window_end_time : ''
+                            })}
+                            startLabel="Waktu Mulai Baru"
+                            durationRequired
+                        />
                     </div>
-                    {/* Calculated End Time */}
-                    {copyForm.start_time && copyForm.duration_minutes > 0 && (
-                        <div className="flex items-center gap-2 px-4 py-3 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/30 rounded-xl">
-                            <span className="text-emerald-600 dark:text-emerald-400 text-sm">⏰</span>
-                            <span className="text-sm text-emerald-700 dark:text-emerald-300">
-                                <span className="font-medium">Waktu Berakhir:</span>{' '}
-                                {(() => {
-                                    const end = new Date(new Date(copyForm.start_time).getTime() + copyForm.duration_minutes * 60000)
-                                    return end.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' + end.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-                                })()}
-                            </span>
-                        </div>
-                    )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran</label>
@@ -1006,7 +1015,7 @@ export default function GuruUlanganPage() {
                         </Button>
                         <Button
                             onClick={handleCopyExam}
-                            disabled={copying || copyForm.teaching_assignment_ids.length === 0 || !copyForm.title || !copyForm.start_time}
+                            disabled={copying || copyForm.teaching_assignment_ids.length === 0 || !copyForm.title || !copyForm.start_time || copyForm.duration_minutes < 5 || (copyForm.schedule_mode === 'window' && !copyForm.window_end_time)}
                             loading={copying}
                             className="flex-1"
                         >
@@ -1041,7 +1050,7 @@ export default function GuruUlanganPage() {
                         </div>
                         {examKind !== 'ULANGAN' && (
                             <p className="text-xs text-text-secondary mt-2">
-                                {examKind} adalah ujian resmi serentak — semua kelas terpilih mengerjakan pada jendela waktu yang sama. Pilih kelas dari SATU mata pelajaran.
+                                {examKind} adalah ujian resmi sekolah — semua kelas terpilih mengerjakan pada jadwal yang sama (bisa mode serentak atau jendela waktu). Pilih kelas dari SATU mata pelajaran.
                             </p>
                         )}
                     </div>
@@ -1074,41 +1083,25 @@ export default function GuruUlanganPage() {
                             placeholder="Materi yang diujikan..."
                         />
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div data-tutorial="exam-form-start">
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
-                            <input
-                                type="datetime-local"
-                                value={form.start_time}
-                                onChange={(e) => setForm({ ...form, start_time: e.target.value })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                        </div>
-                        <div data-tutorial="exam-form-duration">
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
-                            <input
-                                type="number"
-                                value={form.duration_minutes}
-                                onChange={(e) => setForm({ ...form, duration_minutes: parseInt(e.target.value) || 60 })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                min={5}
-                                max={180}
-                            />
-                        </div>
+                    <div data-tutorial="exam-form-start">
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jadwal Pengerjaan</label>
+                        <TimeWindowFields
+                            value={{
+                                mode: form.schedule_mode,
+                                start_time: form.start_time,
+                                window_end_time: form.window_end_time,
+                                duration_minutes: String(form.duration_minutes)
+                            }}
+                            onChange={(v) => setForm({
+                                ...form,
+                                schedule_mode: v.mode,
+                                start_time: v.start_time,
+                                duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || 0 : 0,
+                                window_end_time: v.mode === 'window' ? v.window_end_time : ''
+                            })}
+                            durationRequired
+                        />
                     </div>
-                    {/* Calculated End Time */}
-                    {form.start_time && form.duration_minutes > 0 && (
-                        <div className="flex items-center gap-2 px-4 py-3 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/30 rounded-xl">
-                            <span className="text-emerald-600 dark:text-emerald-400 text-sm">⏰</span>
-                            <span className="text-sm text-emerald-700 dark:text-emerald-300">
-                                <span className="font-medium">Waktu Berakhir:</span>{' '}
-                                {(() => {
-                                    const end = new Date(new Date(form.start_time).getTime() + form.duration_minutes * 60000)
-                                    return end.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' + end.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-                                })()}
-                            </span>
-                        </div>
-                    )}
                     <div data-tutorial="exam-form-violations">
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran (auto-submit)</label>
                         <input
@@ -1151,7 +1144,7 @@ export default function GuruUlanganPage() {
                         <Button
                             onClick={handleCreate}
                             loading={creating}
-                            disabled={creating || form.teaching_assignment_ids.length === 0 || !form.title || !form.start_time}
+                            disabled={creating || form.teaching_assignment_ids.length === 0 || !form.title || !form.start_time || form.duration_minutes < 5 || (form.schedule_mode === 'window' && !form.window_end_time)}
                             className="flex-1"
                         >
                             Buat & Tambah Soal

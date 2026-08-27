@@ -137,7 +137,7 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
     // Reset attempt handler
     const handleResetAttempt = async (submissionId: string, studentName: string, mode: 'soft' | 'hard') => {
         const confirmMsg = mode === 'soft'
-            ? `Soft Reset: Izinkan "${studentName}" melanjutkan ujian?\n\nTimer melanjutkan sisa waktu jendela ujian (semua siswa selesai serentak) dan pelanggaran di-reset. Jawaban yang sudah tersimpan tetap ada. Hanya bisa selama jendela masih terbuka.`
+            ? `Soft Reset: Izinkan "${studentName}" melanjutkan ujian?\n\nTimer melanjutkan sisa waktu pengerjaan siswa tersebut dan pelanggaran di-reset. Jawaban yang sudah tersimpan tetap ada. Hanya bisa selama batas waktu pengerjaan belum lewat.`
             : `Hard Reset: Mulai ulang ujian untuk "${studentName}"?\n\nSiswa akan mendapat durasi penuh baru terhitung sejak saat reset (terlepas dari jadwal berakhir ujian), TETAPI SEMUA JAWABAN AKAN DIHAPUS.`;
         if (!confirm(confirmMsg)) { setResetMenuId(null); return }
         setResettingId(submissionId)
@@ -279,7 +279,11 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
                     </div>
                     <p className="text-sm text-text-secondary mt-1">
                         {exam.subject_name} • {exam.total_questions} Soal • {exam.duration_minutes} Menit
-                        • <span className="text-red-500 font-bold">Berakhir {new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                        • <span className="text-red-500 font-bold">
+                            {(exam as any).window_end_time
+                                ? `Ditutup ${new Date((exam as any).window_end_time).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`
+                                : `Berakhir ${new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`}
+                        </span>
                     </p>
                 </div>
 

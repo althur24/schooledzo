@@ -256,23 +256,23 @@ async function chunkRun<T>(items: T[], fn: (item: T) => Promise<unknown>): Promi
 export async function closeExpiredSubmissions(now: number = Date.now()): Promise<{ exams: number; officials: number; quizzes: number }> {
     const result = { exams: 0, officials: 0, quizzes: 0 }
 
-    // ULANGAN (jendela global + override hard reset)
+    // ULANGAN (mode serentak / jendela + override hard reset)
     try {
         const { data: subs, error } = await supabase
             .from('exam_submissions')
-            .select('id, exam_id, started_at, timer_override_until, exam:exams!inner(start_time, duration_minutes, is_active)')
+            .select('id, exam_id, started_at, timer_override_until, exam:exams!inner(start_time, duration_minutes, window_end_time, is_active)')
             .eq('is_submitted', false)
             .eq('exam.is_active', true)
             .limit(DISCOVERY_LIMIT)
         if (error) throw error
         const due = (subs || []).filter((s: any) =>
             isSweepDue(resolveWindowExpiry(
-                { start_time: s.exam?.start_time ?? null, duration_minutes: s.exam?.duration_minutes ?? null },
+                { start_time: s.exam?.start_time ?? null, duration_minutes: s.exam?.duration_minutes ?? null, window_end_time: s.exam?.window_end_time ?? null },
                 { started_at: s.started_at, timer_override_until: s.timer_override_until }
             ), now))
         await chunkRun(due, (s: any) => {
             const expiry = resolveWindowExpiry(
-                { start_time: s.exam?.start_time ?? null, duration_minutes: s.exam?.duration_minutes ?? null },
+                { start_time: s.exam?.start_time ?? null, duration_minutes: s.exam?.duration_minutes ?? null, window_end_time: s.exam?.window_end_time ?? null },
                 { started_at: s.started_at, timer_override_until: s.timer_override_until })
             return forceCloseExamSubmission(s.id, s.exam_id, expiry.limited ? expiry.endAt : null)
         })
@@ -281,23 +281,23 @@ export async function closeExpiredSubmissions(now: number = Date.now()): Promise
         logError('closeExpiredSubmissions(exams)', e)
     }
 
-    // UTS/UAS (jendela global + override hard reset)
+    // UTS/UAS (mode serentak / jendela + override hard reset)
     try {
         const { data: subs, error } = await supabase
             .from('official_exam_submissions')
-            .select('id, exam_id, started_at, timer_override_until, exam:official_exams!inner(start_time, duration_minutes, is_active)')
+            .select('id, exam_id, started_at, timer_override_until, exam:official_exams!inner(start_time, duration_minutes, window_end_time, is_active)')
             .eq('is_submitted', false)
             .eq('exam.is_active', true)
             .limit(DISCOVERY_LIMIT)
         if (error) throw error
         const due = (subs || []).filter((s: any) =>
             isSweepDue(resolveWindowExpiry(
-                { start_time: s.exam?.start_time ?? null, duration_minutes: s.exam?.duration_minutes ?? null },
+                { start_time: s.exam?.start_time ?? null, duration_minutes: s.exam?.duration_minutes ?? null, window_end_time: s.exam?.window_end_time ?? null },
                 { started_at: s.started_at, timer_override_until: s.timer_override_until }
             ), now))
         await chunkRun(due, (s: any) => {
             const expiry = resolveWindowExpiry(
-                { start_time: s.exam?.start_time ?? null, duration_minutes: s.exam?.duration_minutes ?? null },
+                { start_time: s.exam?.start_time ?? null, duration_minutes: s.exam?.duration_minutes ?? null, window_end_time: s.exam?.window_end_time ?? null },
                 { started_at: s.started_at, timer_override_until: s.timer_override_until })
             return forceCloseOfficialSubmission(s.id, s.exam_id, expiry.limited ? expiry.endAt : null)
         })

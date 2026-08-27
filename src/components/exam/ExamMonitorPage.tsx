@@ -228,7 +228,11 @@ export default function ExamMonitorPage({ examId, mode }: {
                     </div>
                     <p className="text-sm text-text-secondary mt-1">
                         {exam.subject_name} • {exam.total_questions} Soal • {exam.duration_minutes} Menit
-                        • <span className="text-red-500 font-bold">Berakhir {new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                        • <span className="text-red-500 font-bold">
+                            {(exam as any).window_end_time
+                                ? `Ditutup ${new Date((exam as any).window_end_time).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`
+                                : `Berakhir ${new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`}
+                        </span>
                     </p>
                 </div>
 

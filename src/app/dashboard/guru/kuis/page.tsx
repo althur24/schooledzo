@@ -55,6 +55,9 @@ export default function GuruKuisPage() {
     })
     const [hasDeadline, setHasDeadline] = useState(false)
     const [deadlineValue, setDeadlineValue] = useState('')
+    // Jam buka jendela (opsional): siswa baru bisa mulai setelah waktu ini
+    const [hasAvailableFrom, setHasAvailableFrom] = useState(false)
+    const [availableFromValue, setAvailableFromValue] = useState('')
 
     // Copy States
     const [showCopy, setShowCopy] = useState(false)
@@ -69,6 +72,8 @@ export default function GuruKuisPage() {
     })
     const [copyHasDeadline, setCopyHasDeadline] = useState(false)
     const [copyDeadlineValue, setCopyDeadlineValue] = useState('')
+    const [copyHasAvailableFrom, setCopyHasAvailableFrom] = useState(false)
+    const [copyAvailableFromValue, setCopyAvailableFromValue] = useState('')
 
     // Remedial States
     const [showRemedial, setShowRemedial] = useState(false)
@@ -201,7 +206,8 @@ export default function GuruKuisPage() {
                     description: form.description,
                     duration_minutes: form.duration_minutes,
                     is_randomized: form.is_randomized,
-                    deadline: hasDeadline && deadlineValue ? new Date(deadlineValue).toISOString() : null
+                    deadline: hasDeadline && deadlineValue ? new Date(deadlineValue).toISOString() : null,
+                    available_from: hasAvailableFrom && availableFromValue ? new Date(availableFromValue).toISOString() : null
                 })
             })
 
@@ -228,7 +234,8 @@ export default function GuruKuisPage() {
                                 description: form.description,
                                 duration_minutes: form.duration_minutes,
                                 is_randomized: form.is_randomized,
-                                deadline: hasDeadline && deadlineValue ? new Date(deadlineValue).toISOString() : null
+                                deadline: hasDeadline && deadlineValue ? new Date(deadlineValue).toISOString() : null,
+                                available_from: hasAvailableFrom && availableFromValue ? new Date(availableFromValue).toISOString() : null
                             })
                         }).then(r => {
                             if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -254,6 +261,8 @@ export default function GuruKuisPage() {
             setForm({ teaching_assignment_ids: [], title: '', description: '', duration_minutes: 30, is_randomized: true })
             setHasDeadline(false)
             setDeadlineValue('')
+            setHasAvailableFrom(false)
+            setAvailableFromValue('')
             
             const siblingParam = siblingIds.length > 0 ? `?siblings=${siblingIds.join(',')}` : ''
             router.push(`/dashboard/guru/kuis/${primaryQuiz.id}${siblingParam}`)
@@ -273,6 +282,8 @@ export default function GuruKuisPage() {
         })
         setCopyHasDeadline(false)
         setCopyDeadlineValue('')
+        setCopyHasAvailableFrom(false)
+        setCopyAvailableFromValue('')
         setShowCopy(true)
     }
 
@@ -294,7 +305,8 @@ export default function GuruKuisPage() {
                             description: copyForm.description,
                             duration_minutes: copyForm.duration_minutes,
                             is_randomized: copyForm.is_randomized,
-                            deadline: copyHasDeadline && copyDeadlineValue ? new Date(copyDeadlineValue).toISOString() : null
+                            deadline: copyHasDeadline && copyDeadlineValue ? new Date(copyDeadlineValue).toISOString() : null,
+                            available_from: copyHasAvailableFrom && copyAvailableFromValue ? new Date(copyAvailableFromValue).toISOString() : null
                         })
                     }).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -670,6 +682,31 @@ export default function GuruKuisPage() {
                             </label>
                         </div>
                     </div>
+                    <div data-tutorial="quiz-form-available">
+                        <label className="flex items-center gap-2 cursor-pointer mb-2">
+                            <input
+                                type="checkbox"
+                                checked={hasAvailableFrom}
+                                onChange={(e) => {
+                                    setHasAvailableFrom(e.target.checked)
+                                    if (!e.target.checked) setAvailableFromValue('')
+                                }}
+                                className="w-5 h-5 rounded bg-white border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm font-bold text-text-main dark:text-white">Jam Buka Pengerjaan</span>
+                        </label>
+                        {hasAvailableFrom && (
+                            <input
+                                type="datetime-local"
+                                value={availableFromValue}
+                                onChange={(e) => setAvailableFromValue(e.target.value)}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        )}
+                        <p className="text-xs text-text-secondary dark:text-zinc-500 mt-1">
+                            {hasAvailableFrom ? 'Siswa baru bisa memulai kuis setelah jam ini.' : 'Tanpa jam buka — siswa bisa langsung mengerjakan saat kuis aktif.'}
+                        </p>
+                    </div>
                     <div data-tutorial="quiz-form-deadline">
                         <label className="flex items-center gap-2 cursor-pointer mb-2">
                             <input
@@ -777,6 +814,28 @@ export default function GuruKuisPage() {
                                 <span className="text-text-main dark:text-white flex items-center gap-1"><Swap set="bold" primaryColor="currentColor" size={16} /> Acak Soal</span>
                             </label>
                         </div>
+                    </div>
+                    <div>
+                        <label className="flex items-center gap-2 cursor-pointer mb-2">
+                            <input
+                                type="checkbox"
+                                checked={copyHasAvailableFrom}
+                                onChange={(e) => {
+                                    setCopyHasAvailableFrom(e.target.checked)
+                                    if (!e.target.checked) setCopyAvailableFromValue('')
+                                }}
+                                className="w-5 h-5 rounded bg-white border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm font-bold text-text-main dark:text-white">Jam Buka Pengerjaan Baru</span>
+                        </label>
+                        {copyHasAvailableFrom && (
+                            <input
+                                type="datetime-local"
+                                value={copyAvailableFromValue}
+                                onChange={(e) => setCopyAvailableFromValue(e.target.value)}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        )}
                     </div>
                     <div>
                         <label className="flex items-center gap-2 cursor-pointer mb-2">

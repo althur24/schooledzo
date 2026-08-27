@@ -118,7 +118,10 @@ export default function GuruDashboard() {
                     const nowMs = new Date().getTime()
                     const active = examsData.filter((exam: any) => {
                         const startMs = new Date(exam.start_time).getTime()
-                        const endMs = startMs + (exam.duration_minutes * 60 * 1000)
+                        // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
+                        const endMs = exam.window_end_time
+                            ? new Date(exam.window_end_time).getTime()
+                            : startMs + (exam.duration_minutes * 60 * 1000)
                         return exam.is_active && nowMs >= startMs && nowMs <= endMs
                     })
                     setActiveOfficialExams(active)

@@ -25,6 +25,7 @@ import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import TagInput from '@/components/TagInput'
 import BankQuestionPicker from '@/components/BankQuestionPicker'
+import TimeWindowFields from '@/components/TimeWindowFields'
 import { TagBadge } from '@/components/BankQuestionPicker'
 import { Modal, PageHeader, Button, EmptyState, Toast, type ToastType } from '@/components/ui'
 import Card from '@/components/ui/Card'
@@ -55,9 +56,12 @@ interface Exam {
     description: string | null
     start_time: string
     duration_minutes: number
+    window_end_time?: string | null
     is_active: boolean
     pending_publish: boolean
     batch_id?: string | null
+    /** Kelas paralel dalam batch yang sama (dari API) */
+    batch_siblings?: { id: string; class_name: string }[]
     is_randomized: boolean
     show_results_immediately: boolean
     results_released: boolean
@@ -205,11 +209,16 @@ function EditExamPageInner() {
         description: '',
         start_time: '',
         duration_minutes: 60,
+        schedule_mode: 'sync' as 'sync' | 'window',
+        window_end_time: '',
         max_violations: 3,
         is_randomized: true,
         show_results_immediately: true
     })
     const [savingSettings, setSavingSettings] = useState(false)
+    // Terapkan jadwal juga ke kelas paralel dalam batch (default mati — perubahan
+    // per-kelas yang berbeda tetap dimungkinkan)
+    const [applyScheduleToSiblings, setApplyScheduleToSiblings] = useState(false)
 
     // Toast kecil (mis. konfirmasi reorder berhasil/gagal)
     const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
@@ -526,15 +535,20 @@ function EditExamPageInner() {
     const openEditSettings = () => {
         if (exam) {
             // Format datetime for input, localized
-            const startTime = new Date(exam.start_time)
-            startTime.setMinutes(startTime.getMinutes() - startTime.getTimezoneOffset());
-            const formattedTime = startTime.toISOString().slice(0, 16)
+            const toLocalInput = (iso: string | null | undefined): string => {
+                if (!iso) return ''
+                const d = new Date(iso)
+                d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
+                return d.toISOString().slice(0, 16)
+            }
 
             setEditForm({
                 title: exam.title,
                 description: exam.description || '',
-                start_time: formattedTime,
+                start_time: toLocalInput(exam.start_time),
                 duration_minutes: exam.duration_minutes,
+                schedule_mode: exam.window_end_time ? 'window' : 'sync',
+                window_end_time: toLocalInput(exam.window_end_time),
                 max_violations: exam.max_violations,
                 is_randomized: exam.is_randomized,
                 show_results_immediately: exam.show_results_immediately ?? true
@@ -548,6 +562,10 @@ function EditExamPageInner() {
             setAlertInfo({ type: 'warning', title: 'Form Tidak Lengkap', message: 'Judul dan waktu mulai wajib diisi!' })
             return
         }
+        if (editForm.schedule_mode === 'window' && !editForm.window_end_time) {
+            setAlertInfo({ type: 'warning', title: 'Form Tidak Lengkap', message: 'Jam tutup jendela waktu wajib diisi!' })
+            return
+        }
         setSavingSettings(true)
         try {
             // Convert local datetime-local string to UTC for backend
@@ -555,6 +573,10 @@ function EditExamPageInner() {
             if (editForm.start_time) {
                 const localDate = new Date(editForm.start_time);
                 formattedStartTime = localDate.toISOString();
+            }
+            let formattedWindowEnd = null;
+            if (editForm.schedule_mode === 'window' && editForm.window_end_time) {
+                formattedWindowEnd = new Date(editForm.window_end_time).toISOString();
             }
 
             const res = await fetch(`/api/exams/${examId}`, {
@@ -565,13 +587,33 @@ function EditExamPageInner() {
                     description: editForm.description,
                     start_time: formattedStartTime,
                     duration_minutes: editForm.duration_minutes,
+                    window_end_time: formattedWindowEnd,
                     max_violations: editForm.max_violations,
                     is_randomized: editForm.is_randomized,
                     show_results_immediately: editForm.show_results_immediately
                 })
             })
             if (res.ok) {
+                // Terapkan jadwal ke kelas paralel (opsional, hanya field timing)
+                if (applyScheduleToSiblings && (exam?.batch_siblings?.length || 0) > 0) {
+                    const schedulePayload = {
+                        start_time: formattedStartTime,
+                        duration_minutes: editForm.duration_minutes,
+                        window_end_time: formattedWindowEnd
+                    }
+                    await Promise.allSettled(
+                        (exam?.batch_siblings || []).map(s =>
+                            fetch(`/api/exams/${s.id}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(schedulePayload)
+                            })
+                        )
+                    )
+                    setToast({ message: `Jadwal diterapkan ke ${exam!.batch_siblings!.length} kelas paralel`, type: 'success' })
+                }
                 setShowEditSettings(false)
+                setApplyScheduleToSiblings(false)
                 fetchExam()
             } else {
                 setAlertInfo({ type: 'error', title: 'Gagal', message: 'Gagal menyimpan pengaturan.' })
@@ -2717,33 +2759,42 @@ function EditExamPageInner() {
                             rows={3}
                         />
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
-                            <input
-                                type="datetime-local"
-                                value={editForm.start_time}
-                                onChange={(e) => setEditForm({ ...editForm, start_time: e.target.value })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
-                            <input
-                                type="number"
-                                value={editForm.duration_minutes}
-                                onChange={(e) => setEditForm({ ...editForm, duration_minutes: parseInt(e.target.value) || 60 })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                        </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jadwal Pengerjaan</label>
+                        <TimeWindowFields
+                            value={{
+                                mode: editForm.schedule_mode,
+                                start_time: editForm.start_time,
+                                window_end_time: editForm.window_end_time,
+                                duration_minutes: String(editForm.duration_minutes)
+                            }}
+                            onChange={(v) => setEditForm({
+                                ...editForm,
+                                schedule_mode: v.mode,
+                                start_time: v.start_time,
+                                duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || 0 : 0,
+                                window_end_time: v.mode === 'window' ? v.window_end_time : ''
+                            })}
+                            durationRequired
+                        />
                     </div>
-                    {editForm.start_time && editForm.duration_minutes > 0 && (
-                        <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700/30 rounded-xl">
-                            <p className="text-xs text-text-secondary mb-0.5">Waktu Berakhir (otomatis)</p>
-                            <p className="text-sm font-bold text-blue-600 dark:text-blue-400">
-                                {new Date(new Date(editForm.start_time).getTime() + editForm.duration_minutes * 60000)
-                                    .toLocaleString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                            </p>
+                    {(exam?.batch_siblings?.length || 0) > 0 && (
+                        <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700/30 rounded-xl">
+                            <input
+                                type="checkbox"
+                                id="applyScheduleSiblings"
+                                checked={applyScheduleToSiblings}
+                                onChange={(e) => setApplyScheduleToSiblings(e.target.checked)}
+                                disabled={exam?.is_active}
+                                className="w-5 h-5 mt-0.5 rounded border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="applyScheduleSiblings" className="text-sm cursor-pointer">
+                                <span className="font-medium text-text-main dark:text-white">Terapkan jadwal ini juga ke {exam!.batch_siblings!.length} kelas paralel</span>
+                                <span className="block text-xs text-text-secondary mt-0.5">
+                                    {exam!.batch_siblings!.map(s => s.class_name).join(', ')}
+                                    {exam?.is_active ? ' — hanya bisa saat ulangan belum dipublish' : ''}
+                                </span>
+                            </label>
                         </div>
                     )}
                     <div>

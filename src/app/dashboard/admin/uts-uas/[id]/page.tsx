@@ -21,6 +21,7 @@ import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import TagInput from '@/components/TagInput'
 import BankQuestionPicker from '@/components/BankQuestionPicker'
 import { TagBadge } from '@/components/BankQuestionPicker'
+import TimeWindowFields from '@/components/TimeWindowFields'
 import { useAuth } from '@/contexts/AuthContext'
 
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
@@ -157,7 +158,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     const [granularKkms, setGranularKkms] = useState<any[]>([])
     const [settingsForm, setSettingsForm] = useState({
         title: '', description: '', start_time: '',
-        duration_minutes: 90, is_randomized: true, max_violations: 3,
+        duration_minutes: 90, schedule_mode: 'sync' as 'sync' | 'window', window_end_time: '',
+        is_randomized: true, max_violations: 3,
         show_results_immediately: true,
         target_class_ids: [] as string[]
     })
@@ -219,6 +221,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 description: data.description || '',
                 start_time: data.start_time ? new Date(new Date(data.start_time).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '',
                 duration_minutes: data.duration_minutes || 90,
+                schedule_mode: data.window_end_time ? 'window' : 'sync',
+                window_end_time: data.window_end_time ? new Date(new Date(data.window_end_time).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '',
                 is_randomized: data.is_randomized ?? true,
                 show_results_immediately: data.show_results_immediately ?? true,
                 max_violations: data.max_violations || 3,
@@ -571,11 +575,15 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         setSettingsSaving(true)
         try {
             const localDate = new Date(settingsForm.start_time)
+            const windowEndIso = settingsForm.schedule_mode === 'window' && settingsForm.window_end_time
+                ? new Date(settingsForm.window_end_time).toISOString()
+                : null
             const res = await fetch(`${examApi}/${examId}`, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     title: settingsForm.title, description: settingsForm.description,
                     start_time: localDate.toISOString(), duration_minutes: settingsForm.duration_minutes,
+                    window_end_time: windowEndIso,
                     is_randomized: settingsForm.is_randomized, max_violations: settingsForm.max_violations,
                     show_results_immediately: settingsForm.show_results_immediately,
                     // Kelas target hanya dimiliki official (ulangan satu kelas per teaching assignment)
@@ -591,6 +599,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     description: settingsForm.description,
                     start_time: localDate.toISOString(),
                     duration_minutes: settingsForm.duration_minutes,
+                    window_end_time: windowEndIso,
                     is_randomized: settingsForm.is_randomized,
                     max_violations: settingsForm.max_violations,
                     show_results_immediately: settingsForm.show_results_immediately,
@@ -867,25 +876,25 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Deskripsi</label>
                         <textarea value={settingsForm.description} onChange={(e) => setSettingsForm({ ...settingsForm, description: e.target.value })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" rows={3} />
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
-                            <input type="datetime-local" value={settingsForm.start_time} onChange={(e) => setSettingsForm({ ...settingsForm, start_time: e.target.value })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
-                            <input type="number" value={settingsForm.duration_minutes} onChange={(e) => setSettingsForm({ ...settingsForm, duration_minutes: parseInt(e.target.value) || 90 })} min={5} max={300} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" />
-                        </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jadwal Pengerjaan</label>
+                        <TimeWindowFields
+                            value={{
+                                mode: settingsForm.schedule_mode,
+                                start_time: settingsForm.start_time,
+                                window_end_time: settingsForm.window_end_time,
+                                duration_minutes: String(settingsForm.duration_minutes)
+                            }}
+                            onChange={(v) => setSettingsForm({
+                                ...settingsForm,
+                                schedule_mode: v.mode,
+                                start_time: v.start_time,
+                                duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || 0 : 0,
+                                window_end_time: v.mode === 'window' ? v.window_end_time : ''
+                            })}
+                            durationRequired
+                        />
                     </div>
-                    {settingsForm.start_time && settingsForm.duration_minutes > 0 && (
-                        <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700/30 rounded-xl">
-                            <p className="text-xs text-text-secondary mb-0.5">Waktu Berakhir (otomatis)</p>
-                            <p className="text-sm font-bold text-blue-600 dark:text-blue-400">
-                                {new Date(new Date(settingsForm.start_time).getTime() + settingsForm.duration_minutes * 60000)
-                                    .toLocaleString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                            </p>
-                        </div>
-                    )}
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran (auto-submit)</label>
                         <input type="number" value={settingsForm.max_violations} onChange={(e) => setSettingsForm({ ...settingsForm, max_violations: parseInt(e.target.value) || 3 })} min={1} max={10} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" />

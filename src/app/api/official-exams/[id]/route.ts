@@ -83,10 +83,27 @@ export async function PUT(
 
         const body = await request.json()
         const {
-            title, description, start_time, duration_minutes,
+            title, description, start_time, duration_minutes, window_end_time,
             is_randomized, is_active, max_violations,
             target_class_ids, subject_id, show_results_immediately, results_released
         } = body
+
+        // Validasi jendela waktu: jam tutup harus setelah jam buka (pakai start_time
+        // baru bila ada, jika tidak cek start_time lama di DB)
+        if (window_end_time) {
+            let effectiveStart = start_time
+            if (!effectiveStart) {
+                const { data: cur } = await supabase
+                    .from('official_exams')
+                    .select('start_time')
+                    .eq('id', id)
+                    .single()
+                effectiveStart = cur?.start_time
+            }
+            if (effectiveStart && new Date(window_end_time) <= new Date(effectiveStart)) {
+                return NextResponse.json({ error: 'Jam tutup jendela waktu harus setelah jam buka' }, { status: 400 })
+            }
+        }
 
         // Server-side guard: jangan aktifkan ujian tanpa soal
         if (is_active === true) {
@@ -104,6 +121,7 @@ export async function PUT(
         if (description !== undefined) updateData.description = description
         if (start_time !== undefined) updateData.start_time = start_time
         if (duration_minutes !== undefined) updateData.duration_minutes = duration_minutes
+        if (window_end_time !== undefined) updateData.window_end_time = window_end_time || null
         if (is_randomized !== undefined) updateData.is_randomized = is_randomized
         if (is_active !== undefined) updateData.is_active = is_active
         if (max_violations !== undefined) updateData.max_violations = max_violations

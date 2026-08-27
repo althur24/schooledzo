@@ -279,7 +279,7 @@ export async function POST(request: NextRequest) {
         // per request di hot path autosave 1000 siswa
         const [studentRes, quizRes] = await Promise.all([
             supabase.from('students').select('id').eq('user_id', user.id).single(),
-            supabase.from('quizzes').select('deadline, duration_minutes, is_remedial, allowed_student_ids').eq('id', quiz_id).single()
+            supabase.from('quizzes').select('deadline, duration_minutes, is_remedial, allowed_student_ids, available_from').eq('id', quiz_id).single()
         ])
         const student = studentRes.data
         const quiz = quizRes.data
@@ -314,8 +314,14 @@ export async function POST(request: NextRequest) {
         // Deadline hanya menggerbang sesi BARU. Attempt yang sudah berjalan ditangani
         // enforcement di bawah — jawaban tersimpan tidak boleh hilang hanya karena
         // deadline lewat di tengah jalan (siswa punya grace 60 dtk untuk flush terakhir).
-        if (!existing && quiz.deadline && new Date() > new Date(quiz.deadline)) {
-            return NextResponse.json({ error: 'Kuis sudah melewati deadline' }, { status: 400 })
+        // available_from (jam buka jendela) juga hanya menggerbang sesi BARU.
+        if (!existing) {
+            if (quiz.available_from && new Date() < new Date(quiz.available_from)) {
+                return NextResponse.json({ error: 'Kuis belum dibuka' }, { status: 400 })
+            }
+            if (quiz.deadline && new Date() > new Date(quiz.deadline)) {
+                return NextResponse.json({ error: 'Kuis sudah melewati deadline' }, { status: 400 })
+            }
         }
 
         // Attempt yang sudah dikumpulkan tidak boleh ditimpa ulang (selaras ulangan/UTS-UAS)

@@ -46,7 +46,7 @@ export const adminNav: NavItem[] = [
     { icon: Bookmark, label: 'Mapel', path: '/dashboard/admin/mapel' },
     { icon: DocumentIcon, label: 'Materi', path: '/dashboard/admin/materi' },
     { icon: Calendar, label: 'Tahun', path: '/dashboard/admin/tahun-ajaran' },
-    { icon: Chart, label: 'UTS/UAS', path: '/dashboard/admin/uts-uas' },
+    { icon: Chart, label: 'Ulangan', path: '/dashboard/admin/uts-uas' },
     { icon: ShieldDone, label: 'Review Soal', path: '/dashboard/admin/review-soal' },
     { icon: Folder, label: 'Bank Soal', path: '/dashboard/admin/bank-soal' },
     { icon: Chart, label: 'Analitik', path: '/dashboard/admin/analitik' },

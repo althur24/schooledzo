@@ -347,10 +347,11 @@ async function sendTeacherExamReminders(user: AuthUser, counter: Counter) {
 
                     // Teacher "Dimulai" — notify when exam start_time has arrived
                     // dan window pengerjaan belum lewat. official_exams tidak punya
-                    // kolom end_time — window = start_time + duration_minutes.
+                    // kolom end_time — window = window_end_time (mode jendela)
+                    // ?? start_time + duration_minutes (mode serentak).
                     const { data: startedExams } = await supabase
                         .from('official_exams')
-                        .select('id, title, exam_type, start_time, duration_minutes, target_class_ids, subject_id, subject:subjects(name)')
+                        .select('id, title, exam_type, start_time, duration_minutes, window_end_time, target_class_ids, subject_id, subject:subjects(name)')
                         .eq('school_id', user.school_id)
                         .eq('is_active', true)
                         .in('subject_id', subjectIds)
@@ -360,7 +361,9 @@ async function sendTeacherExamReminders(user: AuthUser, counter: Counter) {
                         for (const exam of startedExams) {
                             if (!exam.target_class_ids?.some((cid: string) => classIds.includes(cid))) continue
 
-                            const windowEndMs = new Date(exam.start_time).getTime() + (exam.duration_minutes || 0) * 60000
+                            const windowEndMs = exam.window_end_time
+                                ? new Date(exam.window_end_time).getTime()
+                                : new Date(exam.start_time).getTime() + (exam.duration_minutes || 0) * 60000
                             if (now.getTime() > windowEndMs) continue
 
                             const label = exam.exam_type === 'UTS' ? 'UTS' : 'UAS'

@@ -18,6 +18,7 @@ export async function POST(request: NextRequest) {
             title,
             start_time,
             duration_minutes,
+            window_end_time,
             target_class_ids,
             is_remedial,
             allowed_student_ids
@@ -25,6 +26,11 @@ export async function POST(request: NextRequest) {
 
         if (!source_exam_id || !title || !start_time) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+        }
+
+        // Validasi jendela waktu: jam tutup harus setelah jam buka
+        if (window_end_time && new Date(window_end_time) <= new Date(start_time)) {
+            return NextResponse.json({ error: 'Jam tutup jendela waktu harus setelah jam buka' }, { status: 400 })
         }
 
         // 1. Get source exam
@@ -45,6 +51,7 @@ export async function POST(request: NextRequest) {
             description: sourceExam.description,
             start_time,
             duration_minutes: duration_minutes || sourceExam.duration_minutes,
+            window_end_time: window_end_time || null,
             is_active: false, // Default to inactive/draft
             is_randomized: sourceExam.is_randomized,
             max_violations: sourceExam.max_violations,

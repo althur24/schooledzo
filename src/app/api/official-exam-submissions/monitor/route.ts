@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { needsManualGrading } from '@/lib/questionTypeUtils'
 import { batchedIn, IN_BATCH_SIZE } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { resolveWindowExpiry, isSweepDue, endsAtIso } from '@/lib/examExpiry'
 
 export async function GET(request: NextRequest) {
     try {
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
         const { data: exam, error: examError } = await supabase
             .from('official_exams')
             .select(`
-                id, title, exam_type, duration_minutes, start_time, is_active, max_violations, subject_id, target_class_ids,
+                id, title, exam_type, duration_minutes, start_time, window_end_time, is_active, max_violations, subject_id, target_class_ids,
                 subject:subjects(id, name, kkm, school_id)
             `)
             .eq('id', examId)
@@ -155,7 +156,7 @@ export async function GET(request: NextRequest) {
             supabase
                 .from('official_exam_submissions')
                 .select(`
-                    id, student_id, is_submitted, is_graded, violation_count, started_at, submitted_at,
+                    id, student_id, is_submitted, is_graded, violation_count, started_at, submitted_at, timer_override_until,
                     total_score, max_score,
                     answers:official_exam_answers(count)
                 `)
@@ -200,16 +201,18 @@ export async function GET(request: NextRequest) {
 
         const now = new Date()
         const nowTime = now.getTime()
-        const durationMs = exam.duration_minutes * 60 * 1000
 
         // Server-side auto-submit: detect and submit expired but unsubmitted entries
+        // Satu sumber kebenaran: mode serentak / jendela + override (src/lib/examExpiry.ts)
         const expiredSubmissionIds: string[] = []
         if (submissions) {
             for (const sub of submissions) {
                 if (!sub.is_submitted) {
-                    const startedTime = new Date(sub.started_at).getTime()
-                    const endTarget = startedTime + durationMs
-                    if (nowTime > endTarget) {
+                    const expiry = resolveWindowExpiry(
+                        { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
+                        { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
+                    )
+                    if (isSweepDue(expiry, nowTime)) {
                         expiredSubmissionIds.push(sub.id)
                     }
                 }
@@ -237,7 +240,11 @@ export async function GET(request: NextRequest) {
                 const totalScore = existingAnswers?.reduce((sum, a) => sum + (a.points_earned || 0), 0) || 0
 
                 const startedTime = new Date(sub.started_at).getTime()
-                const expectedSubmittedAt = new Date(startedTime + durationMs).toISOString()
+                const expiry = resolveWindowExpiry(
+                    { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
+                    { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
+                )
+                const expectedSubmittedAt = endsAtIso(expiry) || new Date(startedTime).toISOString()
 
                 await supabase
                     .from('official_exam_submissions')
@@ -274,10 +281,16 @@ export async function GET(request: NextRequest) {
                 } else {
                     status = 'working'
                     workingCount++
-                    
-                    const startedTime = new Date(sub.started_at).getTime()
-                    const endTarget = startedTime + durationMs
-                    timeRemainingSec = Math.max(0, Math.floor((endTarget - nowTime) / 1000))
+
+                    // Satu sumber kebenaran: mode serentak / jendela + override hard reset
+                    const expiry = resolveWindowExpiry(
+                        { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
+                        { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
+                    )
+                    const endTarget = expiry.limited ? expiry.endAt : null
+                    timeRemainingSec = endTarget !== null
+                        ? Math.max(0, Math.floor((endTarget - nowTime) / 1000))
+                        : null
                 }
             } else {
                 notStartedCount++

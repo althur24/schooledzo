@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
             try {
                 const { data: examData } = await supabase
                     .from('exams')
-                    .select('duration_minutes, start_time')
+                    .select('duration_minutes, start_time, window_end_time')
                     .eq('id', examId)
                     .single()
 
@@ -64,11 +64,11 @@ export async function GET(request: NextRequest) {
                         .eq('exam_id', examId)
                         .eq('is_submitted', false)
 
-                    // Satu sumber kebenaran: jendela global + override hard reset (src/lib/examExpiry.ts)
+                    // Satu sumber kebenaran: mode serentak / jendela (src/lib/examExpiry.ts)
                     const withExpiry = (inProgress || []).map(sub => ({
                         sub,
                         expiry: resolveWindowExpiry(
-                            { start_time: examData.start_time, duration_minutes: examData.duration_minutes },
+                            { start_time: examData.start_time, duration_minutes: examData.duration_minutes, window_end_time: examData.window_end_time },
                             { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
                         )
                     }))
@@ -91,12 +91,14 @@ export async function GET(request: NextRequest) {
             .from('exam_submissions')
             .select(`
                 id, exam_id, student_id, started_at, submitted_at, is_submitted,
-                total_score, max_score, violation_count, violations_log, is_graded, created_at,
+                total_score, max_score, violation_count, violations_log, is_graded, created_at, timer_override_until,
                 student:students(id, nis, user:users!students_user_id_fkey(full_name)),
                 exam:exams!inner(
                     id,
                     title,
                     duration_minutes,
+                    start_time,
+                    window_end_time,
                     show_results_immediately,
                     results_released,
                     teaching_assignment:teaching_assignments!inner(
@@ -166,9 +168,11 @@ export async function GET(request: NextRequest) {
                         *,
                         student:students(id, nis, user:users!students_user_id_fkey(full_name)),
                         exam:exams(
-                            id, 
-                            title, 
+                            id,
+                            title,
                             duration_minutes,
+                            start_time,
+                            window_end_time,
                             teaching_assignment:teaching_assignments(
                                 academic_year_id,
                                 subject:subjects(id, name),
@@ -227,6 +231,17 @@ export async function GET(request: NextRequest) {
                 return { ...sub, results_hidden: false }
             })
         }
+
+        // Lampirkan ends_at (batas efektif, dihitung server) per submission —
+        // client (dashboard siswa) memakainya untuk kartu "Lanjutkan" & auto-submit.
+        finalData = finalData.map((sub: any) => {
+            const examObj = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
+            const expiry = resolveWindowExpiry(
+                { start_time: examObj?.start_time ?? null, duration_minutes: examObj?.duration_minutes ?? null, window_end_time: examObj?.window_end_time ?? null },
+                { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
+            )
+            return { ...sub, ends_at: endsAtIso(expiry) }
+        })
 
         return NextResponse.json(finalData)
     } catch (error) {
@@ -289,7 +304,7 @@ export async function POST(request: NextRequest) {
         if (existingSubmission) {
             // Return existing submission with all data needed for resume
             const expiry = resolveWindowExpiry(
-                { start_time: exam.start_time, duration_minutes: exam.duration_minutes },
+                { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
                 { started_at: existingSubmission.started_at, timer_override_until: existingSubmission.timer_override_until }
             )
             // Jawaban tersimpan ikut dikirim — resume lintas device (localStorage kosong)
@@ -317,9 +332,17 @@ export async function POST(request: NextRequest) {
         if (now < startTime) {
             return NextResponse.json({ error: 'Ulangan belum dimulai' }, { status: 400 })
         }
-        const endTime = new Date(startTime.getTime() + (exam.duration_minutes || 0) * 60 * 1000)
-        if (now > endTime) {
-            return NextResponse.json({ error: 'Waktu pengerjaan ulangan sudah berakhir' }, { status: 400 })
+        if (exam.window_end_time) {
+            // Mode jendela: siswa hanya boleh MEMULAI sebelum jam tutup
+            if (now > new Date(exam.window_end_time)) {
+                return NextResponse.json({ error: 'Jendela waktu pengerjaan sudah ditutup' }, { status: 400 })
+            }
+        } else {
+            // Mode serentak (lama): semua berakhir di start + durasi
+            const endTime = new Date(startTime.getTime() + (exam.duration_minutes || 0) * 60 * 1000)
+            if (now > endTime) {
+                return NextResponse.json({ error: 'Waktu pengerjaan ulangan sudah berakhir' }, { status: 400 })
+            }
         }
 
         // Verifikasi kelas siswa
@@ -365,7 +388,7 @@ export async function POST(request: NextRequest) {
         if (error) throw error
 
         const newExpiry = resolveWindowExpiry(
-            { start_time: exam.start_time, duration_minutes: exam.duration_minutes },
+            { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
             { started_at: submission.started_at, timer_override_until: submission.timer_override_until }
         )
         return NextResponse.json({
@@ -396,7 +419,7 @@ export async function PUT(request: NextRequest) {
         // Get current submission
         const { data: currentSubmission } = await supabase
             .from('exam_submissions')
-            .select('*, exam:exams(max_violations, show_results_immediately, results_released, duration_minutes, start_time)')
+            .select('*, exam:exams(max_violations, show_results_immediately, results_released, duration_minutes, start_time, window_end_time)')
             .eq('id', submission_id)
             .single()
 
@@ -427,15 +450,18 @@ export async function PUT(request: NextRequest) {
                 return NextResponse.json({ error: 'Submission ini belum dikumpulkan/di-submit' }, { status: 400 })
             }
 
-            // Semantik jendela global: batas default = start_time + durasi (serentak).
-            // Hard Reset = pengecualian sengaja oleh guru: durasi penuh baru via timer_override_until.
+            // Batas soft reset: mode jendela → jam tutup; mode serentak → start + durasi.
+            // Hard Reset = pengecualian sengaja oleh guru: durasi penuh baru via timer_override_until
+            // (override TIDAK dipotong jam tutup — lihat resolveWindowExpiry).
             const examCfg: any = currentSubmission.exam || {}
             const durationMs = (examCfg.duration_minutes || 0) * 60000
-            const windowEndMs = examCfg.start_time && durationMs > 0
-                ? new Date(examCfg.start_time).getTime() + durationMs
-                : null
+            const softLimitMs = examCfg.window_end_time
+                ? new Date(examCfg.window_end_time).getTime()
+                : (examCfg.start_time && durationMs > 0
+                    ? new Date(examCfg.start_time).getTime() + durationMs
+                    : null)
 
-            if (reset_attempt === 'soft' && windowEndMs !== null && Date.now() > windowEndMs) {
+            if (reset_attempt === 'soft' && softLimitMs !== null && Date.now() > softLimitMs) {
                 return NextResponse.json({
                     error: 'Jendela waktu pengerjaan sudah berakhir — soft reset tidak menambah waktu. Gunakan Hard Reset untuk memberi attempt baru dengan durasi penuh.'
                 }, { status: 400 })
@@ -478,7 +504,7 @@ export async function PUT(request: NextRequest) {
             if (error) throw error
 
             const expiryAfter = resolveWindowExpiry(
-                { start_time: examCfg.start_time ?? null, duration_minutes: examCfg.duration_minutes ?? null },
+                { start_time: examCfg.start_time ?? null, duration_minutes: examCfg.duration_minutes ?? null, window_end_time: examCfg.window_end_time ?? null },
                 { started_at: data.started_at, timer_override_until: data.timer_override_until }
             )
 
@@ -496,12 +522,12 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'Already submitted' }, { status: 400 })
         }
 
-        // Penegakan batas waktu di server: jendela global + override hard reset.
+        // Penegakan batas waktu di server: mode serentak / jendela (src/lib/examExpiry.ts).
         // Lewat batas + grace → submission ditutup paksa, TAPI jawaban yang dikirim
         // ikut di-upsert (menang per soal) supaya jawaban yang diketik saat offline
         // tidak hilang (anti "jam habis tapi masih bisa mengerjakan").
         const writeExpiry = resolveWindowExpiry(
-            { start_time: currentSubmission.exam?.start_time ?? null, duration_minutes: currentSubmission.exam?.duration_minutes ?? null },
+            { start_time: currentSubmission.exam?.start_time ?? null, duration_minutes: currentSubmission.exam?.duration_minutes ?? null, window_end_time: currentSubmission.exam?.window_end_time ?? null },
             { started_at: currentSubmission.started_at, timer_override_until: currentSubmission.timer_override_until }
         )
         if (!isWriteAllowed(writeExpiry)) {

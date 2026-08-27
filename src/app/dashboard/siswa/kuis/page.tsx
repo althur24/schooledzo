@@ -12,6 +12,8 @@ interface Quiz {
     title: string
     description: string | null
     duration_minutes: number
+    available_from?: string | null
+    deadline?: string | null
     is_active: boolean
     created_at: string
     teaching_assignment: {
@@ -105,6 +107,11 @@ export default function SiswaKuisPage() {
                         const isCompleted = !!submission?.submitted_at
                         const isInProgress = submission && !submission.submitted_at
                         const questionCount = quiz.questions?.[0]?.count || 0
+                        // Jendela waktu kuis: jam buka & deadline hanya menggerbang attempt BARU
+                        const notYetOpen = !!quiz.available_from && Date.now() < new Date(quiz.available_from).getTime()
+                        const pastDeadline = !!quiz.deadline && Date.now() > new Date(quiz.deadline).getTime()
+                        const canStartNew = !notYetOpen && !pastDeadline
+                        const fmt = (iso: string) => new Date(iso).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 
                         return (
                             <div key={quiz.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-4 md:p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all group cursor-pointer">
@@ -145,6 +152,18 @@ export default function SiswaKuisPage() {
                                             <span>Durasi</span>
                                             <span className="font-medium flex items-center gap-1"><TimeCircle set="bold" primaryColor="currentColor" size={14} /> {quiz.duration_minutes} menit</span>
                                         </div>
+                                        {quiz.available_from && (
+                                            <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                <span>Dibuka Pukul</span>
+                                                <span className="font-medium">{fmt(quiz.available_from)}</span>
+                                            </div>
+                                        )}
+                                        {quiz.deadline && (
+                                            <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                <span>Ditutup Pukul</span>
+                                                <span className="font-medium text-red-500 dark:text-red-400">{fmt(quiz.deadline)}</span>
+                                            </div>
+                                        )}
                                         <div className="flex items-center justify-between text-xs text-text-secondary">
                                             <span>Jumlah Soal</span>
                                             <span className="font-medium flex items-center gap-1"><Document set="bold" primaryColor="currentColor" size={14} /> {questionCount} soal</span>
@@ -169,10 +188,13 @@ export default function SiswaKuisPage() {
                                             </div>
                                         ) : isInProgress ? (
                                             (() => {
-                                                // Check expiration
+                                                // Check expiration — min(started_at + durasi, deadline), buffer 1 menit
                                                 const startedAt = new Date(submission.started_at).getTime()
                                                 const durationMs = quiz.duration_minutes * 60000
-                                                const isExpired = Date.now() > (startedAt + durationMs + 60000)
+                                                const perStudentEnd = durationMs > 0 ? startedAt + durationMs : null
+                                                const deadlineMs = quiz.deadline ? new Date(quiz.deadline).getTime() : null
+                                                const effectiveEnd = Math.min(...[perStudentEnd, deadlineMs].filter((v): v is number => v !== null))
+                                                const isExpired = Date.now() > (effectiveEnd + 60000)
 
                                                 if (isExpired) {
                                                     return (
@@ -193,13 +215,21 @@ export default function SiswaKuisPage() {
                                                     </Link>
                                                 )
                                             })()
-                                        ) : (
+                                        ) : canStartNew ? (
                                             <Link
                                                 href={`/dashboard/siswa/kuis/${quiz.id}`}
                                                 className="w-full block text-center px-4 py-2.5 md:px-6 md:py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-bold shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 hover:scale-[1.02] transition-all text-sm md:text-base"
                                             >
                                                 Mulai Kuis
                                             </Link>
+                                        ) : notYetOpen ? (
+                                            <div className="w-full text-center px-4 py-2.5 md:px-6 md:py-3 bg-secondary/10 text-text-secondary rounded-xl font-bold text-sm md:text-base">
+                                                Dibuka {fmt(quiz.available_from!)}
+                                            </div>
+                                        ) : (
+                                            <div className="w-full text-center px-4 py-2.5 md:px-6 md:py-3 bg-secondary/10 text-text-secondary rounded-xl font-bold text-sm md:text-base">
+                                                Waktu Pengerjaan Berakhir
+                                            </div>
                                         )}
                                     </div>
                                 </div>

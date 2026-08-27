@@ -125,10 +125,15 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { title, description, start_time, duration_minutes, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, duplicate_from_exam_id, show_results_immediately, batch_id } = body
+        const { title, description, start_time, duration_minutes, window_end_time, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, duplicate_from_exam_id, show_results_immediately, batch_id } = body
 
         if (!title || !start_time || duration_minutes === undefined || !teaching_assignment_id) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+        }
+
+        // Validasi jendela waktu: jam tutup harus setelah jam buka
+        if (window_end_time && new Date(window_end_time) <= new Date(start_time)) {
+            return NextResponse.json({ error: 'Jam tutup jendela waktu harus setelah jam buka' }, { status: 400 })
         }
 
         // Validasi TA + kepemilikan: ADMIN boleh TA mana pun di sekolahnya (buat untuk guru);
@@ -164,6 +169,7 @@ export async function POST(request: NextRequest) {
                 description,
                 start_time,
                 duration_minutes,
+                window_end_time: window_end_time || null,
                 teaching_assignment_id,
                 is_active: false,
                 is_randomized: is_randomized || false,

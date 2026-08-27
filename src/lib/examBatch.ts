@@ -87,10 +87,14 @@ async function syncBatch(
     table: 'exams' | 'quizzes',
     questionsTable: 'exam_questions' | 'quiz_questions',
     fkColumn: 'exam_id' | 'quiz_id',
-    primaryId: string
+    primaryId: string,
+    /** Field jadwal yang ikut disinkronkan ke sibling saat publish (jendela/serentak). */
+    timingFields: string[]
 ): Promise<BatchSyncResult> {
-    const { data: primary } = await supabaseAdmin
-        .from(table).select('id, batch_id').eq('id', primaryId).single()
+    // Select dinamis (field jadwal berbeda per tabel) — tipe di-cast manual
+    const { data } = await supabaseAdmin
+        .from(table).select('id, batch_id, ' + timingFields.join(', ')).eq('id', primaryId).single()
+    const primary = data as { id: string; batch_id: string | null } & Record<string, unknown> | null
     if (!primary?.batch_id) return { total: 0, failed: [] }
 
     const { data: siblings } = await supabaseAdmin
@@ -143,9 +147,15 @@ async function syncBatch(
                 }
             }
 
+            // Jadwal (jam buka/tutup/durasi) ikut disinkronkan dari kelas utama —
+            // batch multi-kelas adalah satu kesatuan. Perubahan jadwal per-kelas
+            // yang berbeda tetap bisa lewat form pengaturan masing-masing editor.
+            const timingUpdate: Record<string, unknown> = {}
+            for (const f of timingFields) timingUpdate[f] = (primary as any)[f] ?? null
+
             const { error: pubError } = await supabaseAdmin
                 .from(table)
-                .update({ is_active: true, updated_at: new Date().toISOString() })
+                .update({ is_active: true, updated_at: new Date().toISOString(), ...timingUpdate })
                 .eq('id', targetId)
             if (pubError) {
                 console.error(`[batch] aktivasi gagal untuk ${targetId}:`, pubError)
@@ -165,9 +175,9 @@ async function syncBatch(
 }
 
 export async function syncExamBatch(primaryExamId: string): Promise<BatchSyncResult> {
-    return syncBatch('exams', 'exam_questions', 'exam_id', primaryExamId)
+    return syncBatch('exams', 'exam_questions', 'exam_id', primaryExamId, ['start_time', 'duration_minutes', 'window_end_time'])
 }
 
 export async function syncQuizBatch(primaryQuizId: string): Promise<BatchSyncResult> {
-    return syncBatch('quizzes', 'quiz_questions', 'quiz_id', primaryQuizId)
+    return syncBatch('quizzes', 'quiz_questions', 'quiz_id', primaryQuizId, ['duration_minutes', 'deadline', 'available_from'])
 }

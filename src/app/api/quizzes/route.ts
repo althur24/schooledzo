@@ -102,10 +102,15 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { title, description, start_time, deadline, duration_minutes, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, questions, batch_id } = body
+        const { title, description, start_time, deadline, duration_minutes, available_from, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, questions, batch_id } = body
 
         if (!title || duration_minutes === undefined || !teaching_assignment_id) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+        }
+
+        // Validasi jendela waktu kuis: jam tutup (deadline) harus setelah jam buka
+        if (available_from && deadline && new Date(deadline) <= new Date(available_from)) {
+            return NextResponse.json({ error: 'Batas waktu (deadline) harus setelah jam buka' }, { status: 400 })
         }
 
         // Block writes to archived (COMPLETED) academic years
@@ -121,6 +126,7 @@ export async function POST(request: NextRequest) {
                 start_time,
                 deadline: deadline || null,
                 duration_minutes,
+                available_from: available_from || null,
                 teaching_assignment_id,
                 is_active: false,
                 is_randomized: is_randomized ?? true,

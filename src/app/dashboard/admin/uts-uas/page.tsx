@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
+import TimeWindowFields from '@/components/TimeWindowFields'
+import ClassChipsSelector from '@/components/ClassChipsSelector'
 import { Plus, ChevronDown } from 'react-iconly'
 import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BookOpen, BarChart3, Copy, RefreshCw } from 'lucide-react'
 
@@ -15,6 +17,7 @@ interface OfficialExam {
     description: string | null
     start_time: string
     duration_minutes: number
+    window_end_time?: string | null
     is_active: boolean
     is_randomized: boolean
     max_violations: number
@@ -58,6 +61,125 @@ export default function AdminUtsUasPage() {
 
     // Duplicate & Remedial states (dipakai UTS/UAS & Ulangan — source membedakan endpoint)
     const [showDuplicate, setShowDuplicate] = useState(false)
+
+    // === Buat Ulangan untuk Guru (admin) — form senanda form ulangan guru ===
+    const [showCreateTeacherExam, setShowCreateTeacherExam] = useState(false)
+    const [teacherOptions, setTeacherOptions] = useState<{ id: string; name: string }[]>([])
+    const [teacherTAs, setTeacherTAs] = useState<{ id: string; subject: { id: string; name: string }; class: { id: string; name: string } }[]>([])
+    const [teacherExamForm, setTeacherExamForm] = useState({
+        teacher_id: '',
+        teaching_assignment_ids: [] as string[],
+        title: '',
+        description: '',
+        start_time: '',
+        duration_minutes: 60,
+        schedule_mode: 'sync' as 'sync' | 'window',
+        window_end_time: '',
+        is_randomized: true,
+        max_violations: 3,
+        show_results_immediately: true
+    })
+    const [creatingTeacherExam, setCreatingTeacherExam] = useState(false)
+
+    const openCreateTeacherExam = async () => {
+        setShowCreateTeacherExam(true)
+        setTeacherExamForm({
+            teacher_id: '',
+            teaching_assignment_ids: [],
+            title: '',
+            description: '',
+            start_time: '',
+            duration_minutes: 60,
+            schedule_mode: 'sync',
+            window_end_time: '',
+            is_randomized: true,
+            max_violations: 3,
+            show_results_immediately: true
+        })
+        setTeacherTAs([])
+        if (teacherOptions.length === 0) {
+            try {
+                const res = await fetch('/api/teachers')
+                const data = await res.json()
+                const list = Array.isArray(data) ? data : []
+                setTeacherOptions(list.map((t: any) => ({ id: t.id, name: t.user?.full_name || t.nip || 'Tanpa Nama' })))
+            } catch (e) {
+                console.error('Error fetching teachers:', e)
+            }
+        }
+    }
+
+    const handleTeacherExamTeacherChange = async (teacherId: string) => {
+        setTeacherExamForm(prev => ({ ...prev, teacher_id: teacherId, teaching_assignment_ids: [] }))
+        setTeacherTAs([])
+        if (!teacherId) return
+        try {
+            const res = await fetch('/api/teaching-assignments')
+            const data = await res.json()
+            const list = Array.isArray(data) ? data : []
+            setTeacherTAs(list
+                .filter((ta: any) => ta.teacher_id === teacherId || (Array.isArray(ta.teacher) ? ta.teacher[0]?.id === teacherId : ta.teacher?.id === teacherId))
+                .map((ta: any) => ({
+                    id: ta.id,
+                    subject: Array.isArray(ta.subject) ? ta.subject[0] : ta.subject,
+                    class: Array.isArray(ta.class) ? ta.class[0] : ta.class
+                }))
+                .filter((ta: any) => ta.subject?.id && ta.class?.id))
+        } catch (e) {
+            console.error('Error fetching teacher assignments:', e)
+        }
+    }
+
+    const handleCreateTeacherExam = async () => {
+        const f = teacherExamForm
+        if (!f.teacher_id || f.teaching_assignment_ids.length === 0 || !f.title || !f.start_time || f.duration_minutes < 5 || (f.schedule_mode === 'window' && !f.window_end_time)) return
+        setCreatingTeacherExam(true)
+        try {
+            const batchId = f.teaching_assignment_ids.length > 1 ? crypto.randomUUID() : null
+            const basePayload = {
+                title: f.title,
+                description: f.description,
+                start_time: new Date(f.start_time).toISOString(),
+                duration_minutes: f.duration_minutes,
+                window_end_time: f.schedule_mode === 'window' && f.window_end_time ? new Date(f.window_end_time).toISOString() : null,
+                is_randomized: f.is_randomized,
+                max_violations: f.max_violations,
+                show_results_immediately: f.show_results_immediately,
+                batch_id: batchId
+            }
+
+            const results = await Promise.allSettled(
+                f.teaching_assignment_ids.map(taId =>
+                    fetch('/api/exams', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ...basePayload, teaching_assignment_id: taId })
+                    }).then(r => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                        return r.json()
+                    })
+                )
+            )
+            const okCount = results.filter(r => r.status === 'fulfilled').length
+            if (okCount === 0) {
+                showToast('Gagal membuat ulangan. Silakan coba lagi.', 'error')
+                return
+            }
+            setShowCreateTeacherExam(false)
+            const firstCreated = results.find(r => r.status === 'fulfilled')?.value
+            if (firstCreated?.id) {
+                router.push(`/dashboard/admin/uts-uas/${firstCreated.id}?type=ulangan`)
+            } else {
+                fetchUlangan()
+            }
+            if (okCount < f.teaching_assignment_ids.length) {
+                showToast(`${okCount} dari ${f.teaching_assignment_ids.length} kelas berhasil dibuat. Sisanya gagal — buat ulang untuk kelas tersebut.`, 'error')
+            }
+        } finally {
+            setCreatingTeacherExam(false)
+        }
+    }
+
     const [duplicateExam, setDuplicateExam] = useState<OfficialExam | any | null>(null)
     const [duplicateSource, setDuplicateSource] = useState<'official' | 'ulangan'>('official')
     const [duplicateMode, setDuplicateMode] = useState<'BIASA' | 'REMEDIAL'>('BIASA')
@@ -71,6 +193,8 @@ export default function AdminUtsUasPage() {
         title: '',
         start_time: '',
         duration_minutes: 90,
+        schedule_mode: 'sync' as 'sync' | 'window',
+        window_end_time: '',
         target_class_ids: [] as string[]
     })
 
@@ -89,6 +213,8 @@ export default function AdminUtsUasPage() {
         subject_id: '',
         start_time: '',
         duration_minutes: 90,
+        schedule_mode: 'sync' as 'sync' | 'window',
+        window_end_time: '',
         is_randomized: true,
         max_violations: 3,
         show_results_immediately: true,
@@ -183,7 +309,10 @@ export default function AdminUtsUasPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ...form,
-                    start_time: localDate.toISOString()
+                    start_time: localDate.toISOString(),
+                    window_end_time: form.schedule_mode === 'window' && form.window_end_time
+                        ? new Date(form.window_end_time).toISOString()
+                        : null
                 })
             })
             if (res.ok) {
@@ -196,6 +325,8 @@ export default function AdminUtsUasPage() {
                     subject_id: '',
                     start_time: '',
                     duration_minutes: 90,
+                    schedule_mode: 'sync',
+                    window_end_time: '',
                     is_randomized: true,
                     max_violations: 3,
                     show_results_immediately: true,
@@ -265,6 +396,8 @@ export default function AdminUtsUasPage() {
             title: mode === 'REMEDIAL' ? `Remedial ${exam.title}` : `Copy of ${exam.title}`,
             start_time: defaultTime,
             duration_minutes: exam.duration_minutes,
+            schedule_mode: exam.window_end_time ? 'window' : 'sync',
+            window_end_time: '',
             target_class_ids: exam.target_class_ids || []
         })
 
@@ -381,6 +514,9 @@ export default function AdminUtsUasPage() {
                     description: duplicateExam.description,
                     start_time: localDate.toISOString(),
                     duration_minutes: duplicateForm.duration_minutes,
+                    window_end_time: duplicateForm.schedule_mode === 'window' && duplicateForm.window_end_time
+                        ? new Date(duplicateForm.window_end_time).toISOString()
+                        : null,
                     is_randomized: duplicateExam.is_randomized,
                     max_violations: duplicateExam.max_violations,
                     show_results_immediately: duplicateExam.show_results_immediately ?? true,
@@ -410,6 +546,9 @@ export default function AdminUtsUasPage() {
                     title: duplicateForm.title,
                     start_time: localDate.toISOString(),
                     duration_minutes: duplicateForm.duration_minutes,
+                    window_end_time: duplicateForm.schedule_mode === 'window' && duplicateForm.window_end_time
+                        ? new Date(duplicateForm.window_end_time).toISOString()
+                        : null,
                     target_class_ids: duplicateForm.target_class_ids,
                     is_remedial: duplicateMode === 'REMEDIAL',
                     allowed_student_ids: duplicateMode === 'REMEDIAL' ? selectedStudentIds : null
@@ -467,7 +606,10 @@ export default function AdminUtsUasPage() {
     const getExamStatus = (exam: OfficialExam) => {
         const now = new Date()
         const startTime = new Date(exam.start_time)
-        const endTime = new Date(startTime.getTime() + exam.duration_minutes * 60000)
+        // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
+        const endTime = exam.window_end_time
+            ? new Date(exam.window_end_time)
+            : new Date(startTime.getTime() + exam.duration_minutes * 60000)
 
         if (now > endTime) return { label: 'Selesai', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' }
         if (!exam.is_active) return { label: 'Draft', color: 'bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-500/20 dark:text-amber-400' }
@@ -508,16 +650,23 @@ export default function AdminUtsUasPage() {
     return (
         <div className="space-y-6">
             <PageHeader
-                title="UTS / UAS"
-                subtitle="Kelola Ujian Tengah Semester & Ujian Akhir Semester"
+                title="Ulangan"
+                subtitle="Kelola ulangan harian guru & ujian UTS/UAS sekolah"
                 icon={<div className="text-indigo-500"><GraduationCap className="w-6 h-6" /></div>}
                 backHref="/dashboard/admin"
                 action={
-                    <Button onClick={() => setShowCreate(true)} icon={
-                        <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
-                    }>
-                        Buat Ujian
-                    </Button>
+                    <div className="flex gap-2">
+                        {tab === 'ulangan' && (
+                            <Button variant="secondary" onClick={() => setShowCreateTeacherExam(true)}>
+                                Buat Ulangan untuk Guru
+                            </Button>
+                        )}
+                        <Button onClick={() => setShowCreate(true)} icon={
+                            <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
+                        }>
+                            Buat Ujian
+                        </Button>
+                    </div>
                 }
             />
 
@@ -632,14 +781,16 @@ export default function AdminUtsUasPage() {
                                         </div>
                                         <div className="flex flex-col gap-1.5 pt-1 text-xs text-text-secondary">
                                             <div className="flex items-center justify-between">
-                                                <span>Waktu Mulai</span>
+                                                <span>{exam.window_end_time ? 'Dibuka' : 'Waktu Mulai'}</span>
                                                 <span className="font-bold text-text-main dark:text-white">{formatDateTime(exam.start_time)}</span>
                                             </div>
                                             <div className="flex items-center justify-between">
-                                                <span>Waktu Selesai</span>
+                                                <span>{exam.window_end_time ? 'Ditutup' : 'Waktu Selesai'}</span>
                                                 <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                                                     <Clock className="w-3.5 h-3.5" />
-                                                    {formatDateTime(new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
+                                                    {formatDateTime(exam.window_end_time
+                                                        ? exam.window_end_time
+                                                        : new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
                                                 </span>
                                             </div>
                                         </div>
@@ -771,9 +922,15 @@ export default function AdminUtsUasPage() {
                                                 </div>
                                             </div>
                                             <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                <span>Mulai</span>
+                                                <span>{exam.window_end_time ? 'Dibuka' : 'Mulai'}</span>
                                                 <span className="font-bold text-text-main dark:text-white">{formatDateTime(exam.start_time)}</span>
                                             </div>
+                                            {exam.window_end_time && (
+                                                <div className="flex items-center justify-between text-xs text-text-secondary">
+                                                    <span>Ditutup</span>
+                                                    <span className="font-bold text-red-500 dark:text-red-400">{formatDateTime(exam.window_end_time)}</span>
+                                                </div>
+                                            )}
                                             {counts && (
                                                 <div className="flex items-center justify-between text-xs">
                                                     <span className="text-text-secondary">Pengumpulan</span>
@@ -939,33 +1096,25 @@ export default function AdminUtsUasPage() {
                         </div>
                     </div>
 
-                    {/* Time & Duration */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
-                            <input
-                                type="datetime-local"
-                                value={form.start_time}
-                                onChange={(e) => setForm({ ...form, start_time: e.target.value })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (mnt)</label>
-                            <input
-                                type="number"
-                                value={form.duration_minutes}
-                                onChange={(e) => setForm({ ...form, duration_minutes: parseInt(e.target.value) || 90 })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                min={5} max={300}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Selesai</label>
-                            <div className="w-full px-4 py-3 bg-secondary/10 border border-secondary/10 rounded-xl text-text-main dark:text-zinc-300 font-medium flex items-center h-[50px]">
-                                {form.start_time ? new Date(new Date(form.start_time).getTime() + form.duration_minutes * 60000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-'}
-                            </div>
-                        </div>
+                    {/* Schedule */}
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jadwal Pengerjaan</label>
+                        <TimeWindowFields
+                            value={{
+                                mode: form.schedule_mode,
+                                start_time: form.start_time,
+                                window_end_time: form.window_end_time,
+                                duration_minutes: String(form.duration_minutes)
+                            }}
+                            onChange={(v) => setForm({
+                                ...form,
+                                schedule_mode: v.mode,
+                                start_time: v.start_time,
+                                duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || 0 : 0,
+                                window_end_time: v.mode === 'window' ? v.window_end_time : ''
+                            })}
+                            durationRequired
+                        />
                     </div>
 
                     {/* Options */}
@@ -1009,10 +1158,142 @@ export default function AdminUtsUasPage() {
                         <Button
                             onClick={handleCreate}
                             loading={creating}
-                            disabled={!form.subject_id || !form.title || !form.start_time || form.target_class_ids.length === 0}
+                            disabled={!form.subject_id || !form.title || !form.start_time || form.target_class_ids.length === 0 || form.duration_minutes < 5 || (form.schedule_mode === 'window' && !form.window_end_time)}
                             className="flex-1"
                         >
                             Buat & Tambah Soal
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Buat Ulangan untuk Guru (admin) — form senanda form ulangan guru */}
+            <Modal
+                open={showCreateTeacherExam}
+                onClose={() => setShowCreateTeacherExam(false)}
+                title="Buat Ulangan untuk Guru"
+            >
+                <div className="space-y-4">
+                    <div className="flex items-start gap-3 p-3 bg-teal-500/10 text-teal-700 dark:text-teal-300 rounded-xl text-sm">
+                        <BookOpen className="w-5 h-5 flex-shrink-0" />
+                        <div>
+                            Ulangan dibuat sebagai <span className="font-bold">DRAFT atas nama guru</span> yang dipilih — langsung muncul di daftar ulangan guru terkait. Guru melengkapi soal dan mempublikasikannya.
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Guru <span className="text-red-500">*</span></label>
+                        <select
+                            value={teacherExamForm.teacher_id}
+                            onChange={(e) => handleTeacherExamTeacherChange(e.target.value)}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                            <option value="">-- Pilih Guru --</option>
+                            {teacherOptions.map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    {teacherExamForm.teacher_id && (
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran <span className="text-red-500">*</span></label>
+                            {teacherTAs.length === 0 ? (
+                                <p className="text-sm text-text-secondary p-3 bg-secondary/5 border border-secondary/20 rounded-xl">
+                                    Guru ini belum memiliki penugasan mengajar di tahun ajaran aktif.
+                                </p>
+                            ) : (
+                                <ClassChipsSelector
+                                    assignments={teacherTAs.map(ta => ({ id: ta.id, subject: ta.subject, class: ta.class }))}
+                                    selectedIds={teacherExamForm.teaching_assignment_ids}
+                                    onChange={(ids) => setTeacherExamForm({ ...teacherExamForm, teaching_assignment_ids: ids })}
+                                    disabled={teacherTAs.length === 0}
+                                />
+                            )}
+                        </div>
+                    )}
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ulangan <span className="text-red-500">*</span></label>
+                        <input
+                            type="text"
+                            value={teacherExamForm.title}
+                            onChange={(e) => setTeacherExamForm({ ...teacherExamForm, title: e.target.value })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Contoh: Ulangan Harian Bab 2"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Deskripsi (Opsional)</label>
+                        <textarea
+                            value={teacherExamForm.description}
+                            onChange={(e) => setTeacherExamForm({ ...teacherExamForm, description: e.target.value })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            rows={2}
+                            placeholder="Materi yang diujikan..."
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jadwal Pengerjaan</label>
+                        <TimeWindowFields
+                            value={{
+                                mode: teacherExamForm.schedule_mode,
+                                start_time: teacherExamForm.start_time,
+                                window_end_time: teacherExamForm.window_end_time,
+                                duration_minutes: String(teacherExamForm.duration_minutes)
+                            }}
+                            onChange={(v) => setTeacherExamForm({
+                                ...teacherExamForm,
+                                schedule_mode: v.mode,
+                                start_time: v.start_time,
+                                duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || 0 : 0,
+                                window_end_time: v.mode === 'window' ? v.window_end_time : ''
+                            })}
+                            durationRequired
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran (auto-submit)</label>
+                        <input
+                            type="number"
+                            value={teacherExamForm.max_violations}
+                            onChange={(e) => setTeacherExamForm({ ...teacherExamForm, max_violations: parseInt(e.target.value) || 3 })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            min={1}
+                            max={10}
+                        />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
+                            <input
+                                type="checkbox"
+                                id="teacherExamRandomize"
+                                checked={teacherExamForm.is_randomized}
+                                onChange={(e) => setTeacherExamForm({ ...teacherExamForm, is_randomized: e.target.checked })}
+                                className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="teacherExamRandomize" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none">Acak urutan soal per siswa</label>
+                        </div>
+                        <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
+                            <input
+                                type="checkbox"
+                                id="teacherExamShowResults"
+                                checked={teacherExamForm.show_results_immediately}
+                                onChange={(e) => setTeacherExamForm({ ...teacherExamForm, show_results_immediately: e.target.checked })}
+                                className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="teacherExamShowResults" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none flex flex-col">
+                                <span>Tampilkan Hasil Langsung</span>
+                                <span className="text-xs text-text-secondary font-normal mt-0.5">Jika dimatikan, siswa baru bisa melihat nilai setelah guru klik "Bagikan Hasil"</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div className="flex gap-3 pt-4 border-t border-secondary/10">
+                        <Button variant="secondary" onClick={() => setShowCreateTeacherExam(false)} className="flex-1">Batal</Button>
+                        <Button
+                            onClick={handleCreateTeacherExam}
+                            loading={creatingTeacherExam}
+                            disabled={creatingTeacherExam || !teacherExamForm.teacher_id || teacherExamForm.teaching_assignment_ids.length === 0 || !teacherExamForm.title || !teacherExamForm.start_time || teacherExamForm.duration_minutes < 5 || (teacherExamForm.schedule_mode === 'window' && !teacherExamForm.window_end_time)}
+                            className="flex-1"
+                        >
+                            Buat Ulangan (Draft)
                         </Button>
                     </div>
                 </div>
@@ -1047,26 +1328,24 @@ export default function AdminUtsUasPage() {
                         </div>
 
                         {/* Schedule */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai</label>
-                                <input
-                                    type="datetime-local"
-                                    value={duplicateForm.start_time}
-                                    onChange={(e) => setDuplicateForm({ ...duplicateForm, start_time: e.target.value })}
-                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (Menit)</label>
-                                <input
-                                    type="number"
-                                    value={duplicateForm.duration_minutes}
-                                    onChange={(e) => setDuplicateForm({ ...duplicateForm, duration_minutes: parseInt(e.target.value) || 90 })}
-                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                    min={5} max={300}
-                                />
-                            </div>
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jadwal Pengerjaan</label>
+                            <TimeWindowFields
+                                value={{
+                                    mode: duplicateForm.schedule_mode,
+                                    start_time: duplicateForm.start_time,
+                                    window_end_time: duplicateForm.window_end_time,
+                                    duration_minutes: String(duplicateForm.duration_minutes)
+                                }}
+                                onChange={(v) => setDuplicateForm({
+                                    ...duplicateForm,
+                                    schedule_mode: v.mode,
+                                    start_time: v.start_time,
+                                    duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || 0 : 0,
+                                    window_end_time: v.mode === 'window' ? v.window_end_time : ''
+                                })}
+                                durationRequired
+                            />
                         </div>
 
                         {/* Remedial Student Selection */}

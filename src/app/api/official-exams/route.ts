@@ -173,13 +173,18 @@ export async function POST(request: NextRequest) {
         const body = await request.json()
         const {
             exam_type, title, description, subject_id,
-            start_time, duration_minutes, is_randomized,
+            start_time, duration_minutes, window_end_time, is_randomized,
             max_violations, target_class_ids, academic_year_id,
             show_results_immediately
         } = body
 
         if (!exam_type || !title || !subject_id || !start_time || !target_class_ids?.length) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+        }
+
+        // Validasi jendela waktu: jam tutup harus setelah jam buka
+        if (window_end_time && new Date(window_end_time) <= new Date(start_time)) {
+            return NextResponse.json({ error: 'Jam tutup jendela waktu harus setelah jam buka' }, { status: 400 })
         }
 
         // Use provided academic_year_id or fall back to active year
@@ -218,6 +223,7 @@ export async function POST(request: NextRequest) {
                 description: description || null,
                 start_time,
                 duration_minutes: duration_minutes || 90,
+                window_end_time: window_end_time || null,
                 is_randomized: is_randomized ?? true,
                 max_violations: max_violations || 3,
                 target_class_ids,

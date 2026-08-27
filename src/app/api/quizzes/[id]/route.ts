@@ -64,7 +64,22 @@ export async function GET(
             }
         }
 
-        return NextResponse.json(data)
+        // Sibling batch (kelas paralel) — sumber definitif untuk checkbox
+        // "Terapkan jadwal juga ke kelas paralel" (sessionStorage bisa hilang).
+        let batchSiblings: { id: string; class_name: string }[] = []
+        if (data?.batch_id) {
+            const { data: siblings } = await supabase
+                .from('quizzes')
+                .select('id, teaching_assignment:teaching_assignments(class:classes(name))')
+                .eq('batch_id', data.batch_id)
+                .neq('id', id)
+            batchSiblings = (siblings || []).map((s: any) => ({
+                id: s.id,
+                class_name: (Array.isArray(s.teaching_assignment) ? s.teaching_assignment[0]?.class : s.teaching_assignment?.class)?.name || '-'
+            }))
+        }
+
+        return NextResponse.json({ ...data, batch_siblings: batchSiblings })
     } catch (error) {
         console.error('Error fetching quiz:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
@@ -105,7 +120,7 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: quizForYear } = await supabase
             .from('quizzes')
-            .select('teaching_assignment_id')
+            .select('teaching_assignment_id, deadline, available_from')
             .eq('id', id)
             .single()
         if (quizForYear?.teaching_assignment_id) {
@@ -114,8 +129,16 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { title, description, duration_minutes, is_randomized, is_active, deadline } = body
+        const { title, description, duration_minutes, is_randomized, is_active, deadline, available_from } = body
 
+        // Validasi jendela waktu kuis: deadline harus setelah jam buka
+        if (deadline || available_from) {
+            const effectiveOpen = available_from !== undefined ? (available_from || null) : quizForYear?.available_from
+            const effectiveDeadline = deadline !== undefined ? (deadline || null) : quizForYear?.deadline
+            if (effectiveOpen && effectiveDeadline && new Date(effectiveDeadline) <= new Date(effectiveOpen)) {
+                return NextResponse.json({ error: 'Batas waktu (deadline) harus setelah jam buka' }, { status: 400 })
+            }
+        }
 
         let finalIsActive = is_active
         let finalPendingPublish = false
@@ -193,6 +216,7 @@ export async function PUT(
         if (is_randomized !== undefined) updateData.is_randomized = is_randomized
         if (is_active !== undefined) updateData.is_active = finalIsActive
         if (deadline !== undefined) updateData.deadline = deadline || null
+        if (available_from !== undefined) updateData.available_from = available_from || null
 
         // Set pending_publish correctly when explicitly publishing
         if (is_active !== undefined) {

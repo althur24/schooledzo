@@ -21,15 +21,18 @@ export async function checkEndedOfficialExams(schoolId: string): Promise<void> {
         // Get all active official exams for this school
         const { data: activeExams } = await supabase
             .from('official_exams')
-            .select('id, title, exam_type, start_time, duration_minutes, subject_id, target_class_ids, school_id, subject:subjects(name)')
+            .select('id, title, exam_type, start_time, duration_minutes, window_end_time, subject_id, target_class_ids, school_id, subject:subjects(name)')
             .eq('school_id', schoolId)
             .eq('is_active', true)
 
         if (!activeExams || activeExams.length === 0) return
 
         // Filter exams whose end time has passed
+        // (mode jendela → jam tutup; mode serentak → start + durasi)
         const endedExams = activeExams.filter(exam => {
-            const endTime = new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60 * 1000)
+            const endTime = exam.window_end_time
+                ? new Date(exam.window_end_time).getTime()
+                : new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60 * 1000)
             return now > endTime
         })
 

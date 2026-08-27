@@ -19,7 +19,7 @@ import RichTextEditor from '@/components/RichTextEditor'
 import { plainToHtml } from '@/lib/richTextUtils'
 import EditorErrorBoundary from '@/components/EditorErrorBoundary'
 import { Edit, Discovery, Folder, Plus, Upload, Danger, InfoCircle, TickSquare, CloseSquare, Delete, Document, Search, User } from 'react-iconly'
-import { Loader2, Eye, Brain, GripVertical } from 'lucide-react'
+import { Loader2, Eye, Brain, GripVertical, Settings as SettingsIcon } from 'lucide-react'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import TagInput from '@/components/TagInput'
@@ -55,6 +55,11 @@ interface Quiz {
     is_active: boolean
     pending_publish: boolean
     batch_id?: string | null
+    /** Kelas paralel dalam batch yang sama (dari API) */
+    batch_siblings?: { id: string; class_name: string }[]
+    duration_minutes?: number | null
+    deadline?: string | null
+    available_from?: string | null
     teaching_assignment: {
         subject: { id: string; name: string }
         class: { name: string }
@@ -188,6 +193,91 @@ function EditQuizPageInner() {
 
     const [showPublishConfirm, setShowPublishConfirm] = useState(false)
     const [showPreview, setShowPreview] = useState(false)
+
+    // Pengaturan kuis (durasi, jam buka, deadline) — dulu hanya bisa diisi saat buat
+    const [showQuizSettings, setShowQuizSettings] = useState(false)
+    const [quizSettingsForm, setQuizSettingsForm] = useState({
+        duration_minutes: 30,
+        has_available_from: false,
+        available_from: '',
+        has_deadline: false,
+        deadline: ''
+    })
+    const [savingQuizSettings, setSavingQuizSettings] = useState(false)
+    // Terapkan jadwal juga ke kelas paralel dalam batch (default mati)
+    const [applyScheduleToSiblings, setApplyScheduleToSiblings] = useState(false)
+
+    const openQuizSettings = () => {
+        if (!quiz) return
+        const toLocalInput = (iso: string | null | undefined): string => {
+            if (!iso) return ''
+            const d = new Date(iso)
+            if (isNaN(d.getTime())) return ''
+            d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
+            return d.toISOString().slice(0, 16)
+        }
+        setQuizSettingsForm({
+            duration_minutes: quiz.duration_minutes || 0,
+            has_available_from: !!quiz.available_from,
+            available_from: toLocalInput(quiz.available_from),
+            has_deadline: !!quiz.deadline,
+            deadline: toLocalInput(quiz.deadline)
+        })
+        setShowQuizSettings(true)
+    }
+
+    const handleSaveQuizSettings = async () => {
+        setSavingQuizSettings(true)
+        try {
+            const res = await fetch(`/api/quizzes/${quizId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    duration_minutes: quizSettingsForm.duration_minutes || 0,
+                    available_from: quizSettingsForm.has_available_from && quizSettingsForm.available_from
+                        ? new Date(quizSettingsForm.available_from).toISOString()
+                        : null,
+                    deadline: quizSettingsForm.has_deadline && quizSettingsForm.deadline
+                        ? new Date(quizSettingsForm.deadline).toISOString()
+                        : null
+                })
+            })
+            if (res.ok) {
+                // Terapkan jadwal ke kelas paralel (opsional, hanya field timing)
+                if (applyScheduleToSiblings && (quiz?.batch_siblings?.length || 0) > 0) {
+                    const schedulePayload = {
+                        duration_minutes: quizSettingsForm.duration_minutes || 0,
+                        available_from: quizSettingsForm.has_available_from && quizSettingsForm.available_from
+                            ? new Date(quizSettingsForm.available_from).toISOString()
+                            : null,
+                        deadline: quizSettingsForm.has_deadline && quizSettingsForm.deadline
+                            ? new Date(quizSettingsForm.deadline).toISOString()
+                            : null
+                    }
+                    await Promise.allSettled(
+                        (quiz?.batch_siblings || []).map(s =>
+                            fetch(`/api/quizzes/${s.id}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(schedulePayload)
+                            })
+                        )
+                    )
+                    showToast(`Jadwal diterapkan ke ${quiz!.batch_siblings!.length} kelas paralel`, 'success')
+                }
+                setShowQuizSettings(false)
+                setApplyScheduleToSiblings(false)
+                showToast('Pengaturan kuis tersimpan', 'success')
+                fetchQuiz()
+            } else {
+                const err = await res.json().catch(() => ({}))
+                showToast(err?.error || 'Gagal menyimpan pengaturan', 'error')
+            }
+        } finally {
+            setSavingQuizSettings(false)
+        }
+    }
+
     const [publishing, setPublishing] = useState(false)
     const [syncFailedCount, setSyncFailedCount] = useState(0)
     const [retryingSync, setRetryingSync] = useState(false)
@@ -989,6 +1079,13 @@ function EditQuizPageInner() {
                         >
                             <Eye className="w-4 h-4 mr-1" />
                             Preview
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            onClick={openQuizSettings}
+                            icon={<SettingsIcon className="w-4 h-4" />}
+                        >
+                            Pengaturan
                         </Button>
                         {!quiz.is_active && !quiz.pending_publish && (
                             <Button
@@ -2230,6 +2327,96 @@ function EditQuizPageInner() {
                         <Button variant="secondary" onClick={() => setShowSuccessModal(false)} className="flex-1 justify-center">
                             Tutup
                         </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Pengaturan Kuis (durasi & jendela waktu) */}
+            <Modal
+                open={showQuizSettings}
+                onClose={() => setShowQuizSettings(false)}
+                title="⚙️ Pengaturan Kuis"
+            >
+                <div className="space-y-5">
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi Pengerjaan (menit)</label>
+                        <input
+                            type="number"
+                            value={quizSettingsForm.duration_minutes}
+                            onChange={(e) => setQuizSettingsForm({ ...quizSettingsForm, duration_minutes: parseInt(e.target.value) || 0 })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            min={0}
+                        />
+                        <p className="text-xs text-text-secondary mt-1.5">Durasi per siswa, dihitung sejak siswa memulai. Isi 0 untuk tanpa batas waktu.</p>
+                    </div>
+
+                    <div>
+                        <label className="flex items-center gap-2 cursor-pointer mb-2">
+                            <input
+                                type="checkbox"
+                                checked={quizSettingsForm.has_available_from}
+                                onChange={(e) => setQuizSettingsForm({ ...quizSettingsForm, has_available_from: e.target.checked, ...(e.target.checked ? {} : { available_from: '' }) })}
+                                className="w-5 h-5 rounded bg-white border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm font-bold text-text-main dark:text-white">Jam Buka Pengerjaan</span>
+                        </label>
+                        {quizSettingsForm.has_available_from && (
+                            <input
+                                type="datetime-local"
+                                value={quizSettingsForm.available_from}
+                                onChange={(e) => setQuizSettingsForm({ ...quizSettingsForm, available_from: e.target.value })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        )}
+                        <p className="text-xs text-text-secondary mt-1">
+                            {quizSettingsForm.has_available_from ? 'Siswa baru bisa memulai kuis setelah jam ini.' : 'Tanpa jam buka — siswa bisa langsung mengerjakan saat kuis aktif.'}
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="flex items-center gap-2 cursor-pointer mb-2">
+                            <input
+                                type="checkbox"
+                                checked={quizSettingsForm.has_deadline}
+                                onChange={(e) => setQuizSettingsForm({ ...quizSettingsForm, has_deadline: e.target.checked, ...(e.target.checked ? {} : { deadline: '' }) })}
+                                className="w-5 h-5 rounded bg-white border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm font-bold text-text-main dark:text-white">Batas Waktu Pengerjaan (jam tutup)</span>
+                        </label>
+                        {quizSettingsForm.has_deadline && (
+                            <input
+                                type="datetime-local"
+                                value={quizSettingsForm.deadline}
+                                onChange={(e) => setQuizSettingsForm({ ...quizSettingsForm, deadline: e.target.value })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        )}
+                        <p className="text-xs text-text-secondary mt-1">
+                            {quizSettingsForm.has_deadline ? 'Siswa tidak bisa memulai setelah waktu ini; yang sedang mengerjakan dipotong di jam ini.' : 'Tanpa batas waktu — siswa bisa mengerjakan kapan saja selama kuis aktif.'}
+                        </p>
+                    </div>
+
+                    {(quiz?.batch_siblings?.length || 0) > 0 && (
+                        <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700/30 rounded-xl">
+                            <input
+                                type="checkbox"
+                                id="applyScheduleSiblingsQuiz"
+                                checked={applyScheduleToSiblings}
+                                onChange={(e) => setApplyScheduleToSiblings(e.target.checked)}
+                                className="w-5 h-5 mt-0.5 rounded border-secondary/30 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="applyScheduleSiblingsQuiz" className="text-sm cursor-pointer">
+                                <span className="font-medium text-text-main dark:text-white">Terapkan jadwal ini juga ke {quiz!.batch_siblings!.length} kelas paralel</span>
+                                <span className="block text-xs text-text-secondary mt-0.5">
+                                    {quiz!.batch_siblings!.map(s => s.class_name).join(', ')}
+                                </span>
+                            </label>
+                        </div>
+                    )}
+
+                    <div className="flex gap-3 pt-4 border-t border-secondary/10">
+                        <Button variant="secondary" onClick={() => setShowQuizSettings(false)} className="flex-1">Batal</Button>
+                        <Button onClick={handleSaveQuizSettings} loading={savingQuizSettings} className="flex-1">Simpan Perubahan</Button>
                     </div>
                 </div>
             </Modal>

@@ -33,7 +33,22 @@ export async function GET(
 
         if (error) throw error
 
-        return NextResponse.json(data)
+        // Sibling batch (kelas paralel) — sumber definitif untuk checkbox
+        // "Terapkan jadwal juga ke kelas paralel" (sessionStorage bisa hilang).
+        let batchSiblings: { id: string; class_name: string }[] = []
+        if (data?.batch_id) {
+            const { data: siblings } = await supabase
+                .from('exams')
+                .select('id, teaching_assignment:teaching_assignments(class:classes(name))')
+                .eq('batch_id', data.batch_id)
+                .neq('id', id)
+            batchSiblings = (siblings || []).map((s: any) => ({
+                id: s.id,
+                class_name: (Array.isArray(s.teaching_assignment) ? s.teaching_assignment[0]?.class : s.teaching_assignment?.class)?.name || '-'
+            }))
+        }
+
+        return NextResponse.json({ ...data, batch_siblings: batchSiblings })
     } catch (error) {
         console.error('Error fetching exam:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
@@ -58,7 +73,7 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id, results_released, teaching_assignment:teaching_assignments(teacher_id)')
+            .select('teaching_assignment_id, results_released, start_time, teaching_assignment:teaching_assignments(teacher_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -74,8 +89,15 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { title, description, start_time, duration_minutes, is_randomized, is_active, max_violations, show_results_immediately, results_released } = body
+        const { title, description, start_time, duration_minutes, window_end_time, is_randomized, is_active, max_violations, show_results_immediately, results_released } = body
 
+        // Validasi jendela waktu: jam tutup harus setelah jam buka
+        if (window_end_time) {
+            const effectiveStart = start_time ?? examForYear?.start_time
+            if (effectiveStart && new Date(window_end_time) <= new Date(effectiveStart)) {
+                return NextResponse.json({ error: 'Jam tutup jendela waktu harus setelah jam buka' }, { status: 400 })
+            }
+        }
 
         let finalIsActive = is_active
         let finalPendingPublish = false
@@ -148,6 +170,7 @@ export async function PUT(
         if (description !== undefined) updateData.description = description
         if (start_time !== undefined) updateData.start_time = start_time
         if (duration_minutes !== undefined) updateData.duration_minutes = duration_minutes
+        if (window_end_time !== undefined) updateData.window_end_time = window_end_time || null
         if (is_randomized !== undefined) updateData.is_randomized = is_randomized
         if (is_active !== undefined) updateData.is_active = finalIsActive
         if (show_results_immediately !== undefined) updateData.show_results_immediately = show_results_immediately

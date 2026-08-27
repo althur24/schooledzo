@@ -575,6 +575,7 @@ export type Database = {
           teaching_assignment_id: string
           title: string
           updated_at: string | null
+          window_end_time: string | null
         }
         Insert: {
           allowed_student_ids?: string[] | null
@@ -596,6 +597,7 @@ export type Database = {
           teaching_assignment_id: string
           title: string
           updated_at?: string | null
+          window_end_time?: string | null
         }
         Update: {
           allowed_student_ids?: string[] | null
@@ -617,6 +619,7 @@ export type Database = {
           teaching_assignment_id?: string
           title?: string
           updated_at?: string | null
+          window_end_time?: string | null
         }
         Relationships: [
           {
@@ -954,6 +957,7 @@ export type Database = {
           target_class_ids: string[]
           title: string
           updated_at: string | null
+          window_end_time: string | null
         }
         Insert: {
           academic_year_id: string
@@ -977,6 +981,7 @@ export type Database = {
           target_class_ids?: string[]
           title: string
           updated_at?: string | null
+          window_end_time?: string | null
         }
         Update: {
           academic_year_id?: string
@@ -1000,6 +1005,7 @@ export type Database = {
           target_class_ids?: string[]
           title?: string
           updated_at?: string | null
+          window_end_time?: string | null
         }
         Relationships: [
           {
@@ -1368,6 +1374,7 @@ export type Database = {
       quizzes: {
         Row: {
           allowed_student_ids: string[] | null
+          available_from: string | null
           batch_id: string | null
           created_at: string | null
           deadline: string | null
@@ -1385,6 +1392,7 @@ export type Database = {
         }
         Insert: {
           allowed_student_ids?: string[] | null
+          available_from?: string | null
           batch_id?: string | null
           created_at?: string | null
           deadline?: string | null
@@ -1402,6 +1410,7 @@ export type Database = {
         }
         Update: {
           allowed_student_ids?: string[] | null
+          available_from?: string | null
           batch_id?: string | null
           created_at?: string | null
           deadline?: string | null
