@@ -62,6 +62,13 @@ body {
   line-height: 2;
 }
 
+/* RTL input fields — gunakan font Arab saat mengetik (opsi jawaban, isian
+   singkat, jawaban siswa, teks bacaan) agar konsisten dengan hasil render */
+textarea[dir="rtl"],
+input[dir="rtl"] {
+  font-family: 'Amiri', 'Noto Naskh Arabic', serif;
+}
+
 /* KaTeX block math */
 .katex-block {
   display: block;

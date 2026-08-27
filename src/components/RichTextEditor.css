@@ -136,6 +136,20 @@
     font-style: italic;
 }
 
+/* ─── Arabic (RTL) typing — konsisten dengan render SmartText ───
+   Guru melihat font Amiri + rata kanan SEJAK mengetik, bukan hanya
+   setelah soal dirender di card/siswa. */
+.rte-content .tiptap[dir="rtl"] {
+    font-family: 'Amiri', 'Noto Naskh Arabic', serif;
+    text-align: right;
+    font-size: 17px;
+}
+
+/* Placeholder mengikuti sisi kanan saat RTL */
+.rte-content .tiptap[dir="rtl"] p.is-editor-empty:first-child::before {
+    float: right;
+}
+
 /* Paragraphs */
 .rte-content .tiptap p {
     margin: 0 0 0.25em 0;

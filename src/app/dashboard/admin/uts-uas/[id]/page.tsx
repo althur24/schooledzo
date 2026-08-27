@@ -21,6 +21,7 @@ import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import TagInput from '@/components/TagInput'
 import BankQuestionPicker from '@/components/BankQuestionPicker'
 import InlineQuestionTags from '@/components/InlineQuestionTags'
+import { detectTextDirection } from '@/lib/textDirection'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -1214,7 +1215,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                             <div className="space-y-6">
                                 <div>
                                     <label className="block text-sm font-bold text-teal-700 dark:text-teal-400 mb-2">📖 Teks Bacaan (Passage)</label>
-                                    <RichTextEditor value={passageText} onChange={(val) => setPassageText(val)} placeholder="Tulis teks bacaan / passage di sini..." />
+                                    <RichTextEditor value={passageText} onChange={(val) => setPassageText(val)} placeholder="Tulis teks bacaan / passage di sini..." textDirection={detectTextDirection(passageText)} />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold text-violet-700 dark:text-violet-400 mb-2">🎧 Audio Listening (Opsional)</label>

@@ -27,6 +27,7 @@ import TagInput from '@/components/TagInput'
 import BankQuestionPicker from '@/components/BankQuestionPicker'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import InlineQuestionTags from '@/components/InlineQuestionTags'
+import { detectTextDirection } from '@/lib/textDirection'
 import { Modal, PageHeader, Button, EmptyState, Toast, type ToastType } from '@/components/ui'
 import Card from '@/components/ui/Card'
 
@@ -2193,7 +2194,8 @@ function EditExamPageInner() {
                                         <textarea
                                             value={passageText}
                                             onChange={(e) => setPassageText(e.target.value)}
-                                            className="w-full px-4 py-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-300 dark:border-teal-700 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 min-h-[120px]"
+                                            dir={detectTextDirection(passageText)}
+                                            className={`w-full px-4 py-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-300 dark:border-teal-700 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 min-h-[120px] ${detectTextDirection(passageText) === 'rtl' ? 'text-right' : ''}`}
                                             placeholder="Tulis teks bacaan / passage di sini..."
                                         />
                                     </div>
