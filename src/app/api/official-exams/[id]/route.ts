@@ -333,8 +333,20 @@ export async function DELETE(
         if (isErrorResponse(ctx)) return ctx
         const { user } = ctx
 
-        if (user.role !== 'ADMIN') {
+        if (user.role !== 'ADMIN' && user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Kepemilikan guru: hanya boleh hapus ujian resmi pada mapel & kelas yang diajarnya
+        if (user.role === 'GURU') {
+            const { data: examScope } = await supabase
+                .from('official_exams')
+                .select('subject_id, target_class_ids, academic_year_id')
+                .eq('id', id)
+                .single()
+            if (!examScope || !(await canManageOfficialExam(user, examScope))) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
         }
 
         // Cascade: delete related records first (foreign key constraints)

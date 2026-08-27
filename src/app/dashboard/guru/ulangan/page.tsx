@@ -92,6 +92,18 @@ export default function GuruUlanganPage() {
     const [showCopy, setShowCopy] = useState(false)
     const [copySourceExam, setCopySourceExam] = useState<Exam | null>(null)
     const [copying, setCopying] = useState(false)
+
+    // Official Exam (UTS/UAS) reuse & delete states
+    const [showOfficialCopy, setShowOfficialCopy] = useState(false)
+    const [officialCopySource, setOfficialCopySource] = useState<OfficialExam | null>(null)
+    const [officialCopying, setOfficialCopying] = useState(false)
+    const [officialCopyForm, setOfficialCopyForm] = useState({
+        title: '',
+        start_time: '',
+        duration_minutes: 60,
+        schedule_mode: 'sync' as 'sync' | 'window',
+        window_end_time: '',
+    })
     const [copyForm, setCopyForm] = useState({
         teaching_assignment_ids: [] as string[],
         title: '',
@@ -461,6 +473,62 @@ export default function GuruUlanganPage() {
         fetchData()
     }
 
+    const openOfficialCopyModal = (exam: OfficialExam) => {
+        setOfficialCopySource(exam)
+        setOfficialCopyForm({
+            title: `[Copy] ${exam.title}`,
+            start_time: '',
+            duration_minutes: exam.duration_minutes,
+            schedule_mode: exam.window_end_time ? 'window' : 'sync',
+            window_end_time: '',
+        })
+        setShowOfficialCopy(true)
+    }
+
+    const handleOfficialCopy = async () => {
+        if (!officialCopySource || !officialCopyForm.title || !officialCopyForm.start_time) return
+        setOfficialCopying(true)
+        try {
+            const utcStart = new Date(officialCopyForm.start_time).toISOString()
+            const res = await fetch('/api/official-exams/duplicate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_exam_id: officialCopySource.id,
+                    title: officialCopyForm.title,
+                    start_time: utcStart,
+                    duration_minutes: officialCopyForm.duration_minutes,
+                    window_end_time: officialCopyForm.schedule_mode === 'window' && officialCopyForm.window_end_time
+                        ? new Date(officialCopyForm.window_end_time).toISOString()
+                        : null,
+                })
+            })
+            const data = await res.json().catch(() => null)
+            if (!res.ok) {
+                alert(data?.error || 'Gagal menduplikasi ujian.')
+                return
+            }
+            alert('Ujian berhasil disalin sebagai draft. Lengkapi soal & jadwal di editor.')
+            setShowOfficialCopy(false)
+            fetchData()
+        } catch (error) {
+            console.error('Error duplicating official exam:', error)
+            alert('Terjadi kesalahan saat menduplikasi ujian.')
+        } finally {
+            setOfficialCopying(false)
+        }
+    }
+
+    const handleDeleteOfficial = async (id: string) => {
+        if (!confirm('Hapus ujian UTS/UAS ini? Semua soal & hasil pengerjaan siswa ikut terhapus.')) return
+        const res = await fetch(`/api/official-exams/${id}`, { method: 'DELETE' })
+        if (!res.ok) {
+            const data = await res.json().catch(() => null)
+            alert(data?.error || 'Gagal menghapus ujian.')
+        }
+        fetchData()
+    }
+
     const handleOpenRemedial = async (exam: Exam) => {
         setRemedialExam(exam)
         setShowRemedial(true)
@@ -808,6 +876,7 @@ export default function GuruUlanganPage() {
                                 {officialExams.map(exam => {
                                     const status = getOfficialExamStatus(exam)
                                     const isLive = status.label === 'Berlangsung'
+                                    const isDone = status.label === 'Selesai'
 
                                     // Draft (termasuk buatan admin) dibuka di editor agar bisa dilengkapi & dipublish
                                     const primaryAction = status.label === 'Draft'
@@ -815,6 +884,27 @@ export default function GuruUlanganPage() {
                                         : isLive
                                             ? { label: 'Monitor Live', href: `/dashboard/guru/uts-uas/${exam.id}/monitor`, icon: <Activity className="w-4 h-4" /> }
                                             : { label: 'Lihat Hasil', href: `/dashboard/guru/uts-uas/${exam.id}/hasil`, icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> }
+
+                                    const officialMenuItems: DropdownMenuItem[] = [
+                                        {
+                                            label: 'Lihat Hasil',
+                                            show: exam.is_active && !isLive,
+                                            icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={14} /></span>,
+                                            onClick: () => router.push(`/dashboard/guru/uts-uas/${exam.id}/hasil`),
+                                        },
+                                        {
+                                            label: 'Pakai Ulang',
+                                            show: isDone || isLive,
+                                            icon: <Copy className="w-4 h-4" />,
+                                            onClick: () => openOfficialCopyModal(exam),
+                                        },
+                                        {
+                                            label: 'Hapus',
+                                            danger: true,
+                                            icon: <Trash2 className="w-4 h-4" />,
+                                            onClick: () => handleDeleteOfficial(exam.id),
+                                        },
+                                    ]
 
                                     const extraBadges = exam.creator_role === 'ADMIN' ? [(
                                         <span key="admin" className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
@@ -838,6 +928,7 @@ export default function GuruUlanganPage() {
                                             durationMinutes={exam.duration_minutes}
                                             questionCount={exam.question_count}
                                             primaryAction={primaryAction}
+                                            menuItems={officialMenuItems}
                                         />
                                     )
                                 })}
@@ -946,6 +1037,85 @@ export default function GuruUlanganPage() {
                             className="flex-1"
                         >
                             Salin Ulangan
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Modal Pakai Ulang UTS/UAS — duplikasi ujian resmi sebagai draft baru */}
+            <Modal
+                open={showOfficialCopy}
+                onClose={() => setShowOfficialCopy(false)}
+                title="Pakai Ulang UTS/UAS"
+            >
+                <div className="space-y-4">
+                    <div className="bg-secondary/10 p-4 rounded-xl">
+                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source Ujian: {officialCopySource?.title}</h4>
+                        <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
+                            <span>Jenis: <strong>{officialCopySource?.exam_type}</strong></span>
+                            <span>Mapel: <strong>{officialCopySource?.subject?.name}</strong></span>
+                            <span>Soal: <strong>{officialCopySource?.question_count}</strong></span>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ujian Baru</label>
+                        <input
+                            type="text"
+                            value={officialCopyForm.title}
+                            onChange={(e) => setOfficialCopyForm({ ...officialCopyForm, title: e.target.value })}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai <span className="text-red-500">*</span></label>
+                            <input
+                                type="datetime-local"
+                                value={officialCopyForm.start_time}
+                                onChange={(e) => setOfficialCopyForm({ ...officialCopyForm, start_time: e.target.value })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
+                            <input
+                                type="number"
+                                min={5}
+                                max={300}
+                                value={officialCopyForm.duration_minutes}
+                                onChange={(e) => setOfficialCopyForm({ ...officialCopyForm, duration_minutes: parseInt(e.target.value, 10) || 0 })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        </div>
+                    </div>
+                    <TimeWindowFields
+                        value={{
+                            mode: officialCopyForm.schedule_mode,
+                            start_time: officialCopyForm.start_time,
+                            duration_minutes: String(officialCopyForm.duration_minutes),
+                            window_end_time: officialCopyForm.window_end_time,
+                        }}
+                        onChange={(v: any) => setOfficialCopyForm(prev => ({
+                            ...prev,
+                            schedule_mode: v.mode,
+                            start_time: v.start_time || prev.start_time,
+                            duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || prev.duration_minutes : prev.duration_minutes,
+                            window_end_time: v.mode === 'window' ? v.window_end_time : '',
+                        }))}
+                        durationRequired
+                    />
+                    <p className="text-xs text-text-secondary bg-sky-500/10 border border-sky-500/20 rounded-xl p-3">
+                        ℹ️ Ujian baru dibuat sebagai <strong>draft</strong> dengan kelas target yang sama. Anda bisa mengubah kelas & jadwalnya di editor setelah ini.
+                    </p>
+                    <div className="flex gap-3 pt-2">
+                        <Button variant="secondary" onClick={() => setShowOfficialCopy(false)} className="flex-1">Batal</Button>
+                        <Button
+                            onClick={handleOfficialCopy}
+                            disabled={officialCopying || !officialCopyForm.title || !officialCopyForm.start_time || officialCopyForm.duration_minutes < 5 || (officialCopyForm.schedule_mode === 'window' && !officialCopyForm.window_end_time)}
+                            loading={officialCopying}
+                            className="flex-1"
+                        >
+                            Salin Ujian
                         </Button>
                     </div>
                 </div>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { canManageOfficialExam } from '@/lib/teacherScope'
 
 export async function POST(request: NextRequest) {
     try {
@@ -8,7 +9,7 @@ export async function POST(request: NextRequest) {
         if (isErrorResponse(ctx)) return ctx
         const { user } = ctx
 
-        if (user.role !== 'ADMIN') {
+        if (user.role !== 'ADMIN' && user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
@@ -42,6 +43,21 @@ export async function POST(request: NextRequest) {
 
         if (sourceError || !sourceExam) {
             return NextResponse.json({ error: 'Source exam not found' }, { status: 404 })
+        }
+
+        // Kepemilikan guru: boleh menyalin hanya bila dia mengajar mapel source exam
+        // DAN semua kelas targetnya (kecuali target diganti — cek target baru)
+        if (user.role === 'GURU') {
+            const targetClassIds = target_class_ids || sourceExam.target_class_ids
+            const sourceOk = await canManageOfficialExam(user, sourceExam)
+            const targetOk = sourceOk && await canManageOfficialExam(user, {
+                subject_id: sourceExam.subject_id,
+                target_class_ids: targetClassIds,
+                academic_year_id: sourceExam.academic_year_id
+            })
+            if (!sourceOk || !targetOk) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini atau kelas targetnya' }, { status: 403 })
+            }
         }
 
         // 2. Insert new exam

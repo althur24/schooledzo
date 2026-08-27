@@ -20,7 +20,7 @@ import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import TagInput from '@/components/TagInput'
 import BankQuestionPicker from '@/components/BankQuestionPicker'
-import { TagBadge } from '@/components/BankQuestionPicker'
+import InlineQuestionTags from '@/components/InlineQuestionTags'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -545,7 +545,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 options: q.options || null, correct_answer: q.correct_answer || null,
                 difficulty: q.difficulty || 'MEDIUM', points: q.points || 10,
                 order_index: questions.length + idx, passage_text: q.passage_text || null,
-                teacher_hots_claim: q.teacher_hots_claim || false
+                teacher_hots_claim: q.teacher_hots_claim || false,
+                tags: q.tags || null
             }))
             const res = await postQuestions({ questions: newQuestions })
             if (res.ok) { setSoalMode('list'); fetchQuestions() }
@@ -563,7 +564,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     body: JSON.stringify(standalone.map((q: any) => ({
                         question_text: q.question_text, question_type: q.question_type,
                         options: q.options || null, correct_answer: q.correct_answer || null,
-                        difficulty: q.difficulty || 'MEDIUM', subject_id: subjectId, tags: null
+                        difficulty: q.difficulty || 'MEDIUM', subject_id: subjectId, tags: q.tags || null
                     })))
                 })
             }
@@ -804,12 +805,33 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                             <div className="flex items-center gap-2 mb-3">
                                                 <span className={`px-2.5 py-1 text-xs font-bold rounded-full border bg-secondary/10 text-text-main dark:text-white border-secondary/20`}>{q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}</span>
                                                 {q.passage_text && <span className="px-2 py-0.5 text-xs rounded-full bg-teal-500/20 text-teal-600 dark:text-teal-400">📖 Passage</span>}
-                                                {(q.tags || []).map((t: string) => (
-                                                    <TagBadge key={t} tag={t} />
-                                                ))}
                                                 {q.status === 'approved' && <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">✅</span>}
                                                 {q.difficulty && <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/10 text-text-secondary font-medium">{q.difficulty}</span>}
                                             </div>
+
+                                            {/* Tag soal — editable langsung di card (read-only saat ujian aktif/menunggu review) */}
+                                            {q.id && (
+                                                <InlineQuestionTags
+                                                    questionId={q.id}
+                                                    tags={q.tags}
+                                                    suggestions={tagSuggestions}
+                                                    readOnly={!!exam.is_active || !!(exam as any).pending_publish}
+                                                    onSave={async (nextTags) => {
+                                                        try {
+                                                            const res = await fetch(`${examApi}/${examId}/questions`, {
+                                                                method: 'PUT',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ question_id: q.id, tags: nextTags })
+                                                            })
+                                                            if (!res.ok) return false
+                                                            setQuestions(prev => prev.map(pq => pq.id === q.id ? { ...pq, tags: nextTags } : pq))
+                                                            return true
+                                                        } catch {
+                                                            return false
+                                                        }
+                                                    }}
+                                                />
+                                            )}
                                             {q.passage_text && (<div className="mb-3 p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-lg overflow-hidden"><p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1">📖 Bacaan:</p><p className="text-sm text-text-main dark:text-white whitespace-pre-wrap line-clamp-3">{q.passage_text}</p></div>)}
                                             <div dir={q.text_direction || 'ltr'}>
                                                 <SmartText text={q.question_text} className={`prose dark:prose-invert max-w-none text-text-main dark:text-white mb-4 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
@@ -1336,6 +1358,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 targetLabel="UTS/UAS"
                 aiReviewEnabled={aiReviewEnabled}
                 showBankSoal={false}
+                tagSuggestions={tagSuggestions}
             />
 
             {/* Bank Soal Mode */}

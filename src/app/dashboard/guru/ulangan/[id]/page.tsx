@@ -26,7 +26,7 @@ import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import TagInput from '@/components/TagInput'
 import BankQuestionPicker from '@/components/BankQuestionPicker'
 import TimeWindowFields from '@/components/TimeWindowFields'
-import { TagBadge } from '@/components/BankQuestionPicker'
+import InlineQuestionTags from '@/components/InlineQuestionTags'
 import { Modal, PageHeader, Button, EmptyState, Toast, type ToastType } from '@/components/ui'
 import Card from '@/components/ui/Card'
 
@@ -1052,6 +1052,7 @@ function EditExamPageInner() {
                 order_index: questions.length + idx,
                 passage_text: q.passage_text || null,
                 teacher_hots_claim: q.teacher_hots_claim || false,
+                tags: q.tags || null
             }))
 
             const res = await fetch(`/api/exams/${examId}/questions`, {
@@ -1125,7 +1126,7 @@ function EditExamPageInner() {
                             correct_answer: q.correct_answer || null,
                             difficulty: q.difficulty || 'MEDIUM',
                             subject_id: subjectId,
-                            tags: null
+                            tags: q.tags || null
                         })))
                     }).then(res => {
                         if (!res.ok) throw new Error('Gagal menyimpan soal mandiri ke Bank Soal.')
@@ -1715,15 +1716,36 @@ function EditExamPageInner() {
                                                     📖 Passage
                                                 </span>
                                             )}
-                                            {(q.tags || []).map((t: string) => (
-                                                <TagBadge key={t} tag={t} />
-                                            ))}
                                             {q.status === 'approved' && <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 flex items-center gap-1"><TickSquare set="bold" primaryColor="currentColor" size={10} /> Approved</span>}
                                             {aiReviewEnabled && q.status === 'admin_review' && <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 flex items-center gap-1"><InfoCircle set="bold" primaryColor="currentColor" size={10} /> Menunggu Review</span>}
                                             {q.status === 'returned' && <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 flex items-center gap-1"><CloseSquare set="bold" primaryColor="currentColor" size={10} /> Dikembalikan</span>}
                                             {aiReviewEnabled && q.status === 'ai_reviewing' && <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 animate-pulse flex items-center gap-1"><Discovery set="bold" primaryColor="currentColor" size={10} /> AI Analyzing...</span>}
                                             {aiReviewEnabled && q.status === 'draft' && <span className="px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 animate-pulse flex items-center gap-1"><Discovery set="bold" primaryColor="currentColor" size={10} /> Menunggu AI...</span>}
                                         </div>
+
+                                        {/* Tag soal — editable langsung di card (read-only saat ulangan aktif/menunggu review) */}
+                                        {q.id && (
+                                            <InlineQuestionTags
+                                                questionId={q.id}
+                                                tags={q.tags}
+                                                suggestions={tagSuggestions}
+                                                readOnly={!!exam?.is_active || !!exam?.pending_publish}
+                                                onSave={async (nextTags) => {
+                                                    try {
+                                                        const res = await fetch(`/api/exams/${examId}/questions`, {
+                                                            method: 'PUT',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({ question_id: q.id, tags: nextTags })
+                                                        })
+                                                        if (!res.ok) return false
+                                                        setQuestions(prev => prev.map(pq => pq.id === q.id ? { ...pq, tags: nextTags } : pq))
+                                                        return true
+                                                    } catch {
+                                                        return false
+                                                    }
+                                                }}
+                                            />
+                                        )}
 
                                         {q.status === 'returned' && q.admin_review && (
                                             <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg">
@@ -2461,6 +2483,7 @@ function EditExamPageInner() {
                 saving={saving}
                 targetLabel="Ulangan"
                 aiReviewEnabled={aiReviewEnabled}
+                tagSuggestions={tagSuggestions}
             />
 
             {/* Bank Soal Mode */}

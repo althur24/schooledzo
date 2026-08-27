@@ -6,6 +6,7 @@ import { Button } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
+import TagInput from '@/components/TagInput'
 
 interface AIQuestion {
     question_text: string
@@ -17,6 +18,7 @@ interface AIQuestion {
     difficulty?: 'EASY' | 'MEDIUM' | 'HARD'
     passage_text?: string
     teacher_hots_claim?: boolean
+    tags?: string[]
     [key: string]: any
 }
 
@@ -31,6 +33,8 @@ interface RapihAIModalProps {
     targetLabel: string // "Kuis" or "Ulangan"
     aiReviewEnabled?: boolean
     showBankSoal?: boolean
+    /** Saran tag dari bank soal untuk autocomplete TagInput per soal */
+    tagSuggestions?: string[]
 }
 
 export default function RapihAIModal({
@@ -41,7 +45,8 @@ export default function RapihAIModal({
     saving,
     targetLabel,
     aiReviewEnabled = true,
-    showBankSoal = true
+    showBankSoal = true,
+    tagSuggestions = []
 }: RapihAIModalProps) {
     const [activeTab, setActiveTab] = useState<RapihTab>('clean')
 
@@ -590,6 +595,18 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                                                 🧠 {q.teacher_hots_claim ? 'HOTS' : 'HOTS'}
                                                             </button>
                                                         )}
+
+                                                        {/* Per-question tags (opsional) — tersimpan bersama soal */}
+                                                        <div className="min-w-[160px] flex-1" onClick={(e) => e.stopPropagation()}>
+                                                            <TagInput
+                                                                value={q.tags || []}
+                                                                onChange={(tags) => setResults(prev => prev.map((item, i) => i === idx ? { ...item, tags } : item))}
+                                                                suggestions={tagSuggestions}
+                                                                placeholder="Tag (opsional)…"
+                                                                maxTags={10}
+                                                                className="[&>div]:min-h-[34px] [&>div]:py-1"
+                                                            />
+                                                        </div>
 
                                                         <button
                                                             onClick={() => setEditIdx(editIdx === idx ? null : idx)}

@@ -853,7 +853,8 @@ export default function BankSoalPage() {
                         difficulty: q.difficulty || 'MEDIUM',
                         subject_id: selectedSubject || null,
                         teacher_hots_claim: q.teacher_hots_claim || false,
-                        content_format: 'html'
+                        content_format: 'html',
+                        tags: q.tags || null
                     })))
                 })
             }
@@ -1927,6 +1928,7 @@ export default function BankSoalPage() {
                             saving={saving}
                             targetLabel="Bank Soal"
                             aiReviewEnabled={aiReviewEnabled}
+                            tagSuggestions={availableTags}
                         />
                     </div>
                 </div>

@@ -180,8 +180,8 @@ export default function ExamCard({
                 <Link href={primaryAction.href} className="flex-1">
                     <Button
                         size="sm"
-                        variant={isLive ? 'danger' : 'primary'}
-                        className={`w-full justify-center ${isLive ? 'bg-red-500 text-white hover:bg-red-600' : ''}`}
+                        variant={isLive ? 'danger-solid' : 'primary'}
+                        className="w-full justify-center"
                         icon={primaryAction.icon}
                     >
                         {primaryAction.label}
