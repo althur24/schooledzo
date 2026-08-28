@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useAuth } from '@/contexts/AuthContext'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
@@ -80,6 +81,7 @@ function EditExamPageInner() {
     const params = useParams()
     const router = useRouter()
     const searchParams = useSearchParams()
+    const { user } = useAuth()
     const examId = params.id as string
     const highlightId = searchParams.get('highlight')
     const siblingParam = searchParams.get('siblings')
@@ -194,6 +196,9 @@ function EditExamPageInner() {
     const [showSuccessModal, setShowSuccessModal] = useState<false | 'published' | 'pending'>(false)
     const [alertInfo, setAlertInfo] = useState<{ type: 'info' | 'warning' | 'error' | 'success', title: string, message: string } | null>(null)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
+    // Gate Generate AI: default OFF untuk guru; admin menyalakan via school-settings.
+    // Admin/super-admin yang membuka halaman guru selalu boleh (middleware mengizinkan).
+    const [aiGenerateEnabled, setAiGenerateEnabled] = useState(false)
     const [resolvedKkm, setResolvedKkm] = useState(75)
 
     // Results state
@@ -308,7 +313,10 @@ function EditExamPageInner() {
 
     useEffect(() => {
         fetch('/api/school-settings').then(r => r.ok ? r.json() : null).then(d => {
-            if (d) setAiReviewEnabled(d.ai_review_enabled !== false)
+            if (d) {
+                setAiReviewEnabled(d.ai_review_enabled !== false)
+                setAiGenerateEnabled(d.ai_generate_enabled === true)
+            }
         }).catch(() => { })
     }, [])
 
@@ -2485,6 +2493,7 @@ function EditExamPageInner() {
                 saving={saving}
                 targetLabel="Ulangan"
                 aiReviewEnabled={aiReviewEnabled}
+                canGenerate={aiGenerateEnabled || user?.role === 'ADMIN'}
                 tagSuggestions={tagSuggestions}
             />
 

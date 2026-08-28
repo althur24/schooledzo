@@ -1358,6 +1358,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 saving={rapihSaving}
                 targetLabel="UTS/UAS"
                 aiReviewEnabled={aiReviewEnabled}
+                canGenerate={true}
                 showBankSoal={false}
                 tagSuggestions={tagSuggestions}
             />

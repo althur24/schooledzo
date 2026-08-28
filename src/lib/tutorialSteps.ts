@@ -452,7 +452,7 @@ export const tutorialDefinitions: TutorialDef[] = [
             {
                 element: '[data-tutorial="quiz-add-ai"]',
                 title: 'Cara 2: Rapih AI',
-                description: 'Generate soal otomatis dari topik, foto, atau teks.\n\nAI akan membuatkan soal lengkap untuk Anda.',
+                description: 'Rapikan soal paste-an, ekstrak soal dari dokumen Word, atau generate soal otomatis dari materi (fitur generate dapat diaktifkan admin sekolah).',
                 side: 'right',
                 align: 'start',
             },
@@ -555,7 +555,7 @@ export const tutorialDefinitions: TutorialDef[] = [
             {
                 element: '[data-tutorial="bank-add-btn"]',
                 title: 'Tambah Soal',
-                description: 'Ada 2 cara:\n• Manual — tulis soal satu per satu\n• Rapih AI — generate otomatis dari topik, foto, atau teks',
+                description: 'Ada beberapa cara:\n• Manual — tulis soal satu per satu\n• Rapih AI — rapikan soal paste-an, ekstrak dari dokumen Word, atau generate otomatis dari materi (generate dapat diaktifkan admin sekolah)',
                 side: 'bottom',
                 align: 'end',
             },
@@ -710,7 +710,7 @@ export const tutorialDefinitions: TutorialDef[] = [
             {
                 element: '[data-tutorial="exam-add-ai"]',
                 title: 'Cara 2: Rapih AI',
-                description: 'Generate soal otomatis dari topik, foto, atau teks.',
+                description: 'Rapikan soal paste-an, ekstrak soal dari dokumen Word, atau generate otomatis dari materi (fitur generate dapat diaktifkan admin sekolah).',
                 side: 'right',
                 align: 'start',
             },

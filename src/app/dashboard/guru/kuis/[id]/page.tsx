@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
+import { useAuth } from '@/contexts/AuthContext'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
@@ -88,6 +89,7 @@ interface DragInfo {
 function EditQuizPageInner() {
     const params = useParams()
     const searchParams = useSearchParams()
+    const { user } = useAuth()
     const quizId = params.id as string
     const highlightId = searchParams.get('highlight')
     const siblingParam = searchParams.get('siblings')
@@ -286,6 +288,9 @@ function EditQuizPageInner() {
     const [showSuccessModal, setShowSuccessModal] = useState<false | 'published' | 'pending'>(false)
     const [alertInfo, setAlertInfo] = useState<{ type: 'info' | 'warning' | 'error' | 'success', title: string, message: string } | null>(null)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
+    // Gate Generate AI: default OFF untuk guru; admin menyalakan via school-settings.
+    // Admin/super-admin yang membuka halaman guru selalu boleh (middleware mengizinkan).
+    const [aiGenerateEnabled, setAiGenerateEnabled] = useState(false)
 
     // Toast notification (design system)
     const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
@@ -350,7 +355,10 @@ function EditQuizPageInner() {
 
     useEffect(() => {
         fetch('/api/school-settings').then(r => r.ok ? r.json() : null).then(d => {
-            if (d) setAiReviewEnabled(d.ai_review_enabled !== false)
+            if (d) {
+                setAiReviewEnabled(d.ai_review_enabled !== false)
+                setAiGenerateEnabled(d.ai_generate_enabled === true)
+            }
         }).catch(() => { })
     }, [])
 
@@ -2266,6 +2274,7 @@ function EditQuizPageInner() {
                 saving={saving}
                 targetLabel="Kuis"
                 aiReviewEnabled={aiReviewEnabled}
+                canGenerate={aiGenerateEnabled || user?.role === 'ADMIN'}
                 tagSuggestions={tagSuggestions}
             />
 

@@ -219,6 +219,9 @@ export default function BankSoalPage() {
     const [standalonePage, setStandalonePage] = useState(1)
     const [passagePage, setPassagePage] = useState(1)
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
+    // Gate Generate AI: default OFF untuk guru; admin menyalakan via school-settings.
+    // Admin/super-admin yang membuka halaman guru selalu boleh (middleware mengizinkan).
+    const [aiGenerateEnabled, setAiGenerateEnabled] = useState(false)
 
     // Filter tag (multi-tag, OR)
     const [selectedTags, setSelectedTags] = useState<string[]>([])
@@ -268,7 +271,10 @@ export default function BankSoalPage() {
 
     useEffect(() => {
         fetch('/api/school-settings').then(r => r.ok ? r.json() : null).then(d => {
-            if (d) setAiReviewEnabled(d.ai_review_enabled !== false)
+            if (d) {
+                setAiReviewEnabled(d.ai_review_enabled !== false)
+                setAiGenerateEnabled(d.ai_generate_enabled === true)
+            }
         }).catch(() => { })
     }, [])
 
@@ -1928,6 +1934,7 @@ export default function BankSoalPage() {
                             saving={saving}
                             targetLabel="Bank Soal"
                             aiReviewEnabled={aiReviewEnabled}
+                            canGenerate={aiGenerateEnabled || user?.role === 'ADMIN'}
                             tagSuggestions={availableTags}
                         />
                     </div>

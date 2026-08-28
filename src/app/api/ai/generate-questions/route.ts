@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { parseGeminiJson } from '@/lib/parse-gemini-json'
 import { callGemini } from '@/lib/geminiClient'
 import { normalizeQuestionTypes } from '@/lib/normalizeQuestionTypes'
@@ -13,6 +14,25 @@ export async function POST(request: NextRequest) {
 
         if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Gate fitur: Generate AI default nonaktif untuk guru — hanya admin
+        // yang bisa menyalakannya lewat school-settings (ai_generate_enabled).
+        // UI menyembunyikan tab-nya; ini enforcement server-side agar endpoint
+        // tidak bisa dipakai langsung saat flag OFF.
+        if (user.role === 'GURU') {
+            let generateEnabled = false
+            if (schoolId) {
+                const { data: school } = await supabase
+                    .from('schools')
+                    .select('settings')
+                    .eq('id', schoolId)
+                    .single()
+                generateEnabled = (school?.settings as any)?.ai_generate_enabled === true
+            }
+            if (!generateEnabled) {
+                return NextResponse.json({ error: 'Fitur Generate AI dinonaktifkan. Hubungi admin sekolah untuk mengaktifkannya.' }, { status: 403 })
+            }
         }
 
         const { material, count, type, difficulty } = await request.json()

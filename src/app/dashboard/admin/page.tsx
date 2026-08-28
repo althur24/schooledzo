@@ -42,6 +42,8 @@ export default function AdminDashboard() {
     const [pendingReviewCount, setPendingReviewCount] = useState(0)
     const [tutorialEnabled, setTutorialEnabled] = useState(false)
     const [tutorialToggleLoading, setTutorialToggleLoading] = useState(false)
+    const [aiGenerateEnabled, setAiGenerateEnabled] = useState(false)
+    const [aiGenerateToggleLoading, setAiGenerateToggleLoading] = useState(false)
 
     useEffect(() => {
         if (user && user.role !== 'ADMIN') {
@@ -119,6 +121,7 @@ export default function AdminDashboard() {
                     const data = await res.json()
                     setAiReviewEnabled(data.ai_review_enabled !== false)
                     setTutorialEnabled(data.tutorial_enabled === true)
+                    setAiGenerateEnabled(data.ai_generate_enabled === true)
                 }
             } catch (err) {
                 console.error('Error fetching settings:', err)
@@ -160,6 +163,24 @@ export default function AdminDashboard() {
             console.error('Error toggling tutorial:', err)
         } finally {
             setTutorialToggleLoading(false)
+        }
+    }
+
+    const handleToggleAIGenerate = async () => {
+        setAiGenerateToggleLoading(true)
+        try {
+            const res = await fetch('/api/school-settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ai_generate_enabled: !aiGenerateEnabled })
+            })
+            if (res.ok) {
+                setAiGenerateEnabled(!aiGenerateEnabled)
+            }
+        } catch (err) {
+            console.error('Error toggling AI generate:', err)
+        } finally {
+            setAiGenerateToggleLoading(false)
         }
     }
 
@@ -474,6 +495,31 @@ export default function AdminDashboard() {
                             } ${tutorialToggleLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                     >
                         <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform duration-300 ${tutorialEnabled ? 'translate-x-7' : 'translate-x-0'
+                            }`} />
+                    </button>
+                </div>
+
+                {/* Generate Soal AI Toggle */}
+                <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-zinc-700 mt-3">
+                    <div className="flex-1">
+                        <p className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                            ✨ Generate Soal AI
+                        </p>
+                        <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">
+                            {aiGenerateEnabled
+                                ? 'Guru dapat membuat soal otomatis dari materi melalui tab "Generate AI" di Rapih AI.'
+                                : 'Tab "Generate AI" di Rapih AI disembunyikan dari guru. Rapikan Soal & Upload Dokumen tetap tersedia.'}
+                        </p>
+                    </div>
+                    <button
+                        onClick={handleToggleAIGenerate}
+                        disabled={aiGenerateToggleLoading}
+                        className={`relative ml-4 w-14 h-7 rounded-full transition-all duration-300 flex-shrink-0 ${aiGenerateEnabled
+                                ? 'bg-emerald-500 hover:bg-emerald-600'
+                                : 'bg-slate-300 dark:bg-zinc-600 hover:bg-slate-400'
+                            } ${aiGenerateToggleLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                        <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform duration-300 ${aiGenerateEnabled ? 'translate-x-7' : 'translate-x-0'
                             }`} />
                     </button>
                 </div>

@@ -35,6 +35,9 @@ interface RapihAIModalProps {
     showBankSoal?: boolean
     /** Saran tag dari bank soal untuk autocomplete TagInput per soal */
     tagSuggestions?: string[]
+    /** Tampilkan tab "Generate AI". Default false — admin mengaktifkan per sekolah
+     *  via school-settings (ai_generate_enabled); admin/super-admin selalu true. */
+    canGenerate?: boolean
 }
 
 export default function RapihAIModal({
@@ -46,7 +49,8 @@ export default function RapihAIModal({
     targetLabel,
     aiReviewEnabled = true,
     showBankSoal = true,
-    tagSuggestions = []
+    tagSuggestions = [],
+    canGenerate = false
 }: RapihAIModalProps) {
     const [activeTab, setActiveTab] = useState<RapihTab>('clean')
 
@@ -220,11 +224,16 @@ export default function RapihAIModal({
         }
     }
 
-    const tabs: { key: RapihTab; icon: React.ReactNode; label: string; desc: string; color: string; bgActive: string; bgInactive: string; borderActive: string }[] = [
+    const allTabs: { key: RapihTab; icon: React.ReactNode; label: string; desc: string; color: string; bgActive: string; bgInactive: string; borderActive: string }[] = [
         { key: 'clean', icon: <WandSparkles className="w-4 h-4" />, label: 'Rapikan Soal', desc: 'Paste & rapikan', color: 'text-purple-600 dark:text-purple-400', bgActive: 'bg-purple-100 dark:bg-purple-500/20', bgInactive: 'bg-purple-50 dark:bg-purple-500/10', borderActive: 'border-purple-400 bg-purple-50 dark:bg-purple-500/10' },
         { key: 'generate', icon: <Sparkles className="w-4 h-4" />, label: 'Generate AI', desc: 'Buat dari materi', color: 'text-amber-600 dark:text-amber-400', bgActive: 'bg-amber-100 dark:bg-amber-500/20', bgInactive: 'bg-amber-50 dark:bg-amber-500/10', borderActive: 'border-amber-400 bg-amber-50 dark:bg-amber-500/10' },
         { key: 'upload', icon: <FileUp className="w-4 h-4" />, label: 'Upload Dokumen', desc: 'Word (.docx)', color: 'text-blue-600 dark:text-blue-400', bgActive: 'bg-blue-100 dark:bg-blue-500/20', bgInactive: 'bg-blue-50 dark:bg-blue-500/10', borderActive: 'border-blue-400 bg-blue-50 dark:bg-blue-500/10' },
     ]
+    const tabs = allTabs.filter((tab): tab is (typeof allTabs)[number] => tab.key !== 'generate' || canGenerate)
+
+    // Guard stale state: activeTab 'generate' saat canGenerate false (mis. flag
+    // dimatikan admin) jatuh kembali ke 'clean' — tidak ada tab hantu aktif.
+    const effectiveTab: RapihTab = activeTab === 'generate' && !canGenerate ? 'clean' : activeTab
 
     return (
         <Card className="p-6">
@@ -240,17 +249,17 @@ export default function RapihAIModal({
                         <button
                             key={tab.key}
                             onClick={() => { if (!isLoading) setActiveTab(tab.key) }}
-                            className={`flex-1 flex items-center gap-2.5 px-4 py-3 rounded-xl border-2 transition-all cursor-pointer ${activeTab === tab.key
+                            className={`flex-1 flex items-center gap-2.5 px-4 py-3 rounded-xl border-2 transition-all cursor-pointer ${effectiveTab === tab.key
                                 ? `${tab.borderActive} shadow-sm`
                                 : 'border-secondary/20 bg-secondary/5 text-text-secondary hover:border-secondary/40'
                                 }`}
                         >
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${tab.color} ${activeTab === tab.key ? tab.bgActive : tab.bgInactive
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${tab.color} ${effectiveTab === tab.key ? tab.bgActive : tab.bgInactive
                                 }`}>
                                 {tab.icon}
                             </div>
                             <div className="text-left">
-                                <div className={`text-sm font-semibold ${activeTab === tab.key ? 'text-text-main dark:text-white' : ''}`}>{tab.label}</div>
+                                <div className={`text-sm font-semibold ${effectiveTab === tab.key ? 'text-text-main dark:text-white' : ''}`}>{tab.label}</div>
                                 <div className="text-[11px] opacity-70">{tab.desc}</div>
                             </div>
                         </button>
@@ -267,7 +276,7 @@ export default function RapihAIModal({
             )}
 
             {/* Tab 1: Rapikan Soal */}
-            {!hasResults && activeTab === 'clean' && (
+            {!hasResults && effectiveTab === 'clean' && (
                 <div className="space-y-4">
                     <p className="text-sm text-text-secondary dark:text-zinc-400">
                         Paste soal yang di-copy dari website, PDF, atau dokumen lain. AI akan merapikan format dan memisahkan setiap soal secara otomatis.
@@ -298,7 +307,7 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
             )}
 
             {/* Tab 2: Generate dari Materi */}
-            {!hasResults && activeTab === 'generate' && (
+            {!hasResults && effectiveTab === 'generate' && (
                 <div className="space-y-6">
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Materi / Teks</label>
@@ -364,7 +373,7 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
             )}
 
             {/* Tab 3: Upload Dokumen */}
-            {!hasResults && activeTab === 'upload' && (
+            {!hasResults && effectiveTab === 'upload' && (
                 <div className="space-y-4">
                     <p className="text-sm text-text-secondary dark:text-zinc-400">
                         Upload file Word (.docx) yang berisi soal-soal. AI akan mengekstrak dan merapikan soal secara otomatis.

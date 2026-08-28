@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({
             ai_review_enabled: settings.ai_review_enabled !== false, // default true
             tutorial_enabled: settings.tutorial_enabled === true, // default false
+            ai_generate_enabled: settings.ai_generate_enabled === true, // default false — hanya admin yang bisa menyalakan
             ...settings
         })
     } catch (error) {
@@ -89,6 +90,7 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({
             ai_review_enabled: settings.ai_review_enabled !== false,
             tutorial_enabled: settings.tutorial_enabled === true,
+            ai_generate_enabled: settings.ai_generate_enabled === true,
             ...settings
         })
     } catch (error) {
