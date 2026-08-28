@@ -6,6 +6,9 @@ import { logError } from '@/lib/logError'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { resolveWindowExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/examExpiry'
 import { forceCloseOfficialSubmission } from '@/lib/autoCloseExpired'
+import { getTeacherScope, canTeachStudentSubmission } from '@/lib/teacherScope'
+import { fetchAllRows } from '@/lib/fetchAllRows'
+import { batchedIn } from '@/lib/batchedIn'
 
 // GET official exam submissions
 export async function GET(request: NextRequest) {
@@ -32,6 +35,9 @@ export async function GET(request: NextRequest) {
                 )
             `)
             .order('created_at', { ascending: false })
+            // Tiebreaker stabil untuk paginasi fetchAllRows (submissions dibuat
+            // batch saat ujian serentak → created_at sering identik)
+            .order('id', { ascending: false })
 
         if (examId) {
             query = query.eq('exam_id', examId)
@@ -40,8 +46,24 @@ export async function GET(request: NextRequest) {
             query = query.eq('student_id', studentId)
         }
 
-        const { data, error } = await query
-        if (error) throw error
+        // S5-style scoping: siswa hanya melihat submission miliknya — filter di
+        // SQL sebelum fetch supaya tidak full-table untuk tiap request siswa.
+        let scopedStudentId: string | null = null
+        if (user.role === 'SISWA') {
+            const { data: student } = await supabase
+                .from('students')
+                .select('id')
+                .eq('user_id', user.id)
+                .single()
+            if (!student) return NextResponse.json([])
+            scopedStudentId = student.id
+            query = query.eq('student_id', student.id)
+        }
+
+        // fetchAllRows: filter school/role/class dilakukan post-fetch di JS,
+        // jadi query ini harus mengembalikan SEMUA baris — tanpa ini, tabel
+        // >1000 submissions terpotong diam-diam sebelum sempat difilter.
+        const data = await fetchAllRows(query)
 
         let result = data || []
 
@@ -52,13 +74,9 @@ export async function GET(request: NextRequest) {
 
         // Role-based filtering
         if (user.role === 'SISWA') {
-            const { data: student } = await supabase
-                .from('students')
-                .select('id')
-                .eq('user_id', user.id)
-                .single()
-            if (student) {
-                result = result.filter((s: any) => s.student_id === student.id)
+            // Sudah di-scope di SQL; filter ulang idempotent untuk keamanan
+            if (scopedStudentId) {
+                result = result.filter((s: any) => s.student_id === scopedStudentId)
             } else {
                 result = []
             }
@@ -75,18 +93,25 @@ export async function GET(request: NextRequest) {
 
             if (teacher) {
                 const examIds = [...new Set(result.map((s: any) => s.exam_id))]
-                const { data: exams } = await supabase
-                    .from('official_exams')
-                    .select('id, subject_id, target_class_ids')
-                    .in('id', examIds.length ? examIds : ['00000000-0000-0000-0000-000000000000'])
+                // batchedIn per 100 id (batas URL): ratusan exam id → URL >16KB → error 500
+                const exams = await batchedIn<any>(
+                    'id', examIds,
+                    (chunk) => supabase
+                        .from('official_exams')
+                        .select('id, subject_id, target_class_ids')
+                        .in('id', chunk)
+                )
                 const examById = new Map((exams || []).map((e: any) => [e.id, e]))
 
-                const targetClassIds = [...new Set((exams || []).flatMap((e: any) => e.target_class_ids || []))]
-                const { data: taught } = await supabase
-                    .from('teaching_assignments')
-                    .select('subject_id, class_id')
-                    .eq('teacher_id', teacher.id)
-                    .in('class_id', targetClassIds.length ? targetClassIds : ['00000000-0000-0000-0000-000000000000'])
+                const targetClassIds = [...new Set(exams.flatMap((e: any) => e.target_class_ids || []))]
+                const taught = await batchedIn<any>(
+                    'class_id', targetClassIds,
+                    (chunk) => supabase
+                        .from('teaching_assignments')
+                        .select('subject_id, class_id')
+                        .eq('teacher_id', teacher.id)
+                        .in('class_id', chunk)
+                )
                 const taughtKey = new Set((taught || []).map((a: any) => `${a.subject_id}|${a.class_id}`))
 
                 result = result.filter((sub: any) => {
@@ -110,13 +135,17 @@ export async function GET(request: NextRequest) {
                 const ex: any = Array.isArray(s.exam) ? s.exam[0] : s.exam
                 if (ex?.academic_year_id) examYears.add(ex.academic_year_id)
             })
-            const { data: enrollments } = await supabase
-                .from('student_enrollments')
-                .select('student_id, class_id, academic_year_id')
-                .in('student_id', studentIds.length ? studentIds : ['00000000-0000-0000-0000-000000000000'])
-                .in('academic_year_id', examYears.size ? [...examYears] : ['00000000-0000-0000-0000-000000000000'])
+            // batchedIn per 100 id (batas URL): ribuan student id → URL >16KB → error 500
+            const enrollments = await batchedIn<any>(
+                'student_id', studentIds,
+                (chunk) => supabase
+                    .from('student_enrollments')
+                    .select('student_id, class_id, academic_year_id')
+                    .in('student_id', chunk)
+                    .in('academic_year_id', examYears.size ? [...examYears] : ['00000000-0000-0000-0000-000000000000'])
+            )
             const studentYearClass = new Map<string, string>()
-            ;(enrollments || []).forEach((e: any) =>
+            enrollments.forEach((e: any) =>
                 studentYearClass.set(`${e.student_id}|${e.academic_year_id}`, e.class_id)
             )
             result = result.filter((sub: any) => {
@@ -173,7 +202,8 @@ export async function GET(request: NextRequest) {
 
             if (remedials && remedials.length > 0) {
                 const remedialIds = remedials.map(r => r.id)
-                const { data: remedialSubmissions } = await supabase
+                // fetchAllRows: remedial seangkatan/sekolah bisa >1000 submissions
+                const remedialSubmissions = await fetchAllRows(supabase
                     .from('official_exam_submissions')
                     .select(`
                         *,
@@ -185,6 +215,7 @@ export async function GET(request: NextRequest) {
                         )
                     `)
                     .in('exam_id', remedialIds)
+                    .order('id'))
 
                 if (remedialSubmissions && remedialSubmissions.length > 0) {
                     const studentHighestSubmissions = new Map<string, any>()
@@ -296,35 +327,43 @@ export async function POST(request: NextRequest) {
         }
 
         // Resume dulu: submission yang sudah berjalan tidak boleh terkunci
-        // (mis. auto-deaktivasi saat window lewat, atau reload di tengah ujian)
+        // (mis. auto-deaktivasi saat window lewat, atau reload di tengah ujian).
+        // K3 Security Fix: .maybeSingle() — .single() LAMA menelan error multi-row
+        // (PGRST116) dan menganggap tidak ada submission → INSERT baris baru →
+        // amplifikasi duplikat. Constraint UNIQUE kini juga menjaga di level DB.
         const { data: existingSubmission } = await supabase
             .from('official_exam_submissions')
             .select('id, is_submitted, question_order, started_at, violation_count, max_score, timer_override_until')
             .eq('exam_id', exam_id)
             .eq('student_id', student.id)
-            .single()
+            .maybeSingle()
 
-        if (existingSubmission?.is_submitted) {
-            return NextResponse.json({ error: 'Anda sudah mengumpulkan ujian ini' }, { status: 400 })
-        }
-
-        if (existingSubmission) {
+        // Helper: respons resume untuk submission yang sedang berjalan
+        const resumeResponse = async (existing: NonNullable<typeof existingSubmission>) => {
             const expiry = resolveWindowExpiry(
                 { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
-                { started_at: existingSubmission.started_at, timer_override_until: existingSubmission.timer_override_until }
+                { started_at: existing.started_at, timer_override_until: existing.timer_override_until }
             )
             // Jawaban tersimpan ikut dikirim — resume lintas device (localStorage kosong)
             // tidak menampilkan soal kosong padahal server punya jawaban
             const { data: savedAnswers } = await supabase
                 .from('official_exam_answers')
                 .select('question_id, answer')
-                .eq('submission_id', existingSubmission.id)
+                .eq('submission_id', existing.id)
             return NextResponse.json({
-                ...existingSubmission,
+                ...existing,
                 saved_answers: savedAnswers || [],
                 server_time: new Date().toISOString(),
                 ends_at: endsAtIso(expiry)
             })
+        }
+
+        if (existingSubmission?.is_submitted) {
+            return NextResponse.json({ error: 'Anda sudah mengumpulkan ujian ini' }, { status: 400 })
+        }
+
+        if (existingSubmission) {
+            return resumeResponse(existingSubmission)
         }
 
         // === Sesi baru: semua gate wajib lolos ===
@@ -401,7 +440,11 @@ export async function POST(request: NextRequest) {
         const maxScore = questions?.reduce((sum: number, q: any) => sum + (q.points || 10), 0) || 0
 
         // Create new submission
-        const { data: submission, error } = await supabase
+        // K3 Security Fix: race double-POST — dua request bersamaan bisa sama-sama
+        // lolos cek existing di atas. Constraint UNIQUE (exam_id, student_id) kini
+        // menolak insert kedua (23505) → re-fetch dan kembalikan respons resume,
+        // bukan error 500.
+        const { data: submission, error: insertError } = await supabase
             .from('official_exam_submissions')
             .insert({
                 exam_id,
@@ -413,7 +456,23 @@ export async function POST(request: NextRequest) {
             .select()
             .single()
 
-        if (error) throw error
+        if (insertError) {
+            // unique violation "uq_official_exam_submissions_exam_student" → request
+            // paralel sudah membuat submission; ambil dan resume
+            if (insertError.code === '23505') {
+                const { data: raced } = await supabase
+                    .from('official_exam_submissions')
+                    .select('id, is_submitted, question_order, started_at, violation_count, max_score, timer_override_until')
+                    .eq('exam_id', exam_id)
+                    .eq('student_id', student.id)
+                    .maybeSingle()
+                if (raced && !raced.is_submitted) return resumeResponse(raced)
+                if (raced?.is_submitted) {
+                    return NextResponse.json({ error: 'Anda sudah mengumpulkan ujian ini' }, { status: 400 })
+                }
+            }
+            throw insertError
+        }
 
         const newExpiry = resolveWindowExpiry(
             { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
@@ -435,7 +494,7 @@ export async function PUT(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         const body = await request.json()
         const { submission_id, answers, submit, violation, reset_attempt } = body
@@ -447,7 +506,7 @@ export async function PUT(request: NextRequest) {
         // Get current submission
         const { data: currentSubmission } = await supabase
             .from('official_exam_submissions')
-            .select('*, exam:official_exams(max_violations, show_results_immediately, results_released, duration_minutes, start_time, window_end_time)')
+            .select('*, exam:official_exams(max_violations, show_results_immediately, results_released, duration_minutes, start_time, window_end_time, school_id, subject_id, target_class_ids, academic_year_id)')
             .eq('id', submission_id)
             .single()
 
@@ -455,10 +514,20 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'Submission not found' }, { status: 404 })
         }
 
+        // Helper: exam config sebagai objek tunggal (embed bisa array atau objek)
+        const examCfgOf = (sub: any): any => Array.isArray(sub?.exam) ? sub.exam[0] : sub?.exam || {}
+
         // Handle reset attempt (Admin only) — must be checked BEFORE the is_submitted guard
         if (reset_attempt) {
             if (user.role !== 'ADMIN') {
                 return NextResponse.json({ error: 'Hanya admin yang dapat mereset attempt siswa' }, { status: 403 })
+            }
+
+            // K2 Security Fix: scope sekolah — admin hanya boleh mereset submission
+            // ujian sekolahnya sendiri (sebelumnya admin sekolah manapun bisa reset lintas sekolah)
+            const resetExamCfg = examCfgOf(currentSubmission)
+            if (resetExamCfg.school_id && schoolId && resetExamCfg.school_id !== schoolId) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
             }
 
             if (!currentSubmission.is_submitted) {
@@ -468,7 +537,7 @@ export async function PUT(request: NextRequest) {
             // Batas soft reset: mode jendela → jam tutup; mode serentak → start + durasi.
             // Hard Reset = pengecualian sengaja oleh admin: durasi penuh baru via timer_override_until
             // (mode jendela: override tetap terpotong jam tutup oleh resolveWindowExpiry).
-            const examCfg: any = Array.isArray(currentSubmission.exam) ? currentSubmission.exam[0] : currentSubmission.exam || {}
+            const examCfg: any = examCfgOf(currentSubmission)
             const durationMs = (examCfg.duration_minutes || 0) * 60000
             const softLimitMs = examCfg.window_end_time
                 ? new Date(examCfg.window_end_time).getTime()
@@ -545,7 +614,28 @@ export async function PUT(request: NextRequest) {
             if (!student || currentSubmission.student_id !== student.id) {
                 return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
             }
-        } else if (user.role !== 'GURU' && user.role !== 'ADMIN') {
+        } else if (user.role === 'GURU') {
+            // K2 Security Fix: scope per-submission — guru boleh mengelola submission
+            // siswa yang kelasnya dia ajar untuk mapel ujian ini. (Sebelumnya .every:
+            // guru harus mengajar SEMUA kelas target → guru mapel per-kelas kena 403
+            // saat menyimpan nilai padahal halaman hasil bisa dibuka.)
+            const examCfg = examCfgOf(currentSubmission)
+            const { data: subStudent } = await supabase
+                .from('students')
+                .select('class_id')
+                .eq('id', currentSubmission.student_id)
+                .single()
+            const scope = await getTeacherScope(user.id, examCfg.academic_year_id)
+            if (!canTeachStudentSubmission(scope, examCfg.subject_id, subStudent?.class_id)) {
+                return NextResponse.json({ error: 'Anda tidak mengajar kelas siswa ini' }, { status: 403 })
+            }
+        } else if (user.role === 'ADMIN') {
+            // K2 Security Fix: scope sekolah untuk admin
+            const examCfg = examCfgOf(currentSubmission)
+            if (examCfg.school_id && schoolId && examCfg.school_id !== schoolId) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+            }
+        } else {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
 

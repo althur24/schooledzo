@@ -52,6 +52,19 @@ export async function GET(
         const isReleased = examObj.results_released || false
         const isHidden = user.role === 'SISWA' && !showImmediately && !isReleased
 
+        // K1 Security Fix: kunci jawaban (correct_answer di exam_questions) hanya boleh
+        // terlihat oleh guru/admin, ATAU siswa yang SUDAH submit dan hasilnya boleh
+        // dilihat. Sebelumnya embed exam_questions(*) membocorkan kunci ke siswa
+        // yang masih mengerjakan (show_results_immediately default true).
+        const canSeeAnswerKeys = user.role !== 'SISWA' || ((data as any)?.is_submitted && !isHidden)
+        const responseDataRaw: any = data
+        if (!canSeeAnswerKeys && responseDataRaw?.exam?.questions) {
+            responseDataRaw.exam.questions = responseDataRaw.exam.questions.map((q: any) => {
+                const { correct_answer, ...rest } = q
+                return rest
+            })
+        }
+
         // Fetch answers from exam_answers table
         const { data: examAnswers, error: answersError } = await supabase
             .from('exam_answers')
@@ -60,13 +73,18 @@ export async function GET(
 
         if (answersError) throw answersError
 
+        // K1 lanjutan: is_correct/score jawaban juga dirahasiakan dari siswa yang
+        // BELUM submit (mirror versi official) — jangan sampai jadi oracle
+        // benar/salah saat ujian masih berjalan.
+        const hideAnswers = user.role === 'SISWA' && (!(data as any)?.is_submitted || isHidden)
+
         // Map exam_answers to the format the frontend expects
         const answers = (examAnswers || []).map(a => ({
             question_id: a.question_id,
             answer: a.answer,
-            is_correct: isHidden ? undefined : a.is_correct,
-            score: isHidden ? undefined : a.points_earned,
-            feedback: isHidden ? '' : (a.feedback || '')
+            is_correct: hideAnswers ? undefined : a.is_correct,
+            score: hideAnswers ? undefined : a.points_earned,
+            feedback: hideAnswers ? '' : (a.feedback || '')
         }))
 
         const responseData = {
@@ -122,6 +140,19 @@ export async function PUT(
             const assignmentTeacherId = (submissionData?.exam as any)?.teaching_assignment?.teacher_id
             if (!teacher || assignmentTeacherId !== teacher.id) {
                 return NextResponse.json({ error: 'Forbidden: You do not have access to grade this class' }, { status: 403 })
+            }
+        } else if (user.role === 'ADMIN') {
+            // K2 Security Fix: scope sekolah untuk admin — exams tidak punya school_id,
+            // scope diperoleh via TA pemilik → teachers.school_id
+            const { data: submissionData } = await supabase
+                .from('exam_submissions')
+                .select('exam:exams(teaching_assignment:teaching_assignments(teacher_id, teacher:teachers(school_id)))')
+                .eq('id', id)
+                .single()
+            const ta = (submissionData?.exam as any)?.teaching_assignment as any
+            const taTeacher = Array.isArray(ta?.teacher) ? ta.teacher[0] : ta?.teacher
+            if (taTeacher?.school_id && schoolId && taTeacher.school_id !== schoolId) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
             }
         }
 

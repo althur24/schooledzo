@@ -5,6 +5,8 @@ import { gradeAnswer, needsManualGrading } from '@/lib/questionTypeUtils'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { resolveWindowExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/examExpiry'
 import { forceCloseExamSubmission } from '@/lib/autoCloseExpired'
+import { canManageExam } from '@/lib/teacherScope'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // Helper: send notification to teacher when student submits exam
 async function notifyTeacherExamSubmission(examId: string, studentName: string, isForceSubmit: boolean = false) {
@@ -109,6 +111,9 @@ export async function GET(request: NextRequest) {
                 )
             `)
             .order('created_at', { ascending: false })
+            // Tiebreaker stabil untuk paginasi fetchAllRows (batch submit saat
+            // ulangan serentak → created_at sering identik)
+            .order('id', { ascending: false })
 
         if (examId) {
             query = query.eq('exam_id', examId)
@@ -147,9 +152,10 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        const { data, error } = await query
-
-        if (error) throw error
+        // fetchAllRows: guru/admin tanpa exam_id mendapat semua submission tahun
+        // aktif; ulangan sekelas/sekolah juga bisa >1000 peserta — query biasa
+        // terpotong diam-diam di 1000 baris.
+        const data = await fetchAllRows(query)
 
         let finalData = data || []
 
@@ -162,7 +168,8 @@ export async function GET(request: NextRequest) {
 
             if (remedials && remedials.length > 0) {
                 const remedialIds = remedials.map(r => r.id)
-                const { data: remedialSubmissions } = await supabase
+                // fetchAllRows: remedial sekelas/sekolah bisa >1000 submissions
+                const remedialSubmissions = await fetchAllRows(supabase
                     .from('exam_submissions')
                     .select(`
                         *,
@@ -181,6 +188,7 @@ export async function GET(request: NextRequest) {
                         )
                     `)
                     .in('exam_id', remedialIds)
+                    .order('id'))
 
                 if (remedialSubmissions && remedialSubmissions.length > 0) {
                     const studentHighestSubmissions = new Map<string, any>()
@@ -289,36 +297,42 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Exam not found' }, { status: 404 })
         }
 
-        // Resume dulu: submission yang sudah berjalan tidak boleh terkunci saat reload
+        // Resume dulu: submission yang sudah berjalan tidak boleh terkunci saat reload.
+        // K3 Security Fix: .maybeSingle() — .single() menelan error multi-row (PGRST116)
+        // dan menganggap tidak ada submission → INSERT baris baru → duplikat.
         const { data: existingSubmission } = await supabase
             .from('exam_submissions')
             .select('id, is_submitted, question_order, started_at, violation_count, max_score, timer_override_until')
             .eq('exam_id', exam_id)
             .eq('student_id', student.id)
-            .single()
+            .maybeSingle()
 
-        if (existingSubmission?.is_submitted) {
-            return NextResponse.json({ error: 'Anda sudah mengumpulkan ulangan ini' }, { status: 400 })
-        }
-
-        if (existingSubmission) {
-            // Return existing submission with all data needed for resume
+        // Helper: respons resume untuk submission yang sedang berjalan
+        const resumeResponse = async (existing: NonNullable<typeof existingSubmission>) => {
             const expiry = resolveWindowExpiry(
                 { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
-                { started_at: existingSubmission.started_at, timer_override_until: existingSubmission.timer_override_until }
+                { started_at: existing.started_at, timer_override_until: existing.timer_override_until }
             )
             // Jawaban tersimpan ikut dikirim — resume lintas device (localStorage kosong)
             // tidak menampilkan soal kosong padahal server punya jawaban
             const { data: savedAnswers } = await supabase
                 .from('exam_answers')
                 .select('question_id, answer')
-                .eq('submission_id', existingSubmission.id)
+                .eq('submission_id', existing.id)
             return NextResponse.json({
-                ...existingSubmission,
+                ...existing,
                 saved_answers: savedAnswers || [],
                 server_time: new Date().toISOString(),
                 ends_at: endsAtIso(expiry)
             })
+        }
+
+        if (existingSubmission?.is_submitted) {
+            return NextResponse.json({ error: 'Anda sudah mengumpulkan ulangan ini' }, { status: 400 })
+        }
+
+        if (existingSubmission) {
+            return resumeResponse(existingSubmission)
         }
 
         // === Sesi baru: semua gate wajib lolos ===
@@ -373,7 +387,10 @@ export async function POST(request: NextRequest) {
         const maxScore = questions?.reduce((sum, q) => sum + (q.points || 1), 0) || 0
 
         // Create new submission
-        const { data: submission, error } = await supabase
+        // K3 Security Fix: race double-POST — request paralel bisa sama-sama lolos
+        // cek existing di atas; UNIQUE (exam_id, student_id) menolak insert kedua
+        // (23505) → re-fetch dan kembalikan respons resume.
+        const { data: submission, error: insertError } = await supabase
             .from('exam_submissions')
             .insert({
                 exam_id,
@@ -385,7 +402,21 @@ export async function POST(request: NextRequest) {
             .select()
             .single()
 
-        if (error) throw error
+        if (insertError) {
+            if (insertError.code === '23505') {
+                const { data: raced } = await supabase
+                    .from('exam_submissions')
+                    .select('id, is_submitted, question_order, started_at, violation_count, max_score, timer_override_until')
+                    .eq('exam_id', exam_id)
+                    .eq('student_id', student.id)
+                    .maybeSingle()
+                if (raced && !raced.is_submitted) return resumeResponse(raced)
+                if (raced?.is_submitted) {
+                    return NextResponse.json({ error: 'Anda sudah mengumpulkan ulangan ini' }, { status: 400 })
+                }
+            }
+            throw insertError
+        }
 
         const newExpiry = resolveWindowExpiry(
             { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
@@ -419,12 +450,34 @@ export async function PUT(request: NextRequest) {
         // Get current submission
         const { data: currentSubmission } = await supabase
             .from('exam_submissions')
-            .select('*, exam:exams(max_violations, show_results_immediately, results_released, duration_minutes, start_time, window_end_time)')
+            .select('*, exam:exams(max_violations, show_results_immediately, results_released, duration_minutes, start_time, window_end_time, teaching_assignment:teaching_assignments(teacher_id, teacher:teachers(school_id)))')
             .eq('id', submission_id)
             .single()
 
         if (!currentSubmission) {
             return NextResponse.json({ error: 'Submission not found' }, { status: 404 })
+        }
+
+        // Helper: exam config sebagai objek tunggal (embed bisa array atau objek)
+        const examCfgOf = (sub: any): any => Array.isArray(sub?.exam) ? sub.exam[0] : sub?.exam || {}
+        const taCfgOf = (sub: any): any => {
+            const cfg = examCfgOf(sub)
+            const ta = Array.isArray(cfg?.teaching_assignment) ? cfg.teaching_assignment[0] : cfg?.teaching_assignment
+            return ta || {}
+        }
+
+        // K2 Security Fix: otorisasi guru/admin — sebelumnya hanya cek role.
+        // GURU harus pemilik TA ulangan ini; ADMIN harus satu sekolah (via TA → teachers.school_id).
+        const verifyTeacherOrAdmin = async (): Promise<boolean> => {
+            const ta = taCfgOf(currentSubmission)
+            if (user.role === 'ADMIN') {
+                const teacherSchoolId = (Array.isArray(ta.teacher) ? ta.teacher[0] : ta.teacher)?.school_id
+                return !teacherSchoolId || !schoolId || teacherSchoolId === schoolId
+            }
+            if (user.role === 'GURU') {
+                return canManageExam(user, ta.teacher_id)
+            }
+            return false
         }
 
         // C3 Security Fix: Verify SISWA ownership — only the student who owns this submission can modify it
@@ -437,7 +490,11 @@ export async function PUT(request: NextRequest) {
             if (!student || currentSubmission.student_id !== student.id) {
                 return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
             }
-        } else if (user.role !== 'GURU' && user.role !== 'ADMIN') {
+        } else if (user.role === 'GURU' || user.role === 'ADMIN') {
+            if (!(await verifyTeacherOrAdmin())) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+            }
+        } else {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
 
@@ -453,7 +510,7 @@ export async function PUT(request: NextRequest) {
             // Batas soft reset: mode jendela → jam tutup; mode serentak → start + durasi.
             // Hard Reset = pengecualian sengaja oleh guru: durasi penuh baru via timer_override_until
             // (override TIDAK dipotong jam tutup — lihat resolveWindowExpiry).
-            const examCfg: any = currentSubmission.exam || {}
+            const examCfg: any = examCfgOf(currentSubmission)
             const durationMs = (examCfg.duration_minutes || 0) * 60000
             const softLimitMs = examCfg.window_end_time
                 ? new Date(examCfg.window_end_time).getTime()

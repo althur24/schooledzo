@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getTeacherScope, canTeachStudentSubmission } from '@/lib/teacherScope'
 import { logError } from '@/lib/logError'
 
 // GET submission detail with answers
@@ -40,6 +41,12 @@ export async function GET(
         const isReleased = examObj.results_released || false
         const isHidden = ctx.user.role === 'SISWA' && !showImmediately && !isReleased
 
+        // K1 Security Fix: kunci jawaban hanya boleh terlihat guru/admin, ATAU siswa
+        // yang SUDAH submit dan hasilnya boleh dilihat. Sebelumnya strip hanya
+        // berbasis visibility setting — siswa yang masih mengerjakan ujian dengan
+        // show_results_immediately=true (default) bisa membaca correct_answer.
+        const hideKeys = ctx.user.role === 'SISWA' && (!(submission as any)?.is_submitted || isHidden)
+
         // Fetch answers
         const { data: answers } = await supabase
             .from('official_exam_answers')
@@ -49,7 +56,7 @@ export async function GET(
             `)
             .eq('submission_id', id)
 
-        const processedAnswers = isHidden
+        const processedAnswers = hideKeys
             ? (answers || []).map((a: any) => ({
                 ...a,
                 is_correct: undefined,
@@ -80,10 +87,30 @@ export async function PUT(
         const { id } = await params
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         if (user.role !== 'ADMIN' && user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // K2 Security Fix: verifikasi akses guru/admin — sebelumnya PUT grading ini
+        // tidak punya verifikasi sama sekali (guru manapun lintas sekolah bisa mengubah nilai).
+        // GURU: scope per-submission — harus mengajar mapel ini di kelas SISWA pemilik
+        // submission (bukan semua kelas target); ADMIN satu sekolah.
+        const { data: subForAuth } = await supabase
+            .from('official_exam_submissions')
+            .select('student:students(class_id), exam:official_exams(school_id, subject_id, target_class_ids, academic_year_id)')
+            .eq('id', id)
+            .single()
+        const authExam: any = Array.isArray(subForAuth?.exam) ? subForAuth.exam[0] : subForAuth?.exam || {}
+        if (user.role === 'GURU') {
+            const authStudent: any = Array.isArray(subForAuth?.student) ? subForAuth.student[0] : subForAuth?.student
+            const scope = await getTeacherScope(user.id, authExam.academic_year_id)
+            if (!canTeachStudentSubmission(scope, authExam.subject_id, authStudent?.class_id)) {
+                return NextResponse.json({ error: 'Anda tidak mengajar kelas siswa ini' }, { status: 403 })
+            }
+        } else if (authExam.school_id && schoolId && authExam.school_id !== schoolId) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
 
         const body = await request.json()

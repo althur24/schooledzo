@@ -78,6 +78,22 @@ export async function canManageExam(user: { id: string; role: string }, taTeache
 }
 
 /**
+ * Scope per-submission untuk UTS/UAS: guru boleh mengelola submission siswa bila
+ * dia mengajar mapel ujian DI KELAS siswa tersebut. Berbeda dengan canTeachScope
+ * (level ujian — semua kelas target, dipakai untuk create/edit exam), ini level
+ * submission — guru mapel per-kelas tetap bisa menilai/menangani siswa di kelasnya
+ * sendiri tanpa harus mengajar semua kelas target ujian.
+ */
+export function canTeachStudentSubmission(
+    scope: TeacherScope | null,
+    subjectId: string | null | undefined,
+    studentClassId: string | null | undefined
+): boolean {
+    if (!scope || !subjectId || !studentClassId) return false
+    return scope.assignments.some(a => a.subject_id === subjectId && a.class_id === studentClassId)
+}
+
+/**
  * Helper gabungan untuk guard endpoint UTS/UAS:
  * ADMIN selalu boleh; GURU hanya bila mapel & semua kelas target diajar (di tahun exam).
  */

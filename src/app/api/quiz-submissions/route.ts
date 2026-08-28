@@ -5,6 +5,7 @@ import { gradeAnswer, isAutoGradeable, needsManualGrading } from '@/lib/question
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { resolveQuizExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/examExpiry'
 import { forceCloseQuizSubmission } from '@/lib/autoCloseExpired'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // Helper function for sending notifications
 async function sendQuizSubmissionNotification(quizId: string, userFullName: string) {
@@ -132,6 +133,8 @@ export async function GET(request: NextRequest) {
                 )
             `)
             .order('submitted_at', { ascending: false })
+            // Tiebreaker stabil untuk paginasi fetchAllRows (submitted_at banyak duplikat/NULL)
+            .order('id', { ascending: false })
 
         if (quizId) {
             query = query.eq('quiz_id', quizId)
@@ -173,9 +176,10 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        const { data, error } = await query
-
-        if (error) throw error
+        // fetchAllRows: guru/admin tanpa quiz_id mendapat semua submission tahun
+        // aktif; kuis sekelas/sekolah juga bisa >1000 peserta — query biasa
+        // terpotong diam-diam di 1000 baris.
+        const data = await fetchAllRows(query)
 
         let finalData = data || []
 
@@ -188,7 +192,8 @@ export async function GET(request: NextRequest) {
 
             if (remedials && remedials.length > 0) {
                 const remedialIds = remedials.map(r => r.id)
-                const { data: remedialSubmissions } = await supabase
+                // fetchAllRows: remedial sekelas/sekolah bisa >1000 submissions
+                const remedialSubmissions = await fetchAllRows(supabase
                     .from('quiz_submissions')
                     .select(`
                         *,
@@ -207,6 +212,7 @@ export async function GET(request: NextRequest) {
                         )
                     `)
                     .in('quiz_id', remedialIds)
+                    .order('id'))
 
                 if (remedialSubmissions && remedialSubmissions.length > 0) {
                     // Merge based on student.id
@@ -304,12 +310,13 @@ export async function POST(request: NextRequest) {
         const questions = await getExamQuestionsForGrading('quiz_questions', quiz_id)
 
         // Check if already submitted or exists
+        // K3 Security Fix: .maybeSingle() — .single() menelan error multi-row (PGRST116)
         const { data: existing } = await supabase
             .from('quiz_submissions')
             .select('id, answers, started_at, submitted_at')
             .eq('quiz_id', quiz_id)
             .eq('student_id', student.id)
-            .single()
+            .maybeSingle()
 
         // Deadline hanya menggerbang sesi BARU. Attempt yang sudah berjalan ditangani
         // enforcement di bawah — jawaban tersimpan tidak boleh hilang hanya karena
@@ -364,13 +371,16 @@ export async function POST(request: NextRequest) {
         let allGraded = !hasManualGrading
         let gradedAnswers: any[] = []
 
-        // Only process answers if they exist
-        if (answersToProcess && Array.isArray(answersToProcess) && answersToProcess.length > 0) {
-            gradedAnswers = answersToProcess.map((ans: { question_id: string; answer: string }) => {
+        // Grading satu daftar jawaban — diekstrak supaya jalur race 23505 bisa
+        // mengulang fallback jawaban (jangan timpa jawaban tersimpan dengan []).
+        const gradeAnswersList = (list: any[]) => {
+            let score = 0
+            let max = 0
+            const graded = (list || []).map((ans: { question_id: string; answer: string }) => {
                 const question = questions.find(q => q.id === ans.question_id)
                 if (!question) return ans
 
-                maxScore += question.points
+                max += question.points
 
                 if (isAutoGradeable(question.question_type)) {
                     const graded = gradeAnswer(
@@ -380,7 +390,7 @@ export async function POST(request: NextRequest) {
                         question.options,
                         question.points || 1
                     )
-                    totalScore += graded.pointsEarned
+                    score += graded.pointsEarned
                     return {
                         ...ans,
                         is_correct: graded.isCorrect,
@@ -395,9 +405,20 @@ export async function POST(request: NextRequest) {
                     }
                 }
             })
+            return { graded, score, max }
         }
 
-        if (existing) {
+        // Only process answers if they exist
+        if (answersToProcess && Array.isArray(answersToProcess) && answersToProcess.length > 0) {
+            const r = gradeAnswersList(answersToProcess)
+            gradedAnswers = r.graded
+            totalScore = r.score
+            maxScore = r.max
+        }
+
+        // Helper: proses attempt yang sudah ada (save-progress atau final submit).
+        // Dipakai ulang oleh jalur race double-POST di bawah (catch 23505).
+        const processExisting = async (existing: { id: string; started_at: string | null; submitted_at: string | null; answers: unknown }) => {
             const contractExpiry = resolveQuizExpiry(
                 { deadline: quiz.deadline, duration_minutes: quiz.duration_minutes },
                 { started_at: existing.started_at }
@@ -442,6 +463,10 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ ...data, ...contract })
         }
 
+        if (existing) {
+            return processExisting(existing)
+        }
+
         // Create new submission — started_at otoritatif server (jangan percaya jam HP siswa)
         const insertData: any = {
             quiz_id,
@@ -464,7 +489,35 @@ export async function POST(request: NextRequest) {
             .select()
             .single()
 
-        if (error) throw error
+        // K3 Security Fix: race double-POST — request paralel bisa sama-sama lolos
+        // cek existing di atas; UNIQUE (quiz_id, student_id) menolak insert kedua
+        // (23505) → re-fetch dan proses sebagai attempt existing.
+        if (error) {
+            if (error.code === '23505') {
+                const { data: raced } = await supabase
+                    .from('quiz_submissions')
+                    .select('id, answers, started_at, submitted_at')
+                    .eq('quiz_id', quiz_id)
+                    .eq('student_id', student.id)
+                    .maybeSingle()
+                if (raced) {
+                    if (raced.submitted_at) {
+                        return NextResponse.json({ error: 'Kuis sudah dikumpulkan' }, { status: 400 })
+                    }
+                    // Fallback jawaban juga berlaku di jalur race: submit tanpa answers
+                    // memakai jawaban yang tersimpan di attempt pemenang race — jangan
+                    // timpa dengan array kosong (skor akan jadi 0).
+                    if (submit && (!answers || !Array.isArray(answers) || answers.length === 0)) {
+                        const r = gradeAnswersList((raced.answers as any[]) || [])
+                        gradedAnswers = r.graded
+                        totalScore = r.score
+                        maxScore = r.max
+                    }
+                    return processExisting(raced)
+                }
+            }
+            throw error
+        }
 
         // Notify for new submission if submitted
         if (submit) {
