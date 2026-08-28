@@ -164,7 +164,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     if (isExamMode) {
         return (
             <div className="min-h-screen bg-background-light dark:bg-background-dark transition-colors duration-300">
-                <main className="w-full overflow-y-auto animate-in fade-in duration-500 scrollbar-desktop">
+                <main className="w-full overflow-y-auto animate-in fade-in duration-500">
                     {children}
                 </main>
             </div>
@@ -246,7 +246,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 />
 
                 {/* Main content - bottom padding on mobile for bottom nav, left padding follows desktop sidebar width */}
-                <main className={`flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 lg:pb-8 overflow-y-auto animate-in fade-in duration-500 transition-[padding] duration-300 ease-in-out scrollbar-desktop ${sidebarCollapsed ? 'lg:pl-28' : 'lg:pl-[17rem]'}`}>
+                <main className={`flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 lg:pb-8 overflow-y-auto animate-in fade-in duration-500 transition-[padding] duration-300 ease-in-out ${sidebarCollapsed ? 'lg:pl-28' : 'lg:pl-[17rem]'}`}>
                     {children}
                 </main>
             </div>

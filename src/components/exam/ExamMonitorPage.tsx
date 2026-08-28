@@ -312,7 +312,7 @@ export default function ExamMonitorPage({ examId, mode }: {
 
                 {/* Scroll container vertikal internal — header tabel sticky di dalamnya,
                     sehingga header halaman & stats tetap terlihat saat memantau banyak siswa */}
-                <div className="overflow-auto max-h-[calc(100vh-16rem)] scrollbar-desktop">
+                <div className="overflow-auto max-h-[calc(100vh-16rem)]">
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="sticky top-0 z-10 border-b border-black/5 dark:border-white/5 bg-slate-100 dark:bg-slate-800 text-xs font-bold text-text-secondary uppercase tracking-wider shadow-[0_1px_0_rgba(0,0,0,0.05)]">

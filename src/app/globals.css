@@ -41,36 +41,38 @@
 }
 
 /*
- * Scrollbar tipis khusus desktop (mouse/trackpad).
- * Mobile/touch tetap tanpa scrollbar (overlay bawaan OS) — `pointer: fine`
- * hanya match pada pointer presisi. Penting untuk pengguna dengan roda
- * mouse rusak: scrollbar selalu terlihat & bisa diseret di desktop.
+ * Scrollbar tipis global — hanya di desktop (mouse/trackpad).
+ * `pointer: fine` hanya match pada pointer presisi, jadi mobile tetap
+ * tanpa scrollbar (overlay bawaan OS). `:where(*)` ber-spec 0, sehingga
+ * override yang ada (inline scrollbar-width, .hide-scrollbar) tetap menang.
+ * Penting untuk pengguna dengan roda mouse rusak: scrollbar selalu
+ * terlihat & bisa diseret di semua area scrollable desktop.
  */
-@utility scrollbar-desktop {
-  @media (pointer: fine) {
+@media (pointer: fine) {
+  :where(*) {
     scrollbar-width: thin;
     scrollbar-color: #cbd5e1 transparent;
+  }
 
-    &::-webkit-scrollbar {
-      width: 10px;
-      height: 10px;
-    }
+  :where(*)::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
 
-    &::-webkit-scrollbar-thumb {
-      background: #cbd5e1;
-      border-radius: 999px;
-      border: 2px solid transparent;
-      background-clip: content-box;
-    }
+  :where(*)::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
 
-    &::-webkit-scrollbar-thumb:hover {
-      background: #94a3b8;
-      background-clip: content-box;
-    }
+  :where(*)::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+    background-clip: content-box;
+  }
 
-    &::-webkit-scrollbar-track {
-      background: transparent;
-    }
+  :where(*)::-webkit-scrollbar-track {
+    background: transparent;
   }
 }
 
