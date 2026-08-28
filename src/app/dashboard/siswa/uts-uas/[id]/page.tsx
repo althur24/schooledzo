@@ -7,7 +7,10 @@ import SmartText from '@/components/SmartText'
 import StudentAnswerInput from '@/components/StudentAnswerInput'
 import PassageBlock from '@/components/PassageBlock'
 import NetworkBadge from '@/components/NetworkBadge'
+import ExamZoomControls from '@/components/exam/ExamZoomControls'
+import ExamZoomHint from '@/components/exam/ExamZoomHint'
 import useOnlineStatus from '@/hooks/useOnlineStatus'
+import useExamZoom from '@/hooks/useExamZoom'
 import { GraduationCap } from 'lucide-react'
 
 interface ExamQuestion {
@@ -62,6 +65,8 @@ export default function TakeOfficialExamPage() {
     const [loadError, setLoadError] = useState<string | null>(null) // gagal load (network dsb.) — bisa dicoba ulang
     const isOnline = useOnlineStatus()
     const isOffline = !isOnline
+    const examZoomActive = !!submission && !submission.is_submitted && !forceSubmitted
+    const { zoomLevel, zoomIn, zoomOut, handleDoubleClick, handleTouchEnd, canZoomIn, canZoomOut, showHint, dismissHint } = useExamZoom(examZoomActive, examZoomActive && isFullscreen)
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
     const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null)
 
@@ -689,8 +694,15 @@ export default function TakeOfficialExamPage() {
                             <p className="text-sm text-text-secondary">{exam.subject?.name}</p>
                         </div>
                     </div>
-                    <div className="flex items-center justify-between md:justify-end gap-3 md:gap-6">
+                    <div className="flex items-center justify-between md:justify-end gap-3 md:gap-6 flex-wrap">
                         <NetworkBadge isOnline={isOnline} saveStatus={saveStatus} latencyMs={lastLatencyMs} />
+                        <ExamZoomControls
+                            zoomLevel={zoomLevel}
+                            canZoomIn={canZoomIn}
+                            canZoomOut={canZoomOut}
+                            onZoomIn={zoomIn}
+                            onZoomOut={zoomOut}
+                        />
                         <div className={`px-3 py-1 rounded-lg flex items-center gap-1.5 ${violationCount > 0 ? 'bg-red-500/20 text-red-500' : 'bg-gray-100 dark:bg-gray-800 text-text-secondary'}`}>
                             <Danger set="bold" primaryColor="currentColor" size={16} /> {violationCount}/{maxViolations}
                         </div>
@@ -700,6 +712,8 @@ export default function TakeOfficialExamPage() {
                     </div>
                 </div>
             </div>
+
+            <ExamZoomHint visible={showHint} onDismiss={dismissHint} />
 
             {/* Main */}
             <div className="flex-1 min-h-0 flex flex-col md:flex-row max-w-4xl mx-auto w-full overflow-hidden">
@@ -738,7 +752,12 @@ export default function TakeOfficialExamPage() {
                         <p className="text-xs text-text-secondary mt-1 text-center">{answeredCount}/{questions.length}</p>
                     </div>
 
-                    <div className="flex-1 min-h-0 overflow-y-auto p-3 md:p-6">
+                    <div
+                        className="flex-1 min-h-0 overflow-y-auto p-3 md:p-6"
+                        style={{ zoom: zoomLevel, touchAction: 'manipulation' }}
+                        onDoubleClick={handleDoubleClick}
+                        onTouchEnd={handleTouchEnd}
+                    >
                         <div className="bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-6">
                             <div className="flex items-center gap-3 mb-4">
                                 <span className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">{currentIndex + 1}</span>

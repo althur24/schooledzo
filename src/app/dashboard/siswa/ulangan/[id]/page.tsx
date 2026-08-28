@@ -7,7 +7,10 @@ import SmartText from '@/components/SmartText'
 import StudentAnswerInput from '@/components/StudentAnswerInput'
 import PassageBlock from '@/components/PassageBlock'
 import NetworkBadge from '@/components/NetworkBadge'
+import ExamZoomControls from '@/components/exam/ExamZoomControls'
+import ExamZoomHint from '@/components/exam/ExamZoomHint'
 import useOnlineStatus from '@/hooks/useOnlineStatus'
+import useExamZoom from '@/hooks/useExamZoom'
 
 interface ExamQuestion {
     id: string
@@ -97,6 +100,11 @@ export default function TakeExamPage() {
         totalQuestions: number
         timeRemaining: number
     } | null>(null)
+
+    // Zoom internal: aktif selama pengerjaan; hint hanya saat soal benar-benar terlihat
+    // (sudah fullscreen dan tidak ada modal resume) supaya tidak kedaluwarsa tersembunyi.
+    const examZoomActive = !!submission && !submission.is_submitted && !forceSubmitted
+    const { zoomLevel, zoomIn, zoomOut, handleDoubleClick, handleTouchEnd, canZoomIn, canZoomOut, showHint, dismissHint } = useExamZoom(examZoomActive, examZoomActive && isFullscreen && !showResumeModal)
 
     // Helper functions for Timer - just set initial state
     const initializeExamFromResume = (examData: Exam, remainingTime: number) => {
@@ -851,8 +859,15 @@ export default function TakeExamPage() {
                         <h1 className="text-base md:text-lg font-bold text-text-main dark:text-white">{exam.title}</h1>
                         <p className="text-sm text-text-secondary">{exam.teaching_assignment?.subject?.name}</p>
                     </div>
-                    <div className="flex items-center justify-between md:justify-end gap-3 md:gap-6">
+                    <div className="flex items-center justify-between md:justify-end gap-3 md:gap-6 flex-wrap">
                         <NetworkBadge isOnline={isOnline} saveStatus={saveStatus} latencyMs={lastLatencyMs} />
+                        <ExamZoomControls
+                            zoomLevel={zoomLevel}
+                            canZoomIn={canZoomIn}
+                            canZoomOut={canZoomOut}
+                            onZoomIn={zoomIn}
+                            onZoomOut={zoomOut}
+                        />
                         {/* Violation counter */}
                         <div className={`px-3 py-1 rounded-lg flex items-center gap-1.5 ${violationCount > 0 ? 'bg-red-500/20 text-red-500 dark:text-red-400' : 'bg-gray-100 dark:bg-gray-800 text-text-secondary'}`}>
                             <Danger set="bold" primaryColor="currentColor" size={16} /> {violationCount}/{maxViolations}
@@ -864,6 +879,8 @@ export default function TakeExamPage() {
                     </div>
                 </div>
             </div>
+
+            <ExamZoomHint visible={showHint} onDismiss={dismissHint} />
 
             {/* Main content */}
             {(() => {
@@ -960,7 +977,12 @@ export default function TakeExamPage() {
 
                         {/* Question area */}
                         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                            <div className="flex-1 min-h-0 overflow-y-auto w-full p-3 md:p-6">
+                            <div
+                                className="flex-1 min-h-0 overflow-y-auto w-full p-3 md:p-6"
+                                style={{ zoom: zoomLevel, touchAction: 'manipulation' }}
+                                onDoubleClick={handleDoubleClick}
+                                onTouchEnd={handleTouchEnd}
+                            >
                                 {currentItem?.type === 'audio_group' ? (
                                     /* Audio group: show audio + all questions */
                                     <div className="bg-white dark:bg-surface-dark border border-violet-300 dark:border-violet-700 rounded-xl overflow-hidden min-h-0 md:min-h-[400px]">
