@@ -978,7 +978,7 @@ export default function TakeExamPage() {
                         {/* Question area */}
                         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                             <div
-                                className="flex-1 min-h-0 overflow-y-auto w-full p-3 md:p-6"
+                                className="flex-1 min-h-0 overflow-y-auto w-full p-3 md:p-6 scrollbar-desktop"
                                 style={{ zoom: zoomLevel, touchAction: 'manipulation' }}
                                 onDoubleClick={handleDoubleClick}
                                 onTouchEnd={handleTouchEnd}

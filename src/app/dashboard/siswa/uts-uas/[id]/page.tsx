@@ -753,7 +753,7 @@ export default function TakeOfficialExamPage() {
                     </div>
 
                     <div
-                        className="flex-1 min-h-0 overflow-y-auto p-3 md:p-6"
+                        className="flex-1 min-h-0 overflow-y-auto p-3 md:p-6 scrollbar-desktop"
                         style={{ zoom: zoomLevel, touchAction: 'manipulation' }}
                         onDoubleClick={handleDoubleClick}
                         onTouchEnd={handleTouchEnd}

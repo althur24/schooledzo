@@ -40,6 +40,40 @@
   }
 }
 
+/*
+ * Scrollbar tipis khusus desktop (mouse/trackpad).
+ * Mobile/touch tetap tanpa scrollbar (overlay bawaan OS) — `pointer: fine`
+ * hanya match pada pointer presisi. Penting untuk pengguna dengan roda
+ * mouse rusak: scrollbar selalu terlihat & bisa diseret di desktop.
+ */
+@utility scrollbar-desktop {
+  @media (pointer: fine) {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+
+    &::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: content-box;
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+      background-clip: content-box;
+    }
+
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+  }
+}
+
 /* 
  * FORCE LIGHT MODE - Override system dark mode preference
  * This ensures the app shows in light mode regardless of browser/OS settings
