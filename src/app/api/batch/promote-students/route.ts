@@ -121,7 +121,9 @@ export async function POST(request: NextRequest) {
             promoted: data?.promoted ?? 0,
             graduated: data?.graduated ?? 0,
             failed: data?.failed ?? 0,
-            errors: data?.errors ?? []
+            errors: data?.errors ?? [],
+            already_done: data?.already_done ?? 0,
+            already_done_students: data?.already_done_students ?? []
         })
     } catch (error: any) {
         console.error('Error in batch promote-students:', error)

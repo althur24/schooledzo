@@ -118,7 +118,7 @@ export default function KenaikanKelasPage() {
 
     // Results
     const [showResultModal, setShowResultModal] = useState(false)
-    const [results, setResults] = useState<{ success: number; failed: number; errors: string[] }>({ success: 0, failed: 0, errors: [] })
+    const [results, setResults] = useState<{ success: number; failed: number; errors: string[]; alreadyDone: number; alreadyDoneNames: string[] }>({ success: 0, failed: 0, errors: [], alreadyDone: 0, alreadyDoneNames: [] })
 
     // Promote retained student
     const [promoteRetainedStudent, setPromoteRetainedStudent] = useState<Student | null>(null)
@@ -535,7 +535,7 @@ export default function KenaikanKelasPage() {
 
         // Pre-flight: if any student lacks a resolvable target, do NOT call the API.
         if (preflightErrors.length > 0) {
-            setResults({ success: 0, failed: preflightErrors.length, errors: preflightErrors })
+            setResults({ success: 0, failed: preflightErrors.length, errors: preflightErrors, alreadyDone: 0, alreadyDoneNames: [] })
             setShowResultModal(true)
             setProcessing(false)
             return
@@ -558,6 +558,8 @@ export default function KenaikanKelasPage() {
             let successCount = 0
             let failedCount = 0
             let errorLines: string[] = []
+            let alreadyDoneCount = 0
+            let alreadyDoneNames: string[] = []
 
             if (res.ok) {
                 const data = await res.json()
@@ -566,13 +568,15 @@ export default function KenaikanKelasPage() {
                 errorLines = (data.errors || []).map((e: { student_name?: string; error?: string }) =>
                     `${e.student_name || 'Siswa'}: ${e.error || 'gagal'}`
                 )
+                alreadyDoneCount = data.already_done || 0
+                alreadyDoneNames = (data.already_done_students || []).map((e: { student_name?: string }) => e.student_name || 'Siswa')
             } else {
                 const errData = await res.json().catch(() => ({}))
                 failedCount = total
                 errorLines = [errData.error || 'Gagal memproses kenaikan kelas']
             }
 
-            setResults({ success: successCount, failed: failedCount, errors: errorLines })
+            setResults({ success: successCount, failed: failedCount, errors: errorLines, alreadyDone: alreadyDoneCount, alreadyDoneNames })
             setShowResultModal(true)
 
             // Refresh data from source year
@@ -582,7 +586,9 @@ export default function KenaikanKelasPage() {
             setResults({
                 success: 0,
                 failed: total,
-                errors: ['Terjadi error tidak terduga saat memproses kenaikan kelas']
+                errors: ['Terjadi error tidak terduga saat memproses kenaikan kelas'],
+                alreadyDone: 0,
+                alreadyDoneNames: []
             })
             setShowResultModal(true)
         } finally {
@@ -1393,6 +1399,19 @@ export default function KenaikanKelasPage() {
                             <p className="text-sm text-red-700 dark:text-red-300">Gagal</p>
                         </div>
                     </div>
+
+                    {results.alreadyDone > 0 && (
+                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-xl">
+                            <p className="font-medium text-blue-700 dark:text-blue-300 mb-2">
+                                {results.alreadyDone} siswa sudah diproses sebelumnya (dilewati, bukan error):
+                            </p>
+                            <ul className="text-sm text-blue-600 dark:text-blue-400 space-y-1 max-h-40 overflow-y-auto">
+                                {results.alreadyDoneNames.map((name, i) => (
+                                    <li key={i}>• {name}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
 
                     {results.errors.length > 0 && (
                         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 rounded-xl">
