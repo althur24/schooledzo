@@ -12,7 +12,7 @@
  */
 require('dotenv').config({ path: '.env.local' });
 const { createClient } = require('@supabase/supabase-js');
-const crypto = require('crypto');
+const { assertMin, makeSession, makeApi } = require('./loadtest/e2e/helpers.cjs');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3100';
 const supabase = createClient(
@@ -22,20 +22,9 @@ const supabase = createClient(
 
 let failures = 0;
 const ok = (cond, label) => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}`); if (!cond) failures++; };
-const api = (path, token, opts = {}) =>
-    fetch(`${BASE_URL}${path}`, {
-        ...opts,
-        headers: { 'Content-Type': 'application/json', Cookie: `session_token=${token}`, ...(opts.headers || {}) }
-    });
+const api = makeApi(BASE_URL);
 const iso = (ms) => new Date(ms).toISOString();
 const created = { exams: [], official: [], sessions: [] };
-
-async function makeSession(userId) {
-    const token = crypto.randomBytes(32).toString('hex');
-    await supabase.from('sessions').insert({ user_id: userId, token, expires_at: iso(Date.now() + 3600000) });
-    created.sessions.push(token);
-    return token;
-}
 
 async function main() {
     const NOW = Date.now();
@@ -56,17 +45,23 @@ async function main() {
     if (!ta) throw new Error('Tidak ada TA aktif dengan siswa di kelasnya');
     const guruAUserId = ta.teacher.user_id;
 
-    // Guru lain (bukan pemilik TA ini)
+    // Guru lain (bukan pemilik TA ini) — WAJIB sekolah yang sama, supaya test (g)
+    // tidak lolos trivially hanya karena beda sekolah (scope multi-tenant)
     const { data: otherTeacher } = await supabase
-        .from('teachers').select('user_id').neq('user_id', guruAUserId).limit(1).single();
-    if (!otherTeacher) throw new Error('Guru kedua tidak ditemukan');
+        .from('teachers')
+        .select('user_id')
+        .eq('school_id', ta.teacher.school_id)
+        .neq('user_id', guruAUserId)
+        .limit(1)
+        .maybeSingle();
+    if (!otherTeacher) throw new Error('Guru kedua (sekolah sama, bukan pemilik TA) tidak ditemukan');
 
     // Admin dari sekolah yang sama dengan guru TA (scope multi-tenant berlaku)
     const { data: admin } = await supabase.from('users').select('id').eq('role', 'ADMIN').eq('school_id', ta.teacher.school_id).limit(1).maybeSingle();
 
-    const guruAToken = await makeSession(guruAUserId);
-    const guruBToken = await makeSession(otherTeacher.user_id);
-    const adminToken = admin ? await makeSession(admin.id) : null;
+    const guruAToken = await makeSession(supabase, guruAUserId, created);
+    const guruBToken = await makeSession(supabase, otherTeacher.user_id, created);
+    const adminToken = admin ? await makeSession(supabase, admin.id, created) : null;
 
     // (a) guru buat UTS dalam scope
     console.log('\n=== UTS/UAS oleh guru ===');
@@ -82,8 +77,19 @@ async function main() {
     ok(resA.ok && bodyA.created_by === guruAUserId, `(a) guru buat UTS dalam scope → ${resA.status}, created_by = guru`);
     if (bodyA.id) created.official.push(bodyA.id);
 
-    // (b) guru buat UTS di luar scope (kelas yang tidak diajar)
-    const { data: otherClass } = await supabase.from('classes').select('id').neq('id', ta.class_id).limit(1).single();
+    // (b) guru buat UTS di luar scope (kelas yang tidak diajar — sekolah SAMA,
+    // supaya 403 benar-benar karena scope TA, bukan karena beda sekolah)
+    // classes tidak punya school_id — scope sekolah lewat academic_years
+    const { data: schoolClasses } = await supabase
+        .from('classes')
+        .select('id, academic_year:academic_years!inner(school_id)')
+        .eq('academic_year.school_id', ta.teacher.school_id)
+        .neq('id', ta.class_id)
+        .limit(10);
+    const { data: guruATas } = await supabase.from('teaching_assignments').select('class_id').eq('teacher_id', ta.teacher_id);
+    const guruAClassIds = new Set((guruATas || []).map(x => x.class_id));
+    const otherClass = (schoolClasses || []).find(c => !guruAClassIds.has(c.id));
+    if (!otherClass) throw new Error('Tidak ada kelas lain di sekolah yang sama yang tidak diajar guru A — test (b) tidak bisa dibedakan dari (a)');
     const resB = await api('/api/official-exams', guruAToken, {
         method: 'POST',
         body: JSON.stringify({
@@ -139,7 +145,10 @@ async function main() {
         });
         ok(resD2.ok, `(d) guru pemilik menambah soal → ${resD2.status}`);
         // simulasikan review AI/admin selesai tepat sebelum publish (AI berjalan async
-        // dan bisa memindahkan status ke admin_review — set approved lagi sebagai final)
+        // dan bisa memindahkan status ke admin_review — set approved lagi sebagai final).
+        // CATATAN: bypass status='approved' via service-role disengaja untuk test ini.
+        // Artinya PASS di sini TIDAK membuktikan jalur admin-review produksi benar —
+        // TODO: test terpisah untuk alur publish via admin review yang sesungguhnya.
         await supabase.from('exam_questions').update({ status: 'approved' }).eq('exam_id', bodyC.id);
         let resD3 = await api(`/api/exams/${bodyC.id}`, guruAToken, { method: 'PUT', body: JSON.stringify({ is_active: true }) });
         let bodyD3 = await resD3.json().catch(() => ({}));
@@ -152,7 +161,8 @@ async function main() {
         ok(resD3.ok && bodyD3.is_active === true, `(d) guru pemilik publish draft buatan admin → ${resD3.status} (is_active=${bodyD3.is_active})`);
 
         // siswa kelas itu: soal sampai + bisa mulai
-        if (student) {            const sToken = await makeSession(student.user_id);
+        if (student) {
+            const sToken = await makeSession(supabase, student.user_id, created);
             const qRes = await api(`/api/exams/${bodyC.id}/questions`, sToken);
             const qs = await qRes.json();
             ok(qRes.ok && Array.isArray(qs) && qs.length > 0, '(d) soal sampai ke siswa kelas sasaran');

@@ -3,13 +3,15 @@
  * (TIME_ENFORCEMENT_UPGRADE_PLAN Fase 6). Server harus jalan di BASE_URL
  * dengan scheduler aktif (sweep tiap 1 menit).
  *
- * Skenario: save/submit tepat waktu, dalam grace, lewat grace (jawaban ditolak
- * & ditutup paksa), semantik jendela global, soft/hard reset, kontrak
- * server_time/ends_at, sweep aktif, deadline kuis. Data uji dibuat & dihapus sendiri.
+ * Skenario: save/submit tepat waktu, dalam grace, lewat grace (perilaku
+ * AUTO-COLLECT: jawaban terakhir yang dikirim DIKUMPULKAN lalu submission
+ * ditutup paksa — lihat src/lib/autoCloseExpired.ts), semantik jendela global,
+ * soft/hard reset, kontrak server_time/ends_at, sweep aktif, deadline kuis.
+ * Data uji dibuat & dihapus sendiri.
  */
 require('dotenv').config({ path: '.env.local' });
 const { createClient } = require('@supabase/supabase-js');
-const crypto = require('crypto');
+const { assertMin, mustInsert, makeSession, makeApi } = require('./loadtest/e2e/helpers.cjs');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3100';
 const supabase = createClient(
@@ -20,21 +22,10 @@ const supabase = createClient(
 let failures = 0;
 const ok = (cond, label) => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}`); if (!cond) failures++; };
 
-const api = (path, token, opts = {}) =>
-    fetch(`${BASE_URL}${path}`, {
-        ...opts,
-        headers: { 'Content-Type': 'application/json', Cookie: `session_token=${token}`, ...(opts.headers || {}) }
-    });
+const api = makeApi(BASE_URL);
 
 const iso = (ms) => new Date(ms).toISOString();
 const created = { exams: [], official: [], quizzes: [], examSubs: [], officialSubs: [], quizSubs: [], sessions: [] };
-
-async function makeSession(userId) {
-    const token = crypto.randomBytes(32).toString('hex');
-    await supabase.from('sessions').insert({ user_id: userId, token, expires_at: iso(Date.now() + 3600000) });
-    created.sessions.push(token);
-    return token;
-}
 
 // Kloning baris induk (exam/official/quiz) agar tidak menyentuh data asli
 async function cloneRow(table, overrides, match) {
@@ -51,13 +42,16 @@ async function cloneRow(table, overrides, match) {
     return data;
 }
 
-async function cloneQuestion(srcTable, fk, parentId) {
+async function cloneQuestion(srcTable, fk, parentId, overrides = {}) {
     const { data: src } = await supabase.from(srcTable).select('*').limit(1).single();
     if (!src) throw new Error(`Tidak ada soal di ${srcTable}`);
     const q = { ...src };
     delete q.id;
     delete q.created_at;
     q[fk] = parentId;
+    // overrides penting untuk determinisme: template .limit(1) tanpa .order()
+    // bisa memilih baris berbeda antar run (kunci/poin/tipe soal acak)
+    Object.assign(q, overrides);
     const { data, error } = await supabase.from(srcTable).insert(q).select().single();
     if (error) throw new Error(`Gagal kloning soal ${srcTable}: ` + error.message);
     return data;
@@ -66,15 +60,14 @@ async function cloneQuestion(srcTable, fk, parentId) {
 async function main() {
     const NOW = Date.now();
     const { data: guru } = await supabase.from('users').select('id').eq('role', 'GURU').limit(1).single();
-    const { data: admin } = await supabase.from('users').select('id').eq('role', 'ADMIN').limit(1).single();
     const { data: siswaUsers } = await supabase.from('users').select('id').eq('role', 'SISWA').limit(5);
     if (!guru || !siswaUsers?.length) throw new Error('User uji kurang');
-    const guruToken = await makeSession(guru.id);
-    const adminToken = admin ? await makeSession(admin.id) : null;
+    const guruToken = await makeSession(supabase, guru.id, created);
     const siswaTokens = [];
-    for (const u of siswaUsers) siswaTokens.push(await makeSession(u.id));
+    for (const u of siswaUsers) siswaTokens.push(await makeSession(supabase, u.id, created));
     const { data: students } = await supabase.from('students').select('id, user_id, class_id, school_id').in('user_id', siswaUsers.map(u => u.id));
-    if (!students?.length) throw new Error('Data students tidak ditemukan');
+    // skenario memakai students[0..3] — fail-fast kalau kurang agar tidak TypeError di tengah
+    assertMin(students?.length || 0, 4, 'siswa uji (skenario timer butuh 4 siswa)');
 
     // ===== ULANGAN =====
     console.log('\n=== ULANGAN (exams) ===');
@@ -94,7 +87,8 @@ async function main() {
         if (error) { console.error('Gagal kloning exam A:', error.message); continue; }
         examA = newExam;
         starter = st;
-        starterToken = await makeSession(st.user_id);
+        starterToken = await makeSession(supabase, st.user_id, created);
+        // simpan SUMBER yang benar-benar di-clone (soal dikloning terpisah di bawah)
         break;
     }
     if (!examA) throw new Error('Tidak bisa menyiapkan exam A');
@@ -119,39 +113,66 @@ async function main() {
         ok(res3.ok, `(3) submit tepat waktu → ${res3.status}`);
     } else {
         console.log('SKIP (1-3): tidak ada siswa dengan kelas yang cocok untuk start gate');
-        const { data: s } = await supabase.from('exam_submissions').insert({ exam_id: examA.id, student_id: students[0].id, started_at: iso(NOW), max_score: 10 }).select().single();
+        const s = await mustInsert(supabase, 'exam_submissions',
+            { exam_id: examA.id, student_id: students[0].id, started_at: iso(NOW), max_score: 10 }, 'subA (jalur skip)');
         subA = s;
-        created.examSubs.push(s.id);
     }
     if (subA?.id) created.examSubs.push(subA.id);
 
-    // Exam B: jendela berakhir 5 mnt lalu (lewat grace 60 dtk)
-    const examB = await cloneRow('exams', { title: '[TEST] Timer B', is_active: true, start_time: iso(NOW - 10 * 60000), duration_minutes: 5, is_remedial: false, allowed_student_ids: [] });
+    // Exam B: jendela berakhir 5 mnt lalu (lewat grace 60 dtk).
+    // is_active FALSE supaya scheduler sweep TIDAK pernah menyentuh submission di
+    // exam ini (sweep hanya memproses exam aktif — autoCloseExpired.ts) → skenario
+    // (4)/(5) deterministik, tidak race dengan sweep. Gate is_active hanya berlaku
+    // untuk MEMULAI sesi baru (POST), bukan PUT pada submission yang sudah ada.
+    const examB = await cloneRow('exams', { title: '[TEST] Timer B', is_active: false, start_time: iso(NOW - 10 * 60000), duration_minutes: 5, is_remedial: false, allowed_student_ids: [] });
     created.exams.push(examB.id);
-    const qB = await cloneQuestion('exam_questions', 'exam_id', examB.id);
+    // Skenario (7)/(8) reset oleh GURU PEMILIK TA examB — bukan guru acak.
+    // (Route kini menegakkan kepemilikan TA; guru acak hanya kebetulan lolos
+    // di DB satu-guru dan akan 403 di DB multi-guru.)
+    let ownerBToken = null;
+    if (examB.teaching_assignment_id) {
+        const { data: taOwner } = await supabase
+            .from('teaching_assignments')
+            .select('teacher:teachers(user_id)')
+            .eq('id', examB.teaching_assignment_id)
+            .maybeSingle();
+        const ownerUserId = (Array.isArray(taOwner?.teacher) ? taOwner.teacher[0] : taOwner?.teacher)?.user_id;
+        if (ownerUserId) ownerBToken = await makeSession(supabase, ownerUserId, created);
+    }
+    if (!ownerBToken) throw new Error('Tidak bisa menemukan guru pemilik TA examB untuk skenario reset (7)/(8)');
+    // Kunci ('B') & poin ditetapkan eksplisit supaya penilaian deterministik
+    const qB = await cloneQuestion('exam_questions', 'exam_id', examB.id, {
+        question_type: 'MULTIPLE_CHOICE', options: ['A', 'B', 'C', 'D'], correct_answer: 'B', points: 10,
+    });
 
-    // Submission B1: punya 1 jawaban tersimpan (10 poin), lalu kirim jawaban baru lewat grace
-    const { data: subB1 } = await supabase.from('exam_submissions').insert({ exam_id: examB.id, student_id: students[0].id, started_at: iso(NOW - 9 * 60000), max_score: 20 }).select().single();
+    // Submission B1: punya 1 jawaban lama (salah, 0 poin), lalu kirim jawaban BENAR lewat grace.
+    // Perilaku AUTO-COLLECT (src/lib/autoCloseExpired.ts): jawaban yang dikirim lewat
+    // grace DI-UPsert (menang per soal) supaya jawaban offline terselamatkan,
+    // dinilai ulang, lalu submission ditutup paksa.
+    const { data: subB1 } = await supabase.from('exam_submissions').insert({ exam_id: examB.id, student_id: students[0].id, started_at: iso(NOW - 9 * 60000), max_score: 10 }).select().single();
     created.examSubs.push(subB1.id);
-    await supabase.from('exam_answers').insert({ submission_id: subB1.id, question_id: qB.id, answer: 'A', is_correct: true, points_earned: 10 });
+    await supabase.from('exam_answers').insert({ submission_id: subB1.id, question_id: qB.id, answer: 'A', is_correct: false, points_earned: 0 });
     const tokB1 = siswaTokens[siswaUsers.findIndex(u => u.id === students[0].user_id)];
 
     const res4 = await api('/api/exam-submissions', tokB1, { method: 'PUT', body: JSON.stringify({ submission_id: subB1.id, answers: [{ question_id: qB.id, answer: 'B' }] }) });
     const body4 = await res4.json();
-    ok(res4.status === 409 && body4.code === 'TIME_EXPIRED', `(4) save lewat grace → 409 TIME_EXPIRED (dapat ${res4.status})`);
-    const { data: ansB1 } = await supabase.from('exam_answers').select('answer').eq('submission_id', subB1.id);
-    ok(ansB1.length === 1 && ansB1[0].answer === 'A', '(4) jawaban lewat grace TIDAK tersimpan (timpa jawaban lama ditolak)');
+    ok(res4.status === 409 && body4.code === 'TIME_EXPIRED' && body4.force_submitted === true, `(4) save lewat grace → 409 TIME_EXPIRED + force_submitted (dapat ${res4.status})`);
+    const { data: ansB1 } = await supabase.from('exam_answers').select('answer, is_correct, points_earned').eq('submission_id', subB1.id);
+    ok(ansB1.length === 1 && ansB1[0].answer === 'B' && ansB1[0].is_correct === true && ansB1[0].points_earned === 10, '(4) jawaban terakhir terselamatkan (upsert menang per soal) + dinilai ulang');
     const { data: subB1After } = await supabase.from('exam_submissions').select('is_submitted, total_score').eq('id', subB1.id).single();
-    ok(subB1After.is_submitted === true && subB1After.total_score === 10, `(4) submission ditutup paksa dgn jawaban lama (score=${subB1After.total_score})`);
+    ok(subB1After.is_submitted === true && subB1After.total_score === 10, `(4) submission ditutup paksa dgn skor jujur (score=${subB1After.total_score})`);
 
-    // Submission B2 (siswa lain): submit lewat grace membawa jawaban → diabaikan
-    const { data: subB2 } = await supabase.from('exam_submissions').insert({ exam_id: examB.id, student_id: students[1].id, started_at: iso(NOW - 9 * 60000), max_score: 20 }).select().single();
+    // Submission B2 (siswa lain): submit lewat grace membawa jawaban → jawaban ikut
+    // terselamatkan (auto-collect) & dinilai — salah = 0 poin, bukan dibuang
+    const { data: subB2 } = await supabase.from('exam_submissions').insert({ exam_id: examB.id, student_id: students[1].id, started_at: iso(NOW - 9 * 60000), max_score: 10 }).select().single();
     created.examSubs.push(subB2.id);
     const tokB2 = siswaTokens[siswaUsers.findIndex(u => u.id === students[1].user_id)];
     const res5 = await api('/api/exam-submissions', tokB2, { method: 'PUT', body: JSON.stringify({ submission_id: subB2.id, answers: [{ question_id: qB.id, answer: 'A' }], submit: true }) });
     ok(res5.status === 409, `(5) submit lewat grace → 409 (dapat ${res5.status})`);
-    const { data: ansB2 } = await supabase.from('exam_answers').select('id').eq('submission_id', subB2.id);
-    ok((ansB2 || []).length === 0, '(5) jawaban yang dibawa submit lewat grace TIDAK tersimpan');
+    const { data: ansB2 } = await supabase.from('exam_answers').select('answer, is_correct, points_earned').eq('submission_id', subB2.id);
+    ok(ansB2.length === 1 && ansB2[0].answer === 'A' && ansB2[0].is_correct === false && ansB2[0].points_earned === 0, '(5) jawaban yang dibawa submit lewat grace terselamatkan & dinilai (salah = 0 poin)');
+    const { data: subB2After } = await supabase.from('exam_submissions').select('is_submitted, total_score').eq('id', subB2.id).single();
+    ok(subB2After.is_submitted === true && subB2After.total_score === 0, `(5) submission ditutup paksa (score=${subB2After.total_score})`);
 
     // (6) submit DALAM grace: jendela berakhir 30 dtk lalu — waktu dihitung segar saat
     // tes berjalan (bukan sejak skrip mulai), agar tidak terlewat grace 60 dtk
@@ -166,15 +187,18 @@ async function main() {
     ok(res6.ok, `(6) submit dalam grace (±30 dtk setelah jendela) → ${res6.status} diterima`);
 
     // (7) soft reset setelah jendela tutup → 400 (subB1 sudah tertutup)
-    const res7 = await api('/api/exam-submissions', guruToken, { method: 'PUT', body: JSON.stringify({ submission_id: subB1.id, reset_attempt: 'soft' }) });
+    const res7 = await api('/api/exam-submissions', ownerBToken, { method: 'PUT', body: JSON.stringify({ submission_id: subB1.id, reset_attempt: 'soft' }) });
     ok(res7.status === 400, `(7) soft reset pasca-jendela → 400 (dapat ${res7.status})`);
 
     // (8) hard reset pasca-jendela → override durasi penuh, siswa bisa menulis lagi
-    const res8 = await api('/api/exam-submissions', guruToken, { method: 'PUT', body: JSON.stringify({ submission_id: subB1.id, reset_attempt: 'hard' }) });
+    const res8 = await api('/api/exam-submissions', ownerBToken, { method: 'PUT', body: JSON.stringify({ submission_id: subB1.id, reset_attempt: 'hard' }) });
     const body8 = await res8.json();
     ok(res8.ok && body8.effective_ends_at, `(8) hard reset → ${res8.status} + effective_ends_at ada`);
+    // bandingkan dengan waktu SEGAR saat request dibuat — bukan NOW awal main(),
+    // karena persiapan fixture di atas bisa makan waktu > toleransi 30 dtk
+    const t8 = Date.now();
     const overrideMs = body8.effective_ends_at ? new Date(body8.effective_ends_at).getTime() : 0;
-    ok(Math.abs(overrideMs - (NOW + 5 * 60000)) < 30000, '(8) override ≈ now + durasi (durasi penuh baru)');
+    ok(Math.abs(overrideMs - (t8 + 5 * 60000)) < 30000, '(8) override ≈ now + durasi (durasi penuh baru)');
     const res8b = await api('/api/exam-submissions', tokB1, { method: 'PUT', body: JSON.stringify({ submission_id: subB1.id, answers: [{ question_id: qB.id, answer: 'B' }] }) });
     ok(res8b.ok, `(8) save setelah hard reset (jendela lama sudah lewat) → ${res8b.status} diterima`);
 
@@ -225,8 +249,10 @@ async function main() {
 
     // ===== KUIS =====
     console.log('\n=== KUIS ===');
-    // (10) per-student kedaluwarsa (durasi 30 mnt, mulai 1 jam lalu, tanpa deadline)
-    const quizA = await cloneRow('quizzes', { title: '[TEST] Timer Kuis A', is_active: true, duration_minutes: 30, deadline: null, is_remedial: false, allowed_student_ids: [] });
+    // (10) per-student kedaluwarsa (durasi 30 mnt, mulai 1 jam lalu, tanpa deadline).
+    // is_active FALSE supaya scheduler sweep tidak menutup subQ duluan (race) —
+    // gate is_active/deadline hanya menggerbang sesi BARU, bukan attempt berjalan.
+    const quizA = await cloneRow('quizzes', { title: '[TEST] Timer Kuis A', is_active: false, duration_minutes: 30, deadline: null, is_remedial: false, allowed_student_ids: [] });
     created.quizzes.push(quizA.id);
     const qQuizA = await cloneQuestion('quiz_questions', 'quiz_id', quizA.id);
     const { data: subQ } = await supabase.from('quiz_submissions').insert({ quiz_id: quizA.id, student_id: students[0].id, started_at: iso(NOW - 60 * 60000), answers: [] }).select().single();
@@ -275,15 +301,21 @@ async function main() {
     const body13 = await res13.json();
     ok(res13.status === 409 && body13.code === 'TIME_EXPIRED', `(13) UTS/UAS save lewat grace → 409 (dapat ${res13.status})`);
 
-    // (14) hard reset oleh ADMIN → override dihormati
-    if (adminToken) {
-        const res14 = await api('/api/official-exam-submissions', adminToken, { method: 'PUT', body: JSON.stringify({ submission_id: subO.id, reset_attempt: 'hard' }) });
+    // (14) hard reset oleh ADMIN satu sekolah dengan offA → override dihormati.
+    // (Route kini menegakkan scope sekolah; admin acak beda sekolah akan 403.)
+    let adminAToken = null;
+    {
+        const { data: adminA } = await supabase.from('users').select('id').eq('role', 'ADMIN').eq('school_id', offA.school_id).limit(1).maybeSingle();
+        if (adminA) adminAToken = await makeSession(supabase, adminA.id, created);
+    }
+    if (adminAToken) {
+        const res14 = await api('/api/official-exam-submissions', adminAToken, { method: 'PUT', body: JSON.stringify({ submission_id: subO.id, reset_attempt: 'hard' }) });
         const body14 = await res14.json();
         ok(res14.ok && body14.effective_ends_at, `(14) hard reset UTS/UAS oleh admin → ${res14.status}`);
         const res14b = await api('/api/official-exam-submissions', tokB1, { method: 'PUT', body: JSON.stringify({ submission_id: subO.id, answers: [{ question_id: qOff.id, answer: 'A' }] }) });
         ok(res14b.ok, `(14) save setelah hard reset → ${res14b.status} diterima`);
     } else {
-        console.log('SKIP (14): user ADMIN tidak ditemukan');
+        console.log('SKIP (14): admin sekolah exam tidak ditemukan');
     }
 
     console.log(failures === 0 ? '\nSEMUA PASS' : `\n${failures} FAIL`);

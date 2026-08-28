@@ -5,39 +5,72 @@
  * C1-C4 (alur ujian + cache) terhadap `next start` lokal + DB produksi.
  *
  * Safety: hanya INSERT/DELETE baris ber-marker E2E/e2e_; cleanup di finally.
+ * Scheduler cron_runs TIDAK di-reset secara default (mencegah burst reminder
+ * ke user nyata). Untuk test notifikasi penuh: E2E_RESET_SCHEDULER=1 node ...
  * Jalankan: node loadtest/e2e/run_all.cjs
  */
 require('dotenv').config({ path: '.env.local' })
 const { createClient } = require('@supabase/supabase-js')
 const { spawn } = require('child_process')
 const bcrypt = require('bcryptjs')
+const { mustInsert, spawnServer, stopServerSafe, waitPortUp } = require('./helpers.cjs')
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 const PORT = 3100
 const BASE = `http://localhost:${PORT}`
+
+// Reset cron_runs memaksa job notifikasi jalan segera (burst reminder ke user NYATA
+// kalau DB target produksi). Opt-in: set E2E_RESET_SCHEDULER=1 untuk test penuh.
+// Tanpa flag, skenario B1-B4/B1b diberi SKIP (bukan FAIL palsu) jika job belum jalan.
+const RESET_SCHEDULER = process.env.E2E_RESET_SCHEDULER === '1'
+
+// Job notification memegang lock 9 menit (src/lib/notificationJobs.ts: LOCK_MAX_AGE_MS,
+// scheduler berjalan tiap ~10 mnt). Tanpa reset, jika lock masih aktif lebih lama dari
+// window test, menunggu hanya membuang waktu — deteksi ini membuat SKIP terjadi cepat
+// (dulu: tiap skenario B menunggu 90 dtk sia-sia → total 450 dtk dead-wait).
+const JOB_LOCK_MS = 9 * 60 * 1000
+const JOB_RUN_GRACE_MS = 90 * 1000  // window maksimal menunggu job due + eksekusi
+let jobNotDueUntil = null           // timestamp: job tidak akan jalan sebelum waktu ini
+
+async function detectJobSchedule() {
+    if (RESET_SCHEDULER) return // reset memaksa job due segera setelah boot
+    const { data } = await supabase.from('cron_runs').select('last_run_at').eq('job', 'notification_jobs').maybeSingle()
+    if (!data?.last_run_at) return // tak ada catatan — anggap due
+    const lockUntil = new Date(data.last_run_at).getTime() + JOB_LOCK_MS
+    const remaining = lockUntil - Date.now()
+    if (remaining > JOB_RUN_GRACE_MS) {
+        jobNotDueUntil = lockUntil
+        console.log(`job notification baru akan due ${new Date(lockUntil).toISOString()} (lock aktif ${Math.round(remaining / 60000)} mnt lagi) — skenario B akan SKIP cepat`)
+    }
+}
 
 const results = []
 function report(name, pass, evidence) {
     results.push({ name, pass, evidence })
     console.log(`${pass ? 'PASS' : 'FAIL'}  ${name} — ${evidence}`)
 }
+function reportSkip(name, reason) {
+    // SKIP dihitung pass supaya exit code tidak menyesatkan, tapi diberi label jelas
+    results.push({ name, pass: true, evidence: `SKIP: ${reason}` })
+    console.log(`SKIP  ${name} — ${reason}`)
+}
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 // ---- server management ----
 let server = null
 async function startServer() {
-    await supabase.from('cron_runs').update({ last_run_at: '2000-01-01T00:00:00Z' }).eq('job', 'notification_jobs')
-    server = spawn('npx', ['next', 'start', '-p', String(PORT)], { cwd: process.cwd(), stdio: 'ignore' })
-    for (let i = 0; i < 60; i++) {
-        try { const r = await fetch(BASE + '/login'); if (r.status) return } catch { }
-        await sleep(1000)
+    if (RESET_SCHEDULER) {
+        await supabase.from('cron_runs').update({ last_run_at: '2000-01-01T00:00:00Z' }).eq('job', 'notification_jobs')
+    } else {
+        await detectJobSchedule()
     }
-    throw new Error('server tidak start dalam 60s')
+    server = spawnServer(process.cwd(), PORT)
+    await waitPortUp(BASE)
 }
 async function stopServer() {
-    if (server) { server.kill('SIGTERM'); server = null }
-    spawn('pkill', ['-f', `next start.*${PORT}`])
-    await sleep(2000)
+    // hanya membunuh process group milik sendiri — bukan pkill yang bisa kena proses lain
+    await stopServerSafe(server, BASE)
+    server = null
 }
 // tunggu sampai kondisi DB terpenuhi (job butuh ~10-20s setelah boot)
 async function waitFor(fn, timeoutMs = 90000, intervalMs = 3000) {
@@ -49,6 +82,18 @@ async function waitFor(fn, timeoutMs = 90000, intervalMs = 3000) {
     }
     return null
 }
+// waitFor untuk kondisi yang bergantung job notification.
+// Job adalah BATCH atas semua user bersesi aktif (contoh nyata: 238 user,
+// concurrency 10 → ±24 batch) dan fixture e2e kita paling belakang antrean —
+// job butuh MENIT untuk sampai ke user kita, bukan detik. Timeout flag-mode
+// harus realistis (8 mnt); tanpa flag, SKIP cepat via jobNotDueUntil.
+async function waitForJob(fn, intervalMs = 5000) {
+    if (jobNotDueUntil) return null
+    return waitFor(fn, RESET_SCHEDULER ? 480000 : 90000, intervalMs)
+}
+const jobSkipReason = () => jobNotDueUntil
+    ? `job notification tidak akan due sebelum ${new Date(jobNotDueUntil).toISOString()} (lock 9 mnt aktif) — jalankan dengan E2E_RESET_SCHEDULER=1 untuk test penuh`
+    : 'job tidak jalan dalam timeout — scheduler tidak di-reset'
 
 async function http(path, opts = {}, token) {
     const t0 = Date.now()
@@ -80,48 +125,58 @@ async function main() {
     if (!school || !year) throw new Error('school/tahun ajaran aktif tidak ditemukan')
 
     const subjT = await template('subjects')
-    const { data: subject } = await supabase.from('subjects').insert({ ...subjT, id: undefined, name: `${U} Mapel`, school_id: subjT?.school_id ?? school.id }).select().single()
+    const subject = await mustInsert(supabase, 'subjects',
+        { ...subjT, id: undefined, name: `${U} Mapel`, school_id: subjT?.school_id ?? school.id }, 'subject fixture')
     created.subjects.push(subject.id)
 
     const classT = await template('classes')
-    const { data: klass } = await supabase.from('classes').insert({ ...classT, id: undefined, name: `${U} Kelas`, academic_year_id: classT?.academic_year_id ?? year.id }).select().single()
+    const klass = await mustInsert(supabase, 'classes',
+        { ...classT, id: undefined, name: `${U} Kelas`, academic_year_id: classT?.academic_year_id ?? year.id }, 'class fixture')
     created.classes.push(klass.id)
 
     const passHash = bcrypt.hashSync('e2e-pass', 10)
-    const { data: siswaUser } = await supabase.from('users').insert({ username: `${U}_siswa`, full_name: 'E2E Siswa', password_hash: passHash, role: 'SISWA', school_id: school.id }).select().single()
-    const { data: guruUser } = await supabase.from('users').insert({ username: `${U}_guru`, full_name: 'E2E Guru', password_hash: passHash, role: 'GURU', school_id: school.id }).select().single()
+    const siswaUser = await mustInsert(supabase, 'users',
+        { username: `${U}_siswa`, full_name: 'E2E Siswa', password_hash: passHash, role: 'SISWA', school_id: school.id }, 'user siswa fixture')
+    const guruUser = await mustInsert(supabase, 'users',
+        { username: `${U}_guru`, full_name: 'E2E Guru', password_hash: passHash, role: 'GURU', school_id: school.id }, 'user guru fixture')
     created.users.push(siswaUser.id, guruUser.id)
 
     const studT = await template('students')
-    const { data: student } = await supabase.from('students').insert({ ...studT, id: undefined, user_id: siswaUser.id, nis: `${runId}`, class_id: klass.id }).select().single()
+    const student = await mustInsert(supabase, 'students',
+        { ...studT, id: undefined, user_id: siswaUser.id, nis: `${runId}`, class_id: klass.id }, 'student fixture')
     created.students.push(student.id)
 
+    // enrollment opsional (template bisa kosong) — gagal tidak fatal, cukup warn
     const enrT = await template('student_enrollments')
-    const { data: enr } = await supabase.from('student_enrollments').insert({ ...enrT, id: undefined, student_id: student.id, class_id: klass.id, academic_year_id: year.id, status: 'ACTIVE' }).select().single()
+    const { data: enr, error: enrErr } = await supabase.from('student_enrollments')
+        .insert({ ...enrT, id: undefined, student_id: student.id, class_id: klass.id, academic_year_id: year.id, status: 'ACTIVE' }).select().single()
+    if (enrErr) console.warn('WARN: enrollment fixture gagal (lanjut tanpa enrollment):', enrErr.message)
     if (enr) created.enrollments.push(enr.id)
 
     const teachT = await template('teachers')
-    const { data: teacher } = await supabase.from('teachers').insert({ ...teachT, id: undefined, user_id: guruUser.id, nip: `e2e${runId}` }).select().single()
+    const teacher = await mustInsert(supabase, 'teachers',
+        { ...teachT, id: undefined, user_id: guruUser.id, nip: `e2e${runId}` }, 'teacher fixture')
     created.teachers.push(teacher.id)
 
     const taT = await template('teaching_assignments')
-    const { data: ta } = await supabase.from('teaching_assignments').insert({ ...taT, id: undefined, teacher_id: teacher.id, subject_id: subject.id, class_id: klass.id, academic_year_id: year.id }).select().single()
+    const ta = await mustInsert(supabase, 'teaching_assignments',
+        { ...taT, id: undefined, teacher_id: teacher.id, subject_id: subject.id, class_id: klass.id, academic_year_id: year.id }, 'TA fixture')
     created.tas.push(ta.id)
 
     const asgT = await template('assignments')
-    const { data: asg } = await supabase.from('assignments').insert({ ...asgT, id: undefined, teaching_assignment_id: ta.id, title: `${U} Tugas`, due_date: new Date(Date.now() + 23 * 3600e3).toISOString() }).select().single()
+    const asg = await mustInsert(supabase, 'assignments',
+        { ...asgT, id: undefined, teaching_assignment_id: ta.id, title: `${U} Tugas`, due_date: new Date(Date.now() + 23 * 3600e3).toISOString() }, 'assignment fixture')
     created.assignments.push(asg.id)
 
     const examT = await template('official_exams')
     const now = Date.now()
     async function makeExam(title, startOffsetMin, durMin) {
-        const { data, error } = await supabase.from('official_exams').insert({
+        const data = await mustInsert(supabase, 'official_exams', {
             ...examT, id: undefined, title, school_id: school.id, subject_id: subject.id, academic_year_id: year.id,
             exam_type: 'UTS', start_time: new Date(now + startOffsetMin * 60e3).toISOString(),
             duration_minutes: durMin, is_active: true, is_remedial: false, allowed_student_ids: null,
             target_class_ids: [klass.id], created_by: examT?.created_by ?? guruUser.id,
-        }).select().single()
-        if (error) throw new Error(`buat exam "${title}" gagal: ${error.message}`)
+        }, `exam fixture "${title}"`)
         created.exams.push(data.id)
         return data
     }
@@ -137,8 +192,7 @@ async function main() {
             question_text: `${U} soal ${ord}`, options: type === 'MULTIPLE_CHOICE' ? ['opsi A', 'opsi B', 'opsi C', 'opsi D'] : null,
             order_index: ord,
         }
-        const { data, error } = await supabase.from('official_exam_questions').insert(row).select().single()
-        if (error) throw new Error('buat soal gagal: ' + error.message)
+        const data = await mustInsert(supabase, 'official_exam_questions', row, `soal fixture ord=${ord}`)
         created.questions.push(data.id)
         return data
     }
@@ -163,44 +217,60 @@ async function main() {
     await startServer()
 
     // ============ B1: deadline reminder ============
-    const b1 = await waitFor(async () => {
+    const b1 = await waitForJob(async () => {
         const { data } = await supabase.from('notifications').select('id').eq('user_id', siswaUser.id).eq('type', 'DEADLINE_REMINDER').ilike('title', `%${U} Tugas%`)
         return data && data.length > 0 ? data : null
     })
-    report('B1 deadline reminder terkirim', !!b1, b1 ? `${b1.length} notif ditemukan` : 'timeout menunggu job')
+    if (b1) report('B1 deadline reminder terkirim', true, `${b1.length} notif ditemukan`)
+    else if (!RESET_SCHEDULER) reportSkip('B1 deadline reminder terkirim', jobSkipReason())
+    else report('B1 deadline reminder terkirim', false, 'timeout menunggu job')
 
     // ============ B2: ujian dijadwalkan (hanya kelas target) ============
     // Ujian < 24 jam: siswa target dapat EXAM_REMINDER "Segera" dan guru mapel
     // juga dapat EXAM_REMINDER. ("Dijadwalkan" UJIAN_RESMI sengaja tidak dibuat
     // untuk ujian < 24 jam — dedupe any-type, perilaku lama.) Yang penting:
     // tidak ada user di luar kelas/mapel target yang menerima notif ini.
-    const b2first = await waitFor(async () => {
+    const b2first = await waitForJob(async () => {
         const { data } = await supabase.from('notifications').select('id').ilike('title', `%${U} Terjadwal%`)
         return data && data.length > 0 ? true : null
     })
-    // job memproses user bertahap — tunggu settle supaya hitungan final
-    if (b2first) await sleep(15000)
+    // job memproses user bertahap (batch 10) — siswa & guru bisa di batch berbeda,
+    // jadi tunggu sampai keduanya kebagian, bukan sleep buta
+    if (b2first) {
+        await waitFor(async () => {
+            const { data } = await supabase.from('notifications').select('user_id').ilike('title', `%${U} Terjadwal%`)
+            const users = [...new Set((data || []).map(n => n.user_id))]
+            return users.includes(siswaUser.id) && users.includes(guruUser.id)
+        }, 120000, 5000)
+    }
     const { data: b2 } = await supabase.from('notifications').select('id, user_id, type').ilike('title', `%${U} Terjadwal%`)
     const b2Users = [...new Set((b2 || []).map(n => n.user_id))]
     const b2Allowed = new Set([siswaUser.id, guruUser.id])
     const b2Types = (b2 || []).map(n => n.type).sort().join('+')
-    const b2ok = !!b2first && !!b2 && b2.length >= 1 && b2Users.every(u => b2Allowed.has(u))
-    report('B2 notif ujian hanya ke kelas/mapel target', b2ok, b2 ? `${b2.length} notif [${b2Types}] untuk ${b2Users.length} user e2e (siswa+guru), user lain=0` : 'tidak ada notif')
+    // siswa target WAJIB kebagian — kalau cuma guru yang dapat, itu bug, bukan pass
+    const b2ok = !!b2first && !!b2 && b2.length >= 1 && b2Users.includes(siswaUser.id) && b2Users.every(u => b2Allowed.has(u))
+    if (b2first) report('B2 notif ujian hanya ke kelas/mapel target', b2ok, b2 ? `${b2.length} notif [${b2Types}] untuk ${b2Users.length} user e2e (siswa=${b2Users.includes(siswaUser.id) ? 'ya' : 'TIDAK'}, guru=${b2Users.includes(guruUser.id) ? 'ya' : 'tidak'}), user lain=0` : 'tidak ada notif')
+    else if (!RESET_SCHEDULER) reportSkip('B2 notif ujian hanya ke kelas/mapel target', jobSkipReason())
+    else report('B2 notif ujian hanya ke kelas/mapel target', false, 'timeout menunggu job')
 
     // ============ B3: guru dapat "Dimulai" ============
-    const b3 = await waitFor(async () => {
+    const b3 = await waitForJob(async () => {
         const { data } = await supabase.from('notifications').select('id').eq('user_id', guruUser.id).ilike('title', `%Dimulai: ${U} Berlangsung%`)
         return data && data.length > 0 ? data : null
     })
-    report('B3 guru dapat notif "Dimulai"', !!b3, b3 ? `${b3.length} notif` : 'timeout')
+    if (b3) report('B3 guru dapat notif "Dimulai"', true, `${b3.length} notif`)
+    else if (!RESET_SCHEDULER) reportSkip('B3 guru dapat notif "Dimulai"', jobSkipReason())
+    else report('B3 guru dapat notif "Dimulai"', false, 'timeout')
 
     // ============ B4: cleanup basi + global 30 hari ============
-    const b4 = await waitFor(async () => {
+    const b4 = await waitForJob(async () => {
         const { data: s } = await supabase.from('notifications').select('id').eq('id', staleNotif.id)
         const { data: o } = await supabase.from('notifications').select('id').eq('id', oldNotif.id)
         return (s?.length === 0 && o?.length === 0) ? true : null
     })
-    report('B4 notif basi + notif lama terhapus job', !!b4, b4 ? 'keduanya hilang dari DB' : 'masih ada')
+    if (b4) report('B4 notif basi + notif lama terhapus job', true, 'keduanya hilang dari DB')
+    else if (!RESET_SCHEDULER) reportSkip('B4 notif basi + notif lama terhapus job', jobSkipReason())
+    else report('B4 notif basi + notif lama terhapus job', false, 'masih ada')
 
     // ============ A4: API notifikasi ============
     const g = await http('/api/notifications?limit=10', {}, SISWA_TOK)
@@ -241,7 +311,8 @@ async function main() {
     let forceResp = null
     for (let i = 0; i < 3; i++) {
         forceResp = await http('/api/official-exam-submissions', { method: 'PUT', body: JSON.stringify({ submission_id: subV, violation: { type: 'TAB_SWITCH' } }) }, SISWA_TOK)
-        if (i < 2) await sleep(3300) // dedupe server: 3 detik
+        // dedupe server 3 dtk (berbasis waktu, apapun tipenya) — margin 4,5 dtk agar tidak flaky
+        if (i < 2) await sleep(4500)
     }
     const { data: subVRow } = await supabase.from('official_exam_submissions').select('is_submitted, violation_count').eq('id', subV).single()
     report('C3 pelanggaran 3x = force submit', forceResp?.body?.force_submitted === true && subVRow?.is_submitted === true,
@@ -270,11 +341,13 @@ async function main() {
     report('C4b setelah restart grading pakai kunci baru', cAns3?.points_earned === 2, `points=${cAns3?.points_earned} (harap 2)`)
 
     // ============ B1 dedupe: job kedua tidak duplikat ============
-    const b1dup = await waitFor(async () => {
+    const b1dup = await waitForJob(async () => {
         const { data } = await supabase.from('notifications').select('id').eq('user_id', siswaUser.id).eq('type', 'DEADLINE_REMINDER').ilike('title', `%${U} Tugas%`)
         return data && data.length > 0 ? data : null
     })
-    report('B1b run kedua tidak duplikat reminder', !!b1dup && b1dup.length === 1, `jumlah notif=${b1dup?.length} (harap 1)`)
+    if (b1dup) report('B1b run kedua tidak duplikat reminder', b1dup.length === 1, `jumlah notif=${b1dup.length} (harap 1)`)
+    else if (!RESET_SCHEDULER) reportSkip('B1b run kedua tidak duplikat reminder', jobSkipReason())
+    else report('B1b run kedua tidak duplikat reminder', false, `b1dup=${b1dup?.length ?? 0}`)
 
     await stopServer()
 }

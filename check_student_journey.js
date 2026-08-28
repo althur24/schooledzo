@@ -6,7 +6,7 @@
  */
 require('dotenv').config({ path: '.env.local' });
 const { createClient } = require('@supabase/supabase-js');
-const crypto = require('crypto');
+const { assertMin, makeSession, makeApi } = require('./loadtest/e2e/helpers.cjs');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3100';
 const supabase = createClient(
@@ -16,20 +16,9 @@ const supabase = createClient(
 
 let failures = 0;
 const ok = (cond, label) => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}`); if (!cond) failures++; };
-const api = (path, token, opts = {}) =>
-    fetch(`${BASE_URL}${path}`, {
-        ...opts,
-        headers: { 'Content-Type': 'application/json', Cookie: `session_token=${token}`, ...(opts.headers || {}) }
-    });
+const api = makeApi(BASE_URL);
 const iso = (ms) => new Date(ms).toISOString();
 const created = { exams: [], official: [], quizzes: [], examSubs: [], officialSubs: [], quizSubs: [], sessions: [] };
-
-async function makeSession(userId) {
-    const token = crypto.randomBytes(32).toString('hex');
-    await supabase.from('sessions').insert({ user_id: userId, token, expires_at: iso(Date.now() + 3600000) });
-    created.sessions.push(token);
-    return token;
-}
 
 // Kloning 1 soal sumber menjadi soal uji milik parent baru
 async function cloneQuestions(srcTable, fk, srcParentId, newParentId) {
@@ -57,11 +46,11 @@ async function main() {
     const NOW = Date.now();
     const { data: siswaUsers } = await supabase.from('users').select('id').eq('role', 'SISWA').limit(3);
     const { data: students } = await supabase.from('students').select('id, user_id, class_id, school_id').in('user_id', siswaUsers.map(u => u.id));
-    if (!students?.length) throw new Error('students tidak ditemukan');
+    assertMin(students?.length || 0, 3, 'siswa uji (3 alur journey butuh 3 siswa berbeda)');
 
     // ===== ULANGAN: perjalanan penuh =====
     console.log('\n=== ULANGAN: perjalanan siswa ===');
-    let exam = null, student = null, token = null;
+    let exam = null, student = null, token = null, srcUsed = null;
     const { data: srcExams } = await supabase.from('exams').select('*, teaching_assignment:teaching_assignments(class_id)').limit(15);
     for (const src of srcExams || []) {
         const classId = (Array.isArray(src.teaching_assignment) ? src.teaching_assignment[0] : src.teaching_assignment)?.class_id;
@@ -73,12 +62,16 @@ async function main() {
         Object.assign(row, { title: '[TEST] Journey Ulangan', is_active: true, start_time: iso(NOW - 60000), duration_minutes: 60, is_remedial: false, allowed_student_ids: [] });
         const { data: newExam, error } = await supabase.from('exams').insert(row).select().single();
         if (error) continue;
-        exam = newExam; student = st; token = await makeSession(st.user_id);
+        exam = newExam; student = st; token = await makeSession(supabase, st.user_id, created);
+        // simpan SUMBER yang benar-benar di-clone — soal harus dikloning dari sumber ini
+        // (dulu: srcExams.find(e => e.teaching_assignment)?.id bisa nyasar ke exam lain)
+        srcUsed = src;
         break;
     }
     if (!exam) throw new Error('Tidak bisa menyiapkan exam journey');
     created.exams.push(exam.id);
-    const qsExam = await cloneQuestions('exam_questions', 'exam_id', srcExams.find(e => e.teaching_assignment)?.id || exam.id, exam.id);
+    if (!srcUsed?.id) throw new Error('Sumber kloning soal ulangan hilang (srcUsed)');
+    const qsExam = await cloneQuestions('exam_questions', 'exam_id', srcUsed.id, exam.id);
 
     // 1. Siswa membuka halaman: detail + daftar soal
     const dRes = await api(`/api/exams/${exam.id}`, token);
@@ -104,14 +97,16 @@ async function main() {
 
     // ===== KUIS: perjalanan penuh =====
     console.log('\n=== KUIS: perjalanan siswa ===');
-    const { data: srcQuiz } = await supabase.from('quizzes').select('*').limit(1).single();
+    const { data: srcQuiz } = await supabase.from('quizzes').select('*').limit(1).maybeSingle();
+    if (!srcQuiz) throw new Error('Tidak ada baris sumber di quizzes — tidak bisa menyiapkan journey kuis');
     const qRow = { ...srcQuiz };
     delete qRow.id; delete qRow.created_at;
     Object.assign(qRow, { title: '[TEST] Journey Kuis', is_active: true, duration_minutes: 30, deadline: null, is_remedial: false, allowed_student_ids: [] });
-    const { data: quiz } = await supabase.from('quizzes').insert(qRow).select().single();
+    const { data: quiz, error: quizErr } = await supabase.from('quizzes').insert(qRow).select().single();
+    if (quizErr || !quiz) throw new Error('gagal clone quiz: ' + (quizErr?.message || 'tanpa data'));
     created.quizzes.push(quiz.id);
     await cloneQuestions('quiz_questions', 'quiz_id', srcQuiz.id, quiz.id);
-    const token2 = await makeSession(students[1].user_id);
+    const token2 = await makeSession(supabase, students[1].user_id, created);
 
     const qzRes = await api(`/api/quizzes/${quiz.id}`, token2);
     const quizDetail = await qzRes.json();
@@ -144,7 +139,7 @@ async function main() {
     if (offErr) throw new Error('gagal clone official: ' + offErr.message);
     created.official.push(offExam.id);
     await cloneQuestions('official_exam_questions', 'exam_id', srcOff.id, offExam.id);
-    const token3 = await makeSession(st3.user_id);
+    const token3 = await makeSession(supabase, st3.user_id, created);
 
     const offQRes = await api(`/api/official-exams/${offExam.id}/questions`, token3);
     const offQuestions = await offQRes.json();

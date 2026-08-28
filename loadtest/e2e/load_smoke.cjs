@@ -11,8 +11,8 @@
  */
 require('dotenv').config({ path: '.env.local' })
 const { createClient } = require('@supabase/supabase-js')
-const { spawn } = require('child_process')
 const bcrypt = require('bcryptjs')
+const { assertMin, mustInsert, spawnServer, stopServerSafe, waitPortUp } = require('./helpers.cjs')
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 const PORT = 3100
@@ -25,23 +25,20 @@ const NOTIF_EVERY_MS = 15000
 const metrics = { save: [], notif: [], start: [], submit: [], errors: 0, total: 0 }
 function record(bucket, ms) { metrics[bucket].push(ms) }
 function pct(arr, p) { if (!arr.length) return -1; const s = [...arr].sort((a, b) => a - b); return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))]) }
+function fmtPct(arr, p) { return arr.length ? `${pct(arr, p)}ms` : 'n/a (n=0)' }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
 
 let server = null
 async function startServer() {
-    server = spawn('npx', ['next', 'start', '-p', String(PORT)], { cwd: process.cwd(), stdio: 'ignore' })
-    for (let i = 0; i < 60; i++) {
-        try { const r = await fetch(BASE + '/login'); if (r.status) return } catch { }
-        await sleep(1000)
-    }
-    throw new Error('server tidak start')
+    server = spawnServer(process.cwd(), PORT)
+    await waitPortUp(BASE)
 }
 async function stopServer() {
-    if (server) { server.kill('SIGTERM'); server = null }
-    spawn('pkill', ['-f', `next start.*${PORT}`])
-    await sleep(2000)
+    // hanya membunuh process group milik sendiri — bukan pkill yang bisa kena proses lain
+    await stopServerSafe(server, BASE)
+    server = null
 }
 
 async function api(path, opts, token, bucket) {
@@ -70,34 +67,42 @@ async function main() {
     const runId = Date.now() % 100000
     const U = `ld_${runId}`
 
-    // fixtures
+    // fixtures — template wajib ada, gagal insert harus throw (bukan null diam-diam)
     const { data: school } = await supabase.from('schools').select('id').limit(1).single()
-    const { data: year } = await supabase.from('academic_years').select('id').eq('school_id', school.id).eq('is_active', true).single()
+    const { data: year } = await supabase.from('academic_years').select('id').eq('school_id', school.id).eq('is_active', true).limit(1).maybeSingle()
+    if (!school || !year) throw new Error('school/tahun ajaran aktif tidak ditemukan')
     const { data: subjT } = await supabase.from('subjects').select('*').limit(1)
     const { data: classT } = await supabase.from('classes').select('*').limit(1)
     const { data: examT } = await supabase.from('official_exams').select('*').limit(1)
     const { data: qT } = await supabase.from('official_exam_questions').select('*').limit(1)
     const { data: studT } = await supabase.from('students').select('*').limit(1)
+    assertMin(subjT?.length || 0, 1, 'template subjects')
+    assertMin(classT?.length || 0, 1, 'template classes')
+    assertMin(examT?.length || 0, 1, 'template official_exams')
+    assertMin(qT?.length || 0, 1, 'template official_exam_questions')
+    assertMin(studT?.length || 0, 1, 'template students')
 
-    const { data: subject } = await supabase.from('subjects').insert({ ...subjT[0], id: undefined, name: `${U} Mapel`, school_id: school.id }).select().single()
+    const subject = await mustInsert(supabase, 'subjects',
+        { ...subjT[0], id: undefined, name: `${U} Mapel`, school_id: school.id }, 'subject fixture')
     created.subjects.push(subject.id)
-    const { data: klass } = await supabase.from('classes').insert({ ...classT[0], id: undefined, name: `${U} Kelas`, academic_year_id: year.id }).select().single()
+    const klass = await mustInsert(supabase, 'classes',
+        { ...classT[0], id: undefined, name: `${U} Kelas`, academic_year_id: year.id }, 'class fixture')
     created.classes.push(klass.id)
 
     const now = Date.now()
-    const { data: exam } = await supabase.from('official_exams').insert({
+    const exam = await mustInsert(supabase, 'official_exams', {
         ...examT[0], id: undefined, title: `${U} TO`, school_id: school.id, subject_id: subject.id, academic_year_id: year.id,
         exam_type: 'UTS', start_time: new Date(now - 10 * 60e3).toISOString(), duration_minutes: 120,
         is_active: true, is_remedial: false, allowed_student_ids: null, target_class_ids: [klass.id],
-    }).select().single()
+    }, 'exam fixture')
     created.exams.push(exam.id)
 
     const qIds = []
     for (let q = 1; q <= 10; q++) {
-        const { data } = await supabase.from('official_exam_questions').insert({
+        const data = await mustInsert(supabase, 'official_exam_questions', {
             ...qT[0], id: undefined, exam_id: exam.id, question_text: `${U} soal ${q}`, question_type: 'MULTIPLE_CHOICE',
             options: ['A1', 'B1', 'C1', 'D1'], correct_answer: 'A', points: 10, order_index: q,
-        }).select().single()
+        }, `soal #${q}`)
         created.questions.push(data.id)
         qIds.push(data.id)
     }
@@ -106,9 +111,12 @@ async function main() {
     const users = []
     for (let n = 1; n <= N_STUDENTS; n++) {
         const pad = String(n).padStart(3, '0')
-        const { data: u } = await supabase.from('users').insert({ username: `${U}_${pad}`, full_name: `${U} Siswa ${pad}`, password_hash: passHash, role: 'SISWA', school_id: school.id }).select().single()
-        const { data: st } = await supabase.from('students').insert({ ...studT[0], id: undefined, user_id: u.id, nis: `${runId}${pad}`, class_id: klass.id, school_id: studT[0]?.school_id ?? school.id }).select().single()
-        const { data: se } = await supabase.from('sessions').insert({ user_id: u.id, token: `${U}_tok_${pad}`, expires_at: new Date(now + 86400e3).toISOString() }).select().single()
+        const u = await mustInsert(supabase, 'users',
+            { username: `${U}_${pad}`, full_name: `${U} Siswa ${pad}`, password_hash: passHash, role: 'SISWA', school_id: school.id }, `user siswa ${pad}`)
+        const st = await mustInsert(supabase, 'students',
+            { ...studT[0], id: undefined, user_id: u.id, nis: `${runId}${pad}`, class_id: klass.id, school_id: studT[0]?.school_id ?? school.id }, `student ${pad}`)
+        const se = await mustInsert(supabase, 'sessions',
+            { user_id: u.id, token: `${U}_tok_${pad}`, expires_at: new Date(now + 86400e3).toISOString() }, `session ${pad}`)
         created.users.push(u.id); created.students.push(st.id); created.sessions.push(se.id)
         users.push({ token: `${U}_tok_${pad}` })
     }
@@ -145,11 +153,15 @@ async function main() {
     const errRate = metrics.total ? (metrics.errors / metrics.total * 100).toFixed(2) : '0'
     console.log('\n===== HASIL SMOKE 50 VU =====')
     console.log(`total request : ${metrics.total} (error ${metrics.errors} = ${errRate}%)`)
-    console.log(`start_exam    : n=${metrics.start.length} p50=${pct(metrics.start, .5)}ms p95=${pct(metrics.start, .95)}ms`)
-    console.log(`save_answer   : n=${metrics.save.length} p50=${pct(metrics.save, .5)}ms p95=${pct(metrics.save, .95)}ms  (target p95<800)`)
-    console.log(`notifications : n=${metrics.notif.length} p50=${pct(metrics.notif, .5)}ms p95=${pct(metrics.notif, .95)}ms  (target p95<300)`)
-    console.log(`submit        : n=${metrics.submit.length} p50=${pct(metrics.submit, .5)}ms p95=${pct(metrics.submit, .95)}ms`)
-    const pass = metrics.errors / metrics.total < 0.01 && pct(metrics.save, .95) < 800 && pct(metrics.notif, .95) < 300
+    console.log(`start_exam    : n=${metrics.start.length} p50=${fmtPct(metrics.start, .5)} p95=${fmtPct(metrics.start, .95)}`)
+    console.log(`save_answer   : n=${metrics.save.length} p50=${fmtPct(metrics.save, .5)} p95=${fmtPct(metrics.save, .95)}  (target p95<800)`)
+    console.log(`notifications : n=${metrics.notif.length} p50=${fmtPct(metrics.notif, .5)} p95=${fmtPct(metrics.notif, .95)}  (target p95<300)`)
+    console.log(`submit        : n=${metrics.submit.length} p50=${fmtPct(metrics.submit, .5)} p95=${fmtPct(metrics.submit, .95)}`)
+    // guard array kosong: pct() = -1 saat n=0 bisa lolos threshold <800 secara palsu
+    const pass = metrics.total > 0
+        && metrics.errors / metrics.total < 0.01
+        && metrics.save.length > 0 && pct(metrics.save, .95) < 800
+        && metrics.notif.length > 0 && pct(metrics.notif, .95) < 300
     console.log(pass ? 'D1: PASS (semua threshold terpenuhi)' : 'D1: FAIL (ada threshold dilanggar)')
 }
 
