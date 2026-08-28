@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { fetchAllRows } from '@/lib/fetchAllRows'
+import { batchedIn } from '@/lib/batchedIn'
 
 export async function GET(request: NextRequest) {
     try {
@@ -15,56 +17,78 @@ export async function GET(request: NextRequest) {
         // Run all diagnostic checks in parallel (scoped to school)
         const schoolFilter = (query: any) => schoolId ? query.eq('school_id', schoolId) : query
 
+        // fetchAllRows untuk tabel yang bisa >1000 baris (sekolah besar: 1088+
+        // siswa, ribuan sesi/submissions) — query biasa terpotong diam-diam
+        // sehingga statistik & check diagnostik salah. .order('id') wajib agar
+        // paginasi range-loop stabil (tanpa order bisa skip/duplikat baris).
         const [
-            usersResult,
-            studentsResult,
-            teachersResult,
+            users,
+            students,
+            teachers,
             sessionsResult,
             orphanStudentsResult,
             orphanTeachersResult,
             emptyQuizzesResult,
             emptyExamsResult,
-            ungradedSubmissionsResult,
             classesResult,
             noClassStudentsResult,
             academicYearsResult,
         ] = await Promise.all([
             // Total users by role (scoped)
-            schoolFilter(supabase.from('users').select('id, role')),
+            fetchAllRows(schoolFilter(supabase.from('users').select('id, role')).order('id')),
             // Total students (scoped)
-            schoolFilter(supabase.from('students').select('id, user_id, class_id, status')),
+            fetchAllRows(schoolFilter(supabase.from('students').select('id, user_id, class_id, status')).order('id')),
             // Total teachers (scoped)
-            schoolFilter(supabase.from('teachers').select('id, user_id')),
+            fetchAllRows(schoolFilter(supabase.from('teachers').select('id, user_id')).order('id')),
             // Active sessions (join through users for school scope)
-            supabase.from('sessions').select('id, expires_at, user:users!inner(school_id)')
-                .eq('users.school_id', schoolId || ''),
+            fetchAllRows(supabase.from('sessions').select('id, expires_at, user:users!inner(school_id)')
+                .eq('users.school_id', schoolId || '').order('id')),
             // Orphaned students (scoped)
-            schoolFilter(supabase.from('students').select('id, user_id, user:users!students_user_id_fkey(id)')),
+            fetchAllRows(schoolFilter(supabase.from('students').select('id, user_id, user:users!students_user_id_fkey(id)')).order('id')),
             // Orphaned teachers (scoped)
-            schoolFilter(supabase.from('teachers').select('id, user_id, user:users(id)')),
+            fetchAllRows(schoolFilter(supabase.from('teachers').select('id, user_id, user:users(id)')).order('id')),
             // Quizzes with no questions (chain-filtered via TA → academic_year)
             supabase.from('quizzes').select('id, title, quiz_questions(id), teaching_assignment:teaching_assignments!inner(academic_year:academic_years!inner(school_id))').eq('is_active', true).eq('teaching_assignments.academic_years.school_id', schoolId || ''),
             // Exams with no questions (similar chain)
             supabase.from('exams').select('id, title, exam_questions(id), teaching_assignment:teaching_assignments!inner(academic_year:academic_years!inner(school_id))').eq('is_active', true).eq('teaching_assignments.academic_years.school_id', schoolId || ''),
-            // Ungraded submissions (scoped via assignment → TA → academic year)
-            supabase.from('student_submissions').select('id, graded_at, assignment:assignments!inner(teaching_assignment:teaching_assignments!inner(academic_year:academic_years!inner(school_id)))').is('graded_at', null).eq('assignments.teaching_assignments.academic_years.school_id', schoolId || ''),
             // Classes (scoped via academic year)
             supabase.from('classes').select('id, name, academic_year:academic_years!inner(school_id)').eq('academic_years.school_id', schoolId || ''),
             // Students without class (scoped)
             schoolFilter(supabase.from('students').select('id').is('class_id', null).eq('status', 'ACTIVE')),
-            // Academic years (scoped)
-            schoolFilter(supabase.from('academic_years').select('id, year, is_active')),
+            // Academic years (scoped) — kolomnya `name`, bukan `year`
+            schoolFilter(supabase.from('academic_years').select('id, name, is_active')),
         ])
 
         const now = new Date()
-        const users = usersResult.data || []
-        const sessions = sessionsResult.data || []
-        const expiredSessions = sessions.filter(s => new Date(s.expires_at) < now)
-        const activeSessions = sessions.filter(s => new Date(s.expires_at) >= now)
+
+        // Ungraded submissions (scoped via assignment → TA → academic year).
+        // student_submissions TIDAK punya kolom graded_at. Anti-join "belum dinilai"
+        // tidak bisa lewat embed filter (PostgREST tidak memfilter baris utama dari
+        // embed non-inner), jadi dihitung dua langkah: submissions sekolah ini
+        // dikurangi yang sudah punya baris grades.
+        const schoolSubmissions = await fetchAllRows<{ id: string }>(supabase
+            .from('student_submissions')
+            .select('id, assignment:assignments!inner(teaching_assignment:teaching_assignments!inner(academic_year:academic_years!inner(school_id)))')
+            .eq('assignments.teaching_assignments.academic_years.school_id', schoolId || '')
+            .order('id'))
+        const gradedIds = new Set<string>()
+        if (schoolSubmissions.length > 0) {
+            const gradedRows = await batchedIn<{ submission_id: string }>(
+                'submission_id',
+                schoolSubmissions.map(s => s.id),
+                (chunk) => supabase.from('grades').select('submission_id').in('submission_id', chunk)
+            )
+            for (const g of gradedRows) gradedIds.add(g.submission_id)
+        }
+        const ungradedSubmissionsResult = schoolSubmissions.filter(s => !gradedIds.has(s.id))
+
+        const sessions = sessionsResult || []
+        const expiredSessions = sessions.filter((s: any) => new Date(s.expires_at) < now)
+        const activeSessions = sessions.filter((s: any) => new Date(s.expires_at) >= now)
 
         // Count orphaned records
-        const orphanStudents = (orphanStudentsResult.data || []).filter((s: any) => !s.user)
-        const orphanTeachers = (orphanTeachersResult.data || []).filter((t: any) => !t.user)
+        const orphanStudents = (orphanStudentsResult || []).filter((s: any) => !s.user)
+        const orphanTeachers = (orphanTeachersResult || []).filter((t: any) => !t.user)
 
         // Empty quizzes/exams (active but no questions)
         const emptyQuizzes = (emptyQuizzesResult.data || []).filter((q: any) => !q.quiz_questions || q.quiz_questions.length === 0)
@@ -147,11 +171,11 @@ export async function GET(request: NextRequest) {
                 {
                     id: 'ungraded_submissions',
                     name: 'Tugas Belum Dinilai',
-                    status: (ungradedSubmissionsResult.data?.length || 0) === 0 ? 'healthy' : 'info',
-                    message: (ungradedSubmissionsResult.data?.length || 0) === 0
+                    status: (ungradedSubmissionsResult?.length || 0) === 0 ? 'healthy' : 'info',
+                    message: (ungradedSubmissionsResult?.length || 0) === 0
                         ? 'Semua tugas sudah dinilai'
-                        : `${ungradedSubmissionsResult.data?.length} tugas menunggu penilaian guru`,
-                    count: ungradedSubmissionsResult.data?.length || 0,
+                        : `${ungradedSubmissionsResult?.length} tugas menunggu penilaian guru`,
+                    count: ungradedSubmissionsResult?.length || 0,
                     severity: 'info',
                 },
                 {
@@ -181,11 +205,11 @@ export async function GET(request: NextRequest) {
                 guru: guruCount,
                 siswa: siswaCount,
                 wali: waliCount,
-                totalStudents: studentsResult.data?.length || 0,
-                totalTeachers: teachersResult.data?.length || 0,
+                totalStudents: students.length,
+                totalTeachers: teachers.length,
                 totalClasses: classesResult.data?.length || 0,
                 activeSessions: activeSessions.length,
-                activeAcademicYear: (academicYearsResult.data || []).find((y: any) => y.is_active)?.year || 'Tidak ada',
+                activeAcademicYear: (academicYearsResult.data || []).find((y: any) => y.is_active)?.name || 'Tidak ada',
             },
         }
 

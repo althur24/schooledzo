@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { resolveKkm } from '@/lib/resolveKkm'
+import { batchedIn } from '@/lib/batchedIn'
+import { fetchAllRows } from '@/lib/fetchAllRows'
+
+// batchedIn per 100 id (batas URL) + fetchAllRows per chunk: satu chunk 100 id
+// bisa mengandung >1000 baris yang otherwise terpotong diam-diam.
+function batchedFetchAll<T>(column: string, ids: string[], buildQuery: (chunk: string[]) => any): Promise<T[]> {
+    return batchedIn<T>(column, ids, async (chunk) => ({ data: await fetchAllRows<T>(buildQuery(chunk)), error: null }))
+}
 
 // Helper: Supabase single-relation selects sometimes type as array
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,12 +64,23 @@ export async function GET(request: NextRequest) {
             academic_year: unwrap(c.academic_year)
         }))
 
+        // Hanya kelas dari tahun ajaran AKTIF. Record wali kelas tahun lama tetap
+        // tersimpan untuk histori, tapi TIDAK boleh bocor ke halaman wali kelas —
+        // guru yang sudah bukan wali di tahun aktif akan melihat kelas lama yang
+        // kosong (bug "kelas hantu": kelas tampil tapi 0 siswa).
+        const activeClasses = classesUnwrapped.filter((c: any) => c.academic_year?.is_active)
+
+        if (activeClasses.length === 0) {
+            return NextResponse.json({ classes: [], students: [], grades: [] })
+        }
+
         // Prioritize class from active academic year
-        const activeYearClass = classesUnwrapped.find((c: any) => c.academic_year?.is_active)
-        const classId = request.nextUrl.searchParams.get('class_id') || activeYearClass?.id || classesUnwrapped[0]?.id
+        const activeYearClass = activeClasses[0]
+        const requestedClassId = request.nextUrl.searchParams.get('class_id')
+        const classId = (requestedClassId && activeClasses.find((c: any) => c.id === requestedClassId)?.id) || activeYearClass.id
 
         if (!classId) {
-            return NextResponse.json({ classes, students: [], grades: [] })
+            return NextResponse.json({ classes: activeClasses, students: [], grades: [] })
         }
 
         // Get students in this class
@@ -97,7 +116,8 @@ export async function GET(request: NextRequest) {
 
         if (taIds.length === 0 || !students || students.length === 0) {
             return NextResponse.json({
-                classes,
+                classes: activeClasses,
+                current_class_id: classId,
                 students: students || [],
                 subjects: activeAssignments.map((ta) => unwrap(ta.subject)),
                 grades: []
@@ -108,16 +128,19 @@ export async function GET(request: NextRequest) {
 
         // Fetch all grades across subjects for these students
         // 1. Assignment submissions + grades
-        const { data: submissions } = await supabase
+        // fetchAllRows: 40 siswa × banyak tugas setahun bisa >1000 submissions —
+        // query biasa terpotong diam-diam di 1000 baris.
+        const submissions = await fetchAllRows(supabase
             .from('student_submissions')
             .select(`
                 id, student_id, assignment_id, submitted_at,
                 assignment:assignments(id, title, teaching_assignment_id, type)
             `)
             .in('student_id', studentIds)
+            .order('id'))
 
         // Filter submissions to only those for this class's teaching assignments
-        const relevantSubmissions = (submissions || []).filter((s: any) =>
+        const relevantSubmissions = submissions.filter((s: any) =>
             taIds.includes(s.assignment?.teaching_assignment_id)
         )
 
@@ -125,49 +148,57 @@ export async function GET(request: NextRequest) {
 
         let grades: any[] = []
         if (submissionIds.length > 0) {
-            const { data: gradeData } = await supabase
-                .from('grades')
-                .select('*')
-                .in('submission_id', submissionIds)
-            grades = gradeData || []
+            // batchedIn per 100 id (batas URL) + fetchAllRows per chunk
+            grades = await batchedFetchAll<any>(
+                'submission_id', submissionIds,
+                (chunk) => supabase.from('grades').select('*').in('submission_id', chunk).order('id')
+            )
         }
 
         // 2. Quiz submissions
-        const { data: quizzes } = await supabase
+        const quizzes = await fetchAllRows(supabase
             .from('quizzes')
             .select('id, title, teaching_assignment_id')
             .in('teaching_assignment_id', taIds)
+            .order('id'))
 
-        const quizIds = (quizzes || []).map((q) => q.id)
+        const quizIds = quizzes.map((q: any) => q.id)
 
         let quizSubmissions: any[] = []
         if (quizIds.length > 0) {
-            const { data: qSubs } = await supabase
-                .from('quiz_submissions')
-                .select('id, quiz_id, student_id, total_score, max_score, is_graded')
-                .in('quiz_id', quizIds)
-                .in('student_id', studentIds)
-                .not('submitted_at', 'is', null)
-            quizSubmissions = qSubs || []
+            quizSubmissions = await batchedFetchAll<any>(
+                'quiz_id', quizIds,
+                (chunk) => supabase
+                    .from('quiz_submissions')
+                    .select('id, quiz_id, student_id, total_score, max_score, is_graded')
+                    .in('quiz_id', chunk)
+                    .in('student_id', studentIds)
+                    .not('submitted_at', 'is', null)
+                    .order('id')
+            )
         }
 
         // 3. Exam submissions
-        const { data: exams } = await supabase
+        const exams = await fetchAllRows(supabase
             .from('exams')
             .select('id, title, teaching_assignment_id')
             .in('teaching_assignment_id', taIds)
+            .order('id'))
 
-        const examIds = (exams || []).map((e) => e.id)
+        const examIds = exams.map((e: any) => e.id)
 
         let examSubmissions: any[] = []
         if (examIds.length > 0) {
-            const { data: eSubs } = await supabase
-                .from('exam_submissions')
-                .select('id, exam_id, student_id, total_score, is_submitted')
-                .in('exam_id', examIds)
-                .in('student_id', studentIds)
-                .eq('is_submitted', true)
-            examSubmissions = eSubs || []
+            examSubmissions = await batchedFetchAll<any>(
+                'exam_id', examIds,
+                (chunk) => supabase
+                    .from('exam_submissions')
+                    .select('id, exam_id, student_id, total_score, is_submitted')
+                    .in('exam_id', chunk)
+                    .in('student_id', studentIds)
+                    .eq('is_submitted', true)
+                    .order('id')
+            )
         }
 
         // 4. Official exams (UTS/UAS) — fetch by subject IDs for this class
@@ -191,13 +222,16 @@ export async function GET(request: NextRequest) {
 
             const oeIds = officialExams.map((oe: any) => oe.id)
             if (oeIds.length > 0) {
-                const { data: oeSubs } = await supabase
-                    .from('official_exam_submissions')
-                    .select('id, exam_id, student_id, total_score, max_score, is_submitted, is_graded')
-                    .in('exam_id', oeIds)
-                    .in('student_id', studentIds)
-                    .eq('is_submitted', true)
-                officialExamSubs = oeSubs || []
+                officialExamSubs = await batchedFetchAll<any>(
+                    'exam_id', oeIds,
+                    (chunk) => supabase
+                        .from('official_exam_submissions')
+                        .select('id, exam_id, student_id, total_score, max_score, is_submitted, is_graded')
+                        .in('exam_id', chunk)
+                        .in('student_id', studentIds)
+                        .eq('is_submitted', true)
+                        .order('id')
+                )
             }
         }
 
@@ -296,7 +330,7 @@ export async function GET(request: NextRequest) {
         })
 
         return NextResponse.json({
-            classes,
+            classes: activeClasses,
             current_class_id: classId,
             students: students || [],
             subjects: await Promise.all(
@@ -304,7 +338,7 @@ export async function GET(request: NextRequest) {
                     .map((ta) => unwrap(ta.subject))
                     .filter((s: any, i: number, arr: any[]) => s && arr.findIndex((x: any) => x?.id === s.id) === i)
                     .map(async (subj: any) => {
-                        const c = classesUnwrapped.find((cls: any) => cls.id === classId)
+                        const c = activeClasses.find((cls: any) => cls.id === classId)
                         const resolvedKkm = await resolveKkm(subj.id, c?.school_level, c?.grade_level)
                         return { ...subj, kkm: resolvedKkm }
                     })
@@ -314,9 +348,9 @@ export async function GET(request: NextRequest) {
             raw: {
                 assignments: relevantSubmissions,
                 grades,
-                quizzes: quizzes || [],
+                quizzes,
                 quiz_submissions: quizSubmissions,
-                exams: exams || [],
+                exams,
                 exam_submissions: examSubmissions,
                 official_exams: officialExams,
                 official_exam_submissions: officialExamSubs

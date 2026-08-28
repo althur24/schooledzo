@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { resolveKkm } from '@/lib/resolveKkm'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // ─── Shared helpers ─────────────────────────────────────────────
 function median(arr: number[]): number {
@@ -88,7 +89,9 @@ export async function GET(
         const totalMaxScore = allQuestions.reduce((sum, q) => sum + (q.points || 0), 0)
 
         // 3) Fetch all submitted quiz submissions
-        const { data: submissions } = await supabase
+        // fetchAllRows: kuis seangkatan/sekolah bisa >1000 peserta — query biasa
+        // terpotong diam-diam sehingga analitik (rata-rata, distribusi, ranking) salah.
+        const allSubmissions = await fetchAllRows(supabase
             .from('quiz_submissions')
             .select(`
                 id, student_id, started_at, submitted_at, total_score, max_score, answers,
@@ -96,8 +99,7 @@ export async function GET(
             `)
             .eq('quiz_id', quizId)
             .not('submitted_at', 'is', null)
-
-        const allSubmissions = submissions || []
+            .order('id'))
 
         // 4) Total students in class — count by ENROLLMENT. class_id is unique per
         //    (class, academic year) and enrollment records persist after promotion/

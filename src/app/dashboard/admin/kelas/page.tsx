@@ -115,6 +115,10 @@ export default function KelasPage() {
                 setEditingClass(null)
                 setFormData({ name: '', academic_year_id: '', grade_level: null, school_level: null })
                 fetchData()
+            } else {
+                // Tampilkan pesan (mis. 409 kelas duplikat) — sebelumnya gagal diam-diam
+                const data = await res.json().catch(() => ({}))
+                alert(data.error || 'Gagal menyimpan kelas')
             }
         } finally {
             setSaving(false)

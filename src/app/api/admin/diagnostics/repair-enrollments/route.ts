@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 /**
  * POST /api/admin/diagnostics/repair-enrollments
@@ -19,7 +20,9 @@ export async function POST(request: NextRequest) {
 
         // Find all enrollments where the enrollment's academic_year_id
         // doesn't match the class's academic_year_id
-        const { data: enrollments, error: fetchError } = await supabase
+        // fetchAllRows: enrollment ACTIVE lintas sekolah bisa >1000 baris —
+        // query biasa terpotong diam-diam sehingga repair tidak lengkap.
+        const enrollments = await fetchAllRows(supabase
             .from('student_enrollments')
             .select(`
                 id,
@@ -29,10 +32,9 @@ export async function POST(request: NextRequest) {
                 enrollment_class:classes!student_enrollments_class_id_fkey(id, academic_year_id)
             `)
             .eq('status', 'ACTIVE')
+            .order('id'))
 
-        if (fetchError) throw fetchError
-
-        const mismatched = (enrollments || []).filter((e: any) => {
+        const mismatched = enrollments.filter((e: any) => {
             if (!e.enrollment_class) return false
             return e.academic_year_id !== e.enrollment_class.academic_year_id
         })

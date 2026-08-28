@@ -101,6 +101,22 @@ export async function POST(request: NextRequest) {
             }
         }
 
+        // Anti-duplikat: nama + tingkat + jenjang harus unik per tahun ajaran
+        let dupQuery = supabase
+            .from('classes')
+            .select('id, name')
+            .eq('name', name)
+            .eq('academic_year_id', academic_year_id)
+        if (grade_level === null || grade_level === undefined) dupQuery = dupQuery.is('grade_level', null)
+        else dupQuery = dupQuery.eq('grade_level', grade_level)
+        if (school_level === null || school_level === undefined) dupQuery = dupQuery.is('school_level', null)
+        else dupQuery = dupQuery.eq('school_level', school_level)
+        const { data: duplicate } = await dupQuery.maybeSingle()
+
+        if (duplicate) {
+            return NextResponse.json({ error: `Kelas "${name}" sudah ada di tahun ajaran ini` }, { status: 409 })
+        }
+
         const { data, error } = await supabase
             .from('classes')
             .insert({ name, academic_year_id, grade_level, school_level })

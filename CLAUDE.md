@@ -28,6 +28,16 @@ supabase gen types typescript --linked > src/lib/database.types.ts
 
 Adopsi bertahap: saat menyentuh sebuah route, pasang `createClient<Database>` lokal atau perbaiki typing route itu saja.
 
+## Batas Query Supabase (WAJIB)
+
+REST API Supabase (PostgREST) **memotong hasil query diam-diam di 1000 baris** (respons tetap 200 OK, tanpa error). Karena itu:
+
+- Query tabel yang bisa >1000 baris (students, submissions, grades, dll) **wajib** dibungkus `fetchAllRows` (`src/lib/fetchAllRows.ts`).
+- `.in(kolom, ids)` dengan ratusan id **wajib** `batchedIn` (`src/lib/batchedIn.ts`, belah per 100 id — batas URL 16KB).
+- Kombinasi keduanya (`batchedIn` + `fetchAllRows` per chunk) jika satu chunk bisa >1000 baris — pola `batchedFetchAll` di `src/app/api/dashboard/guru/warnings/route.ts`.
+- Query berisiko tapi tanpa `.order()` harus diberi order + tiebreaker unik (mis. `.order('id')`) sebelum dibungkus `fetchAllRows` — paginasi tanpa order stabil bisa melewatkan/duplikat baris.
+- Aman tanpa helper: query dengan `.single()`/`.maybeSingle()`, filter `.eq('id', ...)`, atau tabel yang pasti kecil (classes, subjects, academic_years, schools).
+
 ## Perintah umum
 
 - Dev: `npm run dev` • Build: `npm run build` • Typecheck: `npx tsc --noEmit`

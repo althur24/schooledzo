@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -8,7 +8,8 @@ import Card from '@/components/ui/Card'
 import { PageHeader, Button, EmptyState } from '@/components/ui'
 import {
     HeartHandshake, Users, TrendingUp, Award,
-    Download, Loader2, ChevronRight, Search
+    Download, Loader2, ChevronRight, Search,
+    ChevronDown, FileSpreadsheet, FileText
 } from 'lucide-react'
 
 interface WaliData {
@@ -25,6 +26,19 @@ export default function WaliKelasPage() {
     const [data, setData] = useState<WaliData | null>(null)
     const [loading, setLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState('')
+    const [exportOpen, setExportOpen] = useState(false)
+    const [exporting, setExporting] = useState(false)
+    const exportRef = useRef<HTMLDivElement>(null)
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+                setExportOpen(false)
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [])
 
     useEffect(() => {
         if (user && user.role !== 'GURU') {
@@ -66,9 +80,9 @@ export default function WaliKelasPage() {
         return Math.round(subjectAvgs.reduce((a, b) => a + b, 0) / subjectAvgs.length)
     }
 
-    // Export to Excel/CSV
-    const handleExport = () => {
-        if (!data) return
+    // Build export table data (headers + rows)
+    const buildExportData = () => {
+        if (!data) return null
 
         const subjects = data.subjects || []
         const headers = ['No', 'NIS', 'Nama Siswa', ...subjects.map((s: any) => s.name), 'Rata-rata']
@@ -97,15 +111,41 @@ export default function WaliKelasPage() {
             ]
         })
 
-        const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
         const className = data.classes?.find((c: any) => c.id === data.current_class_id)?.name || 'kelas'
-        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `rekap_wali_kelas_${className}.csv`
-        a.click()
-        URL.revokeObjectURL(url)
+        return { headers, rows, className }
+    }
+
+    // Export to Excel (.xlsx) or CSV
+    const handleExport = async (format: 'xlsx' | 'csv') => {
+        setExportOpen(false)
+        const exportData = buildExportData()
+        if (!exportData) return
+
+        setExporting(true)
+        try {
+            const { headers, rows, className } = exportData
+            const safeClassName = className.replace(/\s+/g, '_')
+
+            if (format === 'xlsx') {
+                // Lazy load xlsx only when user clicks export
+                const XLSX = await import('xlsx')
+                const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
+                const wb = XLSX.utils.book_new()
+                XLSX.utils.book_append_sheet(wb, ws, 'Rekap Wali Kelas')
+                XLSX.writeFile(wb, `rekap_wali_kelas_${safeClassName}.xlsx`)
+            } else {
+                const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
+                const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `rekap_wali_kelas_${safeClassName}.csv`
+                a.click()
+                URL.revokeObjectURL(url)
+            }
+        } finally {
+            setExporting(false)
+        }
     }
 
     // Get score color
@@ -191,9 +231,40 @@ export default function WaliKelasPage() {
                 backHref="/dashboard/guru"
                 icon={<HeartHandshake className="w-6 h-6 text-pink-500" />}
                 action={
-                    <Button onClick={handleExport} icon={<Download className="w-4 h-4" />} variant="secondary">
-                        Export CSV
-                    </Button>
+                    <div ref={exportRef} className="relative">
+                        <Button
+                            onClick={() => setExportOpen(o => !o)}
+                            icon={exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                            variant="secondary"
+                            disabled={exporting}
+                        >
+                            <span className="flex items-center gap-1">
+                                Export
+                                <ChevronDown className={`w-4 h-4 transition-transform ${exportOpen ? 'rotate-180' : ''}`} />
+                            </span>
+                        </Button>
+
+                        {exportOpen && (
+                            <div className="absolute right-0 z-50 mt-1 w-44 rounded-xl bg-white dark:bg-surface-dark border border-secondary/20 dark:border-white/10 shadow-lg py-1">
+                                <button
+                                    type="button"
+                                    onClick={() => handleExport('xlsx')}
+                                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm font-medium text-left text-text-main dark:text-white hover:bg-secondary/10 dark:hover:bg-white/5 transition-colors"
+                                >
+                                    <FileSpreadsheet className="w-4 h-4 text-green-600 dark:text-green-400" />
+                                    Excel (.xlsx)
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleExport('csv')}
+                                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm font-medium text-left text-text-main dark:text-white hover:bg-secondary/10 dark:hover:bg-white/5 transition-colors"
+                                >
+                                    <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                    CSV (.csv)
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 }
             />
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // GET submissions for an assignment
 export async function GET(request: NextRequest) {
@@ -35,6 +36,8 @@ export async function GET(request: NextRequest) {
         grade:grades(*)
       `)
             .order('submitted_at', { ascending: false })
+            // Tiebreaker stabil untuk paginasi fetchAllRows (submitted_at banyak duplikat/NULL)
+            .order('id', { ascending: false })
 
         if (assignmentId) {
             query = query.eq('assignment_id', assignmentId)
@@ -88,9 +91,9 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        const { data, error } = await query
-
-        if (error) throw error
+        // fetchAllRows: guru/admin tanpa assignment_id mendapat semua submission
+        // tahun aktif — query biasa terpotong diam-diam di 1000 baris.
+        const data = await fetchAllRows(query)
 
         if (assignmentId && includeMissing === 'true') {
             const { data: assignmentInfo } = await supabase

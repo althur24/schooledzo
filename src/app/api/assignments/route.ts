@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
+import { batchedIn } from '@/lib/batchedIn'
+import { fetchAllRows } from '@/lib/fetchAllRows'
+
+// batchedIn per 100 id (batas URL) + fetchAllRows per chunk: satu chunk 100 id
+// bisa mengandung >1000 baris submissions yang otherwise terpotong diam-diam.
+function batchedFetchAll<T>(column: string, ids: string[], buildQuery: (chunk: string[]) => any): Promise<T[]> {
+    return batchedIn<T>(column, ids, async (chunk) => ({ data: await fetchAllRows<T>(buildQuery(chunk)), error: null }))
+}
 
 // GET all assignments
 export async function GET(request: NextRequest) {
@@ -27,6 +35,8 @@ export async function GET(request: NextRequest) {
         )
       `)
             .order('created_at', { ascending: false })
+            // Tiebreaker stabil untuk paginasi fetchAllRows (created_at bisa identik)
+            .order('id', { ascending: false })
 
         if (teachingAssignmentId) {
             query = query.eq('teaching_assignment_id', teachingAssignmentId)
@@ -75,17 +85,21 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        const { data, error } = await query
-
-        if (error) throw error
+        // fetchAllRows: ADMIN mendapat seluruh tugas tahun aktif sekolah —
+        // query biasa terpotong diam-diam di 1000 baris.
+        const data = await fetchAllRows(query)
 
         // Fetch submission counts for all assignments
         if (data && data.length > 0) {
             const assignmentIds = data.map((a: any) => a.id)
-            const { data: subData } = await supabase
-                .from('student_submissions')
-                .select('id, assignment_id, grade:grades(id)')
-                .in('assignment_id', assignmentIds)
+            const subData = await batchedFetchAll<any>(
+                'assignment_id', assignmentIds,
+                (chunk) => supabase
+                    .from('student_submissions')
+                    .select('id, assignment_id, grade:grades(id)')
+                    .in('assignment_id', chunk)
+                    .order('id')
+            )
 
             // Count submissions and ungarded ones per assignment
             const countMap: Record<string, { total: number, ungraded: number }> = {}

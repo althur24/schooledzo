@@ -70,11 +70,15 @@ export async function GET(request: NextRequest) {
         // Fetch assignment grades
         let grades: any[] = []
         try {
+            // Filter student_id di SQL (bukan fetch 50 terbaru GLOBAL lalu filter
+            // di JS — nilai anak sering tidak ikut ter-fetch). Embed WAJIB !inner:
+            // tanpa itu PostgREST mengembalikan grades siswa LAIN dengan submission
+            // null (filter embed non-inner hanya menyaring isi embed, bukan baris utama).
             const { data } = await supabase
                 .from('grades')
                 .select(`
                     id, score, feedback, graded_at,
-                    submission:student_submissions(
+                    submission:student_submissions!inner(
                         id, student_id,
                         assignment:assignments(
                             id, title,
@@ -84,11 +88,11 @@ export async function GET(request: NextRequest) {
                         )
                     )
                 `)
+                .eq('submission.student_id', childId)
                 .order('graded_at', { ascending: false })
                 .limit(50)
 
             grades = (data || [])
-                .filter((g: any) => g.submission?.student_id === childId)
                 .map((g: any) => ({
                     id: g.id,
                     score: g.score,
