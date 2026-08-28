@@ -233,6 +233,54 @@ export default function TakeOfficialExamPage() {
     const loadFailedRef = useRef(false)
     useEffect(() => { loadFailedRef.current = !!loadError }, [loadError])
 
+    // Sync draft lokal ke server (dipanggil oleh event 'online' dan retry loop)
+    const syncLocalToServer = async () => {
+        const localAnswers = loadLocal()
+        if (Object.keys(localAnswers).length > 0 && submissionRef.current) {
+            try {
+                const answersArray = Object.entries(localAnswers).map(([question_id, answer]) => ({ question_id, answer }))
+
+                // Kedaluwarsa dinilai dari patokan server (ends_at + offset), bukan jam HP mentah
+                const isTimeUp = endsAtRef.current !== null && (Date.now() + offsetMsRef.current) >= endsAtRef.current
+
+                const t0 = performance.now()
+                const res = await fetch('/api/official-exam-submissions', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        submission_id: submissionRef.current.id,
+                        answers: answersArray,
+                        ...(isTimeUp && { submit: true })
+                    })
+                })
+
+                // 409 TIME_EXPIRED: server sudah menutup (jawaban request ikut terselamatkan
+                // via upsert). 400 "Already submitted": submission tertutup dari jalur lain.
+                // Keduanya = state final di server, draft lokal aman dibersihkan.
+                const errBody = res.ok ? null : await res.json().catch(() => null)
+                const alreadySubmitted = res.status === 400 && errBody?.error === 'Already submitted'
+                if (res.status === 409 || alreadySubmitted) {
+                    clearLocal()
+                    router.replace('/dashboard/siswa/ulangan')
+                } else if (isTimeUp && res.ok) {
+                    clearLocal()
+                    router.replace('/dashboard/siswa/ulangan')
+                } else if (res.ok) {
+                    // Pulihkan badge: sync sukses → "Tersimpan" (sebelumnya badge macet
+                    // "Gagal simpan" selamanya walau jawaban sudah masuk server).
+                    setSaveStatus('saved')
+                    setLastLatencyMs(performance.now() - t0)
+                } else {
+                    // Server menolak (5xx dsb.) → tetap error; retry loop akan mencoba lagi.
+                    setSaveStatus('error')
+                }
+            } catch (e) {
+                console.error('Error syncing:', e)
+                setSaveStatus('error')
+            }
+        }
+    }
+
     // Sync local answers when reconnected
     useEffect(() => {
         const handleOnline = async () => {
@@ -244,43 +292,23 @@ export default function TakeOfficialExamPage() {
                 startExam()
                 return
             }
-
-            const localAnswers = loadLocal()
-            if (Object.keys(localAnswers).length > 0 && submissionRef.current) {
-                try {
-                    const answersArray = Object.entries(localAnswers).map(([question_id, answer]) => ({ question_id, answer }))
-
-                    // Kedaluwarsa dinilai dari patokan server (ends_at + offset), bukan jam HP mentah
-                    const isTimeUp = endsAtRef.current !== null && (Date.now() + offsetMsRef.current) >= endsAtRef.current
-
-                    const res = await fetch('/api/official-exam-submissions', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            submission_id: submissionRef.current.id,
-                            answers: answersArray,
-                            ...(isTimeUp && { submit: true })
-                        })
-                    })
-
-                    // 409 TIME_EXPIRED: server sudah menutup (jawaban request ikut terselamatkan
-                    // via upsert). 400 "Already submitted": submission tertutup dari jalur lain.
-                    // Keduanya = state final di server, draft lokal aman dibersihkan.
-                    const errBody = res.ok ? null : await res.json().catch(() => null)
-                    const alreadySubmitted = res.status === 400 && errBody?.error === 'Already submitted'
-                    if (res.status === 409 || alreadySubmitted) {
-                        clearLocal()
-                        router.replace('/dashboard/siswa/ulangan')
-                    } else if (isTimeUp && res.ok) {
-                        clearLocal()
-                        router.replace('/dashboard/siswa/ulangan')
-                    }
-                } catch (e) { console.error('Error syncing:', e) }
-            }
+            syncLocalToServer()
         }
         window.addEventListener('online', handleOnline)
         return () => window.removeEventListener('online', handleOnline)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
+
+    // Retry berkala saat autosave gagal: event 'online' browser TIDAK reliable —
+    // WiFi tersambung tapi internet mati tidak memicu event apa pun, sehingga
+    // badge bisa macet "Gagal simpan" selamanya. Retry ini memastikan sync
+    // terjadi begitu server benar-benar terjangkau lagi, lalu badge pulih.
+    useEffect(() => {
+        if (saveStatus !== 'error' || !submission) return
+        const iv = setInterval(() => { syncLocalToServer() }, 15000)
+        return () => clearInterval(iv)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [saveStatus, submission])
 
     useEffect(() => {
         startExam()
@@ -484,6 +512,10 @@ export default function TakeOfficialExamPage() {
 
     const syncToServer = async (questionId: string, answer: string) => {
         if (!submission) return
+        // Offline murni: jangan fire fetch yang pasti gagal — badge sudah menampilkan
+        // "Offline" (merah), bukan "Gagal simpan" yang menyesatkan. Jawaban aman di
+        // localStorage dan akan di-flush oleh syncLocalToServer saat koneksi pulih.
+        if (!navigator.onLine) return
         setSaveStatus('saving')
         const t0 = performance.now()
         try {

@@ -183,6 +183,17 @@ export default function TakeExamPage() {
         }
     }, [])
 
+    // Retry berkala saat autosave gagal: event 'online' browser TIDAK reliable —
+    // WiFi tersambung tapi internet mati tidak memicu event apa pun, sehingga
+    // badge bisa macet "Gagal simpan" selamanya. Retry ini memastikan sync
+    // terjadi begitu server benar-benar terjangkau lagi, lalu badge pulih.
+    useEffect(() => {
+        if (saveStatus !== 'error' || !submission) return
+        const iv = setInterval(() => { syncLocalToServer() }, 15000)
+        return () => clearInterval(iv)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [saveStatus, submission])
+
     const syncLocalToServer = async () => {
         const localAnswers = loadAnswersFromLocal()
         if (Object.keys(localAnswers).length > 0 && submissionRef.current) {
@@ -194,6 +205,7 @@ export default function TakeExamPage() {
                 // Kedaluwarsa dinilai dari patokan server (ends_at + offset), bukan jam HP mentah
                 const isTimeUp = endsAtRef.current !== null && (Date.now() + offsetMsRef.current) >= endsAtRef.current
 
+                const t0 = performance.now()
                 const res = await fetch('/api/exam-submissions', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -216,9 +228,18 @@ export default function TakeExamPage() {
                 } else if (isTimeUp && res.ok) {
                     clearLocalAnswers()
                     router.replace(`/dashboard/siswa/ulangan/${examId}/hasil`)
+                } else if (res.ok) {
+                    // Pulihkan badge: sync sukses → "Tersimpan" (sebelumnya badge macet
+                    // "Gagal simpan" selamanya walau jawaban sudah masuk server).
+                    setSaveStatus('saved')
+                    setLastLatencyMs(performance.now() - t0)
+                } else {
+                    // Server menolak (5xx dsb.) → tetap error; retry loop akan mencoba lagi.
+                    setSaveStatus('error')
                 }
             } catch (error) {
                 console.error('Error syncing to server:', error)
+                setSaveStatus('error')
             }
         }
     }
@@ -634,6 +655,10 @@ export default function TakeExamPage() {
 
     const syncToServer = async (questionId: string, answer: string) => {
         if (!submission) return
+        // Offline murni: jangan fire fetch yang pasti gagal — badge sudah menampilkan
+        // "Offline" (merah), bukan "Gagal simpan" yang menyesatkan. Jawaban aman di
+        // localStorage dan akan di-flush oleh syncLocalToServer saat koneksi pulih.
+        if (!navigator.onLine) return
         setSaveStatus('saving')
         const t0 = performance.now()
         try {
