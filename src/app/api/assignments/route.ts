@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { findTeachingAssignmentsOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
@@ -39,6 +40,10 @@ export async function GET(request: NextRequest) {
             .order('id', { ascending: false })
 
         if (teachingAssignmentId) {
+            // Tenant guard: TA harus milik sekolah caller (param client dipercaya)
+            if ((await findTeachingAssignmentsOutsideSchool([teachingAssignmentId], schoolId)).length > 0) {
+                return NextResponse.json([])
+            }
             query = query.eq('teaching_assignment_id', teachingAssignmentId)
         } else if (allYears !== 'true') {
             // Filter by active year — via inner join (NOT .in(list): hundreds of TA ids
@@ -142,11 +147,13 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { teaching_assignment_id, title, description, type, due_date } = await request.json()
+        const { teaching_assignment_id, title, description, type, due_date, submission_mode } = await request.json()
 
         if (!teaching_assignment_id || !title || !type) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
         }
+
+        const submissionMode = submission_mode === 'OFFLINE' ? 'OFFLINE' : 'ONLINE'
 
         // Block writes to archived (COMPLETED) academic years
         const yearStatus = await getYearStatusByTA(teaching_assignment_id)
@@ -154,7 +161,7 @@ export async function POST(request: NextRequest) {
 
         const { data, error } = await supabase
             .from('assignments')
-            .insert({ teaching_assignment_id, title, description, type, due_date })
+            .insert({ teaching_assignment_id, title, description, type, due_date, submission_mode: submissionMode })
             .select()
             .single()
 
@@ -187,14 +194,16 @@ export async function POST(request: NextRequest) {
 
                     if (enrollments && enrollments.length > 0) {
                         const userIds = enrollments.map((e: any) => e.student.user_id)
-                        const notifType = type === 'TUGAS' ? 'TUGAS_BARU' : 'TUGAS_BARU'
+                        const notifType = 'TUGAS_BARU'
                         const subjectName = (ta.subject as any)?.name || ''
+                        const typeLabels: Record<string, string> = { TUGAS: 'Tugas', PR: 'PR', PROYEK: 'Proyek', LATIHAN: 'Latihan', ULANGAN: 'Ulangan' }
+                        const typeLabel = typeLabels[type] || 'Tugas'
 
                         await supabase.from('notifications').insert(
                             userIds.map((uid: string) => ({
                                 user_id: uid,
                                 type: notifType,
-                                title: `${type === 'TUGAS' ? 'Tugas' : 'Ulangan'} Baru: ${title}`,
+                                title: `${typeLabel} Baru: ${title}`,
                                 message: `${subjectName}${due_date ? ` - Deadline: ${new Date(due_date).toLocaleDateString('id-ID')}` : ''}`,
                                 link: '/dashboard/siswa/tugas'
                             }))

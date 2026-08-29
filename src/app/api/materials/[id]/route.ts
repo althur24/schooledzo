@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { archivedYearResponse } from '@/lib/academicYear'
 
 // DELETE material
@@ -24,7 +25,7 @@ export async function DELETE(
             .select(`
                 id,
                 teaching_assignment:teaching_assignments(
-                    teacher:teachers(user_id),
+                    teacher:teachers(user_id, school_id),
                     academic_year:academic_years(status)
                 )
             `)
@@ -43,6 +44,12 @@ export async function DELETE(
         // Guru hanya boleh menghapus materi dari penugasan miliknya sendiri
         if (user.role === 'GURU' && ownerUserId !== user.id) {
             return NextResponse.json({ error: 'Anda tidak berhak menghapus materi ini' }, { status: 403 })
+        }
+
+        // Tenant guard: materi harus milik sekolah caller (ADMIN dulu lolos tanpa cek)
+        const taSchoolId = Array.isArray(ta?.teacher) ? ta.teacher[0]?.school_id : ta?.teacher?.school_id
+        if (tenantMismatch(taSchoolId, schoolId)) {
+            return notFound()
         }
 
         const yearStatus = Array.isArray(ta?.academic_year) ? ta.academic_year[0]?.status : ta?.academic_year?.status

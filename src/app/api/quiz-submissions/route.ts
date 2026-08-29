@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { findQuizzesOutsideSchool } from '@/lib/tenantGuard'
 import { gradeAnswer, isAutoGradeable, needsManualGrading } from '@/lib/questionTypeUtils'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { resolveQuizExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/examExpiry'
@@ -137,6 +138,10 @@ export async function GET(request: NextRequest) {
             .order('id', { ascending: false })
 
         if (quizId) {
+            // Tenant guard: quiz harus milik sekolah caller (param client dipercaya)
+            if ((await findQuizzesOutsideSchool([quizId], schoolId)).length > 0) {
+                return NextResponse.json([])
+            }
             query = query.eq('quiz_id', quizId)
         }
         if (studentId) {

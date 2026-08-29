@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { findTeachingAssignmentsOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { getBatchSizes } from '@/lib/examBatch'
 
@@ -31,6 +32,10 @@ export async function GET(request: NextRequest) {
             .order('created_at', { ascending: false })
 
         if (teachingAssignmentId) {
+            // Tenant guard: TA harus milik sekolah caller (param client dipercaya)
+            if ((await findTeachingAssignmentsOutsideSchool([teachingAssignmentId], schoolId)).length > 0) {
+                return NextResponse.json([])
+            }
             query = query.eq('teaching_assignment_id', teachingAssignmentId)
         } else if (allYears !== 'true') {
             // Filter by active year — via inner join (NOT .in(list): hundreds of TA ids

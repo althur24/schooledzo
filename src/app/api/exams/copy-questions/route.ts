@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { findExamsOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 import { createClient } from '@supabase/supabase-js'
 
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest) {
         // Auth check
         const ctx = await getSchoolContextOrError(req)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -26,6 +27,14 @@ export async function POST(req: NextRequest) {
                 { error: 'source_exam_id and target_exam_ids (array) are required' },
                 { status: 400 }
             )
+        }
+
+        // Tenant guard: source & semua target harus milik sekolah caller.
+        // Tanpa ini guru/admin bisa menyalin (membaca) soal + kunci jawaban
+        // exam sekolah lain, atau menyuntik soal ke exam sekolah lain.
+        const outside = await findExamsOutsideSchool([source_exam_id, ...target_exam_ids], schoolId)
+        if (outside.length > 0) {
+            return NextResponse.json({ error: 'Exam not found or not accessible' }, { status: 404 })
         }
 
         // Block writes to archived (COMPLETED) academic years (checked per target exam)

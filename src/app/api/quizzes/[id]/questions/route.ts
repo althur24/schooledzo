@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound, resolveQuizSchoolId } from '@/lib/tenantGuard'
 import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
@@ -32,6 +33,11 @@ export async function GET(
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
+
+        // Tenant guard: kuis harus milik sekolah caller (IDOR lintas sekolah)
+        if (tenantMismatch(await resolveQuizSchoolId(id), schoolId)) {
+            return notFound()
+        }
 
         const { data, error } = await supabase
             .from('quiz_questions')
@@ -105,6 +111,25 @@ export async function POST(
 
         if (user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Tenant guard: kuis harus milik sekolah caller + guru pemilik TA-nya
+        // (sebelumnya sama sekali tanpa cek kepemilikan — soal kuis sekolah
+        // lain bisa dibaca/ditambah/diubah/dihapus guru mana pun)
+        if (tenantMismatch(await resolveQuizSchoolId(id), schoolId)) {
+            return notFound()
+        }
+        {
+            const { data: teacher } = await supabase
+                .from('teachers').select('id').eq('user_id', user.id).single()
+            const { data: quizTa } = await supabase
+                .from('quizzes')
+                .select('teaching_assignment:teaching_assignments(teacher_id)')
+                .eq('id', id)
+                .single()
+            if (!teacher || (quizTa?.teaching_assignment as any)?.teacher_id !== teacher.id) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke kuis ini' }, { status: 403 })
+            }
         }
 
         // Block writes to archived (COMPLETED) academic years
@@ -359,6 +384,25 @@ export async function PUT(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        // Tenant guard: kuis harus milik sekolah caller + guru pemilik TA-nya
+        // (sebelumnya sama sekali tanpa cek kepemilikan — soal kuis sekolah
+        // lain bisa dibaca/ditambah/diubah/dihapus guru mana pun)
+        if (tenantMismatch(await resolveQuizSchoolId(id), schoolId)) {
+            return notFound()
+        }
+        {
+            const { data: teacher } = await supabase
+                .from('teachers').select('id').eq('user_id', user.id).single()
+            const { data: quizTa } = await supabase
+                .from('quizzes')
+                .select('teaching_assignment:teaching_assignments(teacher_id)')
+                .eq('id', id)
+                .single()
+            if (!teacher || (quizTa?.teaching_assignment as any)?.teacher_id !== teacher.id) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke kuis ini' }, { status: 403 })
+            }
+        }
+
         // Block writes to archived (COMPLETED) academic years
         const { data: quizForYear } = await supabase
             .from('quizzes')
@@ -458,6 +502,25 @@ export async function DELETE(
 
         if (user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Tenant guard: kuis harus milik sekolah caller + guru pemilik TA-nya
+        // (sebelumnya sama sekali tanpa cek kepemilikan — soal kuis sekolah
+        // lain bisa dibaca/ditambah/diubah/dihapus guru mana pun)
+        if (tenantMismatch(await resolveQuizSchoolId(id), schoolId)) {
+            return notFound()
+        }
+        {
+            const { data: teacher } = await supabase
+                .from('teachers').select('id').eq('user_id', user.id).single()
+            const { data: quizTa } = await supabase
+                .from('quizzes')
+                .select('teaching_assignment:teaching_assignments(teacher_id)')
+                .eq('id', id)
+                .single()
+            if (!teacher || (quizTa?.teaching_assignment as any)?.teacher_id !== teacher.id) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke kuis ini' }, { status: 403 })
+            }
         }
 
         // Block writes to archived (COMPLETED) academic years

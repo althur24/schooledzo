@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { resolveAssignmentSchoolId, tenantMismatch } from '@/lib/tenantGuard'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // GET submissions for an assignment
@@ -40,6 +41,10 @@ export async function GET(request: NextRequest) {
             .order('id', { ascending: false })
 
         if (assignmentId) {
+            // Tenant guard: tugas harus milik sekolah caller (param client dipercaya)
+            if (tenantMismatch(await resolveAssignmentSchoolId(assignmentId), schoolId)) {
+                return NextResponse.json([])
+            }
             query = query.eq('assignment_id', assignmentId)
         }
         if (studentId) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { findQuestionBankQuestionsOutsideSchool, findExamQuizQuestionsOutsideSchool } from '@/lib/tenantGuard'
 import { triggerHOTSAnalysis, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 
 export async function POST(request: NextRequest) {
@@ -26,10 +27,19 @@ export async function POST(request: NextRequest) {
             'exam': 'exam_questions',
             'official_exam': 'official_exam_questions'
         }
-        
+
         const tableName = tableMap[question_source]
         if (!tableName) {
             return NextResponse.json({ error: 'Invalid question source' }, { status: 400 })
+        }
+
+        // Tenant guard: soal harus milik sekolah caller — tanpa ini ADMIN bisa
+        // membaca question_text/options/correct_answer soal sekolah lain.
+        const outside = question_source === 'bank'
+            ? await findQuestionBankQuestionsOutsideSchool([question_id], schoolId)
+            : await findExamQuizQuestionsOutsideSchool([question_id], question_source as 'exam_questions' | 'quiz_questions' | 'official_exam_questions', schoolId)
+        if (outside.length > 0) {
+            return NextResponse.json({ error: 'Question not found' }, { status: 404 })
         }
 
         // Fetch question details

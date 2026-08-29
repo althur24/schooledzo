@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { findExamsOutsideSchool } from '@/lib/tenantGuard'
 import { gradeAnswer, needsManualGrading } from '@/lib/questionTypeUtils'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { resolveWindowExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/examExpiry'
@@ -116,6 +117,10 @@ export async function GET(request: NextRequest) {
             .order('id', { ascending: false })
 
         if (examId) {
+            // Tenant guard: exam harus milik sekolah caller (param client dipercaya)
+            if ((await findExamsOutsideSchool([examId], schoolId)).length > 0) {
+                return NextResponse.json([])
+            }
             query = query.eq('exam_id', examId)
         }
         if (studentId) {

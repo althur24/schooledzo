@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { resolveExamSchoolId, tenantMismatch } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncExamBatch } from '@/lib/examBatch'
 
@@ -14,7 +15,7 @@ export async function POST(
         const { id } = await params
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -23,6 +24,11 @@ export async function POST(
         const { data: exam } = await supabase
             .from('exams').select('teaching_assignment_id, batch_id').eq('id', id).single()
         if (!exam) return NextResponse.json({ error: 'Ulangan tidak ditemukan' }, { status: 404 })
+
+        // Tenant guard: ulangan harus milik sekolah caller
+        if (tenantMismatch(await resolveExamSchoolId(id), schoolId)) {
+            return NextResponse.json({ error: 'Ulangan tidak ditemukan' }, { status: 404 })
+        }
 
         // Guru hanya boleh sync ujian miliknya sendiri
         if (user.role === 'GURU') {

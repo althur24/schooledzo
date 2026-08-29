@@ -69,11 +69,12 @@ export async function PUT(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Kepemilikan: ADMIN selalu boleh; GURU hanya bila mapel & kelas target ujian ini diajarnya
-        if (user.role === 'GURU') {
+        // Kepemilikan: ADMIN hanya di sekolahnya sendiri (tenant guard di
+        // canManageOfficialExam); GURU hanya bila mapel & kelas target ujian ini diajarnya
+        {
             const { data: examScope } = await supabase
                 .from('official_exams')
-                .select('subject_id, target_class_ids, academic_year_id')
+                .select('subject_id, target_class_ids, academic_year_id, school_id')
                 .eq('id', id)
                 .single()
             if (!examScope || !(await canManageOfficialExam(user, examScope))) {
@@ -337,11 +338,12 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Kepemilikan guru: hanya boleh hapus ujian resmi pada mapel & kelas yang diajarnya
-        if (user.role === 'GURU') {
+        // Kepemilikan: ADMIN hanya di sekolahnya sendiri (tenant guard di
+        // canManageOfficialExam); GURU hanya boleh hapus ujian resmi pada mapel & kelas yang diajarnya
+        {
             const { data: examScope } = await supabase
                 .from('official_exams')
-                .select('subject_id, target_class_ids, academic_year_id')
+                .select('subject_id, target_class_ids, academic_year_id, school_id')
                 .eq('id', id)
                 .single()
             if (!examScope || !(await canManageOfficialExam(user, examScope))) {

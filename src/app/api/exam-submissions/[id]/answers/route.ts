@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 
 // GET answers for a specific exam submission
 export async function GET(
@@ -13,6 +14,18 @@ export async function GET(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
+        // Check visibility: look up the submission's exam to get visibility settings
+        const { data: submission } = await supabase
+            .from('exam_submissions')
+            .select('exam:exams(show_results_immediately, results_released, teaching_assignment:teaching_assignments(academic_year:academic_years(school_id)))')
+            .eq('id', id)
+            .single()
+
+        // Tenant guard: submission harus milik sekolah caller (IDOR lintas sekolah)
+        if (tenantMismatch((submission as any)?.exam?.teaching_assignment?.academic_year?.school_id, schoolId)) {
+            return notFound()
+        }
+
         // S1 Security Fix: IDOR protection — SISWA can only access their own submission's answers
         if (user.role === 'SISWA') {
             const { data: student } = await supabase
@@ -23,13 +36,6 @@ export async function GET(
                 return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
             }
         }
-
-        // Check visibility: look up the submission's exam to get visibility settings
-        const { data: submission } = await supabase
-            .from('exam_submissions')
-            .select('exam:exams(show_results_immediately, results_released)')
-            .eq('id', id)
-            .single()
 
         const examObj = (submission as any)?.exam || {}
         const showImmediately = examObj.show_results_immediately ?? true

@@ -71,6 +71,23 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'type and title required' }, { status: 400 })
         }
 
+        // Tenant guard: penerima harus user sekolah caller — tanpa ini
+        // guru/admin bisa mengirim pesan ke user sekolah lain (social engineering)
+        if (schoolId) {
+            const badTargets: string[] = []
+            for (let i = 0; i < user_ids.length; i += 100) {
+                const chunk = user_ids.slice(i, i + 100)
+                const { data: targetUsers } = await supabase
+                    .from('users').select('id, school_id').in('id', chunk)
+                for (const u of (targetUsers || []) as any[]) {
+                    if (u.school_id && u.school_id !== schoolId) badTargets.push(u.id)
+                }
+            }
+            if (badTargets.length > 0) {
+                return NextResponse.json({ error: 'Penerima di luar sekolah Anda' }, { status: 403 })
+            }
+        }
+
         // Create notifications for all target users
         const notifications = user_ids.map((uid: string) => ({
             user_id: uid,

@@ -49,11 +49,14 @@ export async function GET(request: NextRequest) {
         // Fetch announcements regardless
         let announcements: any[] = []
         try {
-            const { data } = await supabase
+            let annQuery = supabase
                 .from('announcements')
                 .select('id, title, content, created_at')
                 .order('created_at', { ascending: false })
                 .limit(5)
+            // Tenant guard: pengumuman sekolah caller saja
+            if (schoolId) annQuery = annQuery.eq('school_id', schoolId)
+            const { data } = await annQuery
             announcements = data || []
         } catch { }
 
@@ -173,6 +176,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Count total assignments for the child's class
+        // (kecuali kolom penilaian offline — bukan tugas yang dikumpulkan siswa)
         let totalAssignments = 0
         try {
             if (child.class?.id) {
@@ -180,6 +184,7 @@ export async function GET(request: NextRequest) {
                     .from('assignments')
                     .select('id, teaching_assignment:teaching_assignments!inner(class_id)', { count: 'exact', head: true })
                     .eq('teaching_assignment.class_id', child.class.id)
+                    .neq('submission_mode', 'OFFLINE')
 
                 totalAssignments = count || 0
             }

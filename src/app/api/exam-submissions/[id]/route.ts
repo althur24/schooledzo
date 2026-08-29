@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 
 // GET single exam submission with questions and answers
 export async function GET(
@@ -24,7 +25,8 @@ export async function GET(
                     title,
                     show_results_immediately,
                     results_released,
-                    questions:exam_questions(*)
+                    questions:exam_questions(*),
+                    teaching_assignment:teaching_assignments(academic_year:academic_years(school_id))
                 ),
                 student:students(
                     id,
@@ -36,6 +38,11 @@ export async function GET(
             .single()
 
         if (error) throw error
+
+        // Tenant guard: submission harus milik sekolah caller (IDOR lintas sekolah)
+        if (tenantMismatch((data as any)?.exam?.teaching_assignment?.academic_year?.school_id, schoolId)) {
+            return notFound()
+        }
 
         // S2 Security Fix: IDOR protection — SISWA can only access their own submission
         if (user.role === 'SISWA') {

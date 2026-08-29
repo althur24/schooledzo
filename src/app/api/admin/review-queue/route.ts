@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { findQuestionBankQuestionsOutsideSchool, findExamQuizQuestionsOutsideSchool } from '@/lib/tenantGuard'
 import { pickBatchRepresentativeIds } from '@/lib/examBatch'
 
 /**
@@ -244,6 +245,21 @@ export async function POST(request: NextRequest) {
                 { error: 'decision harus approve atau return' },
                 { status: 400 }
             )
+        }
+
+        // Tenant guard: soal harus milik sekolah caller — tanpa ini ADMIN bisa
+        // approve/return soal sekolah lain dan trigger efek publish/reset di sana.
+        {
+            const allowedSources = ['bank', 'quiz', 'exam'] as const
+            if (!allowedSources.includes(question_source)) {
+                return NextResponse.json({ error: 'Invalid question source' }, { status: 400 })
+            }
+            const outside = question_source === 'bank'
+                ? await findQuestionBankQuestionsOutsideSchool([question_id], schoolId)
+                : await findExamQuizQuestionsOutsideSchool([question_id], question_source as 'exam_questions' | 'quiz_questions', schoolId)
+            if (outside.length > 0) {
+                return NextResponse.json({ error: 'Question not found' }, { status: 404 })
+            }
         }
 
         // 1. Save admin review

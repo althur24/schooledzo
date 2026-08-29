@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { resolveKkm } from '@/lib/resolveKkm'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
@@ -42,7 +43,7 @@ export async function GET(
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -57,7 +58,8 @@ export async function GET(
                 id, title, duration_minutes,
                 teaching_assignment:teaching_assignments(
                     class:classes(id, name, school_level, grade_level),
-                    subject:subjects(id, name, kkm)
+                    subject:subjects(id, name, kkm),
+                    academic_year:academic_years(school_id)
                 )
             `)
             .eq('id', examId)
@@ -65,6 +67,11 @@ export async function GET(
 
         if (examError || !exam) {
             return NextResponse.json({ error: 'Exam not found' }, { status: 404 })
+        }
+
+        // Tenant guard: exam harus milik sekolah caller (IDOR lintas sekolah)
+        if (tenantMismatch((exam.teaching_assignment as any)?.academic_year?.school_id, schoolId)) {
+            return notFound()
         }
 
         const ta = exam.teaching_assignment as any

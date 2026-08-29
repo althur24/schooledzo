@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { findTeachingAssignmentsOutsideSchool } from '@/lib/tenantGuard'
 import { archivedYearResponse } from '@/lib/academicYear'
 
 // M2: Service Role Key required because app uses custom auth (not Supabase Auth),
@@ -48,7 +49,21 @@ export async function GET(request: NextRequest) {
             .order('created_at', { ascending: false })
 
         if (teachingAssignmentId) {
+            // Tenant guard: TA harus milik sekolah caller (param client dipercaya)
+            if ((await findTeachingAssignmentsOutsideSchool([teachingAssignmentId], schoolId)).length > 0) {
+                return NextResponse.json([])
+            }
             query = query.eq('teaching_assignment_id', teachingAssignmentId)
+        } else if (allYears === 'true' && schoolId) {
+            // all_years utk ADMIN: tetap scope ke tahun ajaran sekolah caller
+            // (sebelumnya tanpa filter — bocor materi semua sekolah)
+            const { data: schoolYears } = await supabase
+                .from('academic_years')
+                .select('id')
+                .eq('school_id', schoolId)
+            const yearIds = schoolYears?.map((y: any) => y.id) || []
+            if (yearIds.length === 0) return NextResponse.json([])
+            query = query.in('teaching_assignment.academic_year_id', yearIds)
         } else if (allYears !== 'true') {
             // Filter by active year — via inner join (NOT .in(list): hundreds of TA ids
             // overflow the 16KB header limit at larger schools and break this endpoint)

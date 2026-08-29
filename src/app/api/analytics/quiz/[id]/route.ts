@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { resolveKkm } from '@/lib/resolveKkm'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 
@@ -41,7 +42,7 @@ export async function GET(
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         // Only teachers and admins can view analytics
         if (user.role !== 'GURU' && user.role !== 'ADMIN') {
@@ -57,7 +58,8 @@ export async function GET(
                 id, title, duration_minutes,
                 teaching_assignment:teaching_assignments(
                     class:classes(id, name, school_level, grade_level),
-                    subject:subjects(id, name, kkm)
+                    subject:subjects(id, name, kkm),
+                    academic_year:academic_years(school_id)
                 )
             `)
             .eq('id', quizId)
@@ -65,6 +67,11 @@ export async function GET(
 
         if (quizError || !quiz) {
             return NextResponse.json({ error: 'Quiz not found' }, { status: 404 })
+        }
+
+        // Tenant guard: quiz harus milik sekolah caller (IDOR lintas sekolah)
+        if (tenantMismatch((quiz.teaching_assignment as any)?.academic_year?.school_id, schoolId)) {
+            return notFound()
         }
 
         const ta = quiz.teaching_assignment as any

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { syncQuizBatch } from '@/lib/examBatch'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound, resolveQuizSchoolId } from '@/lib/tenantGuard'
 
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
@@ -25,7 +26,8 @@ export async function GET(
                     id,
                     academic_year_id,
                     subject:subjects(id, name),
-                    class:classes(id, name, school_level, grade_level)
+                    class:classes(id, name, school_level, grade_level),
+                    academic_year:academic_years(school_id)
                 ),
                 questions:quiz_questions(*)
             `)
@@ -33,6 +35,11 @@ export async function GET(
             .single()
 
         if (error) throw error
+
+        // Tenant guard: kuis harus milik sekolah caller (IDOR lintas sekolah)
+        if (tenantMismatch((data?.teaching_assignment as any)?.academic_year?.school_id, schoolId)) {
+            return notFound()
+        }
 
         // Sort questions by order_index
         if (data.questions) {
@@ -115,6 +122,11 @@ export async function PUT(
             }
         } else if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Tenant guard: kuis harus milik sekolah caller (ADMIN dulu lolos tanpa cek)
+        if (tenantMismatch(await resolveQuizSchoolId(id), schoolId)) {
+            return notFound()
         }
 
         // Block writes to archived (COMPLETED) academic years
@@ -346,6 +358,11 @@ export async function DELETE(
             }
         } else if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Tenant guard: kuis harus milik sekolah caller (ADMIN dulu lolos tanpa cek)
+        if (tenantMismatch(await resolveQuizSchoolId(id), schoolId)) {
+            return notFound()
         }
 
         // Block writes to archived (COMPLETED) academic years

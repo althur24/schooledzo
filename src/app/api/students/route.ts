@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { hashPassword } from '@/lib/auth'
 import { getSchoolContextOrError, isErrorResponse, getSchoolCode } from '@/lib/schoolContext'
+import { tenantMismatch } from '@/lib/tenantGuard'
 import { logError } from '@/lib/logError'
 
 // GET all students
@@ -21,6 +22,18 @@ export async function GET(request: NextRequest) {
 
         // If enrollment_year_id is provided, fetch students with their enrollment in that specific year
         if (enrollment_year_id) {
+            // Tenant guard: tahun ajaran harus milik sekolah caller — tanpa ini
+            // param client bisa menarik NIS+nama siswa sekolah mana pun.
+            if (schoolId) {
+                const { data: enrollYear } = await supabase
+                    .from('academic_years')
+                    .select('school_id')
+                    .eq('id', enrollment_year_id)
+                    .single()
+                if (tenantMismatch((enrollYear as any)?.school_id, schoolId)) {
+                    return NextResponse.json([])
+                }
+            }
              let enrollQuery = supabase
                 .from('student_enrollments')
                 .select(`

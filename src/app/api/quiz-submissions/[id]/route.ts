@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 
 // GET single submission
 export async function GET(
@@ -22,7 +23,8 @@ export async function GET(
                 quiz:quizzes(
                     id,
                     title,
-                    questions:quiz_questions(*)
+                    questions:quiz_questions(*),
+                    teaching_assignment:teaching_assignments(academic_year:academic_years(school_id))
                 ),
                 student:students(
                     id,
@@ -34,6 +36,11 @@ export async function GET(
             .single()
 
         if (error) throw error
+
+        // Tenant guard: submission harus milik sekolah caller (IDOR lintas sekolah)
+        if (tenantMismatch((data as any)?.quiz?.teaching_assignment?.academic_year?.school_id, schoolId)) {
+            return notFound()
+        }
 
         // S3 Security Fix: IDOR protection — SISWA can only access their own quiz submission
         if (user.role === 'SISWA') {
@@ -89,12 +96,19 @@ export async function PUT(
         } else if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         } else {
-            // Role Admin, only check max score
+            // Role Admin: tenant guard + only check max score
             const { data: sub } = await supabase
                 .from('quiz_submissions')
-                .select('max_score')
+                .select('max_score, quiz:quizzes(teaching_assignment:teaching_assignments(academic_year:academic_years(school_id)))')
                 .eq('id', id)
                 .single()
+
+            // Tenant guard: submission harus milik sekolah caller
+            const quizTa = (sub?.quiz as any)?.teaching_assignment
+            const subSchoolId = Array.isArray(quizTa) ? quizTa[0]?.academic_year?.school_id : quizTa?.academic_year?.school_id
+            if (tenantMismatch(subSchoolId, schoolId)) {
+                return notFound()
+            }
 
             if (total_score > (sub?.max_score || 0)) {
                 return NextResponse.json({ error: 'Total score exceeds max score' }, { status: 400 })

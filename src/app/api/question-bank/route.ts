@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch } from '@/lib/tenantGuard'
 import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { batchedIn } from '@/lib/batchedIn'
@@ -44,9 +45,9 @@ export async function GET(request: NextRequest) {
         let query = supabase
             .from('question_bank')
             .select(`
-                *,
+                 *,
                 subject:subjects(id, name),
-                teacher:teachers(id, user:users(full_name))
+                teacher:teachers!inner(id, school_id, user:users(full_name))
             `)
             .is('passage_id', null)
             .order('created_at', { ascending: false })
@@ -55,7 +56,22 @@ export async function GET(request: NextRequest) {
         if (user.role === 'GURU') {
             query = query.eq('teacher_id', currentTeacherId)
         } else if (user.role === 'ADMIN' && filterTeacherId) {
+            // Tenant guard: guru yang diminta harus sekolah caller
+            if (schoolId) {
+                const { data: t } = await supabase
+                    .from('teachers').select('school_id').eq('id', filterTeacherId).single()
+                if (tenantMismatch((t as any)?.school_id, schoolId)) {
+                    return NextResponse.json([])
+                }
+            }
             query = query.eq('teacher_id', filterTeacherId)
+        } else if (user.role === 'ADMIN' && schoolId) {
+            // ADMIN tanpa filter guru: scope ke guru sekolah caller via embed
+            // !inner (sebelumnya fetchAllRows seluruh question_bank SEMUA sekolah
+            // termasuk correct_answer). Filter embed !inner diterapkan PostgREST
+            // ke parent rows — bebas batas URL, aman utk sekolah ratusan guru
+            // (pola .in(ids) bisa overflow 16KB).
+            query = query.eq('teacher.school_id', schoolId)
         }
 
         if (subjectId) {

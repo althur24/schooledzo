@@ -23,11 +23,13 @@ export async function PUT(
         }
 
         // 1. Get the target student to fetch the `user_id` and `parent_user_id`
-        const { data: student, error: fetchError } = await supabase
+        let studentQuery = supabase
             .from('students')
             .select('user_id, parent_user_id')
             .eq('id', id)
-            .eq('school_id', schoolId)
+        // Filter sekolah hanya bila ada (SUPER_ADMIN schoolId null → eq null salah match)
+        if (schoolId) studentQuery = studentQuery.eq('school_id', schoolId)
+        const { data: student, error: fetchError } = await studentQuery
             .single()
 
         if (fetchError || !student) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch } from '@/lib/tenantGuard'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // Create admin client to bypass RLS
@@ -36,6 +37,16 @@ export async function GET(request: NextRequest) {
                     if (schoolId) yearQuery = yearQuery.eq('school_id', schoolId)
                     const { data: activeYear } = await yearQuery.single()
                     if (activeYear) filterYearId = activeYear.id
+                } else if (schoolId) {
+                    // Tenant guard: tahun ajaran dari client harus milik sekolah caller
+                    const { data: reqYear } = await supabase
+                        .from('academic_years')
+                        .select('school_id')
+                        .eq('id', filterYearId)
+                        .single()
+                    if (tenantMismatch((reqYear as any)?.school_id, schoolId)) {
+                        return NextResponse.json([])
+                    }
                 }
             } else if (schoolId) {
                 // all_years = true: still scope to this school's academic years
@@ -250,6 +261,9 @@ export async function GET(request: NextRequest) {
 }
 
 // POST grade a submission (for teachers)
+// Menerima submission_id (penilaian submission online) ATAU
+// assignment_id + student_id (penilaian offline: submission placeholder
+// dibuat otomatis bila siswa belum punya submission).
 export async function POST(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
@@ -260,9 +274,9 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { submission_id, score, feedback } = await request.json()
+        const { submission_id, assignment_id, student_id, score, feedback } = await request.json()
 
-        if (!submission_id || score === undefined) {
+        if ((!submission_id && !(assignment_id && student_id)) || score === undefined) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
         }
 
@@ -271,14 +285,21 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Nilai harus antara 0 dan 100' }, { status: 400 })
         }
 
-        // H2 Security Fix: Verify this teacher owns the submission's teaching assignment
+        // H2 Security Fix: Verify this teacher owns the teaching assignment
         const { data: teacher } = await supabase
             .from('teachers')
             .select('id')
             .eq('user_id', user.id)
             .single()
 
-        if (teacher) {
+        let resolvedSubmissionId = submission_id
+
+        // Fail-closed: GURU tanpa row teachers tidak boleh memberi nilai
+        if (!teacher) {
+            return NextResponse.json({ error: 'Data guru tidak ditemukan' }, { status: 403 })
+        }
+
+        if (submission_id) {
             const { data: submission } = await supabase
                 .from('student_submissions')
                 .select('assignment:assignments(teaching_assignment:teaching_assignments(teacher_id))')
@@ -289,13 +310,61 @@ export async function POST(request: NextRequest) {
             if (assignmentTeacherId && assignmentTeacherId !== teacher.id) {
                 return NextResponse.json({ error: 'Anda tidak memiliki akses untuk menilai submission ini' }, { status: 403 })
             }
+        } else {
+            // Jalur offline: verifikasi kepemilikan assignment
+            const { data: assignment } = await supabase
+                .from('assignments')
+                .select('submission_mode, teaching_assignment:teaching_assignments(teacher_id)')
+                .eq('id', assignment_id)
+                .single()
+
+            if (!assignment) {
+                return NextResponse.json({ error: 'Tugas tidak ditemukan' }, { status: 404 })
+            }
+
+            // Penilaian tanpa submission hanya untuk tugas bertipe offline —
+            // tugas online tetap dinilai murni dari submission siswa.
+            if ((assignment as any).submission_mode !== 'OFFLINE') {
+                return NextResponse.json({ error: 'Penilaian langsung hanya tersedia untuk tugas offline' }, { status: 400 })
+            }
+
+            const assignmentTeacherId = (assignment as any)?.teaching_assignment?.teacher_id
+            if (teacher && assignmentTeacherId && assignmentTeacherId !== teacher.id) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses untuk menilai tugas ini' }, { status: 403 })
+            }
+
+            // Find-or-create submission placeholder (is_offline) untuk siswa ini
+            const { data: existingSub } = await supabase
+                .from('student_submissions')
+                .select('id')
+                .eq('assignment_id', assignment_id)
+                .eq('student_id', student_id)
+                .single()
+
+            if (existingSub) {
+                resolvedSubmissionId = existingSub.id
+            } else {
+                const { data: newSub, error: subError } = await supabase
+                    .from('student_submissions')
+                    .insert({
+                        assignment_id,
+                        student_id,
+                        answers: null,
+                        is_offline: true
+                    })
+                    .select('id')
+                    .single()
+
+                if (subError) throw subError
+                resolvedSubmissionId = newSub.id
+            }
         }
 
         // Check if grade exists - Use regular client here since it's user action
         const { data: existing } = await supabase // Use admin to ensure teacher can grade
             .from('grades')
             .select('id')
-            .eq('submission_id', submission_id)
+            .eq('submission_id', resolvedSubmissionId)
             .single()
 
         let gradeData
@@ -315,7 +384,7 @@ export async function POST(request: NextRequest) {
             // Create new grade
             const { data, error } = await supabase
                 .from('grades')
-                .insert({ submission_id, score: numScore, feedback })
+                .insert({ submission_id: resolvedSubmissionId, score: numScore, feedback })
                 .select()
                 .single()
 
@@ -331,7 +400,7 @@ export async function POST(request: NextRequest) {
                     student:students(user_id),
                     assignment:assignments(title, teaching_assignment:teaching_assignments(subject:subjects(name)))
                 `)
-                .eq('id', submission_id)
+                .eq('id', resolvedSubmissionId)
                 .single()
 
             const studentData = submission?.student as any

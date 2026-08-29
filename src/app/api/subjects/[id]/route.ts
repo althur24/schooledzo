@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 
 // PUT update subject
 export async function PUT(
@@ -53,6 +54,17 @@ export async function DELETE(
 
         if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Tenant guard: mapel harus milik sekolah caller SEBELUM cleanup lintas
+        // tabel — sebelumnya cleanup schedule_entries/subject_kkm tak ter-scope,
+        // id mapel sekolah lain bisa dinull-kan/dihapus KKM-nya.
+        {
+            const { data: subj } = await supabase
+                .from('subjects').select('school_id').eq('id', id).single()
+            if (tenantMismatch((subj as any)?.school_id, schoolId)) {
+                return notFound()
+            }
         }
 
         // Clean up related data before deleting subject

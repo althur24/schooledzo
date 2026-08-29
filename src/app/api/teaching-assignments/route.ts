@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch } from '@/lib/tenantGuard'
 import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 
 // GET all teaching assignments
@@ -15,6 +16,7 @@ export async function GET(request: NextRequest) {
 
         // Auto-filter by active year if no specific year requested
         let filterYearId = academicYearId
+        let schoolYearIds: string[] | null = null
         if (!filterYearId && allYears !== 'true') {
             let yearQuery = supabase
                 .from('academic_years')
@@ -23,6 +25,28 @@ export async function GET(request: NextRequest) {
             if (schoolId) yearQuery = yearQuery.eq('school_id', schoolId)
             const { data: activeYear } = await yearQuery.single()
             if (activeYear) filterYearId = activeYear.id
+        }
+
+        // Tenant guard: tahun ajaran dari client harus milik sekolah caller
+        if (filterYearId && schoolId) {
+            const { data: reqYear } = await supabase
+                .from('academic_years')
+                .select('school_id')
+                .eq('id', filterYearId)
+                .single()
+            if (tenantMismatch((reqYear as any)?.school_id, schoolId)) {
+                return NextResponse.json([])
+            }
+        }
+
+        // all_years=true: tetap scope ke tahun ajaran sekolah caller —
+        // sebelumnya tanpa filter sama sekali (bocor TA semua sekolah)
+        if (!filterYearId && allYears === 'true' && schoolId) {
+            const { data: schoolYears } = await supabase
+                .from('academic_years')
+                .select('id')
+                .eq('school_id', schoolId)
+            schoolYearIds = schoolYears?.map((y: any) => y.id) || []
         }
 
         // No active year: return empty instead of leaking assignments across years
@@ -47,6 +71,8 @@ export async function GET(request: NextRequest) {
 
         if (filterYearId) {
             query = query.eq('academic_year_id', filterYearId)
+        } else if (schoolYearIds) {
+            query = query.in('academic_year_id', schoolYearIds)
         }
 
         const { data, error } = await query

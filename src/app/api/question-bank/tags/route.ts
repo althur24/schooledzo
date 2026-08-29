@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch } from '@/lib/tenantGuard'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // GET daftar tag unik milik guru (untuk autocomplete input tag & filter tag)
@@ -8,7 +9,7 @@ export async function GET(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -30,8 +31,22 @@ export async function GET(request: NextRequest) {
             teacherId = request.nextUrl.searchParams.get('teacher_id')
         }
 
-        let query = supabase.from('question_bank').select('tags')
-        if (teacherId) query = query.eq('teacher_id', teacherId)
+        // Embed !inner: filter teacher.school_id diterapkan PostgREST ke parent
+        // rows — bebas batas URL utk sekolah dengan ratusan guru.
+        let query = supabase.from('question_bank').select('tags, teacher:teachers!inner(school_id)')
+        if (teacherId) {
+            query = query.eq('teacher_id', teacherId)
+            // Tenant guard: guru yang diminta harus sekolah caller (ADMIN ?teacher_id=)
+            if (schoolId) {
+                const { data: t } = await supabase
+                    .from('teachers').select('school_id').eq('id', teacherId).single()
+                if (tenantMismatch((t as any)?.school_id, schoolId)) return NextResponse.json([])
+            }
+        } else if (schoolId) {
+            // ADMIN tanpa teacher_id: scope ke guru sekolah caller
+            // (sebelumnya mengembalikan tag semua sekolah)
+            query = query.eq('teacher.school_id', schoolId)
+        }
 
         const rows = await fetchAllRows(query)
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 
 // DELETE teaching assignment
@@ -18,12 +19,16 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Block writes to archived (COMPLETED) academic years
+        // Block writes to archived (COMPLETED) academic years + tenant guard
         const { data: taForYear } = await supabase
             .from('teaching_assignments')
-            .select('academic_year_id')
+            .select('academic_year_id, academic_year:academic_years(school_id)')
             .eq('id', id)
             .single()
+        // Tenant guard: penugasan harus milik sekolah caller
+        if (tenantMismatch((taForYear as any)?.academic_year?.school_id ?? (Array.isArray((taForYear as any)?.academic_year) ? (taForYear as any)?.academic_year?.[0]?.school_id : undefined), schoolId)) {
+            return notFound()
+        }
         if (taForYear?.academic_year_id) {
             const yearStatus = await getYearStatusById(taForYear.academic_year_id)
             if (yearStatus === 'COMPLETED') return archivedYearResponse()

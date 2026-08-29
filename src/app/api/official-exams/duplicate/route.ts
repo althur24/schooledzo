@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch } from '@/lib/tenantGuard'
 import { canManageOfficialExam } from '@/lib/teacherScope'
 
 export async function POST(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         if (user.role !== 'ADMIN' && user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -42,6 +43,13 @@ export async function POST(request: NextRequest) {
             .single()
 
         if (sourceError || !sourceExam) {
+            return NextResponse.json({ error: 'Source exam not found' }, { status: 404 })
+        }
+
+        // Tenant guard: source exam harus milik sekolah caller — tanpa ini
+        // guru/admin bisa membaca soal + kunci jawaban ujian sekolah lain
+        // dan menyuntik duplikat ke sekolah sumber (school_id ikut sumber).
+        if (tenantMismatch((sourceExam as any).school_id, schoolId)) {
             return NextResponse.json({ error: 'Source exam not found' }, { status: 404 })
         }
 

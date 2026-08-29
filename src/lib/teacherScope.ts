@@ -68,10 +68,26 @@ export function ownsTeachingAssignment(scope: TeacherScope | null, taTeacherId: 
 
 /**
  * Helper gabungan untuk guard endpoint ulangan:
- * ADMIN selalu boleh; GURU hanya bila TA-nya sendiri.
+ * ADMIN hanya boleh di sekolahnya sendiri (via teacher → teachers.school_id);
+ * GURU hanya bila TA-nya sendiri.
  */
-export async function canManageExam(user: { id: string; role: string }, taTeacherId: string | null | undefined): Promise<boolean> {
-    if (user.role === 'ADMIN') return true
+export async function canManageExam(
+    user: { id: string; role: string; school_id?: string | null },
+    taTeacherId: string | null | undefined
+): Promise<boolean> {
+    if (user.role === 'ADMIN') {
+        // Tenant guard: sebelumnya return true tanpa cek — ADMIN satu sekolah
+        // bisa mengubah/menghapus ulangan sekolah lain.
+        const callerSchoolId = user.school_id ?? null
+        if (!callerSchoolId || !taTeacherId) return false
+        const { data: teacher } = await supabase
+            .from('teachers')
+            .select('school_id')
+            .eq('id', taTeacherId)
+            .single()
+        const teacherSchoolId = (teacher as any)?.school_id
+        return !!teacherSchoolId && teacherSchoolId === callerSchoolId
+    }
     if (user.role !== 'GURU') return false
     const scope = await getTeacherScope(user.id)
     return ownsTeachingAssignment(scope, taTeacherId)
@@ -95,13 +111,20 @@ export function canTeachStudentSubmission(
 
 /**
  * Helper gabungan untuk guard endpoint UTS/UAS:
- * ADMIN selalu boleh; GURU hanya bila mapel & semua kelas target diajar (di tahun exam).
+ * ADMIN hanya boleh di sekolahnya sendiri (official_exams.school_id);
+ * GURU hanya bila mapel & semua kelas target diajar (di tahun exam).
  */
 export async function canManageOfficialExam(
-    user: { id: string; role: string },
-    exam: { subject_id: string; target_class_ids: string[] | null; academic_year_id: string | null }
+    user: { id: string; role: string; school_id?: string | null },
+    exam: { subject_id: string; target_class_ids: string[] | null; academic_year_id: string | null; school_id?: string | null }
 ): Promise<boolean> {
-    if (user.role === 'ADMIN') return true
+    if (user.role === 'ADMIN') {
+        // Tenant guard: sebelumnya return true tanpa cek — ADMIN satu sekolah
+        // bisa mengubah/menghapus UTS/UAS sekolah lain.
+        const callerSchoolId = user.school_id ?? null
+        if (!callerSchoolId) return false
+        return exam.school_id === callerSchoolId
+    }
     if (user.role !== 'GURU') return false
     const scope = await getTeacherScope(user.id, exam.academic_year_id)
     return canTeachScope(scope, exam.subject_id, exam.target_class_ids)

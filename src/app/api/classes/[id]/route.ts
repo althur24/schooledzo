@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 
 // PUT update class
@@ -34,12 +35,16 @@ export async function PUT(
             }
         }
 
-        // Block writes to archived (COMPLETED) academic years
+        // Block writes to archived (COMPLETED) academic years + tenant guard
         const { data: classForYear } = await supabase
             .from('classes')
-            .select('academic_year_id')
+            .select('academic_year_id, school_id')
             .eq('id', id)
             .single()
+        // Tenant guard: kelas harus milik sekolah caller
+        if (tenantMismatch((classForYear as any)?.school_id, schoolId)) {
+            return notFound()
+        }
         if (classForYear?.academic_year_id) {
             const yearStatus = await getYearStatusById(classForYear.academic_year_id)
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
@@ -102,12 +107,16 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Block writes to archived (COMPLETED) academic years
+        // Block writes to archived (COMPLETED) academic years + tenant guard
         const { data: classForYear } = await supabase
             .from('classes')
-            .select('academic_year_id')
+            .select('academic_year_id, school_id')
             .eq('id', id)
             .single()
+        // Tenant guard: kelas harus milik sekolah caller
+        if (tenantMismatch((classForYear as any)?.school_id, schoolId)) {
+            return notFound()
+        }
         if (classForYear?.academic_year_id) {
             const yearStatus = await getYearStatusById(classForYear.academic_year_id)
             if (yearStatus === 'COMPLETED') return archivedYearResponse()

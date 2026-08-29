@@ -59,7 +59,11 @@ export async function DELETE(
             .eq('user_id', user.id)
             .single()
 
-        if (teacher) {
+        // Fail-closed: GURU tanpa row teachers = tidak boleh menghapus apa pun
+        if (!teacher) {
+            return NextResponse.json({ error: 'Data guru tidak ditemukan' }, { status: 403 })
+        }
+        {
             const { data: assignment } = await supabase
                 .from('assignments')
                 .select('teaching_assignment:teaching_assignments(teacher_id)')
@@ -143,15 +147,22 @@ export async function PUT(
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
-        const { title, description, type, due_date } = await request.json()
+        const { title, description, type, due_date, submission_mode } = await request.json()
 
         if (!title || !type) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
         }
 
+        // submission_mode hanya diupdate bila dikirim eksplisit — form edit biasa
+        // tidak mengirimnya, agar kolom offline tidak berubah jadi online.
+        const updatePayload: Record<string, any> = { title, description, type, due_date }
+        if (submission_mode === 'OFFLINE' || submission_mode === 'ONLINE') {
+            updatePayload.submission_mode = submission_mode
+        }
+
         const { data, error } = await supabase
             .from('assignments')
-            .update({ title, description, type, due_date })
+            .update(updatePayload)
             .eq('id', id)
             .select()
             .single()

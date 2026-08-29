@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { findQuizzesOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 import { createClient } from '@supabase/supabase-js'
 
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest) {
         // Auth check
         const ctx = await getSchoolContextOrError(req)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -26,6 +27,13 @@ export async function POST(req: NextRequest) {
                 { error: 'source_quiz_id and target_quiz_ids (array) are required' },
                 { status: 400 }
             )
+        }
+
+        // Tenant guard: source & semua target harus milik sekolah caller
+        // (anti eksfiltrasi soal/kunci jawaban & injeksi soal lintas sekolah)
+        const outside = await findQuizzesOutsideSchool([source_quiz_id, ...target_quiz_ids], schoolId)
+        if (outside.length > 0) {
+            return NextResponse.json({ error: 'Quiz not found or not accessible' }, { status: 404 })
         }
 
         // Block writes to archived (COMPLETED) academic years (checked per target quiz)

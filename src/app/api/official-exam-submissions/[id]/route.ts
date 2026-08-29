@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { getTeacherScope, canTeachStudentSubmission } from '@/lib/teacherScope'
 import { logError } from '@/lib/logError'
 
@@ -19,12 +20,17 @@ export async function GET(
             .select(`
                 *,
                 student:students(id, nis, user:users!students_user_id_fkey(full_name)),
-                exam:official_exams(id, title, exam_type, duration_minutes, show_results_immediately, results_released, subject:subjects(name))
+                exam:official_exams(id, title, exam_type, duration_minutes, show_results_immediately, results_released, school_id, subject:subjects(name))
             `)
             .eq('id', id)
             .single()
 
         if (error) throw error
+
+        // Tenant guard: submission harus milik sekolah caller (IDOR lintas sekolah)
+        if (tenantMismatch((submission as any)?.exam?.school_id, ctx.schoolId)) {
+            return notFound()
+        }
 
         // S4 Security Fix: IDOR protection — SISWA can only access their own official exam submission
         if (ctx.user.role === 'SISWA') {
