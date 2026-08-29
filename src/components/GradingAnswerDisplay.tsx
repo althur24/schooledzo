@@ -44,7 +44,7 @@ export default function GradingAnswerDisplay({ question, answer }: GradingAnswer
             return <span>(Tidak valid)</span>
         }
 
-        return <span className="whitespace-pre-wrap">{ansStr}</span>
+        return <SmartText text={ansStr} as="div" className="whitespace-pre-wrap" />
     }
 
     return (

@@ -101,28 +101,46 @@ export default function StudentAnswerInput({ question, value, onChange, onChange
         return (
             <div className="space-y-2">
                 <p className="text-sm text-text-secondary dark:text-slate-400 mb-1">Jawaban Singkat:</p>
-                <input 
+                <input
                     type="text"
-                    dir={dir} 
-                    value={value || ''} 
-                    onChange={(e) => onChange(e.target.value)} 
-                    className={`w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary ${isRtl ? 'text-right' : ''}`} 
-                    placeholder="Ketik jawaban Anda..." 
+                    dir={dir}
+                    value={value || ''}
+                    onChange={(e) => onChange(e.target.value)}
+                    className={`w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary ${isRtl ? 'text-right' : ''}`}
+                    placeholder="Ketik jawaban Anda..."
                     maxLength={200}
                 />
+                {value && value.trim() && (
+                    <div>
+                        <p className="text-xs text-text-secondary dark:text-slate-400 mb-1">Pratinjau (mendukung LaTeX, mis. $x^2$):</p>
+                        <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700 rounded-lg">
+                            <SmartText text={value} as="div" />
+                        </div>
+                    </div>
+                )}
             </div>
         )
     }
 
     // ESSAY fallback
     return (
-        <textarea 
-            dir={dir} 
-            value={value || ''} 
-            onChange={(e) => onChange(e.target.value)} 
-            className={`w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none ${isRtl ? 'text-right' : ''}`} 
-            rows={6} 
-            placeholder="Tulis jawaban Anda di sini..." 
-        />
+        <div className="space-y-2">
+            <textarea
+                dir={dir}
+                value={value || ''}
+                onChange={(e) => onChange(e.target.value)}
+                className={`w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none ${isRtl ? 'text-right' : ''}`}
+                rows={6}
+                placeholder="Tulis jawaban Anda di sini..."
+            />
+            {value && value.trim() && (
+                <div>
+                    <p className="text-xs text-text-secondary dark:text-slate-400 mb-1">{"Pratinjau (mendukung LaTeX, mis. $x^2$ atau $\\frac{a}{b}$):"}</p>
+                    <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700 rounded-lg max-h-48 overflow-y-auto">
+                        <SmartText text={value} as="div" />
+                    </div>
+                </div>
+            )}
+        </div>
     )
 }

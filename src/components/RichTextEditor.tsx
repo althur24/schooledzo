@@ -7,6 +7,7 @@ import { ResizableImage } from './ResizableImageExtension'
 import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import SmartText from './SmartText'
+import MathInsertMenu from './editor/MathInsertMenu'
 import './RichTextEditor.css'
 
 interface RichTextEditorProps {
@@ -251,8 +252,10 @@ export default function RichTextEditor({
                 <div className="rte-toolbar-divider" />
 
                 {/* Math Shortcuts */}
+                <MathInsertMenu onInsert={insertMath} disabled={disabled} />
                 <button type="button" onClick={() => insertMath('\\frac{a}{b}')} className="rte-toolbar-btn" title="Pecahan">½</button>
                 <button type="button" onClick={() => insertMath('x^{2}')} className="rte-toolbar-btn" title="Pangkat">x²</button>
+                <button type="button" onClick={() => insertMath('x_{1}')} className="rte-toolbar-btn" title="Subskrip">x₂</button>
                 <button type="button" onClick={() => insertMath('\\sqrt{x}')} className="rte-toolbar-btn" title="Akar">√</button>
                 <button
                     type="button"
@@ -300,6 +303,18 @@ export default function RichTextEditor({
                     </div>
                 )}
             </div>
+            )}
+
+            {/* Math bar — tampil di SEMUA mode (termasuk compact) supaya editor
+                opsi pilihan ganda juga punya akses rumus/simbol/matriks */}
+            {compact && (
+                <div className="rte-mathbar">
+                    <MathInsertMenu onInsert={insertMath} disabled={disabled} />
+                    <button type="button" onClick={() => insertMath('\\frac{a}{b}')} className="rte-toolbar-btn" title="Pecahan">½</button>
+                    <button type="button" onClick={() => insertMath('x^{2}')} className="rte-toolbar-btn" title="Pangkat">x²</button>
+                    <button type="button" onClick={() => insertMath('x_{1}')} className="rte-toolbar-btn" title="Subskrip">x₂</button>
+                    <button type="button" onClick={() => insertMath('\\sqrt{x}')} className="rte-toolbar-btn" title="Akar">√</button>
+                </div>
             )}
 
             {/* Editor Content Area */}

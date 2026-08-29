@@ -160,24 +160,28 @@ export default function HasilKuisPage() {
                     <div className="bg-secondary/10 rounded-lg p-4 text-sm space-y-2">
                         <div>
                             <p className="text-text-secondary text-xs mb-1">Jawaban Kamu:</p>
-                            <p className="text-text-main dark:text-white font-medium">
+                            <div className="text-text-main dark:text-white font-medium">
                                 {q.question_type === 'MULTIPLE_CHOICE' && q.options && userAnswer?.answer
                                     ? <><span>{userAnswer.answer}. </span><SmartText text={q.options[(userAnswer.answer.charCodeAt(0) - 65)] || ''} as="span" /></>
                                     : q.question_type === 'TRUE_FALSE' && userAnswer?.answer
                                     ? userAnswer.answer
-                                    : userAnswer?.answer || '-'}
-                            </p>
+                                    : userAnswer?.answer
+                                        ? <SmartText text={userAnswer.answer} as="div" />
+                                        : '-'}
+                            </div>
                         </div>
 
                         {/* Show correct answer for auto-gradeable types if graded and incorrect */}
                         {result.is_graded && isAutoGraded && !isCorrect && q.correct_answer && (
                             <div className="pt-2 border-t border-secondary/20">
                                 <p className="text-green-600 dark:text-green-400 text-xs mb-1">Kunci Jawaban:</p>
-                                <p className="text-green-700 dark:text-green-300">
+                                <div className="text-green-700 dark:text-green-300">
                                     {q.question_type === 'MULTIPLE_CHOICE' && q.options
                                         ? <><span>{q.correct_answer}. </span><SmartText text={q.options?.[(q.correct_answer?.charCodeAt(0) || 65) - 65] || ''} as="span" /></>
-                                        : q.correct_answer}
-                                </p>
+                                        : q.correct_answer
+                                            ? <SmartText text={q.correct_answer} as="div" />
+                                            : '-'}
+                                </div>
                             </div>
                         )}
 

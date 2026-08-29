@@ -69,24 +69,66 @@ function renderMathNotation(text: string): string {
         }
     }
 
-    // Mixed text (e.g., "Hasil dari x^2 + 3"): find and render math segments
-    // Match sequences that contain ^ with surrounding math context
+    // Mixed text (e.g., "Hasil dari x^2 + 3"): find and render math segments.
+    // Non-math segments di-escape (lihat catatan keamanan di renderLatexInText).
+    const mathHtmls: string[] = []
     const result = text.replace(
         /(?:[a-zA-Z0-9()\[\]{}]+\s*[+\-*/=<>]*\s*)*[a-zA-Z0-9)}\]]\^[0-9a-zA-Z{(][^\s,;:!?]*(?:\s*[+\-*/=<>]\s*[a-zA-Z0-9(^_][^\s,;:!?]*)*/g,
         (match) => {
             try {
-                return katex.renderToString(match.trim(), { displayMode: false, throwOnError: false })
+                mathHtmls.push(katex.renderToString(match.trim(), { displayMode: false, throwOnError: false }))
+                return `\u0000${mathHtmls.length - 1}\u0000`
             } catch {
                 return match
             }
         }
     )
 
-    return result
+    if (result === text) return text
+    return escapeNonMathHtml(result, mathHtmls)
 }
 
-// Render LaTeX expressions in text, returning HTML string
-function renderLatexInText(text: string): string {
+// Render LaTeX expressions in text, returning HTML string.
+//
+// KEAMANAN: teks non-math di-escape sebelum digabung dengan HTML KaTeX —
+// jawaban siswa (user input) kini mengalir lewat SmartText ke layar guru,
+// jadi hanya HTML hasil generate KaTeX yang boleh masuk dangerouslySetInnerHTML.
+// Tekniknya: segmen math diganti placeholder \u0000N\u0000, sisa teks di-escape,
+// lalu placeholder dipulihkan dengan HTML KaTeX-nya.
+
+function escapeHtmlText(text: string): string {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+}
+
+function restoreMathHtml(text: string, mathHtmls: string[]): string {
+    return text.replace(/\u0000(\d+)\u0000/g, (_, i) => mathHtmls[Number(i)] ?? '')
+}
+
+function escapeNonMathHtml(text: string, mathHtmls: string[]): string {
+    return restoreMathHtml(escapeHtmlText(text), mathHtmls)
+}
+
+// KaTeX trust callback: tetap permissif untuk perintah legitim, tapi blokir
+// URL javascript: pada \href/\url (bisa dimanfaatkan dari input siswa).
+const trustKaTeX = (context: { command: string; url?: string }) => {
+    if ((context.command === '\\href' || context.command === '\\url') && context.url) {
+        return !/^\s*javascript:/i.test(context.url)
+    }
+    return true
+}
+
+function renderLatexInText(text: string, escapeNonMath = false): string {
+    const mathHtmls: string[] = []
+    const ph = (html: string) => {
+        mathHtmls.push(html)
+        return `\u0000${mathHtmls.length - 1}\u0000`
+    }
+
     // First handle block math ($$...$$)
     let result = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, expr) => {
         // Fix common matrix issue: single backslash at end of line instead of double
@@ -94,7 +136,7 @@ function renderLatexInText(text: string): string {
         let cleanExpr = expr.replace(/(?<!\\)\\(?:\s*[\n\r]|\s*\\n)/g, '\\\\ ')
 
         try {
-            return `<div class="katex-block">${katex.renderToString(cleanExpr.trim(), { displayMode: true, throwOnError: false, trust: true })}</div>`
+            return ph(`<div class="katex-block">${katex.renderToString(cleanExpr.trim(), { displayMode: true, throwOnError: false, trust: trustKaTeX })}</div>`)
         } catch (e) {
             return `$$${expr}$$`
         }
@@ -107,25 +149,37 @@ function renderLatexInText(text: string): string {
         let cleanExpr = expr.replace(/(?<!\\)\\(?:\s*[\n\r]|\s*\\n)/g, '\\\\ ')
 
         try {
-            return katex.renderToString(cleanExpr.trim(), { displayMode: false, throwOnError: false, trust: true })
+            return ph(katex.renderToString(cleanExpr.trim(), { displayMode: false, throwOnError: false, trust: trustKaTeX }))
         } catch (e) {
             return `$${expr}$`
         }
     })
 
-    return result
+    // escapeNonMath=false → dipakai untuk konten HTML (Path 0): jangan escape
+    // (tag TipTap akan rusak), sanitization ditangani sanitizeHtml di pemanggil.
+    // escapeNonMath=true → dipakai untuk plain text (Path 1): escape semua
+    // segmen non-math agar user input tidak bisa menyuntik markup.
+    if (!escapeNonMath) {
+        return restoreMathHtml(result, mathHtmls)
+    }
+    return escapeNonMathHtml(result, mathHtmls)
 }
 
 // Auto-wrap raw LaTeX expressions and render
 function renderRawLatexInText(text: string): string {
     // Match segments that contain LaTeX commands with their arguments
     // This handles patterns like: \log_2(x-1), \int_0^1, \frac{a}{b}, x^2, etc.
+    const mathHtmls: string[] = []
+    const ph = (html: string) => {
+        mathHtmls.push(html)
+        return `\u0000${mathHtmls.length - 1}\u0000`
+    }
 
     // First, try to find and render parenthesized LaTeX expressions: ( \expr ... )
     let result = text.replace(/\(\s*((?:[^()]*\\[a-zA-Z]+[^()]*)+)\s*\)/g, (match, expr) => {
         try {
             const rendered = katex.renderToString(expr.trim(), { displayMode: false, throwOnError: false })
-            return rendered
+            return ph(rendered)
         } catch {
             return match
         }
@@ -138,7 +192,7 @@ function renderRawLatexInText(text: string): string {
             /((?:\\[a-zA-Z]+(?:_\{[^}]*\}|_[a-zA-Z0-9]|\^\{[^}]*\}|\^[a-zA-Z0-9]|\{[^}]*\}|\([^)]*\))*(?:\s*[+\-=<>*/^_,]\s*(?:[a-zA-Z0-9]+(?:_\{[^}]*\}|_[a-zA-Z0-9]|\^\{[^}]*\}|\^[a-zA-Z0-9])*|\\[a-zA-Z]+(?:\{[^}]*\})*))*)+)/g,
             (match) => {
                 try {
-                    return katex.renderToString(match.trim(), { displayMode: false, throwOnError: false })
+                    return ph(katex.renderToString(match.trim(), { displayMode: false, throwOnError: false }))
                 } catch {
                     return match
                 }
@@ -146,7 +200,7 @@ function renderRawLatexInText(text: string): string {
         )
     }
 
-    return result
+    return escapeNonMathHtml(result, mathHtmls)
 }
 
 interface SmartTextProps {
@@ -189,7 +243,7 @@ export default function SmartText({ text, className = '', as: Tag = 'p' }: Smart
     if (hasLatex) {
         let html: string
         if (hasExplicitLatex) {
-            html = renderLatexInText(text)
+            html = renderLatexInText(text, true)
         } else {
             html = renderRawLatexInText(text)
         }

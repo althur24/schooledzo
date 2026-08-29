@@ -99,5 +99,6 @@ export function sanitizeHtml(html: string | null | undefined): string {
         .replace(/<link\b[^>]*>/gi, '')
         .replace(/on\w+="[^"]*"/gi, '') // remove inline event handlers
         .replace(/on\w+='[^']*'/gi, '')
+        .replace(/\son\w+\s*=\s*[^\s>]+/gi, '') // unquoted event handlers (e.g. onerror=alert(1))
         .replace(/javascript:/gi, '') // remove javascript: URLs
 }

@@ -315,7 +315,11 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
                                     </div>
                                     <div className="p-3 bg-secondary/5 rounded-lg">
                                         <p className="text-xs text-text-secondary mb-1 font-bold">Jawaban Siswa:</p>
-                                        <p className="text-sm text-text-main dark:text-white whitespace-pre-wrap">{answer.answer || '(tidak dijawab)'}</p>
+                                        <div className="text-sm text-text-main dark:text-white">
+                                            {answer.answer
+                                                ? <SmartText text={answer.answer} as="div" className="whitespace-pre-wrap" />
+                                                : <span className="italic opacity-70">(tidak dijawab)</span>}
+                                        </div>
                                     </div>
                                     <div className="flex items-center gap-3">
                                         <label className="text-sm font-bold text-text-main dark:text-white">Poin:</label>

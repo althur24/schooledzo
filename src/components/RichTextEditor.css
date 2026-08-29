@@ -300,3 +300,240 @@
     max-height: 120px;
     width: auto;
 }
+
+/* ─── Math bar (rendered in ALL modes incl. compact — opsi PG butuh akses rumus) ─── */
+.rte-mathbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 8px;
+    border-bottom: 1px solid rgba(var(--secondary-rgb, 128, 128, 128), 0.15);
+    background: rgba(var(--secondary-rgb, 128, 128, 128), 0.03);
+}
+
+/* Toolbar penuh sudah punya border-bottom sendiri — mathbar di bawahnya
+   tidak perlu border ganda saat keduanya tampil */
+.rte-toolbar + .rte-mathbar {
+    padding-top: 2px;
+}
+
+:is(.dark) .rte-mathbar {
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ─── Math Insert Menu (dropdown ƒx) ─── */
+.math-insert-menu {
+    display: contents; /* trigger button langsung jadi anak flex toolbar */
+}
+
+.rte-toolbar-btn--math {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-style: italic;
+    font-size: 15px;
+    letter-spacing: -0.5px;
+}
+
+.math-insert-menu__x {
+    font-style: italic;
+}
+
+/* Dirender via portal ke document.body + position: fixed — bebas dari
+   clipping overflow:hidden editor dan scroll container modal.
+   top/left diset inline dari getBoundingClientRect() trigger. */
+.math-insert-menu__dropdown {
+    position: fixed;
+    z-index: 9990;
+    min-width: 300px;
+    max-width: min(90vw, 420px);
+    background: white;
+    border: 1px solid rgba(var(--secondary-rgb, 128, 128, 128), 0.25);
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.18), 0 4px 12px -4px rgba(0, 0, 0, 0.1);
+    padding: 8px;
+    animation: math-menu-in 0.12s ease-out;
+}
+
+@keyframes math-menu-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+:is(.dark) .math-insert-menu__dropdown {
+    background: #27272a;
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.math-insert-menu__group {
+    margin-bottom: 6px;
+}
+
+.math-insert-menu__group-name {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary, #94a3b8);
+    padding: 4px 6px;
+}
+
+.math-insert-menu__items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 0 2px;
+}
+
+.math-insert-menu__item {
+    min-width: 38px;
+    padding: 5px 10px;
+    border-radius: 0.5rem;
+    border: 1px solid rgba(var(--secondary-rgb, 128, 128, 128), 0.2);
+    background: white;
+    color: var(--text-main, #1e293b);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+    text-align: center;
+    flex: 1 0 auto;
+    max-width: 90px;
+}
+
+.math-insert-menu__item:hover {
+    border-color: var(--primary, #3b82f6);
+    background: rgba(var(--primary-rgb, 59, 130, 246), 0.08);
+    transform: translateY(-1px);
+}
+
+:is(.dark) .math-insert-menu__item {
+    background: #18181b;
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #e4e4e7;
+}
+
+:is(.dark) .math-insert-menu__item:hover {
+    border-color: var(--primary, #3b82f6);
+    background: rgba(59, 130, 246, 0.15);
+}
+
+.math-insert-menu__free-btn {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    padding: 7px 10px;
+    border: none;
+    border-top: 1px dashed rgba(var(--secondary-rgb, 128, 128, 128), 0.3);
+    background: transparent;
+    color: var(--primary, #3b82f6);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    transition: color 0.12s;
+}
+
+.math-insert-menu__free-btn:hover {
+    text-decoration: underline;
+}
+
+/* ─── Free LaTeX input (dialog dalam dropdown) ─── */
+.math-free-input {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 2px;
+}
+
+.math-free-input__label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary, #94a3b8);
+}
+
+.math-free-input textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid rgba(var(--secondary-rgb, 128, 128, 128), 0.3);
+    border-radius: 0.5rem;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 13px;
+    color: var(--text-main, #1e293b);
+    background: white;
+    outline: none;
+    resize: vertical;
+    min-width: 260px;
+}
+
+.math-free-input textarea:focus {
+    border-color: var(--primary, #3b82f6);
+    box-shadow: 0 0 0 2px rgba(var(--primary-rgb, 59, 130, 246), 0.15);
+}
+
+:is(.dark) .math-free-input textarea {
+    background: #18181b;
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #e4e4e7;
+}
+
+.math-free-preview {
+    min-height: 44px;
+    padding: 8px 10px;
+    border-radius: 0.5rem;
+    background: rgba(var(--secondary-rgb, 128, 128, 128), 0.06);
+    border: 1px solid rgba(var(--secondary-rgb, 128, 128, 128), 0.12);
+    font-size: 15px;
+    color: var(--text-main, #1e293b);
+    overflow-x: auto;
+}
+
+:is(.dark) .math-free-preview {
+    background: rgba(0, 0, 0, 0.25);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #e2e8f0;
+}
+
+.math-free-input__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.math-free-input__btn {
+    padding: 6px 14px;
+    border-radius: 0.5rem;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.12s;
+}
+
+.math-free-input__btn--cancel {
+    background: transparent;
+    border-color: rgba(var(--secondary-rgb, 128, 128, 128), 0.3);
+    color: var(--text-secondary, #64748b);
+}
+
+.math-free-input__btn--insert {
+    background: var(--primary, #3b82f6);
+    color: white;
+}
+
+.math-free-input__btn--insert:hover:not(:disabled) {
+    filter: brightness(1.08);
+}
+
+.math-free-input__btn--insert:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
