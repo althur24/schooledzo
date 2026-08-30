@@ -11,6 +11,7 @@ import { Logout } from 'react-iconly'
 import { Menu } from 'lucide-react'
 
 import Sidebar from '@/components/Sidebar'
+import AuthRetryScreen from '@/components/AuthRetryScreen'
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar_collapsed'
 
@@ -21,7 +22,7 @@ interface DashboardLayoutProps {
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
     const router = useRouter()
     const pathname = usePathname()
-    const { user, logout, loading } = useAuth()
+    const { user, logout, loading, authError, refreshUser } = useAuth()
     const isIntentionalLogout = useRef(false)
 
     // Sidebar: desktop collapse (persisted) + mobile drawer
@@ -53,12 +54,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         router.push('/login')
     }
 
-    // Redirect to login if session expired (user is null after loading completes)
+    // Redirect to login only on a definitive session-expiry (401 from
+    // /api/auth/me, which also cleared the cookie). On network errors,
+    // AuthContext restores the last-known user so the app keeps rendering
+    // (offline-capable pages like materi still work); redirecting with a
+    // still-alive cookie would bounce-loop via middleware.
     useEffect(() => {
-        if (!loading && !user && !isIntentionalLogout.current) {
+        if (!loading && !user && !isIntentionalLogout.current && authError === 'session') {
             router.replace('/login?expired=true')
         }
-    }, [user, loading, router])
+    }, [user, loading, authError, router])
 
     // Enforce password change
     useEffect(() => {
@@ -104,6 +109,27 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
                     <span className="font-medium text-text-main">Memuat...</span>
+                </div>
+            </div>
+        )
+    }
+
+    // Session ended or unreachable — intercept before the shell so child pages
+    // never render with a null user (avoids dead-ends / crashes). On a network
+    // error show a retry screen; on session-expiry show a spinner while the
+    // redirect effect above sends the user to /login.
+    if (!loading && !user) {
+        if (authError === 'network') {
+            return <AuthRetryScreen onRetry={refreshUser} />
+        }
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-[#D4E0D2]">
+                <div className="flex items-center gap-3 text-primary">
+                    <svg className="animate-spin w-6 h-6" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span className="font-medium text-text-main">Mengalihkan...</span>
                 </div>
             </div>
         )

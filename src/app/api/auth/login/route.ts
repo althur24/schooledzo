@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { authenticateUser, createSession } from '@/lib/auth'
+import { authenticateUser, createSession, SESSION_COOKIE_MAX_AGE } from '@/lib/auth'
 
 // M1 Security Fix: In-memory rate limiter for login attempts
 const loginAttempts = new Map<string, { count: number; resetTime: number }>()
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
-            maxAge: 60 * 60 * 24 * 7, // 7 days
+            maxAge: SESSION_COOKIE_MAX_AGE,
             path: '/'
         })
 
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
             httpOnly: false,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
-            maxAge: 60 * 60 * 24 * 7, // 7 days
+            maxAge: SESSION_COOKIE_MAX_AGE,
             path: '/'
         })
 
