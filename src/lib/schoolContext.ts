@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { validateSession } from './auth'
+import { validateSession, validateSessionCached } from './auth'
 import { AuthUser } from './types'
 import { supabaseAdmin } from './supabase'
 
@@ -18,13 +18,20 @@ export interface SchoolContext {
  * Returns the authenticated user and their school_id.
  * Throws if user is not authenticated.
  */
-export async function getSchoolContext(request: NextRequest): Promise<SchoolContext> {
+export async function getSchoolContext(
+    request: NextRequest,
+    opts?: { cachedSession?: boolean }
+): Promise<SchoolContext> {
     const token = request.cookies.get('session_token')?.value
     if (!token) {
         throw new AuthError('Unauthorized', 401)
     }
 
-    const user = await validateSession(token)
+    // cachedSession: micro-cache 30 dtk — hanya untuk endpoint polling
+    // frekuensi tinggi yang tidak sensitif (mis. notifikasi)
+    const user = opts?.cachedSession
+        ? await validateSessionCached(token)
+        : await validateSession(token)
     if (!user) {
         throw new AuthError('Session expired', 401)
     }
@@ -40,10 +47,11 @@ export async function getSchoolContext(request: NextRequest): Promise<SchoolCont
  * Convenience wrapper that returns NextResponse on auth failure.
  */
 export async function getSchoolContextOrError(
-    request: NextRequest
+    request: NextRequest,
+    opts?: { cachedSession?: boolean }
 ): Promise<SchoolContext | NextResponse> {
     try {
-        return await getSchoolContext(request)
+        return await getSchoolContext(request, opts)
     } catch (error) {
         if (error instanceof AuthError) {
             return NextResponse.json(

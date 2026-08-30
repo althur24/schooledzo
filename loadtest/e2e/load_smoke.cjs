@@ -9,7 +9,7 @@
  * Jalankan: node loadtest/e2e/load_smoke.cjs
  * (Full test 1000 VU tetap pakai k6: loadtest/tryout.js — lihat D2.)
  */
-require('dotenv').config({ path: '.env.local' })
+require('./helpers.cjs').loadEnvGuarded()
 const { createClient } = require('@supabase/supabase-js')
 const bcrypt = require('bcryptjs')
 const { assertMin, mustInsert, spawnServer, stopServerSafe, waitPortUp } = require('./helpers.cjs')
@@ -17,12 +17,12 @@ const { assertMin, mustInsert, spawnServer, stopServerSafe, waitPortUp } = requi
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 const PORT = 3100
 const BASE = `http://localhost:${PORT}`
-const N_STUDENTS = 50
+const N_STUDENTS = require('./helpers.cjs').nStudents(50)
 const DURATION_MS = 60 * 1000      // lama fase mengerjakan
 const SAVE_EVERY = [2000, 5000]    // autosave tiap 2-5 dtk (lebih rapat dari produksi: smoke)
 const NOTIF_EVERY_MS = 15000
 
-const metrics = { save: [], notif: [], start: [], submit: [], errors: 0, total: 0 }
+const metrics = { save: [], notif: [], start: [], submit: [], monitor: [], errors: 0, total: 0 }
 function record(bucket, ms) { metrics[bucket].push(ms) }
 function pct(arr, p) { if (!arr.length) return -1; const s = [...arr].sort((a, b) => a - b); return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))]) }
 function fmtPct(arr, p) { return arr.length ? `${pct(arr, p)}ms` : 'n/a (n=0)' }
@@ -34,6 +34,7 @@ let server = null
 async function startServer() {
     server = spawnServer(process.cwd(), PORT)
     await waitPortUp(BASE)
+    await require('./helpers.cjs').assertServerDb(BASE, !!(process.env.ENV_FILE || '').includes('staging'))
 }
 async function stopServer() {
     // hanya membunuh process group milik sendiri — bukan pkill yang bisa kena proses lain
@@ -115,12 +116,37 @@ async function main() {
             { username: `${U}_${pad}`, full_name: `${U} Siswa ${pad}`, password_hash: passHash, role: 'SISWA', school_id: school.id }, `user siswa ${pad}`)
         const st = await mustInsert(supabase, 'students',
             { ...studT[0], id: undefined, user_id: u.id, nis: `${runId}${pad}`, class_id: klass.id, school_id: studT[0]?.school_id ?? school.id }, `student ${pad}`)
+        // Enrollment wajib: POST /api/official-exam-submissions memverifikasi
+        // student_enrollments (ACTIVE, tahun aktif) sebelum mengizinkan start —
+        // tanpa ini start 403 "tidak terdaftar" dan fase save/submit tak jalan.
+        const en = await mustInsert(supabase, 'student_enrollments',
+            { student_id: st.id, class_id: klass.id, academic_year_id: year.id, status: 'ACTIVE' }, `enrollment ${pad}`)
+        created.enrollments.push(en.id)
         const se = await mustInsert(supabase, 'sessions',
             { user_id: u.id, token: `${U}_tok_${pad}`, expires_at: new Date(now + 86400e3).toISOString() }, `session ${pad}`)
         created.users.push(u.id); created.students.push(st.id); created.sessions.push(se.id)
         users.push({ token: `${U}_tok_${pad}` })
     }
-    console.log(`fixtures OK: ${N_STUDENTS} siswa, 1 ujian, 10 soal`)
+
+    // MONITOR=1: admin fixture yang polling endpoint monitor tiap 15 dtk
+    // (mensimulasikan guru menonton halaman Monitor Live selama ujian berjalan)
+    let monitorWork = null
+    if (process.env.MONITOR === '1') {
+        const admin = await mustInsert(supabase, 'users',
+            { username: `${U}_admin`, full_name: `${U} Admin`, password_hash: passHash, role: 'ADMIN', school_id: school.id }, 'user admin (monitor)')
+        const adminTok = `${U}_admintok`
+        await mustInsert(supabase, 'sessions',
+            { user_id: admin.id, token: adminTok, expires_at: new Date(now + 86400e3).toISOString() }, 'session admin')
+        created.users.push(admin.id); created.sessions.push(adminTok)
+        monitorWork = (async () => {
+            const t0 = Date.now()
+            while (Date.now() - t0 < DURATION_MS) {
+                await api(`/api/official-exam-submissions/monitor?exam_id=${exam.id}`, {}, adminTok, 'monitor')
+                await sleep(15000)
+            }
+        })()
+    }
+    console.log(`fixtures OK: ${N_STUDENTS} siswa, 1 ujian, 10 soal${process.env.MONITOR === '1' ? ' + 1 admin (monitor polling)' : ''}`)
 
     await startServer()
     console.log('server up — mulai fase ujian 60 detik...')
@@ -147,7 +173,7 @@ async function main() {
         await api('/api/official-exam-submissions', { method: 'PUT', body: JSON.stringify({ submission_id: subId, submit: true }) }, u.token, 'submit')
     }
 
-    await Promise.all(users.map(studentWork))
+    await Promise.all([Promise.all(users.map(studentWork)), monitorWork].filter(Boolean))
     await stopServer()
 
     const errRate = metrics.total ? (metrics.errors / metrics.total * 100).toFixed(2) : '0'
@@ -157,6 +183,9 @@ async function main() {
     console.log(`save_answer   : n=${metrics.save.length} p50=${fmtPct(metrics.save, .5)} p95=${fmtPct(metrics.save, .95)}  (target p95<800)`)
     console.log(`notifications : n=${metrics.notif.length} p50=${fmtPct(metrics.notif, .5)} p95=${fmtPct(metrics.notif, .95)}  (target p95<300)`)
     console.log(`submit        : n=${metrics.submit.length} p50=${fmtPct(metrics.submit, .5)} p95=${fmtPct(metrics.submit, .95)}`)
+    if (metrics.monitor.length) {
+        console.log(`monitor       : n=${metrics.monitor.length} p50=${fmtPct(metrics.monitor, .5)} p95=${fmtPct(metrics.monitor, .95)}  (RPC agregasi — target p95<2000)`)
+    }
     // guard array kosong: pct() = -1 saat n=0 bisa lolos threshold <800 secara palsu
     const pass = metrics.total > 0
         && metrics.errors / metrics.total < 0.01

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Card } from '@/components/ui'
@@ -85,13 +85,6 @@ export default function ExamMonitorPage({ examId, mode }: {
             if (!res.ok) throw new Error(json.error || 'Gagal memuat data')
 
             setData(json)
-            if (json.exam?.subject_id) {
-                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${json.exam.subject_id}`)
-                if (kkmRes.ok) {
-                    const kkmData = await kkmRes.json()
-                    setSubjectKkms(Array.isArray(kkmData) ? kkmData : [])
-                }
-            }
 
             setLastUpdated(new Date())
             setTickOffset(0) // Reset client countdown on fresh data
@@ -105,15 +98,39 @@ export default function ExamMonitorPage({ examId, mode }: {
         }
     }
 
-    // Auto refresh every 15 seconds
+    // KKM per mapel efektif statis selama ujian — fetch SEKALI per subject_id,
+    // bukan di setiap siklus polling 15 detik (sebelumnya: dobel beban monitor).
+    const kkmFetchedForRef = useRef<string | null>(null)
+    useEffect(() => {
+        const subjectId = data?.exam?.subject_id
+        if (!subjectId || kkmFetchedForRef.current === subjectId) return
+        kkmFetchedForRef.current = subjectId
+        fetch(`/api/subject-kkm?subject_id=${subjectId}`)
+            .then(res => res.ok ? res.json() : [])
+            .then(kkmData => setSubjectKkms(Array.isArray(kkmData) ? kkmData : []))
+            .catch(() => { /* KKM granular opsional — fallback subject_kkm tetap dipakai */ })
+    }, [data?.exam?.subject_id])
+
+    // Auto refresh every 15 seconds — dijeda saat tab disembunyikan
+    // (guru yang mengecilkan tab tidak boleh terus membebani API),
+    // dan langsung refresh begitu tab terlihat lagi.
     useEffect(() => {
         fetchMonitorData() // Initial
 
         const interval = setInterval(() => {
+            if (document.hidden) return
             fetchMonitorData()
         }, 15000)
 
-        return () => clearInterval(interval)
+        const handleVisibility = () => {
+            if (!document.hidden) fetchMonitorData()
+        }
+        document.addEventListener('visibilitychange', handleVisibility)
+
+        return () => {
+            clearInterval(interval)
+            document.removeEventListener('visibilitychange', handleVisibility)
+        }
     }, [examId])
 
     // Client-side 1-second ticker for countdown

@@ -8,7 +8,7 @@
  *
  * Jalankan: node loadtest/e2e/load_expiry.cjs
  */
-require('dotenv').config({ path: '.env.local' })
+require('./helpers.cjs').loadEnvGuarded()
 const { createClient } = require('@supabase/supabase-js')
 const bcrypt = require('bcryptjs')
 const { assertMin, mustInsert, spawnServer, stopServerSafe, waitPortUp } = require('./helpers.cjs')
@@ -16,7 +16,7 @@ const { assertMin, mustInsert, spawnServer, stopServerSafe, waitPortUp } = requi
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 const PORT = 3100
 const BASE = `http://localhost:${PORT}`
-const N_STUDENTS = 50
+const N_STUDENTS = require('./helpers.cjs').nStudents(50)
 const DURATION_MS = 120 * 1000      // fase kerja 2 menit (jendela menutup di detik ke-30)
 const SAVE_EVERY = [1000, 3000]
 
@@ -39,6 +39,7 @@ async function startServer() {
     server.stdout.on('data', capture)
     server.stderr.on('data', capture)
     await waitPortUp(BASE)
+    await require('./helpers.cjs').assertServerDb(BASE, !!(process.env.ENV_FILE || '').includes('staging'))
 }
 async function stopServer() {
     // hanya membunuh process group milik sendiri — bukan pkill yang bisa kena proses lain
@@ -101,6 +102,9 @@ async function main() {
             { username: `${U}_${pad}`, full_name: `${U} Siswa ${pad}`, password_hash: passHash, role: 'SISWA', school_id: school.id }, `user siswa ${pad}`)
         const st = await mustInsert(supabase, 'students',
             { ...studT[0], id: undefined, user_id: u.id, nis: `${runId}${pad}`, class_id: klass.id, school_id: studT[0]?.school_id ?? school.id }, `student ${pad}`)
+        // Enrollment wajib: start ujian resmi memverifikasi student_enrollments (ACTIVE, tahun aktif)
+        await mustInsert(supabase, 'student_enrollments',
+            { student_id: st.id, class_id: klass.id, academic_year_id: year.id, status: 'ACTIVE' }, `enrollment ${pad}`)
         const se = await mustInsert(supabase, 'sessions',
             { user_id: u.id, token: `${U}_tok_${pad}`, expires_at: new Date(now + 86400e3).toISOString() }, `session ${pad}`)
         created.users.push(u.id); created.students.push(st.id); created.sessions.push(se.id)

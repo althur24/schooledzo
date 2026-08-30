@@ -12,6 +12,65 @@
 const crypto = require('crypto')
 
 /**
+ * Muat .env dengan GUARD anti-salah-key:
+ *  - ENV_FILE=.env.staging → URL WAJIB mengandung ref staging (vkkgnredrfqqraonynte),
+ *    dan WAJIB TIDAK mengandung ref production (veohqmrydavkokfiqvjj).
+ *  - ENV_FILE=.env.local (default) → kebalikannya.
+ * Manusia bisa lupa; guard ini membuat salah kombinasi MUSTAHIL diam-diam:
+ * script mati sebelum menyentuh database apa pun.
+ */
+function loadEnvGuarded() {
+    const envFile = process.env.ENV_FILE || '.env.local'
+    require('dotenv').config({ path: envFile })
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+    const isStagingFile = envFile.includes('staging')
+    const urlHasStaging = url.includes('vkkgnredrfqqraonynte')
+    const urlHasProd = url.includes('veohqmrydavkokfiqvjj')
+    if (isStagingFile && !urlHasStaging) {
+        throw new Error(`[ENV GUARD] ${envFile} aktif tapi NEXT_PUBLIC_SUPABASE_URL bukan project staging (vkkgnredrfqqraonynte). URL: ${url || '(kosong)'}. ABORT sebelum menyentuh DB.`)
+    }
+    if (!isStagingFile && urlHasStaging) {
+        throw new Error(`[ENV GUARD] ${envFile} aktif tapi URL menunjuk STAGING (vkkgnredrfqqraonynte) — .env.local harus production. ABORT.`)
+    }
+    if (isStagingFile && urlHasProd) {
+        throw new Error(`[ENV GUARD] ${envFile} (staging) berisi URL PRODUCTION (veohqmrydavkokfiqvjj)! ABORT sebelum menyentuh DB production.`)
+    }
+    if (!urlHasStaging && !urlHasProd) {
+        console.warn(`[ENV GUARD] URL tidak dikenali (bukan staging/prod yang dikenal) — lanjut dengan hati-hati: ${url}`)
+    }
+    return { envFile, url }
+}
+
+/** Jumlah siswa virtual — override via env, default dipertahankan dari script lama. */
+function nStudents(defaultN) {
+    const v = parseInt(process.env.N_STUDENTS || '', 10)
+    return Number.isFinite(v) && v > 0 ? v : defaultN
+}
+
+/**
+ * Guard ketiga (paling penting): pastikan server `next start` BENAR-BENAR
+ * menunjuk ke DB yang diharapkan. NEXT_PUBLIC_SUPABASE_URL di-inline saat
+ * BUILD — bila .next dibangun dengan env lain, runtime env TIDAK mengubahnya.
+ * Deteksi: /api/schools/public membaca tabel schools dari DB yang dipakai
+ * server — staging harus mengandung seed 'STG01', production tidak boleh.
+ */
+async function assertServerDb(baseUrl, expectStaging) {
+    const r = await fetch(baseUrl + '/api/schools/public', { signal: AbortSignal.timeout(10000) })
+        .catch(() => null)
+    const body = r ? await r.json().catch(() => null) : null
+    const list = Array.isArray(body) ? body : (body?.schools || body?.data || [])
+    const codes = list.map((s) => s?.code).filter(Boolean)
+    const isStagingDb = codes.includes('STG01')
+    if (expectStaging && !isStagingDb) {
+        throw new Error(`[SERVER GUARD] Server menunjuk ke DB BUKAN staging (codes: ${codes.join(',') || 'kosong'}). Kemungkinan .next dibangun dengan env production — jalankan ulang build dengan env staging. ABORT.`)
+    }
+    if (!expectStaging && isStagingDb) {
+        throw new Error(`[SERVER GUARD] Server menunjuk ke DB STAGING padahal ini run production. ABORT.`)
+    }
+    return true
+}
+
+/**
  * Fail-fast: jumlah data prasyarat harus cukup, kalau tidak abort dengan pesan jelas.
  * Lebih baik gagal di awal daripada TypeError di tengah / hasil menyesatkan.
  */
@@ -145,4 +204,7 @@ module.exports = {
     stopServerSafe,
     waitPortUp,
     fetchAllRowsCjs,
+    loadEnvGuarded,
+    nStudents,
+    assertServerDb,
 }

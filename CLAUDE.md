@@ -1,5 +1,21 @@
 # LMS YPP — Catatan Workflow
 
+## Dua Project Supabase — JANGAN TERTUKAR
+
+| Project | Ref | Env file | Fungsi |
+|---|---|---|---|
+| **PRODUCTION** | `veohqmrydavkokfiqvjj` | `.env.local` (ter-link CLI) | Data sekolah asli — hati-hati |
+| **STAGING** | `vkkgnredrfqqraonynte` | `.env.staging` | Load test & eksperimen |
+
+- Load test WAJIB pakai: `ENV_FILE=.env.staging node loadtest/e2e/<script>.cjs`
+- Jumlah siswa virtual: `N_STUDENTS=300` (env, default 50)
+- `MONITOR=1` menambah 1 admin yang polling endpoint monitor tiap 15 dtk (mensimulasikan guru di halaman Monitor Live)
+- Guard `loadEnvGuarded()` di `loadtest/e2e/helpers.cjs` meng-abort script bila kombinasi env-file vs project-ref tidak cocok — jangan dihapus.
+- **Jangan pernah menimpa isi `.env.local` dengan key staging** (atau sebaliknya).
+- Migrasi ke staging: `supabase db push --db-url "postgres://postgres:<pw>@db.vkkgnredrfqqraonynte.supabase.co:5432/postgres"` (hostname `db.<ref>` — region-agnostik; pooler ap-south-1 tidak mengenal staging).
+- Schema staging dibuat dari dump production (schema-only, tanpa data) + seed baseline `STAGING SCHOOL`. Template student username: `stg_template_siswa`.
+- TODO setelah load test selesai: rotate password DB + regenerate keys staging (pernah lewat chat).
+
 ## Migrasi Database (Supabase CLI)
 
 Project sudah ter-link ke Supabase (`veohqmrydavkokfiqvjj`). Migrasi dikelola Supabase CLI, bukan copy-paste SQL Editor lagi.

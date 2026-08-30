@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { needsManualGrading } from '@/lib/questionTypeUtils'
-import { batchedIn, IN_BATCH_SIZE } from '@/lib/batchedIn'
+import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
+import { getAnswerStats } from '@/lib/monitorAnswerStats'
 import { resolveWindowExpiry, isSweepDue, endsAtIso } from '@/lib/examExpiry'
 
 // Monitor ulangan reguler (tabel exams/exam_submissions/exam_answers/exam_questions).
@@ -180,26 +182,11 @@ export async function GET(request: NextRequest) {
             })
         }
 
-        // 5. Answer counts per submission (batch per 100 + fetchAllRows per chunk) — ganti N+1.
+        // 5. Answer stats per submission — satu agregasi DB-side (RPC ber-index)
+        //    menggantikan scan seluruh baris exam_answers: 1.000 siswa × 50 soal
+        //    = 50.000+ baris + puluhan request PostgREST PER POLL sebelumnya.
         const submissionIds = submissions?.map(s => s.id) || []
-        const answerCounts = new Map<string, number>()
-        if (submissionIds.length > 0) {
-            const chunks: string[][] = []
-            for (let i = 0; i < submissionIds.length; i += IN_BATCH_SIZE) {
-                chunks.push(submissionIds.slice(i, i + IN_BATCH_SIZE))
-            }
-            await Promise.all(chunks.map(async (chunk) => {
-                const rows = await fetchAllRows<{ submission_id: string }>(
-                    supabase
-                        .from('exam_answers')
-                        .select('submission_id')
-                        .in('submission_id', chunk)
-                )
-                for (const a of rows) {
-                    answerCounts.set(a.submission_id, (answerCounts.get(a.submission_id) || 0) + 1)
-                }
-            }))
-        }
+        const answerStats = await getAnswerStats('exam', examId, submissionIds)
 
         const now = new Date()
         const nowTime = now.getTime()
@@ -222,43 +209,42 @@ export async function GET(request: NextRequest) {
         }
 
         if (expiredSubmissionIds.length > 0) {
-            const { data: examQuestions } = await supabase
-                .from('exam_questions')
-                .select('question_type')
-                .eq('exam_id', examId)
-            const hasEssays = examQuestions?.some(q => needsManualGrading(q.question_type)) || false
+            // Soal dari cache in-memory (TTL 10 mnt) — sama dengan jalur autosave/submit
+            const examQuestions = await getExamQuestionsForGrading('exam_questions', examId)
+            const hasEssays = examQuestions.some(q => needsManualGrading(q.question_type)) || false
 
-            for (const subId of expiredSubmissionIds) {
-                const sub = submissions!.find(s => s.id === subId)
-                if (!sub) continue
+            // Update paralel per chunk 50 — menggantikan loop sekuensial
+            // (SELECT answers + UPDATE per siswa = N+1 query saat massal).
+            // Skor diambil dari agregasi RPC (answerStats), bukan SELECT per siswa.
+            const CHUNK = 50
+            for (let i = 0; i < expiredSubmissionIds.length; i += CHUNK) {
+                await Promise.all(expiredSubmissionIds.slice(i, i + CHUNK).map(async (subId) => {
+                    const sub = submissions!.find(s => s.id === subId)
+                    if (!sub) return
 
-                const { data: existingAnswers } = await supabase
-                    .from('exam_answers')
-                    .select('points_earned')
-                    .eq('submission_id', subId)
-                const totalScore = existingAnswers?.reduce((sum, a) => sum + (a.points_earned || 0), 0) || 0
+                    const totalScore = answerStats.get(subId)?.points || 0
 
-                const startedTime = new Date(sub.started_at).getTime()
-                const expiry = resolveWindowExpiry(
-                    { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
-                    { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
-                )
-                const expectedSubmittedAt = endsAtIso(expiry) || new Date(startedTime).toISOString()
+                    const expiry = resolveWindowExpiry(
+                        { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
+                        { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
+                    )
+                    const expectedSubmittedAt = endsAtIso(expiry) || new Date(sub.started_at).toISOString()
 
-                await supabase
-                    .from('exam_submissions')
-                    .update({
-                        is_submitted: true,
-                        submitted_at: expectedSubmittedAt,
-                        total_score: totalScore,
-                        is_graded: !hasEssays
-                    })
-                    .eq('id', subId)
+                    await supabase
+                        .from('exam_submissions')
+                        .update({
+                            is_submitted: true,
+                            submitted_at: expectedSubmittedAt,
+                            total_score: totalScore,
+                            is_graded: !hasEssays
+                        })
+                        .eq('id', subId)
 
-                sub.is_submitted = true
-                sub.submitted_at = expectedSubmittedAt
-                sub.total_score = totalScore
-                sub.is_graded = !hasEssays
+                    sub.is_submitted = true
+                    sub.submitted_at = expectedSubmittedAt
+                    sub.total_score = totalScore
+                    sub.is_graded = !hasEssays
+                }))
             }
         }
 
@@ -293,7 +279,7 @@ export async function GET(request: NextRequest) {
                 notStartedCount++
             }
 
-            const answeredCount = sub ? (answerCounts.get(sub.id) || 0) : 0
+            const answeredCount = sub ? (answerStats.get(sub.id)?.count || 0) : 0
 
             return {
                 student_id: student.id,

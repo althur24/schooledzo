@@ -6,7 +6,7 @@
  *
  * Jalankan: node loadtest/e2e/load_quiz_autosave.cjs
  */
-require('dotenv').config({ path: '.env.local' })
+require('./helpers.cjs').loadEnvGuarded()
 const { createClient } = require('@supabase/supabase-js')
 const { spawn } = require('child_process')
 const bcrypt = require('bcryptjs')
@@ -14,7 +14,7 @@ const bcrypt = require('bcryptjs')
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 const PORT = 3100
 const BASE = `http://localhost:${PORT}`
-const N_STUDENTS = 50
+const N_STUDENTS = require('./helpers.cjs').nStudents(50)
 const DURATION_MS = 60 * 1000
 const SAVE_EVERY = [1000, 3000]
 

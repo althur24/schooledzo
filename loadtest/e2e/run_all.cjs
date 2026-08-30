@@ -9,7 +9,7 @@
  * ke user nyata). Untuk test notifikasi penuh: E2E_RESET_SCHEDULER=1 node ...
  * Jalankan: node loadtest/e2e/run_all.cjs
  */
-require('dotenv').config({ path: '.env.local' })
+require('./helpers.cjs').loadEnvGuarded()
 const { createClient } = require('@supabase/supabase-js')
 const { spawn } = require('child_process')
 const bcrypt = require('bcryptjs')
@@ -66,6 +66,7 @@ async function startServer() {
     }
     server = spawnServer(process.cwd(), PORT)
     await waitPortUp(BASE)
+    await require('./helpers.cjs').assertServerDb(BASE, !!(process.env.ENV_FILE || '').includes('staging'))
 }
 async function stopServer() {
     // hanya membunuh process group milik sendiri — bukan pkill yang bisa kena proses lain

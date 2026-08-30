@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   graphql_public: {
     Tables: {
@@ -280,6 +280,7 @@ export type Database = {
           description: string | null
           due_date: string | null
           id: string
+          submission_mode: string
           teaching_assignment_id: string | null
           title: string
           type: string
@@ -289,6 +290,7 @@ export type Database = {
           description?: string | null
           due_date?: string | null
           id?: string
+          submission_mode?: string
           teaching_assignment_id?: string | null
           title: string
           type: string
@@ -298,6 +300,7 @@ export type Database = {
           description?: string | null
           due_date?: string | null
           id?: string
+          submission_mode?: string
           teaching_assignment_id?: string | null
           title?: string
           type?: string
@@ -1710,6 +1713,7 @@ export type Database = {
           attachments: Json | null
           id: string
           is_late: boolean | null
+          is_offline: boolean
           student_id: string | null
           submitted_at: string | null
         }
@@ -1719,6 +1723,7 @@ export type Database = {
           attachments?: Json | null
           id?: string
           is_late?: boolean | null
+          is_offline?: boolean
           student_id?: string | null
           submitted_at?: string | null
         }
@@ -1728,6 +1733,7 @@ export type Database = {
           attachments?: Json | null
           id?: string
           is_late?: boolean | null
+          is_offline?: boolean
           student_id?: string | null
           submitted_at?: string | null
         }
@@ -2061,6 +2067,14 @@ export type Database = {
         Args: { p_school_id?: string; p_student_ids: string[] }
         Returns: Json
       }
+      exam_answer_counts: {
+        Args: { p_exam_id: string }
+        Returns: {
+          answered_count: number
+          points_sum: number
+          submission_id: string
+        }[]
+      }
       match_material_chunks: {
         Args: {
           match_count?: number
@@ -2082,6 +2096,14 @@ export type Database = {
           p_to_class_id: string
         }
         Returns: Json
+      }
+      official_exam_answer_counts: {
+        Args: { p_exam_id: string }
+        Returns: {
+          answered_count: number
+          points_sum: number
+          submission_id: string
+        }[]
       }
       promote_students_batch: {
         Args: { p_graduations?: Json; p_notes?: string; p_targets?: Json }

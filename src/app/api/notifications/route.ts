@@ -4,12 +4,17 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { logError } from '@/lib/logError'
 
 // GET notifications for current user
-// Route ini dipolling tiap 60 detik per user — harus ringan (3 query).
+// Route ini dipolling tiap 60 detik per user — harus ringan.
+// Optimasi beban (hasil load test: p95 429ms @50 VU, satu-satunya endpoint
+// gagal threshold di semua tier):
+//  - session via micro-cache 30 dtk (validateSessionCached) → 0 query setelah
+//    poll pertama; lock/logout tetap dihormati via invalidasi di deleteSession
+//  - daftar + hitung unread dijalankan PARALEL (dulu sekuensial 2 round-trip)
 // Semua logika proaktif (cleanup, deadline reminder, exam reminder) berjalan di
 // background scheduler: src/lib/scheduler.ts → src/lib/notificationJobs.ts
 export async function GET(request: NextRequest) {
     try {
-        const ctx = await getSchoolContextOrError(request)
+        const ctx = await getSchoolContextOrError(request, { cachedSession: true })
         if (isErrorResponse(ctx)) return ctx
         const { user } = ctx
 
@@ -18,7 +23,7 @@ export async function GET(request: NextRequest) {
 
         let query = supabase
             .from('notifications')
-            .select('*')
+            .select('id, type, title, message, link, is_read, created_at')
             .eq('user_id', user.id)
             .order('created_at', { ascending: false })
             .limit(limit)
@@ -27,20 +32,20 @@ export async function GET(request: NextRequest) {
             query = query.eq('is_read', false)
         }
 
-        const { data, error } = await query
+        const [listRes, countRes] = await Promise.all([
+            query,
+            supabase
+                .from('notifications')
+                .select('id', { count: 'exact', head: true })
+                .eq('user_id', user.id)
+                .eq('is_read', false)
+        ])
 
-        if (error) throw error
-
-        // Get unread count
-        const { count } = await supabase
-            .from('notifications')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_id', user.id)
-            .eq('is_read', false)
+        if (listRes.error) throw listRes.error
 
         return NextResponse.json({
-            notifications: data || [],
-            unreadCount: count || 0
+            notifications: listRes.data || [],
+            unreadCount: countRes.count || 0
         })
     } catch (error) {
         logError('Error fetching notifications', error)

@@ -6,6 +6,12 @@ const SALT_ROUNDS = 10
 const SESSION_EXPIRY_HOURS = 24 // I1: Reduced from 7 days to 24 hours
 const SESSION_REFRESH_THRESHOLD_HOURS = 12 // Refresh when less than 12h remaining
 
+// Cookie lifetime for session_token / user_role. Set as an absolute backstop
+// (7 days). The DB session (24h, sliding) is the real source of truth; when it
+// expires the /api/auth/me route clears these cookies so the user lands on
+// /login instead of getting stuck on a redirect loop ("Mengalihkan...").
+export const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
+
 // Password utilities
 export async function hashPassword(password: string): Promise<string> {
     return bcrypt.hash(password, SALT_ROUNDS)
@@ -47,6 +53,28 @@ export async function createSession(userId: string): Promise<string | null> {
     }
 
     return token
+}
+
+// In-process micro-cache untuk validasi session endpoint polling frekuensi
+// tinggi (notif dibell tiap 60 dtk per user). Trade-off: perubahan lock/logout
+// berlaku paling lambat TTL di bawah — hanya dipakai route tidak-sensitif.
+const SESSION_CACHE_TTL_MS = 30_000
+const SESSION_CACHE_MAX = 2000
+const sessionCache = new Map<string, { user: AuthUser; expiresAt: number }>()
+
+export async function validateSessionCached(token: string): Promise<AuthUser | null> {
+    const hit = sessionCache.get(token)
+    if (hit && hit.expiresAt > Date.now()) return hit.user
+
+    const user = await validateSession(token)
+    if (user) {
+        if (sessionCache.size >= SESSION_CACHE_MAX) {
+            const oldest = sessionCache.keys().next().value
+            if (oldest !== undefined) sessionCache.delete(oldest)
+        }
+        sessionCache.set(token, { user, expiresAt: Date.now() + SESSION_CACHE_TTL_MS })
+    }
+    return user
 }
 
 export async function validateSession(token: string): Promise<AuthUser | null> {
@@ -93,6 +121,7 @@ export async function validateSession(token: string): Promise<AuthUser | null> {
 }
 
 export async function deleteSession(token: string): Promise<boolean> {
+    sessionCache.delete(token)
     const { error } = await supabase
         .from('sessions')
         .delete()
