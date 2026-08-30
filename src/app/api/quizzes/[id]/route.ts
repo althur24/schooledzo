@@ -49,6 +49,9 @@ export async function GET(
         // C1 Security Fix (parity dgn route /questions): strip kunci jawaban untuk siswa
         // yang belum mengumpulkan — halaman pengerjaan kuis memuat soal dari endpoint ini.
         if (user.role === 'SISWA' && data.questions) {
+            // Jangan bocorkan daftar siswa remedial (siapa yang gagal) ke sekelasnya
+            delete (data as any).allowed_student_ids
+
             const { data: student } = await supabase
                 .from('students')
                 .select('id')
@@ -132,13 +135,16 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: quizForYear } = await supabase
             .from('quizzes')
-            .select('teaching_assignment_id, deadline, available_from')
+            .select('teaching_assignment_id, deadline, available_from, is_active')
             .eq('id', id)
             .single()
         if (quizForYear?.teaching_assignment_id) {
             const yearStatus = await getYearStatusByTA(quizForYear.teaching_assignment_id)
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
+        // is_active SEBELUM update — dipakai untuk membedakan publish pertama
+        // (kirim notifikasi) vs re-PUT kuis yang sudah aktif (jangan spam notifikasi).
+        const wasActive = quizForYear?.is_active === true
 
         const body = await request.json()
         const { title, description, duration_minutes, is_randomized, is_active, deadline, available_from } = body
@@ -253,8 +259,11 @@ export async function PUT(
             throw error
         }
 
-        // If quiz was just published (truly active), send notifications to students
-        if (finalIsActive === true && data?.teaching_assignment?.class_id) {
+        // If quiz was JUST published (belum aktif → aktif), send notifications to students.
+        // Re-PUT kuis yang sudah aktif tidak boleh mengirim ulang notifikasi "Kuis Baru"
+        // ke sekelas (spam) ataupun mengulang sinkronisasi batch.
+        const justPublished = finalIsActive === true && !wasActive
+        if (justPublished && data?.teaching_assignment?.class_id) {
             try {
                 // Get the active academic year
                 const { data: activeYear } = await supabase
@@ -313,7 +322,7 @@ export async function PUT(
         }
         // Sinkronkan kelas satu batch (multi-kelas) bila kuis baru saja diaktifkan
         let batchSync: { total: number, failed: string[] } | null = null
-        if (finalIsActive === true && data?.batch_id) {
+        if (justPublished && data?.batch_id) {
             try {
                 batchSync = await syncQuizBatch(id)
             } catch (batchError) {

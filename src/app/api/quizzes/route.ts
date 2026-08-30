@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
-import { findTeachingAssignmentsOutsideSchool } from '@/lib/tenantGuard'
+import { findTeachingAssignmentsOutsideSchool, findQuizzesOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { getBatchSizes } from '@/lib/examBatch'
 
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
                     subject:subjects(id, name, kkm),
                     class:classes(id, name, school_level, grade_level),
                     teacher:teachers(id, user:users(full_name)),
-                    academic_year:academic_years(id, name, is_active)
+                    academic_year:academic_years(id, name, is_active, school_id)
                 ),
                 questions:quiz_questions(count)
             `)
@@ -37,52 +37,63 @@ export async function GET(request: NextRequest) {
                 return NextResponse.json([])
             }
             query = query.eq('teaching_assignment_id', teachingAssignmentId)
-        } else if (allYears !== 'true') {
-            // Filter by active year — via inner join (NOT .in(list): hundreds of TA ids
-            // overflow the 16KB header limit at larger schools and break this endpoint)
-            const { data: activeYear } = await supabase
-                .from('academic_years')
-                .select('id')
-                .eq('is_active', true)
-                .eq('school_id', schoolId)
-                .single()
+        } else {
+            if (allYears !== 'true') {
+                // Filter by active year — via inner join (NOT .in(list): hundreds of TA ids
+                // overflow the 16KB header limit at larger schools and break this endpoint)
+                const { data: activeYear } = await supabase
+                    .from('academic_years')
+                    .select('id')
+                    .eq('is_active', true)
+                    .eq('school_id', schoolId)
+                    .single()
 
-            if (activeYear) {
-                query = query.eq('teaching_assignment.academic_year_id', activeYear.id)
-
-                // STRICT FILTERING FOR SISWA
-                if (user.role === 'SISWA') {
-                    const { data: student } = await supabase
-                        .from('students')
-                        .select('class_id')
-                        .eq('user_id', user.id)
-                        .single()
-
-                    if (student?.class_id) {
-                        query = query.eq('teaching_assignment.class_id', student.class_id)
-                    } else {
-                        // Student has no valid class -> returns empty list
-                        return NextResponse.json([])
-                    }
-                } else if (user.role === 'GURU') {
-                    // STRICT FILTERING FOR GURU: only own teaching assignments
-                    const { data: teacher } = await supabase
-                        .from('teachers')
-                        .select('id')
-                        .eq('user_id', user.id)
-                        .single()
-
-                    if (teacher) {
-                        query = query.eq('teaching_assignment.teacher_id', teacher.id)
-                    } else {
-                        return NextResponse.json([])
-                    }
+                if (activeYear) {
+                    query = query.eq('teaching_assignment.academic_year_id', activeYear.id)
+                } else {
+                    // No active year: return empty instead of leaking content across years
+                    return NextResponse.json([])
                 }
-                // ADMIN: active-year filter above is sufficient
             } else {
-                // No active year: return empty instead of leaking content across years
-                return NextResponse.json([])
+                // all_years lintas tahun ajaran — TETAP scope ke sekolah caller.
+                // Tanpa ini endpoint mengembalikan kuis SEMUA sekolah (termasuk draft).
+                if (schoolId) {
+                    query = query.eq('teaching_assignment.academic_year.school_id', schoolId)
+                }
             }
+
+            // Role scoping berlaku untuk SEMUA listing tanpa TA eksplisit —
+            // dulu hanya di cabang tahun aktif, membuat all_years=true lolos
+            // tanpa filter kelas/teacher sama sekali.
+            if (user.role === 'SISWA') {
+                // STRICT FILTERING FOR SISWA: hanya kuis kelasnya sendiri
+                const { data: student } = await supabase
+                    .from('students')
+                    .select('class_id')
+                    .eq('user_id', user.id)
+                    .single()
+
+                if (student?.class_id) {
+                    query = query.eq('teaching_assignment.class_id', student.class_id)
+                } else {
+                    // Student has no valid class -> returns empty list
+                    return NextResponse.json([])
+                }
+            } else if (user.role === 'GURU') {
+                // STRICT FILTERING FOR GURU: only own teaching assignments
+                const { data: teacher } = await supabase
+                    .from('teachers')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .single()
+
+                if (teacher) {
+                    query = query.eq('teaching_assignment.teacher_id', teacher.id)
+                } else {
+                    return NextResponse.json([])
+                }
+            }
+            // ADMIN/SUPER_ADMIN: scope sekolah di atas sudah cukup
         }
 
         const { data, error } = await query
@@ -96,6 +107,11 @@ export async function GET(request: NextRequest) {
             ...quiz,
             batch_size: quiz.batch_id ? batchSizes.get(quiz.batch_id) || 1 : 1
         }))
+
+        // SISWA: jangan bocorkan allowed_student_ids (daftar "siapa yang remedial")
+        if (user.role === 'SISWA') {
+            quizzesWithBatch.forEach(q => { delete (q as any).allowed_student_ids })
+        }
 
         return NextResponse.json(quizzesWithBatch)
     } catch (error) {
@@ -116,11 +132,15 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { title, description, start_time, deadline, duration_minutes, available_from, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, questions, batch_id } = body
+        const { title, description, start_time, deadline, duration_minutes, available_from, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, questions, batch_id, submission_mode } = body
 
         if (!title || duration_minutes === undefined || !teaching_assignment_id) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
         }
+
+        // Kuis offline: tanpa soal & tanpa alur publish — langsung aktif,
+        // nilai diinput manual dari halaman Nilai.
+        const isOffline = submission_mode === 'OFFLINE'
 
         // Validasi jendela waktu kuis: jam tutup (deadline) harus setelah jam buka
         if (available_from && deadline && new Date(deadline) <= new Date(available_from)) {
@@ -131,7 +151,30 @@ export async function POST(request: NextRequest) {
         const yearStatus = await getYearStatusByTA(teaching_assignment_id)
         if (yearStatus === 'COMPLETED') return archivedYearResponse()
 
-        // Create quiz (default: draft/inactive until published)
+        // Tenant guard: TA harus milik sekolah caller — tanpa ini guru bisa
+        // menanam kuis di sekolah lain (dan lolos semua guard sekolah itu).
+        if ((await findTeachingAssignmentsOutsideSchool([teaching_assignment_id], schoolId)).length > 0) {
+            return NextResponse.json({ error: 'Teaching assignment tidak valid' }, { status: 403 })
+        }
+
+        // Remedial: kuis sumber harus milik sekolah caller DAN TA yang sama —
+        // duplicate_questions menyalin seluruh soal + kunci jawaban; tanpa guard
+        // ini guru mana pun bisa exfiltrate soal guru/sekolah lain.
+        if (remedial_for_id) {
+            if ((await findQuizzesOutsideSchool([remedial_for_id], schoolId)).length > 0) {
+                return NextResponse.json({ error: 'Kuis sumber remedial tidak valid' }, { status: 403 })
+            }
+            const { data: srcQuiz } = await supabase
+                .from('quizzes')
+                .select('teaching_assignment_id')
+                .eq('id', remedial_for_id)
+                .single()
+            if (srcQuiz?.teaching_assignment_id !== teaching_assignment_id) {
+                return NextResponse.json({ error: 'Kuis remedial harus berasal dari kelas & mapel yang sama' }, { status: 400 })
+            }
+        }
+
+        // Create quiz (default: draft/inactive until published; offline langsung aktif)
         const { data: quiz, error } = await supabase
             .from('quizzes')
             .insert({
@@ -142,12 +185,13 @@ export async function POST(request: NextRequest) {
                 duration_minutes,
                 available_from: available_from || null,
                 teaching_assignment_id,
-                is_active: false,
+                is_active: isOffline ? true : false,
                 is_randomized: is_randomized ?? true,
                 is_remedial: is_remedial || false,
                 remedial_for_id: remedial_for_id || null,
                 allowed_student_ids: allowed_student_ids || null,
-                batch_id: batch_id || null
+                batch_id: batch_id || null,
+                submission_mode: isOffline ? 'OFFLINE' : 'ONLINE'
             })
             .select()
             .single()

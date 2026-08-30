@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { schoolId } = ctx
+        const { user, schoolId } = ctx
 
         const { searchParams } = new URL(request.url)
         const class_id = searchParams.get('class_id')
@@ -19,6 +19,13 @@ export async function GET(request: NextRequest) {
         const status = searchParams.get('status')
         const enrollment_year_id = searchParams.get('enrollment_year_id')
         const user_id = searchParams.get('user_id')
+
+        // SISWA hanya boleh membaca data dirinya sendiri — tanpa guard ini
+        // endpoint membocorkan roster seluruh sekolah (nama, NIS, username)
+        // ke browser siswa mana pun.
+        if (user.role === 'SISWA' && user_id !== user.id) {
+            return NextResponse.json([])
+        }
 
         // If enrollment_year_id is provided, fetch students with their enrollment in that specific year
         if (enrollment_year_id) {
