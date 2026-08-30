@@ -212,6 +212,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                         <div className="flex items-center gap-4">
                             <NotificationBell />
                             <div className="hidden sm:flex flex-col items-end">
+                                <span className="text-[10px] text-slate-400 font-medium tracking-wide">Login sebagai</span>
                                 <p className="text-sm font-bold text-white">{user?.full_name || user?.username}</p>
                                 <p className="text-xs text-emerald-400 font-semibold bg-slate-800 px-2 py-0.5 rounded-full mt-0.5 border border-slate-700">
                                     {getRoleLabel(user?.role || '')}
@@ -225,11 +226,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                             </div>
                             <button
                                 onClick={handleLogout}
-                                className="p-2.5 rounded-full text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                className="flex items-center gap-1.5 p-2.5 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                                 title="Logout"
                                 aria-label="Logout"
                             >
                                 <Logout set="bold" primaryColor="currentColor" size="medium" />
+                                <span className="hidden sm:inline text-sm font-semibold">Logout</span>
                             </button>
                         </div>
                     </div>
