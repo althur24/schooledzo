@@ -18,7 +18,9 @@ function unwrap(val: any): any {
     return val
 }
 
-// GET: Fetch wali kelas data for the logged-in teacher
+// GET: Fetch student performance data for the logged-in teacher.
+// Scope: kelas tempat guru mengajar (teaching assignments) + kelas yang diwalikan.
+// Untuk kelas wali -> SEMUA mapel; untuk kelas non-wali -> hanya mapel yang diampu guru.
 export async function GET(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
@@ -41,47 +43,60 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
         }
 
-        // Get class(es) where this teacher is wali kelas (scoped by school)
-        let classQuery = supabase
+        const teacherId = teacher.id
+
+        // 1. Classes where this teacher is wali kelas (active academic year only)
+        const { data: homeroomClasses, error: hrError } = await supabase
             .from('classes')
             .select(`
                 id, name, grade_level, school_level,
                 academic_year:academic_years(id, name, is_active)
             `)
-            .eq('homeroom_teacher_id', teacher.id)
-        // classes scoped via academic_year (no school_id column on classes)
-        const { data: classes, error: classError } = await classQuery
+            .eq('homeroom_teacher_id', teacherId)
 
-        if (classError) throw classError
+        if (hrError) throw hrError
 
-        if (!classes || classes.length === 0) {
-            return NextResponse.json({ classes: [], students: [], grades: [] })
+        const activeHomeroomClasses = (homeroomClasses || [])
+            .map((c: any) => ({ ...c, academic_year: unwrap(c.academic_year) }))
+            .filter((c: any) => c.academic_year?.is_active)
+
+        // 2. Classes from teaching assignments (active academic year only)
+        const { data: taRows, error: taRowsError } = await supabase
+            .from('teaching_assignments')
+            .select(`
+                class:classes(id, name, grade_level, school_level, academic_year:academic_years(id, name, is_active))
+            `)
+            .eq('teacher_id', teacherId)
+
+        if (taRowsError) throw taRowsError
+
+        const hrClassIds = new Set(activeHomeroomClasses.map((c: any) => c.id))
+        const teachingClassMap = new Map<string, any>()
+        for (const row of (taRows || [])) {
+            const cls = unwrap((row as any).class)
+            if (!cls) continue
+            const unwrapped = { ...cls, academic_year: unwrap(cls.academic_year) }
+            if (!unwrapped.academic_year?.is_active) continue
+            if (!teachingClassMap.has(unwrapped.id)) {
+                teachingClassMap.set(unwrapped.id, unwrapped)
+            }
         }
 
-        // Unwrap academic_year for each class (Supabase may return as array)
-        const classesUnwrapped = classes.map((c: any) => ({
-            ...c,
-            academic_year: unwrap(c.academic_year)
-        }))
+        // Union: kelas wali dulu (default), lalu kelas yang hanya diajari
+        const allClasses: any[] = [
+            ...activeHomeroomClasses.map((c: any) => ({ ...c, isHomeroom: true })),
+            ...Array.from(teachingClassMap.values())
+                .filter((c: any) => !hrClassIds.has(c.id))
+                .map((c: any) => ({ ...c, isHomeroom: false })),
+        ]
 
-        // Hanya kelas dari tahun ajaran AKTIF. Record wali kelas tahun lama tetap
-        // tersimpan untuk histori, tapi TIDAK boleh bocor ke halaman wali kelas —
-        // guru yang sudah bukan wali di tahun aktif akan melihat kelas lama yang
-        // kosong (bug "kelas hantu": kelas tampil tapi 0 siswa).
-        const activeClasses = classesUnwrapped.filter((c: any) => c.academic_year?.is_active)
-
-        if (activeClasses.length === 0) {
-            return NextResponse.json({ classes: [], students: [], grades: [] })
+        if (allClasses.length === 0) {
+            return NextResponse.json({ classes: [], students: [] })
         }
 
-        // Prioritize class from active academic year
-        const activeYearClass = activeClasses[0]
         const requestedClassId = request.nextUrl.searchParams.get('class_id')
-        const classId = (requestedClassId && activeClasses.find((c: any) => c.id === requestedClassId)?.id) || activeYearClass.id
-
-        if (!classId) {
-            return NextResponse.json({ classes: activeClasses, students: [], grades: [] })
-        }
+        const currentClass = (requestedClassId && allClasses.find((c: any) => c.id === requestedClassId)) || allClasses[0]
+        const classId = currentClass.id
 
         // Get students in this class
         const { data: students, error: studentsError } = await supabase
@@ -100,7 +115,7 @@ export async function GET(request: NextRequest) {
         const { data: teachingAssignments, error: taError } = await supabase
             .from('teaching_assignments')
             .select(`
-                id,
+                id, teacher_id,
                 subject:subjects(id, name, kkm),
                 academic_year:academic_years(id, is_active)
             `)
@@ -109,18 +124,27 @@ export async function GET(request: NextRequest) {
         if (taError) throw taError
 
         // Filter to active academic year assignments
-        const activeAssignments = (teachingAssignments || []).filter(
+        let activeAssignments: any[] = (teachingAssignments || []).filter(
             (ta) => unwrap(ta.academic_year)?.is_active
         )
+
+        // SCOPE MATA PELAJARAN:
+        // - Wali kelas kelasnya sendiri -> semua mapel
+        // - Guru biasa -> hanya mapel yang diampu di kelas tersebut
+        if (!currentClass.isHomeroom) {
+            activeAssignments = activeAssignments.filter((ta: any) => ta.teacher_id === teacherId)
+        }
+
         const taIds = activeAssignments.map((ta) => ta.id)
 
         if (taIds.length === 0 || !students || students.length === 0) {
             return NextResponse.json({
-                classes: activeClasses,
+                classes: allClasses,
                 current_class_id: classId,
+                is_homeroom: currentClass.isHomeroom,
                 students: students || [],
                 subjects: activeAssignments.map((ta) => unwrap(ta.subject)),
-                grades: []
+                student_grades: []
             })
         }
 
@@ -201,7 +225,7 @@ export async function GET(request: NextRequest) {
             )
         }
 
-        // 4. Official exams (UTS/UAS) — fetch by subject IDs for this class
+        // 4. Official exams (UTS/UAS) — fetch by subject IDs in scope for this class
         const subjectIds = activeAssignments
             .map((ta) => unwrap(ta.subject)?.id)
             .filter((id: string | undefined): id is string => !!id)
@@ -330,16 +354,16 @@ export async function GET(request: NextRequest) {
         })
 
         return NextResponse.json({
-            classes: activeClasses,
+            classes: allClasses,
             current_class_id: classId,
+            is_homeroom: currentClass.isHomeroom,
             students: students || [],
             subjects: await Promise.all(
                 activeAssignments
                     .map((ta) => unwrap(ta.subject))
                     .filter((s: any, i: number, arr: any[]) => s && arr.findIndex((x: any) => x?.id === s.id) === i)
                     .map(async (subj: any) => {
-                        const c = activeClasses.find((cls: any) => cls.id === classId)
-                        const resolvedKkm = await resolveKkm(subj.id, c?.school_level, c?.grade_level)
+                        const resolvedKkm = await resolveKkm(subj.id, currentClass.school_level, currentClass.grade_level)
                         return { ...subj, kkm: resolvedKkm }
                     })
             ),
@@ -357,7 +381,7 @@ export async function GET(request: NextRequest) {
             }
         })
     } catch (error) {
-        console.error('Error fetching wali kelas data:', error)
+        console.error('Error fetching siswa data:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
     }
 }

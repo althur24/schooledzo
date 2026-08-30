@@ -33,7 +33,7 @@ export const guruNav: NavItem[] = [
     { icon: Game, label: 'Kuis', path: '/dashboard/guru/kuis' },
     { icon: Folder, label: 'Bank Soal', path: '/dashboard/guru/bank-soal' },
     { icon: Graph, label: 'Nilai', path: '/dashboard/guru/nilai' },
-    { icon: User, label: 'Wali Kelas', path: '/dashboard/guru/wali-kelas' },
+    { icon: User, label: 'Siswa', path: '/dashboard/guru/siswa' },
 ]
 
 export const adminNav: NavItem[] = [

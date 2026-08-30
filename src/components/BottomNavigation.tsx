@@ -24,7 +24,7 @@ const TUTORIAL_NAV_IDS: Record<string, string> = {
     '/dashboard/guru/kuis': 'nav-kuis',
     '/dashboard/guru/bank-soal': 'nav-bank-soal',
     '/dashboard/guru/nilai': 'nav-nilai',
-    '/dashboard/guru/wali-kelas': 'nav-wali-kelas',
+    '/dashboard/guru/siswa': 'nav-siswa',
 }
 
 // --- SISWA ---
@@ -54,7 +54,7 @@ const guruArc: NavItem[] = [
     { icon: DocumentIcon, label: 'Materi', path: '/dashboard/guru/materi' },
     { icon: Folder, label: 'Bank Soal', path: '/dashboard/guru/bank-soal' },
     { icon: Graph, label: 'Nilai', path: '/dashboard/guru/nilai' },
-    { icon: User, label: 'Wali', path: '/dashboard/guru/wali-kelas' },
+    { icon: User, label: 'Siswa', path: '/dashboard/guru/siswa' },
 ]
 
 // --- ADMIN ---
@@ -103,7 +103,7 @@ export default function BottomNavigation() {
     }, [pathname])
 
     // Tutorial integration: let the tutorial open/close the arc menu
-    // so nav steps can highlight Materi/Bank Soal/Nilai/Wali on mobile
+    // so nav steps can highlight Materi/Bank Soal/Nilai/Siswa on mobile
     useEffect(() => {
         const open = () => setIsOpen(true)
         const close = () => setIsOpen(false)

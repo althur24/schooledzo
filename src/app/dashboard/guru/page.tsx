@@ -4,12 +4,13 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { TimeCircle as Clock, Danger, Calendar, Category, CloseSquare, User } from 'react-iconly'
+import { TimeCircle as Clock, Danger, Calendar, Category } from 'react-iconly'
 import { PlayCircle } from 'lucide-react'
 
 interface WarningItem {
     student_id: string
     student_name: string
+    class_id?: string
     class_name: string
     subject_name: string
     avg_score: number
@@ -60,30 +61,6 @@ export default function GuruDashboard() {
     const handleTabChange = (tab: 'teaching' | 'homeroom') => {
         setActiveWarningTab(tab)
         setWarningVisibleCount(5)
-    }
-
-    const [selectedClass, setSelectedClass] = useState<{ id: string, name: string } | null>(null)
-    const [classStudents, setClassStudents] = useState<any[]>([])
-    const [loadingStudents, setLoadingStudents] = useState(false)
-
-    const handleClassClick = async (classId: string, className: string) => {
-        setSelectedClass({ id: classId, name: className })
-        setLoadingStudents(true)
-        try {
-            const res = await fetch(`/api/students?class_id=${classId}`)
-            const data = await res.json()
-            setClassStudents(Array.isArray(data) ? data : [])
-        } catch (error) {
-            console.error('Failed to fetch students', error)
-            setClassStudents([])
-        } finally {
-            setLoadingStudents(false)
-        }
-    }
-
-    const closeStudentModal = () => {
-        setSelectedClass(null)
-        setClassStudents([])
     }
 
     useEffect(() => {
@@ -153,7 +130,7 @@ export default function GuruDashboard() {
     const activeWarnings = activeWarningTab === 'teaching' ? teachingWarnings : homeroomWarnings
 
     // Render a single warning card (reused across both tabs)
-    const renderWarningCard = (warning: WarningItem, idx: number, tab: 'teaching' | 'homeroom') => (
+    const renderWarningCard = (warning: WarningItem, idx: number) => (
         <div key={`${warning.student_id}-${warning.subject_name}-${idx}`} className="group flex items-center gap-4 p-4 rounded-2xl bg-white/70 dark:bg-surface-dark/70 backdrop-blur-xl border border-red-100 dark:border-red-900/30 shadow-sm hover:shadow-md hover:border-red-300 dark:hover:border-red-700 transition-all">
             {/* Score Indicator */}
             <div className="relative w-14 h-14 flex items-center justify-center flex-shrink-0">
@@ -184,7 +161,7 @@ export default function GuruDashboard() {
             </div>
 
             {/* Action button */}
-            <Link href={tab === 'homeroom' ? `/dashboard/guru/wali-kelas/${warning.student_id}` : `/dashboard/guru/nilai${warning.teaching_assignment_id ? `?ta=${warning.teaching_assignment_id}` : ''}`} className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-red-50 dark:bg-red-900/20 text-red-500 hover:bg-red-500 hover:text-white transition-colors">
+            <Link href={`/dashboard/guru/siswa/${warning.student_id}${warning.class_id ? `?class_id=${warning.class_id}` : ''}`} className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-red-50 dark:bg-red-900/20 text-red-500 hover:bg-red-500 hover:text-white transition-colors">
                 <svg className="w-5 h-5 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
             </Link>
         </div>
@@ -450,7 +427,7 @@ export default function GuruDashboard() {
                         </div>
                     ) : (
                         <div className="grid gap-3">
-                            {activeWarnings.slice(0, warningVisibleCount).map((warning, idx) => renderWarningCard(warning, idx, activeWarningTab))}
+                            {activeWarnings.slice(0, warningVisibleCount).map((warning, idx) => renderWarningCard(warning, idx))}
                             {activeWarnings.length > warningVisibleCount && (
                                 <button
                                     onClick={() => setWarningVisibleCount(prev => prev + 5)}
@@ -489,10 +466,10 @@ export default function GuruDashboard() {
                         style={{ overflowX: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#a1a1aa transparent' }}
                     >
                         {myClasses.map((cls) => (
-                            <div
+                            <Link
                                 key={cls.class_id}
-                                className="flex-shrink-0 w-56 p-5 rounded-2xl bg-white/80 dark:bg-surface-dark/80 backdrop-blur-xl border border-black/5 dark:border-white/5 shadow-sm hover:shadow-lg hover:border-violet-200 dark:hover:border-violet-800 transition-all group cursor-pointer"
-                                onClick={() => handleClassClick(cls.class_id, cls.class_name)}
+                                href={`/dashboard/guru/siswa?class_id=${cls.class_id}`}
+                                className="flex-shrink-0 w-56 p-5 rounded-2xl bg-white/80 dark:bg-surface-dark/80 backdrop-blur-xl border border-black/5 dark:border-white/5 shadow-sm hover:shadow-lg hover:border-violet-200 dark:hover:border-violet-800 transition-all group"
                             >
                                 <div className="flex items-center justify-between mb-3">
                                     <h3 className="text-lg font-black text-text-main dark:text-white group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">
@@ -515,74 +492,8 @@ export default function GuruDashboard() {
                                 ) : (
                                     <p className="text-xs text-text-secondary dark:text-zinc-500 italic">Wali kelas saja</p>
                                 )}
-                            </div>
+                            </Link>
                         ))}
-                    </div>
-                </div>
-            )}
-
-            {/* Class Students Modal */}
-            {selectedClass && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200" onClick={closeStudentModal}>
-                    <div
-                        className="bg-white dark:bg-surface-dark w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden border border-black/5 dark:border-white/5 animate-in zoom-in-95 duration-200"
-                        onClick={e => e.stopPropagation()}
-                    >
-                        {/* Modal Header */}
-                        <div className="px-6 py-4 border-b border-black/5 dark:border-white/5 flex items-center justify-between bg-black/5 dark:bg-white/5">
-                            <div>
-                                <h3 className="text-xl font-bold text-text-main dark:text-white">Data Siswa</h3>
-                                <p className="text-sm font-medium text-text-secondary">Kelas {selectedClass.name}</p>
-                            </div>
-                            <button
-                                onClick={closeStudentModal}
-                                className="p-2 text-text-secondary hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
-                            >
-                                <CloseSquare set="bold" size={24} />
-                            </button>
-                        </div>
-
-                        {/* Modal Body */}
-                        <div className="p-4 md:p-6 max-h-[60vh] overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-700">
-                            {loadingStudents ? (
-                                <div className="flex flex-col items-center justify-center py-8">
-                                    <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-                                    <p className="mt-4 text-sm font-bold text-text-secondary">Memuat data siswa...</p>
-                                </div>
-                            ) : classStudents.length === 0 ? (
-                                <div className="text-center py-8">
-                                    <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 text-zinc-400 rounded-full flex items-center justify-center mx-auto mb-4">
-                                        <User set="bold" size={32} />
-                                    </div>
-                                    <p className="text-sm font-bold text-text-secondary">Belum ada siswa di kelas ini.</p>
-                                </div>
-                            ) : (
-                                <div className="space-y-3">
-                                    {classStudents.map((student, idx) => (
-                                        <div key={student.id} className="flex items-center justify-between p-4 rounded-2xl border border-black/5 dark:border-white/5 bg-white dark:bg-surface-dark hover:border-primary/30 transition-colors group">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">
-                                                    {idx + 1}
-                                                </div>
-                                                <div>
-                                                    <h4 className="font-bold text-text-main dark:text-white group-hover:text-primary transition-colors">
-                                                        {student.user.full_name}
-                                                    </h4>
-                                                    <div className="flex items-center gap-2 mt-0.5">
-                                                        <span className="text-[10px] font-bold text-text-secondary bg-black/5 dark:bg-white/5 px-2 py-0.5 rounded-md">
-                                                            NIS: {student.nis || '-'}
-                                                        </span>
-                                                        <span className="text-[10px] font-bold text-text-secondary bg-black/5 dark:bg-white/5 px-2 py-0.5 rounded-md">
-                                                            {student.gender === 'L' ? 'Laki-laki' : student.gender === 'P' ? 'Perempuan' : '-'}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
                     </div>
                 </div>
             )}

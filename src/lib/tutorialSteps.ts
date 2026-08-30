@@ -195,7 +195,7 @@ export const tutorialDefinitions: TutorialDef[] = [
             {
                 element: '[data-tutorial="dashboard-classes"]',
                 title: 'Kelas Saya',
-                description: 'Kelas yang Anda ajar.\n\nKlik untuk melihat daftar siswa di kelas tersebut.',
+                description: 'Kelas yang Anda ajar.\n\nKlik untuk melihat performa siswa di kelas tersebut.',
                 side: 'top',
                 align: 'start',
             },
@@ -236,9 +236,9 @@ export const tutorialDefinitions: TutorialDef[] = [
                 side: 'right',
             },
             {
-                element: '[data-tutorial="nav-wali-kelas"]',
-                title: 'Menu: Wali Kelas',
-                description: 'Khusus wali kelas — pantau siswa perwalian Anda.',
+                element: '[data-tutorial="nav-siswa"]',
+                title: 'Menu: Siswa',
+                description: 'Pantau performa siswa di kelas yang Anda ajar.\n\nWali kelas melihat semua mata pelajaran, guru mapel hanya mapel yang diampu.',
                 side: 'right',
             },
             {
