@@ -72,46 +72,65 @@ export async function PUT(
         const id = params.id
         const { answers, total_score, is_graded } = await request.json()
 
+        // Submission lengkap (untuk guard & notifikasi) — fetch sekali untuk semua role
+        const { data: sub } = await supabase
+            .from('quiz_submissions')
+            .select(`
+                submitted_at, is_graded, max_score,
+                quiz:quizzes(
+                    id, title,
+                    teaching_assignment:teaching_assignments(
+                        teacher_id,
+                        subject:subjects(name),
+                        academic_year:academic_years(school_id)
+                    )
+                ),
+                student:students(user_id)
+            `)
+            .eq('id', id)
+            .single()
+
+        if (!sub) {
+            return NextResponse.json({ error: 'Submission tidak ditemukan' }, { status: 404 })
+        }
+
+        // Guard integritas: hanya submission yang SUDAH dikumpulkan yang boleh
+        // dinilai — nilai koreksi guru pada attempt yang masih berjalan akan
+        // tertimpa begitu siswa menekan submit (processExisting menulis ulang
+        // total_score/is_graded).
+        if (!sub.submitted_at) {
+            return NextResponse.json({ error: 'Kuis ini belum dikumpulkan siswa — tidak bisa dinilai' }, { status: 400 })
+        }
+
+        // Validasi skor: wajib number, tidak negatif, tidak melebihi max, tidak null
+        // (null/negatif menghasilkan NaN di rekap & analitik).
+        if (typeof total_score !== 'number' || !Number.isFinite(total_score) || total_score < 0) {
+            return NextResponse.json({ error: 'Nilai tidak valid' }, { status: 400 })
+        }
+        if (total_score > (sub.max_score || 0)) {
+            return NextResponse.json({ error: 'Total score exceeds max score' }, { status: 400 })
+        }
+
         if (user.role === 'GURU') {
             const { data: teacher } = await supabase
                 .from('teachers')
                 .select('id')
                 .eq('user_id', user.id)
                 .single()
-            
-            // Get submission -> quiz -> teaching_assignment
-            const { data: sub } = await supabase
-                .from('quiz_submissions')
-                .select('max_score, quiz:quizzes(teaching_assignment:teaching_assignments(teacher_id))')
-                .eq('id', id)
-                .single()
-            
-            if (!teacher || (sub?.quiz as any)?.teaching_assignment?.teacher_id !== teacher.id) {
-                return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-            }
 
-            if (total_score > (sub?.max_score || 0)) {
-                return NextResponse.json({ error: 'Total score exceeds max score' }, { status: 400 })
+            const quizTa = (sub.quiz as any)?.teaching_assignment
+            if (!teacher || (Array.isArray(quizTa) ? quizTa[0] : quizTa)?.teacher_id !== teacher.id) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
             }
         } else if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         } else {
-            // Role Admin: tenant guard + only check max score
-            const { data: sub } = await supabase
-                .from('quiz_submissions')
-                .select('max_score, quiz:quizzes(teaching_assignment:teaching_assignments(academic_year:academic_years(school_id)))')
-                .eq('id', id)
-                .single()
-
-            // Tenant guard: submission harus milik sekolah caller
-            const quizTa = (sub?.quiz as any)?.teaching_assignment
-            const subSchoolId = Array.isArray(quizTa) ? quizTa[0]?.academic_year?.school_id : quizTa?.academic_year?.school_id
+            // Role Admin: tenant guard
+            const quizTa = (sub.quiz as any)?.teaching_assignment
+            const ta = Array.isArray(quizTa) ? quizTa[0] : quizTa
+            const subSchoolId = Array.isArray(ta?.academic_year) ? ta?.academic_year?.[0]?.school_id : ta?.academic_year?.school_id
             if (tenantMismatch(subSchoolId, schoolId)) {
                 return notFound()
-            }
-
-            if (total_score > (sub?.max_score || 0)) {
-                return NextResponse.json({ error: 'Total score exceeds max score' }, { status: 400 })
             }
         }
 
@@ -127,6 +146,28 @@ export async function PUT(
             .single()
 
         if (error) throw error
+
+        // Notifikasi "Nilai Keluar" saat koreksi manual selesai (is_graded false → true).
+        // Jalur submit hanya memberi notif untuk kuis yang auto-graded — tanpa ini
+        // kuis berisi essay/isian tidak pernah memberi tahu siswa nilainya sudah keluar.
+        if (is_graded === true && sub.is_graded !== true) {
+            const studentUserId = (sub.student as any)?.user_id
+            const quiz = Array.isArray(sub.quiz) ? (sub.quiz as any)[0] : (sub.quiz as any)
+            if (studentUserId && quiz) {
+                try {
+                    const subjectName = (Array.isArray(quiz.teaching_assignment) ? quiz.teaching_assignment[0] : quiz.teaching_assignment)?.subject?.name || ''
+                    await supabase.from('notifications').insert({
+                        user_id: studentUserId,
+                        type: 'NILAI_KELUAR',
+                        title: `Nilai Keluar: ${quiz.title}`,
+                        message: `${subjectName} — Nilai: ${total_score}/${sub.max_score}`,
+                        link: '/dashboard/siswa/kuis'
+                    })
+                } catch (notifError) {
+                    console.error('Error sending graded-result notification:', notifError)
+                }
+            }
+        }
 
         return NextResponse.json(data)
     } catch (error) {

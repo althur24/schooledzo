@@ -112,9 +112,13 @@ export async function GET(request: NextRequest) {
         // pertama, filter siswa di JS (pola yang sama seperti rantai tugas di bawah).
         const studentSet = new Set(studentIds)
 
-        // - Quizzes
-        const { data: quizzes } = await supabase.from('quizzes').select('id, title, teaching_assignment_id').in('teaching_assignment_id', allTaIds)
-        const quizIds = (quizzes || []).map(q => q.id)
+        // - Quizzes (batched: guru multi-kelas × mapel menghasilkan puluhan TA id —
+        //   .in() polos bisa overflow limit URL)
+        const quizzes = await batchedIn<any>(
+            'teaching_assignment_id', allTaIds,
+            (chunk) => supabase.from('quizzes').select('id, title, teaching_assignment_id, is_remedial, remedial_for_id').in('teaching_assignment_id', chunk)
+        )
+        const quizIds = quizzes.map(q => q.id)
         const allQuizSubs = await batchedFetchAll<{ quiz_id: string; student_id: string; total_score: number; max_score: number }>(
             'quiz_id', quizIds,
             (chunk) => supabase
@@ -123,11 +127,35 @@ export async function GET(request: NextRequest) {
                 .in('quiz_id', chunk)
                 .not('submitted_at', 'is', null)
         )
-        const quizSubs = allQuizSubs.filter(s => studentSet.has(s.student_id))
+        let quizSubs: { quiz_id: string; student_id: string; total_score: number; max_score: number }[] = allQuizSubs.filter(s => studentSet.has(s.student_id))
 
-        // - Exams
-        const { data: exams } = await supabase.from('exams').select('id, title, teaching_assignment_id').in('teaching_assignment_id', allTaIds)
-        const examIds = (exams || []).map(e => e.id)
+        // Remedial merge — selaras rekap (api/grades): nilai remedial MENGGANTIKAN
+        // nilai kuis asli (skor tertinggi per siswa per kuis asli), bukan
+        // double-count yang membuat siswa lulus-remedial tetap muncul di warning.
+        const remedialOf = new Map(quizzes.map(q => [q.id, q.remedial_for_id || null]))
+        const quizScoreGroups = new Map<string, { quiz_id: string; student_id: string; pct: number }>()
+        for (const s of quizSubs) {
+            const base = remedialOf.get(s.quiz_id) || s.quiz_id
+            const key = `${s.student_id}:${base}`
+            const pct = s.max_score > 0 ? (s.total_score / s.max_score) * 100 : 0
+            const existing = quizScoreGroups.get(key)
+            if (!existing || pct > existing.pct) {
+                quizScoreGroups.set(key, { quiz_id: base, student_id: s.student_id, pct })
+            }
+        }
+        quizSubs = Array.from(quizScoreGroups.values()).map(g => ({
+            quiz_id: g.quiz_id,
+            student_id: g.student_id,
+            total_score: g.pct,
+            max_score: 100,
+        }))
+
+        // - Exams (batched, alasan sama)
+        const exams = await batchedIn<any>(
+            'teaching_assignment_id', allTaIds,
+            (chunk) => supabase.from('exams').select('id, title, teaching_assignment_id').in('teaching_assignment_id', chunk)
+        )
+        const examIds = exams.map(e => e.id)
         const allExamSubs = await batchedFetchAll<{ exam_id: string; student_id: string; total_score: number; max_score: number }>(
             'exam_id', examIds,
             (chunk) => supabase
@@ -138,9 +166,12 @@ export async function GET(request: NextRequest) {
         )
         const examSubs = allExamSubs.filter(s => studentSet.has(s.student_id))
 
-        // - Tugas
-        const { data: tasks } = await supabase.from('assignments').select('id, teaching_assignment_id').in('teaching_assignment_id', allTaIds)
-        const taskIds = (tasks || []).map(t => t.id)
+        // - Tugas (batched, alasan sama)
+        const tasks = await batchedIn<any>(
+            'teaching_assignment_id', allTaIds,
+            (chunk) => supabase.from('assignments').select('id, teaching_assignment_id').in('teaching_assignment_id', chunk)
+        )
+        const taskIds = tasks.map(t => t.id)
         let taskSubsWithGrades: any[] = []
         if (taskIds.length > 0) {
             // Batched to avoid URL overflow — a teacher with many classes yields many
@@ -172,19 +203,21 @@ export async function GET(request: NextRequest) {
         const getScoresForTAAndStudent = (taId: string, studentId: string) => {
             const scores: number[] = []
 
-            // Quizzes
-            const relatedQuizzes = (quizzes || []).filter(q => q.teaching_assignment_id === taId).map(q => q.id)
+            // Quizzes (sudah di-merge remedial di atas: satu entri per kuis asli, skor terbaik)
+            const relatedQuizzes = quizzes.filter(q => q.teaching_assignment_id === taId).map(q => q.id)
             for (const qs of quizSubs.filter(s => s.student_id === studentId && relatedQuizzes.includes(s.quiz_id))) {
                 if (qs.max_score > 0) scores.push((qs.total_score / qs.max_score) * 100)
             }
             // Exams — normalize to percentage (total_score is raw points; max_score varies per exam)
-            const relatedExams = (exams || []).filter(e => e.teaching_assignment_id === taId).map(e => e.id)
+            const relatedExams = exams.filter(e => e.teaching_assignment_id === taId).map(e => e.id)
             for (const es of examSubs.filter(s => s.student_id === studentId && relatedExams.includes(s.exam_id))) {
                 const raw = es.total_score || 0
-                scores.push(es.max_score > 0 ? (raw / es.max_score) * 100 : raw)
+                // max_score 0/null → poin mentah TIDAK boleh dicampur dengan skala
+                // persen (15 poin ≠ 15%) — skip entry daripada merusak rata-rata.
+                if (es.max_score > 0) scores.push((raw / es.max_score) * 100)
             }
             // Tasks
-            const relatedTasks = (tasks || []).filter(t => t.teaching_assignment_id === taId).map(t => t.id)
+            const relatedTasks = tasks.filter(t => t.teaching_assignment_id === taId).map(t => t.id)
             for (const ts of taskSubsWithGrades.filter(s => s.student_id === studentId && relatedTasks.includes(s.assignment_id))) {
                 scores.push(ts.score || 0)
             }
@@ -224,6 +257,7 @@ export async function GET(request: NextRequest) {
                         teachingWarnings.push({
                             student_id: student.id,
                             student_name: unwrap(student.user)?.full_name || 'Tanpa Nama',
+                            class_id: ta.class_id,
                             class_name: cls?.name || 'Tanpa Kelas',
                             subject_name: subject?.name || 'Tanpa Mapel',
                             avg_score: Math.round(avg),
@@ -254,6 +288,7 @@ export async function GET(request: NextRequest) {
                             homeroomWarnings.push({
                                 student_id: student.id,
                                 student_name: unwrap(student.user)?.full_name || 'Tanpa Nama',
+                                class_id: hrClass.id,
                                 class_name: hrClass.name,
                                 subject_name: subject?.name || 'Tanpa Mapel',
                                 avg_score: Math.round(avg),

@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch } from '@/lib/tenantGuard'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { logGradeChange } from '@/lib/gradeHistory'
 
 // Create admin client to bypass RLS
 const supabase = createClient(
@@ -89,6 +90,9 @@ export async function GET(request: NextRequest) {
                     )
                 `)
                 .order('graded_at', { ascending: false })
+                // Tiebreaker unik — paginasi fetchAllRows tanpa order stabil bisa
+                // melewatkan/duplikasi baris diam-diam (graded_at tidak unik)
+                .order('id', { ascending: false })
             assignmentQuery = applyYearFilter(assignmentQuery, 'submission.assignment.teaching_assignment')
 
             // 2. Fetch Quiz Grades (KUIS)
@@ -103,6 +107,8 @@ export async function GET(request: NextRequest) {
                     quiz:quizzes!inner(
                         id,
                         title,
+                        is_remedial,
+                        remedial_for_id,
                         teaching_assignment_id,
                         teaching_assignment:teaching_assignments!inner(
                             subject:subjects(id, name)
@@ -110,6 +116,9 @@ export async function GET(request: NextRequest) {
                     )
                 `)
                 .not('submitted_at', 'is', null)
+                // Order + tiebreaker unik WAJIB sebelum fetchAllRows — paginasi
+                // tanpa order stabil bisa melewatkan/duplikasi baris diam-diam.
+                .order('id')
             quizQuery = applyYearFilter(quizQuery, 'quiz.teaching_assignment')
 
             // 3. Fetch Exam Grades (ULANGAN)
@@ -131,6 +140,9 @@ export async function GET(request: NextRequest) {
                     )
                 `)
                 .not('submitted_at', 'is', null)
+                // Order + tiebreaker unik WAJIB sebelum fetchAllRows — paginasi
+                // tanpa order stabil bisa melewatkan/duplikasi baris diam-diam.
+                .order('id')
             examQuery = applyYearFilter(examQuery, 'exam.teaching_assignment')
 
             // Filter by student_id if provided (all four categories now filtered at DB level)
@@ -174,13 +186,32 @@ export async function GET(request: NextRequest) {
                         id: qs.id,
                         student_id: qs.student_id,
                         subject_id: subject?.id,
+                        quiz_id: quiz?.id,
+                        remedial_for_id: quiz?.remedial_for_id || null,
                         grade_type: 'KUIS',
                         score: Math.round(score * 10) / 10,
                         subject: { name: subject?.name || '-' },
                         graded_at: qs.submitted_at
                     }
                 })
-            allGrades.push(...mappedQuizzes)
+
+            // Remedial merge: nilai remedial MENGGANTIKAN (bukan menambah) nilai
+            // kuis asli — per (siswa, kuis asli) ambil skor tertinggi. Tanpa ini
+            // siswa yang lulus remedial tercatat 2 nilai KUIS di rekap/rapor
+            // (nilai gagal ikut menyeret rata-rata).
+            const quizGroups = new Map<string, any[]>()
+            for (const m of mappedQuizzes) {
+                const base = m.remedial_for_id || m.quiz_id
+                const key = `${m.student_id}:${base}`
+                if (!quizGroups.has(key)) quizGroups.set(key, [])
+                quizGroups.get(key)!.push(m)
+            }
+            const mergedQuizzes = Array.from(quizGroups.values()).map(group => {
+                const original = group.find(m => !m.remedial_for_id) || group[0]
+                const best = group.reduce((a, b) => (b.score > a.score ? b : a))
+                return { ...original, score: best.score, graded_at: best.graded_at }
+            })
+            allGrades.push(...mergedQuizzes)
 
             const mappedExams = examSubmissions
                 .map((es: any) => {
@@ -294,6 +325,11 @@ export async function POST(request: NextRequest) {
 
         let resolvedSubmissionId = submission_id
 
+        // Konteks untuk audit trail (grade_history)
+        let auditRefId: string | null = null
+        let auditRefTitle: string | null = null
+        let auditStudentId: string | null = null
+
         // Fail-closed: GURU tanpa row teachers tidak boleh memberi nilai
         if (!teacher) {
             return NextResponse.json({ error: 'Data guru tidak ditemukan' }, { status: 403 })
@@ -302,7 +338,7 @@ export async function POST(request: NextRequest) {
         if (submission_id) {
             const { data: submission } = await supabase
                 .from('student_submissions')
-                .select('assignment:assignments(teaching_assignment:teaching_assignments(teacher_id))')
+                .select('student_id, assignment:assignments(id, title, teaching_assignment:teaching_assignments(teacher_id))')
                 .eq('id', submission_id)
                 .single()
 
@@ -310,11 +346,15 @@ export async function POST(request: NextRequest) {
             if (assignmentTeacherId && assignmentTeacherId !== teacher.id) {
                 return NextResponse.json({ error: 'Anda tidak memiliki akses untuk menilai submission ini' }, { status: 403 })
             }
+
+            auditRefId = (submission?.assignment as any)?.id || null
+            auditRefTitle = (submission?.assignment as any)?.title || null
+            auditStudentId = (submission as any)?.student_id || null
         } else {
             // Jalur offline: verifikasi kepemilikan assignment
             const { data: assignment } = await supabase
                 .from('assignments')
-                .select('submission_mode, teaching_assignment:teaching_assignments(teacher_id)')
+                .select('title, submission_mode, teaching_assignment:teaching_assignments(teacher_id)')
                 .eq('id', assignment_id)
                 .single()
 
@@ -332,6 +372,10 @@ export async function POST(request: NextRequest) {
             if (teacher && assignmentTeacherId && assignmentTeacherId !== teacher.id) {
                 return NextResponse.json({ error: 'Anda tidak memiliki akses untuk menilai tugas ini' }, { status: 403 })
             }
+
+            auditRefId = assignment_id
+            auditRefTitle = (assignment as any).title || null
+            auditStudentId = student_id
 
             // Find-or-create submission placeholder (is_offline) untuk siswa ini
             const { data: existingSub } = await supabase
@@ -363,7 +407,7 @@ export async function POST(request: NextRequest) {
         // Check if grade exists - Use regular client here since it's user action
         const { data: existing } = await supabase // Use admin to ensure teacher can grade
             .from('grades')
-            .select('id')
+            .select('id, score')
             .eq('submission_id', resolvedSubmissionId)
             .single()
 
@@ -390,6 +434,21 @@ export async function POST(request: NextRequest) {
 
             if (error) throw error
             gradeData = data
+        }
+
+        // Audit trail: catat perubahan nilai (nilai sama tidak dicatat — diff di helper)
+        if (auditRefId && auditStudentId) {
+            await logGradeChange({
+                schoolId,
+                source: 'ASSIGNMENT',
+                refId: auditRefId,
+                refTitle: auditRefTitle,
+                studentId: auditStudentId,
+                oldScore: existing?.score ?? null,
+                newScore: numScore,
+                maxScore: 100,
+                changedBy: user.id
+            })
         }
 
         // Send notification to student

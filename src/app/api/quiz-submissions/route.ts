@@ -262,6 +262,19 @@ export async function GET(request: NextRequest) {
             return { ...s, ends_at: endsAtIso(expiry) }
         })
 
+        // Anti-nyontek: untuk SISWA, attempt yang belum dikumpulkan tidak boleh
+        // membocorkan is_correct/score per jawaban (data era autosave lama masih
+        // menyimpannya — strip saat dibaca; tab hasil/inspect network jadi steril).
+        if (user.role === 'SISWA') {
+            finalData = finalData.map((s: any) => {
+                if (s.submitted_at || !Array.isArray(s.answers)) return s
+                return {
+                    ...s,
+                    answers: s.answers.map(({ is_correct: _ic, score: _sc, ...rest }: any) => rest)
+                }
+            })
+        }
+
         return NextResponse.json(finalData, { headers: { 'x-server-time': serverTimeIso } })
     } catch (error) {
         console.error('Error fetching quiz submissions:', error)
@@ -289,8 +302,8 @@ export async function POST(request: NextRequest) {
         // Student + quiz di-fetch PARALEL (independen) — memangkas 1 round-trip DB
         // per request di hot path autosave 1000 siswa
         const [studentRes, quizRes] = await Promise.all([
-            supabase.from('students').select('id').eq('user_id', user.id).single(),
-            supabase.from('quizzes').select('deadline, duration_minutes, is_remedial, allowed_student_ids, available_from').eq('id', quiz_id).single()
+            supabase.from('students').select('id, class_id').eq('user_id', user.id).single(),
+            supabase.from('quizzes').select('deadline, duration_minutes, is_remedial, allowed_student_ids, available_from, is_active, teaching_assignment:teaching_assignments(class_id)').eq('id', quiz_id).single()
         ])
         const student = studentRes.data
         const quiz = quizRes.data
@@ -328,6 +341,16 @@ export async function POST(request: NextRequest) {
         // deadline lewat di tengah jalan (siswa punya grace 60 dtk untuk flush terakhir).
         // available_from (jam buka jendela) juga hanya menggerbang sesi BARU.
         if (!existing) {
+            // Attempt BARU hanya untuk kuis yang sudah dipublikasi — draft tidak
+            // boleh dikerjakan siswa walau tahu UUID-nya.
+            if (!quiz.is_active) {
+                return NextResponse.json({ error: 'Kuis belum aktif' }, { status: 403 })
+            }
+            // dan hanya untuk siswa di kelas yang dituju kuis ini.
+            const ta = Array.isArray(quiz.teaching_assignment) ? quiz.teaching_assignment[0] : quiz.teaching_assignment
+            if (ta?.class_id && student.class_id && ta.class_id !== student.class_id) {
+                return NextResponse.json({ error: 'Kuis ini bukan untuk kelas Anda' }, { status: 403 })
+            }
             if (quiz.available_from && new Date() < new Date(quiz.available_from)) {
                 return NextResponse.json({ error: 'Kuis belum dibuka' }, { status: 400 })
             }
@@ -380,12 +403,9 @@ export async function POST(request: NextRequest) {
         // mengulang fallback jawaban (jangan timpa jawaban tersimpan dengan []).
         const gradeAnswersList = (list: any[]) => {
             let score = 0
-            let max = 0
             const graded = (list || []).map((ans: { question_id: string; answer: string }) => {
                 const question = questions.find(q => q.id === ans.question_id)
                 if (!question) return ans
-
-                max += question.points
 
                 if (isAutoGradeable(question.question_type)) {
                     const graded = gradeAnswer(
@@ -410,16 +430,22 @@ export async function POST(request: NextRequest) {
                     }
                 }
             })
-            return { graded, score, max }
+            return { graded, score }
         }
+
+        // max_score = total SEMUA soal (bukan hanya yang dijawab) — siswa yang
+        // mengosongkan soal tidak boleh mendapat denominator lebih kecil (dulu:
+        // jawab 4/5 soal benar = 40/50 = 80%, seharusnya 40/100 = 40%).
+        // Konsisten dengan jalur force-close di autoCloseExpired.ts.
+        const maxScoreAllQuestions = questions.reduce((acc, q) => acc + (q.points || 1), 0)
 
         // Only process answers if they exist
         if (answersToProcess && Array.isArray(answersToProcess) && answersToProcess.length > 0) {
             const r = gradeAnswersList(answersToProcess)
             gradedAnswers = r.graded
             totalScore = r.score
-            maxScore = r.max
         }
+        maxScore = maxScoreAllQuestions
 
         // Helper: proses attempt yang sudah ada (save-progress atau final submit).
         // Dipakai ulang oleh jalur race double-POST di bawah (catch 23505).
@@ -430,11 +456,14 @@ export async function POST(request: NextRequest) {
             )
             const contract = { server_time: new Date().toISOString(), ends_at: endsAtIso(contractExpiry) }
 
-            // If just saving progress (no submit flag), update answers only
+            // If just saving progress (no submit flag), update answers only.
+            // is_correct/score TIDAK disimpan di autosave — tanpa itu siswa bisa
+            // membuka tab hasil / mengintip respons network untuk melihat benar/
+            // salah per soal di tengah kuis (celah nyontek).
             if (!submit) {
                 const updateData: any = {}
                 if (answers && answers.length > 0) {
-                    updateData.answers = gradedAnswers
+                    updateData.answers = gradedAnswers.map(({ is_correct: _ic, score: _sc, ...rest }) => rest)
                 }
                 if (Object.keys(updateData).length > 0) {
                     await supabase
@@ -477,7 +506,9 @@ export async function POST(request: NextRequest) {
             quiz_id,
             student_id: student.id,
             started_at: new Date().toISOString(),
-            answers: gradedAnswers,
+            // Attempt baru tanpa submit = autosave — jawaban bare tanpa
+            // is_correct/score (anti-nyontek, sama seperti jalur save-progress).
+            answers: submit ? gradedAnswers : gradedAnswers.map(({ is_correct: _ic, score: _sc, ...rest }) => rest),
         }
 
         // Only mark as submitted if submit flag is true
@@ -516,7 +547,6 @@ export async function POST(request: NextRequest) {
                         const r = gradeAnswersList((raced.answers as any[]) || [])
                         gradedAnswers = r.graded
                         totalScore = r.score
-                        maxScore = r.max
                     }
                     return processExisting(raced)
                 }

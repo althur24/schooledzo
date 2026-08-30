@@ -18,6 +18,7 @@ interface Quiz {
     is_active: boolean
     pending_publish: boolean
     is_randomized: boolean
+    submission_mode?: string
     batch_id?: string | null
     batch_size?: number
     created_at: string
@@ -399,14 +400,18 @@ export default function GuruKuisPage() {
 
             const studentsWithScores = (Array.isArray(studentsData) ? studentsData : []).map((s: any) => {
                 const sub = (Array.isArray(subsData) ? subsData : []).find((sub: any) => sub.student_id === s.id)
+                // Siswa yang belum MENGUMPULKAN (submitted_at null) bukan "nilai 0" —
+                // dia masih/sama sekali tidak mengerjakan; jangan pre-select remedial.
+                const hasSubmitted = !!sub?.submitted_at
                 let score = 0
-                if (sub && sub.max_score > 0) {
+                if (hasSubmitted && sub && sub.max_score > 0) {
                     score = (sub.total_score / sub.max_score) * 100
                 }
-                const isBelowKKM = score < kkm
+                const isBelowKKM = hasSubmitted && score < kkm
                 return {
                     ...s,
-                    score: Math.round(score),
+                    score: hasSubmitted ? Math.round(score) : null,
+                    hasSubmitted,
                     isBelowKKM
                 }
             })
@@ -527,6 +532,11 @@ export default function GuruKuisPage() {
                                         {(quiz as any).is_remedial && (
                                             <span className="px-2 py-0.5 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm animate-pulse-slow">
                                                 REMEDIAL
+                                            </span>
+                                        )}
+                                        {quiz.submission_mode === 'OFFLINE' && (
+                                            <span className="px-2 py-0.5 bg-teal-500/10 text-teal-600 dark:text-teal-400 text-xs rounded-full border border-teal-200 dark:border-teal-500/20 font-bold">
+                                                Offline
                                             </span>
                                         )}
                                         {(quiz.batch_size || 1) > 1 && (
@@ -965,8 +975,8 @@ export default function GuruKuisPage() {
                                                     {isSelected ? <CheckSquare className="text-primary w-5 h-5" /> : <Square className="text-secondary/50 w-5 h-5" />}
                                                     <span className="font-medium text-text-main dark:text-white">{student.user.full_name}</span>
                                                 </div>
-                                                <div className={`px-2 py-1 rounded text-xs font-bold ${student.isBelowKKM ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'}`}>
-                                                    Nilai: {student.score}
+                                                <div className={`px-2 py-1 rounded text-xs font-bold ${student.hasSubmitted === false ? 'bg-gray-100 text-gray-500 dark:bg-surface-dark dark:text-zinc-400' : student.isBelowKKM ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'}`}>
+                                                    {student.hasSubmitted === false ? 'Belum Mengumpulkan' : `Nilai: ${student.score}`}
                                                 </div>
                                             </div>
                                         )

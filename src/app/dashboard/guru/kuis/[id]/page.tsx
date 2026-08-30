@@ -2461,7 +2461,7 @@ function EditQuizPageInner() {
                 onClose={() => setShowPreview(false)}
                 title={quiz.title}
                 description={quiz.description}
-                durationMinutes={30}
+                durationMinutes={quiz.duration_minutes ?? 0}
                 questions={questions}
                 type="kuis"
             />
