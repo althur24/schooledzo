@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       academic_years: {
@@ -640,6 +615,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      grade_history: {
+        Row: {
+          changed_at: string
+          changed_by: string | null
+          id: string
+          max_score: number | null
+          new_score: number
+          old_score: number | null
+          ref_id: string
+          ref_title: string | null
+          school_id: string | null
+          source: string
+          student_id: string
+        }
+        Insert: {
+          changed_at?: string
+          changed_by?: string | null
+          id?: string
+          max_score?: number | null
+          new_score: number
+          old_score?: number | null
+          ref_id: string
+          ref_title?: string | null
+          school_id?: string | null
+          source: string
+          student_id: string
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string | null
+          id?: string
+          max_score?: number | null
+          new_score?: number
+          old_score?: number | null
+          ref_id?: string
+          ref_title?: string | null
+          school_id?: string | null
+          source?: string
+          student_id?: string
+        }
+        Relationships: []
       }
       grades: {
         Row: {
@@ -1329,6 +1346,7 @@ export type Database = {
           id: string
           is_graded: boolean | null
           max_score: number | null
+          needs_manual_review: boolean
           quiz_id: string | null
           started_at: string | null
           student_id: string | null
@@ -1340,6 +1358,7 @@ export type Database = {
           id?: string
           is_graded?: boolean | null
           max_score?: number | null
+          needs_manual_review?: boolean
           quiz_id?: string | null
           started_at?: string | null
           student_id?: string | null
@@ -1351,6 +1370,7 @@ export type Database = {
           id?: string
           is_graded?: boolean | null
           max_score?: number | null
+          needs_manual_review?: boolean
           quiz_id?: string | null
           started_at?: string | null
           student_id?: string | null
@@ -1389,6 +1409,7 @@ export type Database = {
           is_remedial: boolean | null
           pending_publish: boolean | null
           remedial_for_id: string | null
+          submission_mode: string
           teaching_assignment_id: string | null
           title: string
           updated_at: string | null
@@ -1407,6 +1428,7 @@ export type Database = {
           is_remedial?: boolean | null
           pending_publish?: boolean | null
           remedial_for_id?: string | null
+          submission_mode?: string
           teaching_assignment_id?: string | null
           title: string
           updated_at?: string | null
@@ -1425,6 +1447,7 @@ export type Database = {
           is_remedial?: boolean | null
           pending_publish?: boolean | null
           remedial_for_id?: string | null
+          submission_mode?: string
           teaching_assignment_id?: string | null
           title?: string
           updated_at?: string | null
@@ -2237,9 +2260,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },

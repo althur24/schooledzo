@@ -77,10 +77,12 @@ async function sendDeadlineReminders(user: AuthUser, counter: Counter) {
                 const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000)
 
                 // Find assignments with deadline within 24 hours
+                // (kecuali tugas offline — tidak ada yang harus dikumpulkan siswa)
                 const { data: urgentAssignments } = await supabase
                     .from('assignments')
                     .select('id, title, due_date, teaching_assignment_id')
                     .in('teaching_assignment_id', taIds)
+                    .neq('submission_mode', 'OFFLINE')
                     .gt('due_date', now.toISOString())
                     .lte('due_date', in24h.toISOString())
 
@@ -120,11 +122,13 @@ async function sendDeadlineReminders(user: AuthUser, counter: Counter) {
                 }
 
                 // Kuis dengan deadline dalam 24 jam (siswa belum mengerjakan)
+                // (kecuali kuis offline — tidak ada yang harus dikerjakan siswa)
                 const { data: urgentQuizzes } = await supabase
                     .from('quizzes')
                     .select('id, title, deadline')
                     .in('teaching_assignment_id', taIds)
                     .eq('is_active', true)
+                    .neq('submission_mode', 'OFFLINE')
                     .not('deadline', 'is', null)
                     .gt('deadline', now.toISOString())
                     .lte('deadline', in24h.toISOString())
@@ -132,13 +136,17 @@ async function sendDeadlineReminders(user: AuthUser, counter: Counter) {
                 if (urgentQuizzes && urgentQuizzes.length > 0) {
                     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
                     for (const quiz of urgentQuizzes) {
-                        // Skip jika siswa sudah mengerjakan
+                        // Skip jika siswa sudah MENGUMPULKAN — cukup membuka kuis
+                        // (attempt berjalan) TIDAK boleh meniadakan reminder:
+                        // siswa yang buka lalu pergi justru yang paling perlu diingatkan.
                         const { data: existingQuizSub } = await supabase
                             .from('quiz_submissions')
-                            .select('id')
+                            .select('id, submitted_at')
                             .eq('quiz_id', quiz.id)
                             .eq('student_id', student.id)
                             .limit(1)
+
+                        const hasSubmitted = (existingQuizSub || []).some(s => s.submitted_at != null)
 
                         // Skip jika reminder untuk kuis ini sudah dikirim dalam 24 jam terakhir
                         const { data: existingQuizReminder } = await supabase
@@ -150,7 +158,7 @@ async function sendDeadlineReminders(user: AuthUser, counter: Counter) {
                             .gt('created_at', twentyFourHoursAgo.toISOString())
                             .limit(1)
 
-                        if ((!existingQuizSub || existingQuizSub.length === 0) && (!existingQuizReminder || existingQuizReminder.length === 0)) {
+                        if (!hasSubmitted && (!existingQuizReminder || existingQuizReminder.length === 0)) {
                             const deadlineStr = new Date(quiz.deadline).toLocaleString('id-ID')
                             await supabase.from('notifications').insert({
                                 user_id: user.id,

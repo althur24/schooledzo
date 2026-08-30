@@ -11,14 +11,14 @@ import PassageBlock from '@/components/PassageBlock'
 import { Star, TickSquare, CloseSquare, Paper } from 'react-iconly'
 
 interface QuizResult {
-    total_score: number
-    max_score: number
-    is_graded: boolean
-    submitted_at: string
+    total_score: number | null
+    max_score: number | null
+    is_graded: boolean | null
+    submitted_at: string | null
     answers: {
         question_id: string
         answer: string
-        score?: number
+        score?: number | null
         feedback?: string
     }[]
 }
@@ -91,10 +91,11 @@ export default function HasilKuisPage() {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                // Get student ID
-                const studentsRes = await fetch('/api/students')
+                // Ambil HANYA data diri (?user_id=) — tanpa param, guard API
+                // sekarang mengembalikan [] untuk SISWA (privasi roster sekolah).
+                const studentsRes = await fetch(`/api/students?user_id=${user!.id}`)
                 const students = await studentsRes.json()
-                const myStudent = students.find((s: any) => s.user.id === user?.id)
+                const myStudent = Array.isArray(students) ? students[0] : undefined
 
                 if (!myStudent) return
 
@@ -103,11 +104,16 @@ export default function HasilKuisPage() {
                     fetch(`/api/quiz-submissions?quiz_id=${quizId}&student_id=${myStudent.id}`)
                 ])
 
-                const quizData = await quizRes.json()
-                const subData = await subRes.json()
+                const quizData = await quizRes.json().catch(() => null)
+                const subData = await subRes.json().catch(() => null)
 
-                setQuiz(quizData)
-                if (subData && subData.length > 0) {
+                // Guard: respons error ({error:...}) bukan quiz — setQuiz(quizData)
+                // tanpa cek membuat groupByPassage(undefined) melempar TypeError
+                // (white screen) saat kuis sudah dihapus / fetch gagal.
+                if (quizData && Array.isArray(quizData.questions)) {
+                    setQuiz(quizData)
+                }
+                if (Array.isArray(subData) && subData.length > 0) {
                     setResult(subData[0])
                 }
             } catch (error) {
@@ -120,7 +126,22 @@ export default function HasilKuisPage() {
     }, [user, quizId])
 
     if (loading) return <div className="text-center text-text-secondary py-8">Memuat hasil...</div>
-    if (!result || !quiz) return <div className="text-center text-text-secondary py-8">Hasil tidak ditemukan</div>
+    if (!result) return <div className="text-center text-text-secondary py-8">Hasil tidak ditemukan</div>
+    // Attempt belum dikumpulkan — jawaban masih bisa berubah; menampilkan
+    // detail benar/salah di sini = celah nyontek + semua ikon akan "salah"
+    // (score belum dinilai). Tolak dengan pesan jelas.
+    if (!result.submitted_at) {
+        return (
+            <div className="text-center py-8 space-y-3">
+                <p className="text-text-main dark:text-white font-bold">Kuis ini belum kamu kumpulkan</p>
+                <p className="text-text-secondary">Hasil baru tersedia setelah kamu menekan tombol Kumpulkan.</p>
+                <Link href={`/dashboard/siswa/kuis/${quizId}`} className="inline-block text-primary font-bold hover:underline">
+                    Kembali ke Kuis
+                </Link>
+            </div>
+        )
+    }
+    if (!quiz) return <div className="text-center text-text-secondary py-8">Hasil tidak ditemukan</div>
 
     const getAnswerForQuestion = (qId: string) => {
         return result.answers.find(a => a.question_id === qId)
@@ -218,8 +239,8 @@ export default function HasilKuisPage() {
                     <Card className="text-center">
                         <p className="text-sm text-text-secondary mb-1">Total Skor</p>
                         <p className="text-2xl md:text-3xl font-bold text-primary">
-                            {result.total_score}
-                            <span className="text-sm text-text-secondary font-normal">/{result.max_score}</span>
+                            {result.total_score ?? '—'}
+                            <span className="text-sm text-text-secondary font-normal">/{result.max_score ?? '—'}</span>
                         </p>
                     </Card>
                     <Card className="text-center">

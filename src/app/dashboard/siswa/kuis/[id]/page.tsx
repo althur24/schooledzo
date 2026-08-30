@@ -67,6 +67,22 @@ export default function KerjakanKuisPage() {
         timeRemaining: number
     } | null>(null)
 
+    // E1 Gerbang mulai: attempt + timer BARU DIBUAT SETELAH siswa menekan "Mulai" —
+    // membuka halaman/intip kuis tidak boleh membakar jendela waktu diam-diam.
+    const [showStartGate, setShowStartGate] = useState(false)
+    // E2 Info attempt yang sudah tertutup: kapan dibuka, kapan habis — menggantikan
+    // alert generik "Anda sudah mengerjakan kuis ini" yang membingungkan siswa.
+    // E3: canRescue = ada draft lokal yang belum sampai ke server sebelum ditutup.
+    const [closedInfo, setClosedInfo] = useState<{
+        submission_id: string
+        started_at: string | null
+        ends_at: string | null
+        canRescue: boolean
+    } | null>(null)
+    const [rescueSending, setRescueSending] = useState(false)
+    const [rescueDone, setRescueDone] = useState(false)
+    const myStudentRef = useRef<any>(null)
+
     const timerRef = useRef<NodeJS.Timeout | null>(null)
     const answersRef = useRef(answers)
 
@@ -353,7 +369,9 @@ export default function KerjakanKuisPage() {
         fetchQuizData()
     }
 
-    const initializeAttemptFromResume = (quizData: Quiz, remainingTime: number) => {
+    const initializeAttemptFromResume = (quizData: Quiz, remainingTime: number | null) => {
+        // null = kuis tanpa batas waktu — JANGAN koerce ke 0 (timer badge akan
+        // menampilkan "00:00:00" merah berkedip seolah waktu habis)
         setTimeLeft(remainingTime)
         setLoading(false)
         // Timer handled by useEffect
@@ -385,8 +403,30 @@ export default function KerjakanKuisPage() {
 
         if (existingSub) {
             if (existingSub.submitted_at) {
-                alert('Anda sudah mengerjakan kuis ini.')
-                router.push('/dashboard/siswa/kuis')
+                // E2: attempt sudah dikumpulkan/ditutup — tampilkan layar informatif
+                // (kapan dibuka & kapan batasnya habis), bukan alert generik.
+                const localDraft = loadLocalDraft()
+                const localAnswers = localDraft.answers || {}
+                const dbAnswers: Record<string, string> = {}
+                if (existingSub.answers) {
+                    existingSub.answers.forEach((ans: any) => {
+                        dbAnswers[ans.question_id] = ans.answer
+                    })
+                }
+                const draftStale = localDraft.lastSaved !== null && existingSub.started_at != null
+                    && new Date(localDraft.lastSaved).getTime() < new Date(existingSub.started_at).getTime()
+                // E3: draft lokal berisi jawaban yang belum sempat sampai ke server
+                // sebelum attempt ditutup paksa (mis. browser mati saat waktu habis)
+                const canRescue = !draftStale && Object.keys(localAnswers).some(
+                    qId => localAnswers[qId] !== dbAnswers[qId]
+                )
+                setClosedInfo({
+                    submission_id: existingSub.id,
+                    started_at: existingSub.started_at,
+                    ends_at: existingSub.ends_at ?? null,
+                    canRescue
+                })
+                setLoading(false)
                 return
             }
 
@@ -460,6 +500,42 @@ export default function KerjakanKuisPage() {
             return
 
         } else {
+            // E1 Gerbang mulai: JANGAN buat attempt di sini. Waktu (duration) baru
+            // berjalan setelah siswa menekan "Mulai" di layar konfirmasi —
+            // membuka halaman untuk melihat-lihat tidak boleh membakar jendela
+            // waktu diam-diam (akar kasus "baru ngerjain 1 soal tiba-tiba tertutup").
+            myStudentRef.current = myStudent
+            setShowStartGate(true)
+            setLoading(false)
+            return
+        }
+
+        // Randomize questions if needed
+        let displayQuestions = [...(quizData.questions || [])]
+        if (quizData.is_randomized && !existingSub) {
+            // Only randomize if new attempt, otherwise keep order?
+            // Actually, if we randomize, the order should probably be stored or deterministic.
+            // For simplicity, let's just shuffle client side for now,
+            // BUT if the student refreshes, the order might change which is confusing.
+            // Ideally the order is saved. Since we didn't add 'question_order' to submission,
+            // let's skip persistent randomization for now or just sort by ID to be consistent.
+            // Or just respect the `order_index` from DB which is what the API returns.
+            // The API returns sorted by order_index.
+            // If quiz.is_randomized is true, we should probably shuffle.
+            // Let's use a seeded shuffle based on student ID + quiz ID so it's consistent?
+            // Too complex for now. Let's just use the order from DB.
+        }
+
+        startNewAttemptTimer(quizData, startedAt)
+    }
+
+    // E1: attempt benar-benar dimulai — dipanggil dari tombol "Mulai" di gerbang.
+    const beginNewAttempt = async () => {
+        const quizData = quiz
+        if (!quizData) return
+        setLoading(true)
+        setShowStartGate(false)
+        try {
             // Start new attempt — started_at & ends_at otoritatif dari server (jam HP tidak dipercaya)
             const res = await fetch('/api/quiz-submissions', {
                 method: 'POST',
@@ -480,26 +556,41 @@ export default function KerjakanKuisPage() {
             }
             if (startData?.server_time) offsetMsRef.current = new Date(startData.server_time).getTime() - Date.now()
             if (startData?.ends_at) endsAtRef.current = new Date(startData.ends_at).getTime()
-            setStartTime(startData?.started_at || startedAt.toISOString())
+            setStartTime(startData?.started_at || new Date().toISOString())
+            startNewAttemptTimer(quizData, new Date())
+        } catch (e) {
+            console.error('Error starting attempt:', e)
+            setError('Gagal memulai kuis. Periksa koneksi Anda lalu coba lagi.')
+            setLoadFailed(true)
+            setLoading(false)
         }
+    }
 
-        // Randomize questions if needed
-        let displayQuestions = [...(quizData.questions || [])]
-        if (quizData.is_randomized && !existingSub) {
-            // Only randomize if new attempt, otherwise keep order? 
-            // Actually, if we randomize, the order should probably be stored or deterministic.
-            // For simplicity, let's just shuffle client side for now, 
-            // BUT if the student refreshes, the order might change which is confusing.
-            // Ideally the order is saved. Since we didn't add 'question_order' to submission,
-            // let's skip persistent randomization for now or just sort by ID to be consistent.
-            // Or just respect the `order_index` from DB which is what the API returns.
-            // The API returns sorted by order_index.
-            // If quiz.is_randomized is true, we should probably shuffle.
-            // Let's use a seeded shuffle based on student ID + quiz ID so it's consistent?
-            // Too complex for now. Let's just use the order from DB.
+    // E3: kirim draft lokal (jawaban yang belum sempat tersimpan sebelum attempt
+    // ditutup paksa) ke guru untuk ditinjau manual — lebih adil daripada dibuang diam-diam.
+    const handleRescueDraft = async () => {
+        if (!closedInfo || rescueSending) return
+        setRescueSending(true)
+        try {
+            const localDraft = loadLocalDraft()
+            const formattedAnswers = Object.entries(localDraft.answers || {}).map(([qId, val]) => ({
+                question_id: qId,
+                answer: val as string
+            }))
+            const res = await fetch(`/api/quiz-submissions/${closedInfo.submission_id}/rescue`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ answers: formattedAnswers })
+            })
+            if (!res.ok) throw new Error('rescue failed')
+            clearLocalAnswers()
+            setRescueDone(true)
+        } catch (e) {
+            console.error('Rescue draft error:', e)
+            alert('Gagal mengirim jawaban. Coba lagi sebentar lagi.')
+        } finally {
+            setRescueSending(false)
         }
-
-        startNewAttemptTimer(quizData, startedAt)
     }
 
 
@@ -591,6 +682,105 @@ export default function KerjakanKuisPage() {
                 )}
                 <Link href="/dashboard/siswa" className="px-6 py-2 bg-slate-800 text-white rounded-xl hover:bg-slate-700 transition-colors">
                     Kembali ke Dashboard
+                </Link>
+            </div>
+        )
+    }
+
+    // E2: layar informatif untuk attempt yang sudah tertutup
+    if (closedInfo) {
+        const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 space-y-5 max-w-md mx-auto">
+                <div className="w-16 h-16 rounded-full bg-amber-500/15 flex items-center justify-center text-amber-500 text-3xl">⏱️</div>
+                <h2 className="text-xl font-bold text-text-main dark:text-white text-center">Waktu kuis ini sudah berakhir</h2>
+                <div className="w-full space-y-2 text-sm">
+                    <div className="flex justify-between px-4 py-2.5 rounded-xl bg-secondary/10">
+                        <span className="text-text-secondary">Kamu membuka kuis</span>
+                        <span className="font-bold text-text-main dark:text-white">{fmt(closedInfo.started_at)}</span>
+                    </div>
+                    <div className="flex justify-between px-4 py-2.5 rounded-xl bg-secondary/10">
+                        <span className="text-text-secondary">Batas waktu berakhir</span>
+                        <span className="font-bold text-text-main dark:text-white">{fmt(closedInfo.ends_at)}</span>
+                    </div>
+                </div>
+                <p className="text-text-secondary text-sm text-center">
+                    Durasi kuis dihitung sejak kamu pertama membuka kuis, bukan sejak kamu mulai menjawab.
+                    Jawaban yang tersimpan hingga batas waktu otomatis dikumpulkan.
+                </p>
+
+                {/* E3: rescue draft lokal yang belum sampai ke server */}
+                {closedInfo.canRescue && !rescueDone && (
+                    <div className="w-full p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 space-y-3">
+                        <p className="text-sm text-text-main dark:text-white font-medium">
+                            Ada jawaban di perangkat ini yang belum sempat terkirim sebelum waktu berakhir.
+                        </p>
+                        <button
+                            onClick={handleRescueDraft}
+                            disabled={rescueSending}
+                            className="w-full px-4 py-2.5 bg-amber-600 text-white rounded-xl font-bold hover:bg-amber-700 disabled:opacity-60 transition-colors text-sm"
+                        >
+                            {rescueSending ? 'Mengirim...' : 'Kirim Jawaban ke Guru untuk Ditinjau'}
+                        </button>
+                        <p className="text-xs text-text-secondary">Guru akan meninjau jawabanmu secara manual — nilainya tidak berubah otomatis.</p>
+                    </div>
+                )}
+                {rescueDone && (
+                    <p className="text-green-600 dark:text-green-400 text-sm font-medium text-center">✓ Jawabanmu sudah dikirim ke guru untuk ditinjau.</p>
+                )}
+
+                <div className="flex gap-3 w-full">
+                    <Link href={`/dashboard/siswa/kuis/${quizId}/hasil`} className="flex-1 text-center px-4 py-2.5 bg-primary text-white rounded-xl font-bold hover:bg-primary-dark transition-colors text-sm">
+                        Lihat Hasil
+                    </Link>
+                    <Link href="/dashboard/siswa/kuis" className="flex-1 text-center px-4 py-2.5 bg-secondary/80 text-text-main dark:text-white rounded-xl font-bold hover:bg-secondary transition-colors text-sm">
+                        Daftar Kuis
+                    </Link>
+                </div>
+            </div>
+        )
+    }
+
+    // E1: gerbang konfirmasi sebelum attempt (dan timer) dimulai
+    if (showStartGate && quiz) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 space-y-5 max-w-md mx-auto">
+                <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center text-3xl">📝</div>
+                <h2 className="text-xl font-bold text-text-main dark:text-white text-center">{quiz.title}</h2>
+                <div className="w-full space-y-2 text-sm">
+                    <div className="flex justify-between px-4 py-2.5 rounded-xl bg-secondary/10">
+                        <span className="text-text-secondary">Jumlah soal</span>
+                        <span className="font-bold text-text-main dark:text-white">{quiz.questions.length} soal</span>
+                    </div>
+                    {quiz.duration_minutes > 0 && (
+                        <div className="flex justify-between px-4 py-2.5 rounded-xl bg-secondary/10">
+                            <span className="text-text-secondary">Durasi pengerjaan</span>
+                            <span className="font-bold text-text-main dark:text-white">{quiz.duration_minutes} menit</span>
+                        </div>
+                    )}
+                    {quiz.deadline && (
+                        <div className="flex justify-between px-4 py-2.5 rounded-xl bg-secondary/10">
+                            <span className="text-text-secondary">Batas akhir</span>
+                            <span className="font-bold text-text-main dark:text-white">
+                                {new Date(quiz.deadline).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                        </div>
+                    )}
+                </div>
+                <div className="w-full p-4 rounded-xl border border-amber-500/40 bg-amber-500/10">
+                    <p className="text-sm text-amber-700 dark:text-amber-300 font-medium">
+                        ⚠️ {quiz.duration_minutes > 0
+                            ? `Waktu ${quiz.duration_minutes} menit mulai berjalan SEKARANG setelah kamu menekan tombol Mulai — walaupun kamu keluar atau menutup halaman.`
+                            : 'Pastikan kamu benar-benar siap sebelum memulai.'}
+                    </p>
+                </div>
+                <button
+                    onClick={beginNewAttempt}
+                    className="w-full px-6 py-3.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-bold shadow-lg shadow-cyan-500/20 hover:scale-[1.01] transition-all">
+                    🚀 Mulai Kuis Sekarang
+                </button>
+                <Link href="/dashboard/siswa/kuis" className="text-text-secondary hover:text-text-main text-sm transition-colors">
+                    Kembali dulu, saya belum siap
                 </Link>
             </div>
         )
@@ -885,7 +1075,8 @@ export default function KerjakanKuisPage() {
                             onClick={() => {
                                 setShowResumeModal(false)
                                 if (quiz) {
-                                    initializeAttemptFromResume(quiz, timeLeft ?? 0)
+                                    // null tetap null = Tanpa Batas (bukan 0)
+                                    initializeAttemptFromResume(quiz, timeLeft)
                                 }
                             }}
                             className="w-full px-6 py-4 bg-primary text-white rounded-xl font-bold hover:bg-primary-dark transition-all text-lg shadow-lg shadow-primary/20"

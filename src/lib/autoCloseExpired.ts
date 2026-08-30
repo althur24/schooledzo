@@ -331,6 +331,26 @@ export async function closeExpiredSubmissions(now: number = Date.now()): Promise
         logError('closeExpiredSubmissions(quizzes)', e)
     }
 
+    // KUIS NONAKTIF — attempt yatim dari kuis yang dinonaktifkan/kembali draft.
+    // Siswa tidak bisa lagi mengumpulkan (attempt baru ditolak is_active=false),
+    // jadi attempt yang menggantung harus ditutup paksa — kalau tidak, statusnya
+    // "sedang mengerjakan" selamanya dan memunculkan baris tanpa tanggal di mana-mana.
+    // Batas waktu = waktu penutupan (kuis nonaktif tidak punya "batas efektif").
+    try {
+        const { data: subs, error } = await supabase
+            .from('quiz_submissions')
+            .select('id, quiz:quizzes!inner(is_active)')
+            .is('submitted_at', null)
+            .eq('quiz.is_active', false)
+            .limit(DISCOVERY_LIMIT)
+        if (error) throw error
+        const orphaned = subs || []
+        await chunkRun(orphaned, (s: any) => forceCloseQuizSubmission(s.id, Date.now()))
+        result.quizzes += orphaned.length
+    } catch (e) {
+        logError('closeExpiredSubmissions(quizzes-inactive)', e)
+    }
+
     const total = result.exams + result.officials + result.quizzes
     if (total > 0) {
         console.log(`[auto-close] exams=${result.exams} officials=${result.officials} quizzes=${result.quizzes}`)
