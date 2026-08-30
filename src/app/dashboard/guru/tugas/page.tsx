@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
-import { Edit as PenTool, Calendar, TimeCircle as Clock, Plus, ChevronDown, Paper, Activity, Search, Delete, Danger, Edit } from 'react-iconly'
+import { Edit as PenTool, Calendar, TimeCircle as Clock, Plus, ChevronDown, Paper, Activity, Search, Delete, Danger, Edit, TickSquare } from 'react-iconly'
 import { Loader2, Copy } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -22,6 +22,7 @@ interface Assignment {
     type: string
     due_date: string | null
     created_at: string
+    submission_mode?: string
     teaching_assignment: TeachingAssignment
     submissions?: { count: number }[]
     need_grading_count?: number
@@ -221,7 +222,8 @@ export default function TugasPage() {
                             title: copyForm.title,
                             description: copyForm.description,
                             type: copyForm.type,
-                            due_date: formattedDueDate
+                            due_date: formattedDueDate,
+                            submission_mode: copySourceAssignment.submission_mode || 'ONLINE'
                         })
                     }).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -387,6 +389,11 @@ export default function TugasPage() {
                                                 <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20">
                                                     {assignment.type}
                                                 </span>
+                                                {assignment.submission_mode === 'OFFLINE' && (
+                                                    <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-200 dark:border-teal-500/20">
+                                                        Offline
+                                                    </span>
+                                                )}
                                                 <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/20">
                                                     {assignment.teaching_assignment?.class?.name}
                                                 </span>
@@ -413,21 +420,30 @@ export default function TugasPage() {
                                                     <Calendar set="bold" primaryColor="currentColor" size={16} />
                                                     <span>Dibuat: {new Date(assignment.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                                                 </div>
-                                                <div className={`flex items-center gap-1.5 ${isOverdue ? 'text-red-500 font-medium' : isNearing ? 'text-amber-500 font-medium' : ''}`}>
-                                                    <Clock set="bold" primaryColor="currentColor" size={16} />
-                                                    <span>Deadline: {assignment.due_date ? new Date(assignment.due_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</span>
-                                                </div>
-                                                <div className="flex items-center gap-1.5 font-medium text-primary">
-                                                    <Paper set="bold" primaryColor="currentColor" size={16} />
-                                                    <span>{submitCount}/{totalStudents} mengumpulkan</span>
-                                                </div>
-                                                {totalStudents > 0 && (
-                                                    <div className="w-24 bg-secondary/20 rounded-full h-1.5 overflow-hidden self-center">
-                                                        <div
-                                                            className={`h-full rounded-full transition-all duration-500 ${submitCount >= totalStudents ? 'bg-green-500' : submitCount > 0 ? 'bg-primary' : 'bg-secondary/30'}`}
-                                                            style={{ width: `${Math.min(100, totalStudents > 0 ? (submitCount / totalStudents) * 100 : 0)}%` }}
-                                                        />
+                                                {assignment.submission_mode === 'OFFLINE' ? (
+                                                    <div className="flex items-center gap-1.5 font-medium text-teal-600 dark:text-teal-400">
+                                                        <TickSquare set="bold" primaryColor="currentColor" size={16} />
+                                                        <span>{submitCount} siswa dinilai</span>
                                                     </div>
+                                                ) : (
+                                                    <>
+                                                        <div className={`flex items-center gap-1.5 ${isOverdue ? 'text-red-500 font-medium' : isNearing ? 'text-amber-500 font-medium' : ''}`}>
+                                                            <Clock set="bold" primaryColor="currentColor" size={16} />
+                                                            <span>Deadline: {assignment.due_date ? new Date(assignment.due_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-1.5 font-medium text-primary">
+                                                            <Paper set="bold" primaryColor="currentColor" size={16} />
+                                                            <span>{submitCount}/{totalStudents} mengumpulkan</span>
+                                                        </div>
+                                                        {totalStudents > 0 && (
+                                                            <div className="w-24 bg-secondary/20 rounded-full h-1.5 overflow-hidden self-center">
+                                                                <div
+                                                                    className={`h-full rounded-full transition-all duration-500 ${submitCount >= totalStudents ? 'bg-green-500' : submitCount > 0 ? 'bg-primary' : 'bg-secondary/30'}`}
+                                                                    style={{ width: `${Math.min(100, totalStudents > 0 ? (submitCount / totalStudents) * 100 : 0)}%` }}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                    </>
                                                 )}
                                             </div>
                                         </div>
@@ -548,6 +564,7 @@ export default function TugasPage() {
                                     <option value="PR">PR</option>
                                     <option value="PROYEK">Proyek</option>
                                     <option value="LATIHAN">Latihan</option>
+                                    {formData.type === 'ULANGAN' && <option value="ULANGAN">Ulangan</option>}
                                 </select>
                                 <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary"><ChevronDown set="bold" primaryColor="currentColor" size={20} /></div>
                             </div>
@@ -626,6 +643,7 @@ export default function TugasPage() {
                                     <option value="PR">PR</option>
                                     <option value="PROYEK">Proyek</option>
                                     <option value="LATIHAN">Latihan</option>
+                                    {copyForm.type === 'ULANGAN' && <option value="ULANGAN">Ulangan</option>}
                                 </select>
                                 <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary"><ChevronDown set="bold" primaryColor="currentColor" size={20} /></div>
                             </div>

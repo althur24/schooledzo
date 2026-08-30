@@ -23,6 +23,7 @@ interface Submission {
         id: string
         score: number
         feedback: string | null
+        graded_at?: string
     }>
 }
 
@@ -38,6 +39,7 @@ interface Assignment {
     description: string | null
     type: string
     due_date: string | null
+    submission_mode?: string
     teaching_assignment: {
         subject: { id: string; name: string; kkm?: number }
         class: { id: string; name: string; school_level?: string; grade_level?: number }
@@ -64,6 +66,10 @@ export default function TugasHasilPage() {
         studentName: string
     } | null>(null)
     const [saving, setSaving] = useState(false)
+
+    // Grid roster untuk tugas offline (input nilai tanpa submission)
+    const [offlineScores, setOfflineScores] = useState<Record<string, string>>({})
+    const [savingOffline, setSavingOffline] = useState(false)
 
     const fetchData = useCallback(async () => {
         try {
@@ -154,6 +160,34 @@ export default function TugasHasilPage() {
         }
     }
 
+    const saveOfflineScores = async () => {
+        setSavingOffline(true)
+        try {
+            const entries = Object.entries(offlineScores).filter(([, v]) => v !== '' && !isNaN(parseInt(v)))
+            if (entries.length === 0) return
+            await Promise.all(entries.map(([studentId, v]) =>
+                fetch('/api/grades', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        assignment_id: assignmentId,
+                        student_id: studentId,
+                        score: parseInt(v)
+                    })
+                }).then(res => {
+                    if (!res.ok) throw new Error('Gagal menyimpan nilai')
+                })
+            ))
+            setOfflineScores({})
+            fetchData()
+        } catch (error) {
+            console.error('Error saving offline scores:', error)
+            alert('Gagal menyimpan sebagian nilai. Periksa kembali.')
+        } finally {
+            setSavingOffline(false)
+        }
+    }
+
     if (loading) {
         return <div className="text-center text-text-secondary py-12 flex justify-center"><div className="animate-spin text-primary"><Loader2 className="w-10 h-10" /></div></div>
     }
@@ -164,6 +198,25 @@ export default function TugasHasilPage() {
 
     const stats = calculateStats()
     const totalStudents = submissions.length + missingStudents.length
+    const isOffline = assignment.submission_mode === 'OFFLINE'
+
+    // Roster gabungan (submission placeholder + yang belum dinilai) untuk tugas offline
+    const offlineRoster = [
+        ...submissions.map(s => ({
+            studentId: s.student.id,
+            name: s.student.user?.full_name || 'Siswa',
+            nis: s.student.nis,
+            score: s.grade?.[0]?.score as number | undefined,
+            gradedAt: s.grade?.[0]?.graded_at as string | undefined
+        })),
+        ...missingStudents.map(m => ({
+            studentId: m.id,
+            name: m.user?.full_name || 'Siswa',
+            nis: m.nis,
+            score: undefined as number | undefined,
+            gradedAt: undefined as string | undefined
+        }))
+    ].sort((a, b) => a.name.localeCompare(b.name, 'id'))
 
     return (
         <div className="space-y-6">
@@ -178,9 +231,9 @@ export default function TugasHasilPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Card className="p-4 flex flex-col items-center justify-center text-center">
                     <p className="text-2xl md:text-3xl font-bold text-purple-500 mb-1">
-                        {submissions.length} <span className="text-sm font-normal text-text-secondary">/ {totalStudents}</span>
+                        {isOffline ? stats.count : submissions.length} <span className="text-sm font-normal text-text-secondary">/ {totalStudents}</span>
                     </p>
-                    <p className="text-xs text-text-secondary font-bold uppercase tracking-wider">Terkumpul</p>
+                    <p className="text-xs text-text-secondary font-bold uppercase tracking-wider">{isOffline ? 'Sudah Dinilai' : 'Terkumpul'}</p>
                 </Card>
                 <Card className="p-4 flex flex-col items-center justify-center text-center">
                     <p className="text-2xl md:text-3xl font-bold text-blue-500 mb-1">{stats.avg || '-'}</p>
@@ -191,12 +244,75 @@ export default function TugasHasilPage() {
                     <p className="text-xs text-text-secondary font-bold uppercase tracking-wider">Tertinggi</p>
                 </Card>
                 <Card className="p-4 flex flex-col items-center justify-center text-center">
-                    <p className="text-2xl md:text-3xl font-bold text-amber-500 mb-1">{submissions.length - stats.count}</p>
+                    <p className="text-2xl md:text-3xl font-bold text-amber-500 mb-1">{isOffline ? totalStudents - stats.count : submissions.length - stats.count}</p>
                     <p className="text-xs text-text-secondary font-bold uppercase tracking-wider">Belum Dinilai</p>
                 </Card>
             </div>
 
-            {/* Submissions Table */}
+            {/* Grid Roster Offline: input nilai langsung per siswa */}
+            {isOffline ? (
+                <Card className="overflow-hidden p-0">
+                    <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-secondary/20 dark:border-white/5 bg-secondary/5">
+                        <div>
+                            <p className="font-bold text-text-main dark:text-white">Input Nilai (Tugas Offline)</p>
+                            <p className="text-xs text-text-secondary">Isi nilai lalu klik Simpan Semua — riwayat penilaian tersimpan otomatis</p>
+                        </div>
+                        <Button onClick={saveOfflineScores} loading={savingOffline} size="sm" disabled={Object.keys(offlineScores).length === 0}>
+                            Simpan Semua
+                        </Button>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="bg-secondary/10 dark:bg-white/5 border-b border-secondary/20">
+                                <tr>
+                                    <th className="text-left px-6 py-4 text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Siswa</th>
+                                    <th className="text-center px-6 py-4 text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Nilai (0-100)</th>
+                                    <th className="text-center px-6 py-4 text-sm font-bold text-text-main dark:text-white uppercase tracking-wider">Riwayat</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-secondary/20 dark:divide-white/5">
+                                {offlineRoster.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={3} className="p-12 text-center text-text-secondary">
+                                            Belum ada siswa di kelas ini
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    offlineRoster.map((row) => (
+                                        <tr key={row.studentId} className="hover:bg-secondary/5 transition-colors">
+                                            <td className="px-6 py-4">
+                                                <p className="text-text-main dark:text-white font-bold">{row.name}</p>
+                                                <p className="text-xs text-text-secondary dark:text-zinc-400 font-mono">{row.nis || 'No NIS'}</p>
+                                            </td>
+                                            <td className="px-6 py-4 text-center">
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    max={100}
+                                                    value={offlineScores[row.studentId] ?? (row.score !== undefined ? row.score.toString() : '')}
+                                                    onChange={(e) => setOfflineScores({ ...offlineScores, [row.studentId]: e.target.value })}
+                                                    className="w-20 px-3 py-2 text-center border border-secondary/30 rounded-lg bg-white dark:bg-surface-dark text-text-main dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-primary"
+                                                    placeholder="-"
+                                                />
+                                            </td>
+                                            <td className="px-6 py-4 text-center">
+                                                {row.gradedAt ? (
+                                                    <span className="text-xs text-text-secondary">
+                                                        Dinilai {new Date(row.gradedAt).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex px-3 py-1 bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-500/20 dark:text-amber-400 rounded-full text-xs font-bold">Belum Dinilai</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </Card>
+            ) : (
+            /* Submissions Table */
             <Card className="overflow-hidden p-0">
                 <div className="overflow-x-auto">
                     <table className="w-full">
@@ -296,6 +412,7 @@ export default function TugasHasilPage() {
                     </table>
                 </div>
             </Card>
+            )}
 
             {/* Grading Modal */}
             <Modal

@@ -303,7 +303,7 @@ export async function POST(request: NextRequest) {
         // per request di hot path autosave 1000 siswa
         const [studentRes, quizRes] = await Promise.all([
             supabase.from('students').select('id, class_id').eq('user_id', user.id).single(),
-            supabase.from('quizzes').select('deadline, duration_minutes, is_remedial, allowed_student_ids, available_from, is_active, teaching_assignment:teaching_assignments(class_id)').eq('id', quiz_id).single()
+            supabase.from('quizzes').select('deadline, duration_minutes, is_remedial, allowed_student_ids, available_from, is_active, submission_mode, teaching_assignment:teaching_assignments(class_id)').eq('id', quiz_id).single()
         ])
         const student = studentRes.data
         const quiz = quizRes.data
@@ -314,6 +314,11 @@ export async function POST(request: NextRequest) {
 
         if (!quiz) {
             return NextResponse.json({ error: 'Quiz not found' }, { status: 404 })
+        }
+
+        // Kuis offline dinilai langsung oleh guru — tidak menerima attempt siswa
+        if ((quiz as any).submission_mode === 'OFFLINE') {
+            return NextResponse.json({ error: 'Kuis ini dinilai langsung oleh guru, tidak dikerjakan di sini' }, { status: 400 })
         }
 
         // Remedial guard

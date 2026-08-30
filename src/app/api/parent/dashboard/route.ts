@@ -154,22 +154,23 @@ export async function GET(request: NextRequest) {
         }
 
         // Fetch assignment submissions
+        // (kolom status/created_at tidak ada di student_submissions; deadline -> due_date)
         let submissions: any[] = []
         try {
             const { data } = await supabase
                 .from('student_submissions')
-                .select('id, student_id, status, submitted_at, created_at, assignment:assignments(id, title, deadline), grade:grades(score)')
+                .select('id, student_id, submitted_at, assignment:assignments(id, title, due_date), grade:grades(score)')
                 .eq('student_id', childId)
-                .order('created_at', { ascending: false })
+                .order('submitted_at', { ascending: false })
                 .limit(20)
 
             submissions = (data || []).map((s: any) => ({
                 id: s.id,
                 title: s.assignment?.title || 'Tugas',
-                status: s.status,
+                status: 'SUBMITTED', // semua baris di query ini memang sudah terkumpul
                 score: Array.isArray(s.grade) && s.grade.length > 0 ? s.grade[0].score : null,
                 submitted_at: s.submitted_at,
-                deadline: s.assignment?.deadline
+                deadline: s.assignment?.due_date
             }))
         } catch (err) {
             console.error('Error fetching submissions:', err)

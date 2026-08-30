@@ -159,10 +159,15 @@ export async function POST(request: NextRequest) {
         if (assignment_id) {
             const { data: assignment } = await supabase
                 .from('assignments')
-                .select('due_date')
+                .select('due_date, submission_mode')
                 .eq('id', assignment_id)
                 .single()
-            
+
+            // Tugas offline dinilai langsung oleh guru — tidak menerima pengumpulan
+            if (assignment?.submission_mode === 'OFFLINE') {
+                return NextResponse.json({ error: 'Tugas ini dinilai langsung oleh guru, tidak perlu dikumpulkan di sini' }, { status: 400 })
+            }
+
             if (assignment?.due_date && new Date() > new Date(assignment.due_date)) {
                 isLate = true
             }

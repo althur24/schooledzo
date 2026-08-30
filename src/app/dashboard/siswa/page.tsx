@@ -148,6 +148,8 @@ export default function SiswaDashboard() {
                     // Process Assignments — show ALL that haven't been submitted (deadline not passed)
                     assignments.forEach((a: any) => {
                         if (a.teaching_assignment?.class?.id !== myStudent.class.id) return
+                        // Tugas offline dinilai langsung oleh guru — bukan pekerjaan yang harus dikumpulkan siswa
+                        if (a.submission_mode === 'OFFLINE') return
                         if (assignmentSubmissions.some((s: any) => s.assignment_id === a.id)) return
 
                         const expirationTime = a.due_date ? new Date(a.due_date).getTime() : nowTime + 999999999
@@ -203,6 +205,8 @@ export default function SiswaDashboard() {
                         if (q.teaching_assignment?.class?.id !== myStudent.class.id) return
                         if (quizSubmissions.some((s: any) => s.quiz_id === q.id && s.submitted_at)) return
                         if (!q.is_active) return
+                        // Kuis offline dinilai langsung oleh guru — bukan pekerjaan siswa
+                        if (q.submission_mode === 'OFFLINE') return
 
                         // Use the deadline field from DB
                         const deadlineTime = q.deadline ? new Date(q.deadline).getTime() : 0

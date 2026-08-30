@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import { PageHeader, Card, Button, StatsCard, EmptyState } from '@/components/ui'
-import { Chart, User, TickSquare, TimeCircle, Activity, Search, ArrowRight, Document, Discovery, Download, Paper, Edit } from 'react-iconly'
+import { PageHeader, Card, Button, StatsCard, EmptyState, Modal } from '@/components/ui'
+import { Chart, User, TickSquare, TimeCircle, Activity, Search, ArrowRight, Document, Discovery, Download, Paper, Edit, Plus } from 'react-iconly'
 import { GraduationCap } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
@@ -20,7 +20,7 @@ interface Submission {
     submitted_at: string
     student: { id: string }
     assignment: { id: string; title: string; type: string }
-    grade: Array<{ score: number }>
+    grade: Array<{ score: number; graded_at?: string }>
 }
 
 interface QuizSubmission {
@@ -29,6 +29,7 @@ interface QuizSubmission {
     total_score: number
     max_score: number
     is_graded: boolean
+    submitted_at?: string
     quiz: { id: string; title: string }
 }
 
@@ -37,6 +38,7 @@ interface ExamSubmission {
     is_submitted: boolean
     total_score: number
     max_score: number
+    submitted_at?: string
     student: { id: string }
     exam: { id: string; title: string }
 }
@@ -45,12 +47,14 @@ interface Assignment {
     id: string
     title: string
     type: string
+    submission_mode?: string
     teaching_assignment: { id: string }
 }
 
 interface Quiz {
     id: string
     title: string
+    submission_mode?: string
     teaching_assignment: { id: string }
 }
 
@@ -76,6 +80,7 @@ interface OfficialExamSubForNilai {
     max_score: number
     is_graded: boolean
     exam_id: string
+    submitted_at?: string
 }
 
 interface TeachingAssignment {
@@ -107,6 +112,51 @@ export default function NilaiPage() {
     const [searchQuery, setSearchQuery] = useState('')
     const [exportSuccess, setExportSuccess] = useState(false)
     const [subjectKkms, setSubjectKkms] = useState<any[]>([])
+
+    // Gradebook: tambah kolom penilaian offline + edit kolom + detail sel
+    const [showAddColumn, setShowAddColumn] = useState<'TUGAS' | 'ULANGAN' | 'KUIS' | null>(null)
+    const [newColumnTitle, setNewColumnTitle] = useState('')
+    const [newColumnType, setNewColumnType] = useState('TUGAS')
+    const [savingColumn, setSavingColumn] = useState(false)
+    const [editingColumnId, setEditingColumnId] = useState<string | null>(null)
+    const [editingQuizId, setEditingQuizId] = useState<string | null>(null)
+    const [draftScores, setDraftScores] = useState<Record<string, string>>({})
+    const [savingScores, setSavingScores] = useState(false)
+    const [cellDetail, setCellDetail] = useState<{
+        title: string
+        category: string
+        studentName: string
+        nis: string
+        score: number | null
+        date: string | null
+        source?: 'ASSIGNMENT' | 'QUIZ'
+        refId?: string
+        studentId?: string
+    } | null>(null)
+
+    // Riwayat perubahan nilai untuk sel yang sedang dibuka (hanya kolom yang guru input manual)
+    const [cellHistory, setCellHistory] = useState<Array<{
+        id: string
+        old_score: number | null
+        new_score: number
+        max_score: number | null
+        changed_by_name: string | null
+        changed_at: string
+    }>>([])
+    const [loadingHistory, setLoadingHistory] = useState(false)
+
+    useEffect(() => {
+        if (!cellDetail?.source || !cellDetail?.refId || !cellDetail?.studentId) {
+            setCellHistory([])
+            return
+        }
+        setLoadingHistory(true)
+        fetch(`/api/grade-history?source=${cellDetail.source}&ref_id=${cellDetail.refId}&student_id=${cellDetail.studentId}`)
+            .then(res => res.json())
+            .then(data => setCellHistory(Array.isArray(data) ? data : []))
+            .catch(() => setCellHistory([]))
+            .finally(() => setLoadingHistory(false))
+    }, [cellDetail])
 
     useEffect(() => {
         const fetchInitial = async () => {
@@ -155,6 +205,109 @@ export default function NilaiPage() {
         }
     }, [searchParams, teachingAssignments])
 
+    const fetchTAData = useCallback(async () => {
+        if (!selectedTA) return
+        setLoadingData(true)
+        try {
+            const ta = teachingAssignments.find(t => t.id === selectedTA)
+            if (!ta) return
+
+            // Fetch students in the class — year-aware so a past TA shows the
+            // students who were enrolled then (not the current roster).
+            const studentsRes = await fetch(`/api/students?class_id=${ta.class.id}&enrollment_year_id=${ta.academic_year?.id || ''}`)
+            const studentsData = await studentsRes.json()
+            setStudents(Array.isArray(studentsData) ? studentsData : [])
+
+            // Fetch assignments
+            const assignmentsRes = await fetch('/api/assignments')
+            const assignmentsData = await assignmentsRes.json()
+            const myAssignments = (assignmentsData || []).filter((a: Assignment) =>
+                a.teaching_assignment?.id === selectedTA
+            )
+            setAssignments(myAssignments)
+
+            // Fetch submissions for assignments
+            const allSubs: Submission[] = []
+            for (const assignment of myAssignments) {
+                const subRes = await fetch(`/api/submissions?assignment_id=${assignment.id}`)
+                const subData = await subRes.json()
+                if (Array.isArray(subData)) {
+                    allSubs.push(...subData.map((s: any) => ({ ...s, assignment: { id: assignment.id, title: assignment.title, type: assignment.type } })))
+                }
+            }
+            setAllSubmissions(allSubs)
+
+            // Fetch quizzes
+            const quizzesRes = await fetch('/api/quizzes')
+            const quizzesData = await quizzesRes.json()
+            const myQuizzes = (quizzesData || []).filter((q: Quiz) => q.teaching_assignment?.id === selectedTA)
+            setQuizzes(myQuizzes)
+
+            // Fetch quiz submissions
+            const allQuizSubs: QuizSubmission[] = []
+            for (const quiz of myQuizzes) {
+                const qSubRes = await fetch(`/api/quiz-submissions?quiz_id=${quiz.id}`)
+                const qSubData = await qSubRes.json()
+                if (Array.isArray(qSubData)) {
+                    allQuizSubs.push(...qSubData.map((s: any) => ({ ...s, quiz: { id: quiz.id, title: quiz.title } })))
+                }
+            }
+            setQuizSubmissions(allQuizSubs)
+
+            // Fetch exams
+            const examsRes = await fetch('/api/exams')
+            const examsData = await examsRes.json()
+            const myExams = (examsData || []).filter((e: Exam) => e.teaching_assignment?.id === selectedTA)
+            setExams(myExams)
+
+            // Fetch exam submissions
+            const allExamSubs: ExamSubmission[] = []
+            for (const exam of myExams) {
+                const eSubRes = await fetch(`/api/exam-submissions?exam_id=${exam.id}`)
+                const eSubData = await eSubRes.json()
+                if (Array.isArray(eSubData)) {
+                    allExamSubs.push(...eSubData.filter((s: any) => s.is_submitted).map((s: any) => ({ ...s, exam: { id: exam.id, title: exam.title } })))
+                }
+            }
+            setExamSubmissions(allExamSubs)
+
+            // Fetch official exams (UTS/UAS) matching this subject + class
+            const officialRes = await fetch('/api/official-exams')
+            const officialData = await officialRes.json()
+            const myOfficialExams = (Array.isArray(officialData) ? officialData : []).filter(
+                (oe: any) => oe.subject?.id === ta.subject.id && oe.target_class_ids?.includes(ta.class.id)
+            )
+            setOfficialExams(myOfficialExams.map((oe: any) => ({
+                id: oe.id, title: oe.title, exam_type: oe.exam_type,
+                subject_id: oe.subject?.id, target_class_ids: oe.target_class_ids
+            })))
+
+            // Fetch official exam submissions
+            const allOfficialSubs: OfficialExamSubForNilai[] = []
+            for (const oe of myOfficialExams) {
+                const oeSubRes = await fetch(`/api/official-exam-submissions?exam_id=${oe.id}`)
+                const oeSubData = await oeSubRes.json()
+                if (Array.isArray(oeSubData)) {
+                    allOfficialSubs.push(...oeSubData
+                        .filter((s: any) => s.is_submitted)
+                        .map((s: any) => ({
+                            id: s.id, student_id: s.student?.id || s.student_id,
+                            is_submitted: true, total_score: s.total_score,
+                            max_score: s.max_score, is_graded: s.is_graded,
+                            exam_id: oe.id, submitted_at: s.submitted_at
+                        }))
+                    )
+                }
+            }
+            setOfficialExamSubs(allOfficialSubs)
+
+        } catch (error) {
+            console.error('Error:', error)
+        } finally {
+            setLoadingData(false)
+        }
+    }, [selectedTA, teachingAssignments])
+
     useEffect(() => {
         if (!selectedTA) {
             setStudents([])
@@ -168,111 +321,8 @@ export default function NilaiPage() {
             setOfficialExamSubs([])
             return
         }
-
-        const fetchTAData = async () => {
-            setLoadingData(true)
-            try {
-                const ta = teachingAssignments.find(t => t.id === selectedTA)
-                if (!ta) return
-
-                // Fetch students in the class — year-aware so a past TA shows the
-                // students who were enrolled then (not the current roster).
-                const studentsRes = await fetch(`/api/students?class_id=${ta.class.id}&enrollment_year_id=${ta.academic_year?.id || ''}`)
-                const studentsData = await studentsRes.json()
-                setStudents(Array.isArray(studentsData) ? studentsData : [])
-
-                // Fetch assignments
-                const assignmentsRes = await fetch('/api/assignments')
-                const assignmentsData = await assignmentsRes.json()
-                const myAssignments = (assignmentsData || []).filter((a: Assignment) =>
-                    a.teaching_assignment?.id === selectedTA
-                )
-                setAssignments(myAssignments)
-
-                // Fetch submissions for assignments
-                const allSubs: Submission[] = []
-                for (const assignment of myAssignments) {
-                    const subRes = await fetch(`/api/submissions?assignment_id=${assignment.id}`)
-                    const subData = await subRes.json()
-                    if (Array.isArray(subData)) {
-                        allSubs.push(...subData.map((s: any) => ({ ...s, assignment: { id: assignment.id, title: assignment.title, type: assignment.type } })))
-                    }
-                }
-                setAllSubmissions(allSubs)
-
-                // Fetch quizzes
-                const quizzesRes = await fetch('/api/quizzes')
-                const quizzesData = await quizzesRes.json()
-                const myQuizzes = (quizzesData || []).filter((q: Quiz) => q.teaching_assignment?.id === selectedTA)
-                setQuizzes(myQuizzes)
-
-                // Fetch quiz submissions
-                const allQuizSubs: QuizSubmission[] = []
-                for (const quiz of myQuizzes) {
-                    const qSubRes = await fetch(`/api/quiz-submissions?quiz_id=${quiz.id}`)
-                    const qSubData = await qSubRes.json()
-                    if (Array.isArray(qSubData)) {
-                        allQuizSubs.push(...qSubData.map((s: any) => ({ ...s, quiz: { id: quiz.id, title: quiz.title } })))
-                    }
-                }
-                setQuizSubmissions(allQuizSubs)
-
-                // Fetch exams
-                const examsRes = await fetch('/api/exams')
-                const examsData = await examsRes.json()
-                const myExams = (examsData || []).filter((e: Exam) => e.teaching_assignment?.id === selectedTA)
-                setExams(myExams)
-
-                // Fetch exam submissions
-                const allExamSubs: ExamSubmission[] = []
-                for (const exam of myExams) {
-                    const eSubRes = await fetch(`/api/exam-submissions?exam_id=${exam.id}`)
-                    const eSubData = await eSubRes.json()
-                    if (Array.isArray(eSubData)) {
-                        allExamSubs.push(...eSubData.filter((s: any) => s.is_submitted).map((s: any) => ({ ...s, exam: { id: exam.id, title: exam.title } })))
-                    }
-                }
-                setExamSubmissions(allExamSubs)
-
-                // Fetch official exams (UTS/UAS) matching this subject + class
-                const officialRes = await fetch('/api/official-exams')
-                const officialData = await officialRes.json()
-                const myOfficialExams = (Array.isArray(officialData) ? officialData : []).filter(
-                    (oe: any) => oe.subject?.id === ta.subject.id && oe.target_class_ids?.includes(ta.class.id)
-                )
-                setOfficialExams(myOfficialExams.map((oe: any) => ({
-                    id: oe.id, title: oe.title, exam_type: oe.exam_type,
-                    subject_id: oe.subject?.id, target_class_ids: oe.target_class_ids
-                })))
-
-                // Fetch official exam submissions
-                const allOfficialSubs: OfficialExamSubForNilai[] = []
-                for (const oe of myOfficialExams) {
-                    const oeSubRes = await fetch(`/api/official-exam-submissions?exam_id=${oe.id}`)
-                    const oeSubData = await oeSubRes.json()
-                    if (Array.isArray(oeSubData)) {
-                        allOfficialSubs.push(...oeSubData
-                            .filter((s: any) => s.is_submitted)
-                            .map((s: any) => ({
-                                id: s.id, student_id: s.student?.id || s.student_id,
-                                is_submitted: true, total_score: s.total_score,
-                                max_score: s.max_score, is_graded: s.is_graded,
-                                exam_id: oe.id
-                            }))
-                        )
-                    }
-                }
-                setOfficialExamSubs(allOfficialSubs)
-
-            } catch (error) {
-                console.error('Error:', error)
-            } finally {
-                setLoadingData(false)
-            }
-        }
-
         fetchTAData()
-    }, [selectedTA, teachingAssignments])
+    }, [selectedTA, teachingAssignments, fetchTAData])
 
     // Calculate average for a student
     const calculateAverage = (studentId: string) => {
@@ -307,20 +357,18 @@ export default function NilaiPage() {
         const ta = teachingAssignments.find(t => t.id === selectedTA)
         if (!ta) return
 
-        const tugasAssignmentsLocal = assignments.filter(a => a.type !== 'ULANGAN')
-        const utsExamsLocal = officialExams.filter(oe => oe.exam_type === 'UTS')
-        const uasExamsLocal = officialExams.filter(oe => oe.exam_type === 'UAS')
-
-        // Build header row
+        // Build header row — memakai daftar kolom yang sama dengan tampilan Rekap
+        // (const di bawah; aman karena handleExport dipanggil post-render)
         const headers = [
             'No',
             'NIS',
             'Nama Siswa',
-            ...tugasAssignmentsLocal.map((_, i) => `T${i + 1}`),
+            ...tugasAssignments.map((_, i) => `T${i + 1}`),
             ...quizzes.map((_, i) => `K${i + 1}`),
             ...exams.map((_, i) => `U${i + 1}`),
-            ...utsExamsLocal.map((_, i) => `UTS${utsExamsLocal.length > 1 ? i + 1 : ''}`),
-            ...uasExamsLocal.map((_, i) => `UAS${uasExamsLocal.length > 1 ? i + 1 : ''}`),
+            ...ulanganAssignments.map((_, i) => `U${exams.length + i + 1}`),
+            ...utsExams.map((_, i) => `UTS${utsExams.length > 1 ? i + 1 : ''}`),
+            ...uasExams.map((_, i) => `UAS${uasExams.length > 1 ? i + 1 : ''}`),
             'Rata-rata'
         ]
 
@@ -329,7 +377,7 @@ export default function NilaiPage() {
             (a.user.full_name || '').localeCompare(b.user.full_name || '', 'id')
         )
         const rows = sortedStudents.map((student, idx) => {
-            const tugasGrades = tugasAssignmentsLocal.map(a => {
+            const tugasGrades = tugasAssignments.map(a => {
                 const sub = allSubmissions.find(s => s.student?.id === student.id && s.assignment?.id === a.id)
                 return sub?.grade?.[0]?.score ?? ''
             })
@@ -341,11 +389,15 @@ export default function NilaiPage() {
                 const es = examSubmissions.find(es => es.student?.id === student.id && es.exam.id === e.id)
                 return es ? Math.round((es.total_score / es.max_score) * 100) : ''
             })
-            const utsGrades = utsExamsLocal.map(oe => {
+            const ulanganOfflineGrades = ulanganAssignments.map(a => {
+                const sub = allSubmissions.find(s => s.student?.id === student.id && s.assignment?.id === a.id)
+                return sub?.grade?.[0]?.score ?? ''
+            })
+            const utsGrades = utsExams.map(oe => {
                 const os = officialExamSubs.find(s => s.student_id === student.id && s.exam_id === oe.id)
                 return os?.is_graded && os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : ''
             })
-            const uasGrades = uasExamsLocal.map(oe => {
+            const uasGrades = uasExams.map(oe => {
                 const os = officialExamSubs.find(s => s.student_id === student.id && s.exam_id === oe.id)
                 return os?.is_graded && os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : ''
             })
@@ -358,6 +410,7 @@ export default function NilaiPage() {
                 ...tugasGrades,
                 ...kuisGrades,
                 ...ulanganGrades,
+                ...ulanganOfflineGrades,
                 ...utsGrades,
                 ...uasGrades,
                 avg ?? ''
@@ -402,8 +455,182 @@ export default function NilaiPage() {
 
     const selectedTAData = teachingAssignments.find(t => t.id === selectedTA)
     const tugasAssignments = assignments.filter(a => a.type !== 'ULANGAN')
+    const ulanganAssignments = assignments.filter(a => a.type === 'ULANGAN')
     const utsExams = officialExams.filter(oe => oe.exam_type === 'UTS')
     const uasExams = officialExams.filter(oe => oe.exam_type === 'UAS')
+
+    // Label kategori ramah untuk detail sel
+    const categoryLabel = (type: string) =>
+        type === 'ULANGAN' ? 'Ulangan' : type === 'PR' ? 'PR' : type === 'PROYEK' ? 'Proyek' : type === 'LATIHAN' ? 'Latihan' : 'Tugas'
+
+    // Buat kolom penilaian offline (Tugas/Ulangan/Kuis) dari halaman Nilai
+    const handleAddColumn = async () => {
+        if (!showAddColumn || !newColumnTitle.trim() || !selectedTA) return
+        setSavingColumn(true)
+        try {
+            const res = showAddColumn === 'KUIS'
+                ? await fetch('/api/quizzes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        teaching_assignment_id: selectedTA,
+                        title: newColumnTitle.trim(),
+                        description: '',
+                        duration_minutes: 30, // placeholder — tidak dipakai untuk kuis offline
+                        submission_mode: 'OFFLINE'
+                    })
+                })
+                : await fetch('/api/assignments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        teaching_assignment_id: selectedTA,
+                        title: newColumnTitle.trim(),
+                        description: '',
+                        type: showAddColumn === 'ULANGAN' ? 'ULANGAN' : newColumnType,
+                        due_date: null,
+                        submission_mode: 'OFFLINE'
+                    })
+                })
+            if (!res.ok) {
+                const err = await res.json().catch(() => null)
+                throw new Error(err?.error || 'Gagal membuat kolom')
+            }
+            setShowAddColumn(null)
+            setNewColumnTitle('')
+            setNewColumnType('TUGAS')
+            await fetchTAData()
+        } catch (error: any) {
+            console.error('Error creating column:', error)
+            alert(error?.message || 'Gagal membuat kolom penilaian')
+        } finally {
+            setSavingColumn(false)
+        }
+    }
+
+    // Mode edit kolom offline: isi nilai seluruh siswa langsung di grid
+    const startEditColumn = (assignmentId: string) => {
+        const drafts: Record<string, string> = {}
+        students.forEach(student => {
+            const sub = allSubmissions.find(s => s.student?.id === student.id && s.assignment?.id === assignmentId)
+            drafts[student.id] = sub?.grade?.[0]?.score?.toString() || ''
+        })
+        setDraftScores(drafts)
+        setEditingQuizId(null)
+        setEditingColumnId(assignmentId)
+    }
+
+    const startEditQuizColumn = (quizId: string) => {
+        const drafts: Record<string, string> = {}
+        students.forEach(student => {
+            const qs = quizSubmissions.find(q => q.student_id === student.id && q.quiz.id === quizId)
+            drafts[student.id] = qs?.is_graded ? Math.round((qs.total_score / qs.max_score) * 100).toString() : ''
+        })
+        setDraftScores(drafts)
+        setEditingColumnId(null)
+        setEditingQuizId(quizId)
+    }
+
+    const cancelEditColumn = () => {
+        setEditingColumnId(null)
+        setEditingQuizId(null)
+        setDraftScores({})
+    }
+
+    const saveColumnScores = async () => {
+        if (!editingColumnId) return
+        setSavingScores(true)
+        try {
+            // Hanya kirim nilai yang BERUBAH atau BARU — menyimpan ulang nilai
+            // yang sama akan memicu notifikasi duplikat & menimpa graded_at.
+            const entries = Object.entries(draftScores).filter(([studentId, v]) => {
+                if (v === '') return false
+                const num = parseInt(v)
+                if (isNaN(num)) return false
+                const sub = allSubmissions.find(s => s.student?.id === studentId && s.assignment?.id === editingColumnId)
+                const current = sub?.grade?.[0]?.score
+                return current === undefined || current !== num
+            })
+            const invalid = entries.filter(([, v]) => {
+                const num = parseInt(v)
+                return num < 0 || num > 100
+            })
+            if (invalid.length > 0) {
+                alert(`${invalid.length} nilai di luar rentang 0-100 dilewati.`)
+            }
+            const valid = entries.filter(([, v]) => {
+                const num = parseInt(v)
+                return num >= 0 && num <= 100
+            })
+            if (valid.length === 0) {
+                setEditingColumnId(null)
+                setDraftScores({})
+                return
+            }
+            await Promise.all(valid.map(([studentId, v]) =>
+                fetch('/api/grades', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        assignment_id: editingColumnId,
+                        student_id: studentId,
+                        score: parseInt(v)
+                    })
+                }).then(res => {
+                    if (!res.ok) throw new Error('Gagal menyimpan nilai')
+                })
+            ))
+            setEditingColumnId(null)
+            setDraftScores({})
+            await fetchTAData()
+        } catch (error) {
+            console.error('Error saving scores:', error)
+            alert('Gagal menyimpan sebagian nilai. Periksa kembali.')
+        } finally {
+            setSavingScores(false)
+        }
+    }
+
+    // Simpan kolom kuis offline (endpoint manual terpisah dari jalur kuis online)
+    const saveQuizColumnScores = async () => {
+        if (!editingQuizId) return
+        setSavingScores(true)
+        try {
+            // Hanya kirim nilai yang BERUBAH atau BARU (pola sama seperti kolom tugas)
+            const entries = Object.entries(draftScores).filter(([studentId, v]) => {
+                if (v === '') return false
+                const num = parseInt(v)
+                if (isNaN(num) || num < 0 || num > 100) return false
+                const qs = quizSubmissions.find(q => q.student_id === studentId && q.quiz.id === editingQuizId)
+                const current = qs?.is_graded ? Math.round((qs.total_score / qs.max_score) * 100) : undefined
+                return current === undefined || current !== num
+            })
+            if (entries.length === 0) {
+                cancelEditColumn()
+                return
+            }
+            await Promise.all(entries.map(([studentId, v]) =>
+                fetch('/api/quiz-submissions/manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        quiz_id: editingQuizId,
+                        student_id: studentId,
+                        score: parseInt(v)
+                    })
+                }).then(res => {
+                    if (!res.ok) throw new Error('Gagal menyimpan nilai')
+                })
+            ))
+            cancelEditColumn()
+            await fetchTAData()
+        } catch (error) {
+            console.error('Error saving quiz scores:', error)
+            alert('Gagal menyimpan sebagian nilai. Periksa kembali.')
+        } finally {
+            setSavingScores(false)
+        }
+    }
 
     // Stats
     const totalGraded = allSubmissions.filter(s => s.grade?.length > 0).length + quizSubmissions.filter(q => q.is_graded).length + examSubmissions.length
@@ -544,7 +771,7 @@ export default function NilaiPage() {
                             { id: 'rekap', label: 'Rekap', icon: Paper, color: 'bg-primary' },
                             { id: 'tugas', label: `Tugas (${tugasAssignments.length})`, icon: Edit, color: 'bg-amber-500' },
                             { id: 'kuis', label: `Kuis (${quizzes.length})`, icon: Discovery, color: 'bg-purple-500' },
-                            { id: 'ulangan', label: `Ulangan (${exams.length})`, icon: TimeCircle, color: 'bg-red-500' },
+                            { id: 'ulangan', label: `Ulangan (${exams.length + ulanganAssignments.length})`, icon: TimeCircle, color: 'bg-red-500' },
                             { id: 'uts-uas', label: `UTS/UAS (${officialExams.length})`, icon: Document, color: 'bg-indigo-500' },
                             { id: 'export', label: 'Export', icon: Download, color: 'bg-blue-500' }
                         ].map(tab => (
@@ -569,6 +796,35 @@ export default function NilaiPage() {
                         <>
                             {/* Tab: Rekap */}
                             {activeTab === 'rekap' && (
+                                <div className="space-y-3">
+                                    {/* Toolbar gradebook */}
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <p className="text-xs text-text-secondary">
+                                            Klik nilai untuk melihat judul penilaian • Kolom <span className="font-bold text-amber-600">T</span> = Tugas, <span className="font-bold text-purple-600">K</span> = Kuis, <span className="font-bold text-red-600">U</span> = Ulangan
+                                        </p>
+                                        {editingColumnId || editingQuizId ? (
+                                            <div className="flex gap-2">
+                                                <Button variant="secondary" size="sm" onClick={cancelEditColumn}>
+                                                    Batal
+                                                </Button>
+                                                <Button size="sm" onClick={editingQuizId ? saveQuizColumnScores : saveColumnScores} loading={savingScores}>
+                                                    Simpan Nilai Kolom
+                                                </Button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex gap-2">
+                                                <Button variant="secondary" size="sm" onClick={() => { setNewColumnType('TUGAS'); setShowAddColumn('TUGAS') }} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
+                                                    Tugas
+                                                </Button>
+                                                <Button variant="secondary" size="sm" onClick={() => setShowAddColumn('KUIS')} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
+                                                    Kuis
+                                                </Button>
+                                                <Button variant="secondary" size="sm" onClick={() => setShowAddColumn('ULANGAN')} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
+                                                    Ulangan
+                                                </Button>
+                                            </div>
+                                        )}
+                                    </div>
                                 <Card padding="p-0" className="overflow-hidden">
                                     <div className="overflow-x-auto custom-scrollbar">
                                         <table className="w-full text-sm">
@@ -576,28 +832,78 @@ export default function NilaiPage() {
                                                 <tr>
                                                     <th className="px-6 py-4 text-left text-text-secondary font-bold sticky left-0 z-10 bg-white/95 dark:bg-surface-dark/95 min-w-[200px]">Nama Siswa</th>
                                                     {tugasAssignments.map((a, i) => (
-                                                        <th key={a.id} className="px-4 py-4 text-center text-text-secondary font-bold min-w-[60px]">
-                                                            <span className="px-2 py-1 text-xs rounded-full bg-amber-500/10 text-amber-600 border border-amber-200">T{i + 1}</span>
+                                                        <th key={a.id} title={a.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
+                                                            <div className="flex flex-col items-center gap-1">
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-amber-500/10 text-amber-600 border border-amber-200">T{i + 1}</span>
+                                                                <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{a.title}</span>
+                                                                {a.submission_mode === 'OFFLINE' && (
+                                                                    editingColumnId === a.id ? (
+                                                                        <span className="text-[10px] font-bold text-primary">Mode Edit</span>
+                                                                    ) : (
+                                                                        <button onClick={() => startEditColumn(a.id)} title="Input nilai kolom ini" className="text-primary hover:scale-110 transition-transform">
+                                                                            <Edit set="bold" primaryColor="currentColor" size={14} />
+                                                                        </button>
+                                                                    )
+                                                                )}
+                                                            </div>
                                                         </th>
                                                     ))}
                                                     {quizzes.map((q, i) => (
-                                                        <th key={q.id} className="px-4 py-4 text-center text-text-secondary font-bold min-w-[60px]">
-                                                            <span className="px-2 py-1 text-xs rounded-full bg-purple-500/10 text-purple-600 border border-purple-200">K{i + 1}</span>
+                                                        <th key={q.id} title={q.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
+                                                            <div className="flex flex-col items-center gap-1">
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-purple-500/10 text-purple-600 border border-purple-200">K{i + 1}</span>
+                                                                <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{q.title}</span>
+                                                                {q.submission_mode === 'OFFLINE' && (
+                                                                    editingQuizId === q.id ? (
+                                                                        <span className="text-[10px] font-bold text-primary">Mode Edit</span>
+                                                                    ) : (
+                                                                        <button onClick={() => startEditQuizColumn(q.id)} title="Input nilai kolom ini" className="text-primary hover:scale-110 transition-transform">
+                                                                            <Edit set="bold" primaryColor="currentColor" size={14} />
+                                                                        </button>
+                                                                    )
+                                                                )}
+                                                            </div>
                                                         </th>
                                                     ))}
                                                     {exams.map((e, i) => (
-                                                        <th key={e.id} className="px-4 py-4 text-center text-text-secondary font-bold min-w-[60px]">
-                                                            <span className="px-2 py-1 text-xs rounded-full bg-red-500/10 text-red-600 border border-red-200">U{i + 1}</span>
+                                                        <th key={e.id} title={e.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
+                                                            <div className="flex flex-col items-center gap-1">
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-red-500/10 text-red-600 border border-red-200">U{i + 1}</span>
+                                                                <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{e.title}</span>
+                                                            </div>
+                                                        </th>
+                                                    ))}
+                                                    {ulanganAssignments.map((a, i) => (
+                                                        <th key={a.id} title={a.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
+                                                            <div className="flex flex-col items-center gap-1">
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-red-500/10 text-red-600 border border-red-200">U{exams.length + i + 1}</span>
+                                                                <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{a.title}</span>
+                                                                {a.submission_mode === 'OFFLINE' && (
+                                                                    editingColumnId === a.id ? (
+                                                                        <span className="text-[10px] font-bold text-primary">Mode Edit</span>
+                                                                    ) : (
+                                                                        <button onClick={() => startEditColumn(a.id)} title="Input nilai kolom ini" className="text-primary hover:scale-110 transition-transform">
+                                                                            <Edit set="bold" primaryColor="currentColor" size={14} />
+                                                                        </button>
+                                                                    )
+                                                                )}
+                                                            </div>
                                                         </th>
                                                     ))}
                                                     {utsExams.map((oe, i) => (
-                                                        <th key={oe.id} className="px-4 py-4 text-center text-text-secondary font-bold min-w-[60px]">
-                                                            <span className="px-2 py-1 text-xs rounded-full bg-indigo-500/10 text-indigo-600 border border-indigo-200">UTS{utsExams.length > 1 ? i + 1 : ''}</span>
+                                                        <th key={oe.id} title={oe.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
+                                                            <div className="flex flex-col items-center gap-1">
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-indigo-500/10 text-indigo-600 border border-indigo-200">UTS{utsExams.length > 1 ? i + 1 : ''}</span>
+                                                                <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{oe.title}</span>
+                                                            </div>
                                                         </th>
                                                     ))}
                                                     {uasExams.map((oe, i) => (
-                                                        <th key={oe.id} className="px-4 py-4 text-center text-text-secondary font-bold min-w-[60px]">
-                                                            <span className="px-2 py-1 text-xs rounded-full bg-purple-500/10 text-purple-600 border border-purple-200">UAS{uasExams.length > 1 ? i + 1 : ''}</span>
+                                                        <th key={oe.id} title={oe.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
+                                                            <div className="flex flex-col items-center gap-1">
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-purple-500/10 text-purple-600 border border-purple-200">UAS{uasExams.length > 1 ? i + 1 : ''}</span>
+                                                                <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{oe.title}</span>
+                                                            </div>
                                                         </th>
                                                     ))}
                                                     <th className="px-6 py-4 text-center text-primary font-bold min-w-[80px]">Rata-rata</th>
@@ -617,8 +923,23 @@ export default function NilaiPage() {
                                                                 const score = sub?.grade?.[0]?.score
                                                                 return (
                                                                     <td key={a.id} className="px-4 py-4 text-center">
-                                                                        {score !== undefined ? (
-                                                                            <span className="text-text-main dark:text-white font-bold">{score}</span>
+                                                                        {editingColumnId === a.id ? (
+                                                                            <input
+                                                                                type="number"
+                                                                                min={0}
+                                                                                max={100}
+                                                                                value={draftScores[student.id] ?? ''}
+                                                                                onChange={(e) => setDraftScores({ ...draftScores, [student.id]: e.target.value })}
+                                                                                className="w-16 px-2 py-1.5 text-center border border-primary/40 rounded-lg bg-white dark:bg-surface-dark text-text-main dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                            />
+                                                                        ) : score !== undefined ? (
+                                                                            <button
+                                                                                onClick={() => setCellDetail({ title: a.title, category: categoryLabel(a.type), studentName: student.user.full_name, nis: student.nis, score, date: sub?.grade?.[0]?.graded_at || sub?.submitted_at || null, source: 'ASSIGNMENT', refId: a.id, studentId: student.id })}
+                                                                                className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
+                                                                                title="Klik untuk detail"
+                                                                            >
+                                                                                {score}
+                                                                            </button>
                                                                         ) : sub ? (
                                                                             <span className="text-amber-500 flex justify-center"><TimeCircle set="bold" primaryColor="currentColor" size={16} /></span>
                                                                         ) : (
@@ -631,10 +952,23 @@ export default function NilaiPage() {
                                                                 const qs = quizSubmissions.find(qs => qs.student_id === student.id && qs.quiz.id === q.id)
                                                                 return (
                                                                     <td key={q.id} className="px-4 py-4 text-center">
-                                                                        {qs?.is_graded ? (
-                                                                            <span className="text-text-main dark:text-white font-bold">
+                                                                        {editingQuizId === q.id ? (
+                                                                            <input
+                                                                                type="number"
+                                                                                min={0}
+                                                                                max={100}
+                                                                                value={draftScores[student.id] ?? ''}
+                                                                                onChange={(e) => setDraftScores({ ...draftScores, [student.id]: e.target.value })}
+                                                                                className="w-16 px-2 py-1.5 text-center border border-primary/40 rounded-lg bg-white dark:bg-surface-dark text-text-main dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                            />
+                                                                        ) : qs?.is_graded ? (
+                                                                            <button
+                                                                                onClick={() => setCellDetail({ title: q.title, category: 'Kuis', studentName: student.user.full_name, nis: student.nis, score: Math.round((qs.total_score / qs.max_score) * 100), date: qs.submitted_at || null, source: 'QUIZ', refId: q.id, studentId: student.id })}
+                                                                                className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
+                                                                                title="Klik untuk detail"
+                                                                            >
                                                                                 {Math.round((qs.total_score / qs.max_score) * 100)}
-                                                                            </span>
+                                                                            </button>
                                                                         ) : qs ? (
                                                                             <span className="text-amber-500 flex justify-center"><TimeCircle set="bold" primaryColor="currentColor" size={16} /></span>
                                                                         ) : (
@@ -648,9 +982,41 @@ export default function NilaiPage() {
                                                                 return (
                                                                     <td key={e.id} className="px-4 py-4 text-center">
                                                                         {es ? (
-                                                                            <span className="text-text-main dark:text-white font-bold">
+                                                                            <button
+                                                                                onClick={() => setCellDetail({ title: e.title, category: 'Ulangan', studentName: student.user.full_name, nis: student.nis, score: Math.round((es.total_score / es.max_score) * 100), date: es.submitted_at || null })}
+                                                                                className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
+                                                                                title="Klik untuk detail"
+                                                                            >
                                                                                 {Math.round((es.total_score / es.max_score) * 100)}
-                                                                            </span>
+                                                                            </button>
+                                                                        ) : (
+                                                                            <span className="text-text-secondary/30">-</span>
+                                                                        )}
+                                                                    </td>
+                                                                )
+                                                            })}
+                                                            {ulanganAssignments.map(a => {
+                                                                const sub = allSubmissions.find(s => s.student?.id === student.id && s.assignment?.id === a.id)
+                                                                const score = sub?.grade?.[0]?.score
+                                                                return (
+                                                                    <td key={a.id} className="px-4 py-4 text-center">
+                                                                        {editingColumnId === a.id ? (
+                                                                            <input
+                                                                                type="number"
+                                                                                min={0}
+                                                                                max={100}
+                                                                                value={draftScores[student.id] ?? ''}
+                                                                                onChange={(e) => setDraftScores({ ...draftScores, [student.id]: e.target.value })}
+                                                                                className="w-16 px-2 py-1.5 text-center border border-primary/40 rounded-lg bg-white dark:bg-surface-dark text-text-main dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                            />
+                                                                        ) : score !== undefined ? (
+                                                                            <button
+                                                                                onClick={() => setCellDetail({ title: a.title, category: 'Ulangan', studentName: student.user.full_name, nis: student.nis, score, date: sub?.grade?.[0]?.graded_at || sub?.submitted_at || null, source: 'ASSIGNMENT', refId: a.id, studentId: student.id })}
+                                                                                className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
+                                                                                title="Klik untuk detail"
+                                                                            >
+                                                                                {score}
+                                                                            </button>
                                                                         ) : (
                                                                             <span className="text-text-secondary/30">-</span>
                                                                         )}
@@ -662,9 +1028,13 @@ export default function NilaiPage() {
                                                                 return (
                                                                     <td key={oe.id} className="px-4 py-4 text-center">
                                                                         {os?.is_graded ? (
-                                                                            <span className="text-text-main dark:text-white font-bold">
+                                                                            <button
+                                                                                onClick={() => setCellDetail({ title: oe.title, category: 'UTS', studentName: student.user.full_name, nis: student.nis, score: os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0, date: os.submitted_at || null })}
+                                                                                className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
+                                                                                title="Klik untuk detail"
+                                                                            >
                                                                                 {os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0}
-                                                                            </span>
+                                                                            </button>
                                                                         ) : os ? (
                                                                             <span className="text-amber-500 flex justify-center"><TimeCircle set="bold" primaryColor="currentColor" size={16} /></span>
                                                                         ) : (
@@ -678,9 +1048,13 @@ export default function NilaiPage() {
                                                                 return (
                                                                     <td key={oe.id} className="px-4 py-4 text-center">
                                                                         {os?.is_graded ? (
-                                                                            <span className="text-text-main dark:text-white font-bold">
+                                                                            <button
+                                                                                onClick={() => setCellDetail({ title: oe.title, category: 'UAS', studentName: student.user.full_name, nis: student.nis, score: os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0, date: os.submitted_at || null })}
+                                                                                className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
+                                                                                title="Klik untuk detail"
+                                                                            >
                                                                                 {os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0}
-                                                                            </span>
+                                                                            </button>
                                                                         ) : os ? (
                                                                             <span className="text-amber-500 flex justify-center"><TimeCircle set="bold" primaryColor="currentColor" size={16} /></span>
                                                                         ) : (
@@ -705,11 +1079,17 @@ export default function NilaiPage() {
                                         </table>
                                     </div>
                                 </Card>
+                                </div>
                             )}
 
                             {/* Tab: Tugas - Links to hasil pages */}
                             {activeTab === 'tugas' && (
                                 <div className="space-y-4">
+                                    <div className="flex justify-end">
+                                        <Button variant="secondary" size="sm" onClick={() => { setNewColumnType('TUGAS'); setShowAddColumn('TUGAS') }} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
+                                            Kolom Tugas Offline
+                                        </Button>
+                                    </div>
                                     {tugasAssignments.length === 0 ? (
                                         <EmptyState title="Belum ada tugas" description="Anda belum membuat tugas untuk kelas ini." icon={<div className="text-amber-200"><Edit set="bold" primaryColor="currentColor" size={48} /></div>} />
                                     ) : (
@@ -723,7 +1103,12 @@ export default function NilaiPage() {
                                                             <div className="w-10 h-10 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center">
                                                                 <Edit set="bold" primaryColor="currentColor" size={20} />
                                                             </div>
-                                                            <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">{assignment.type}</span>
+                                                            <div className="flex items-center gap-2">
+                                                                {assignment.submission_mode === 'OFFLINE' && (
+                                                                    <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-teal-500/10 text-teal-600 border border-teal-200 dark:border-teal-500/20">Offline</span>
+                                                                )}
+                                                                <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">{assignment.type}</span>
+                                                            </div>
                                                         </div>
                                                         <h3 className="text-lg font-bold text-text-main dark:text-white mb-1">{assignment.title}</h3>
                                                         <p className="text-sm text-text-secondary mb-4">{subs.length} submission • {graded} dinilai</p>
@@ -743,6 +1128,11 @@ export default function NilaiPage() {
                             {/* Tab: Kuis - Links to hasil pages */}
                             {activeTab === 'kuis' && (
                                 <div className="space-y-4">
+                                    <div className="flex justify-end">
+                                        <Button variant="secondary" size="sm" onClick={() => setShowAddColumn('KUIS')} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
+                                            Kolom Kuis Offline
+                                        </Button>
+                                    </div>
                                     {quizzes.length === 0 ? (
                                         <EmptyState title="Belum ada kuis" description="Anda belum membuat kuis untuk kelas ini." icon={<div className="text-purple-200"><Discovery set="bold" primaryColor="currentColor" size={48} /></div>} />
                                     ) : (
@@ -756,7 +1146,12 @@ export default function NilaiPage() {
                                                             <div className="w-10 h-10 rounded-full bg-purple-500/10 text-purple-600 flex items-center justify-center">
                                                                 <Discovery set="bold" primaryColor="currentColor" size={20} />
                                                             </div>
-                                                            <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">KUIS</span>
+                                                            <div className="flex items-center gap-2">
+                                                                {quiz.submission_mode === 'OFFLINE' && (
+                                                                    <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-teal-500/10 text-teal-600 border border-teal-200 dark:border-teal-500/20">Offline</span>
+                                                                )}
+                                                                <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">KUIS</span>
+                                                            </div>
                                                         </div>
                                                         <h3 className="text-lg font-bold text-text-main dark:text-white mb-1">{quiz.title}</h3>
                                                         <p className="text-sm text-text-secondary mb-4">{subs.length} submission • {graded} dinilai</p>
@@ -776,7 +1171,12 @@ export default function NilaiPage() {
                             {/* Tab: Ulangan - Links to hasil pages */}
                             {activeTab === 'ulangan' && (
                                 <div className="space-y-4">
-                                    {exams.length === 0 ? (
+                                    <div className="flex justify-end">
+                                        <Button variant="secondary" size="sm" onClick={() => setShowAddColumn('ULANGAN')} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
+                                            Kolom Ulangan Offline
+                                        </Button>
+                                    </div>
+                                    {exams.length === 0 && ulanganAssignments.length === 0 ? (
                                         <EmptyState title="Belum ada ulangan" description="Anda belum membuat ulangan untuk kelas ini." icon={<div className="text-red-200"><TimeCircle set="bold" primaryColor="currentColor" size={48} /></div>} />
                                     ) : (
                                         <div className="grid gap-4 md:grid-cols-2">
@@ -795,6 +1195,32 @@ export default function NilaiPage() {
                                                         <Link href={`/dashboard/guru/ulangan/${exam.id}/hasil`} className="w-full block">
                                                             <Button size="sm" variant="outline" className="w-full">
                                                                 Lihat Hasil →
+                                                            </Button>
+                                                        </Link>
+                                                    </Card>
+                                                )
+                                            })}
+                                            {ulanganAssignments.map(assignment => {
+                                                const subs = allSubmissions.filter(s => s.assignment?.id === assignment.id)
+                                                const graded = subs.filter(s => s.grade?.length > 0).length
+                                                return (
+                                                    <Card key={assignment.id} padding="p-5" className="hover:border-red-500/50 transition-colors">
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <div className="w-10 h-10 rounded-full bg-red-500/10 text-red-600 flex items-center justify-center">
+                                                                <TimeCircle set="bold" primaryColor="currentColor" size={20} />
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                {assignment.submission_mode === 'OFFLINE' && (
+                                                                    <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-teal-500/10 text-teal-600 border border-teal-200 dark:border-teal-500/20">Offline</span>
+                                                                )}
+                                                                <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">ULANGAN</span>
+                                                            </div>
+                                                        </div>
+                                                        <h3 className="text-lg font-bold text-text-main dark:text-white mb-1">{assignment.title}</h3>
+                                                        <p className="text-sm text-text-secondary mb-4">{graded} dari {students.length} siswa dinilai</p>
+                                                        <Link href={`/dashboard/guru/tugas/${assignment.id}/hasil`} className="w-full block">
+                                                            <Button size="sm" variant="outline" className="w-full">
+                                                                Lihat & Nilai →
                                                             </Button>
                                                         </Link>
                                                     </Card>
@@ -877,6 +1303,116 @@ export default function NilaiPage() {
             )}
 
             {loading && <div className="text-center text-text-secondary py-8">Memuat...</div>}
+
+            {/* Modal: Tambah Kolom Penilaian Offline */}
+            <Modal
+                open={!!showAddColumn}
+                onClose={() => setShowAddColumn(null)}
+                title={showAddColumn === 'ULANGAN' ? 'Tambah Kolom Ulangan' : showAddColumn === 'KUIS' ? 'Tambah Kolom Kuis' : 'Tambah Kolom Tugas'}
+                subtitle="Kolom penilaian untuk tugas/kuis/ulangan yang dilaksanakan di luar LMS"
+            >
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Penilaian</label>
+                        <input
+                            type="text"
+                            value={newColumnTitle}
+                            onChange={(e) => setNewColumnTitle(e.target.value)}
+                            placeholder={showAddColumn === 'ULANGAN' ? 'cth: Ulangan Harian Bab 3 (kertas)' : showAddColumn === 'KUIS' ? 'cth: Kuis Kosakata (lisan)' : 'cth: Praktik Membaca Puisi'}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            autoFocus
+                        />
+                    </div>
+                    {showAddColumn === 'TUGAS' && (
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jenis</label>
+                            <select
+                                value={newColumnType}
+                                onChange={(e) => setNewColumnType(e.target.value)}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                                <option value="TUGAS">Tugas</option>
+                                <option value="PR">PR</option>
+                                <option value="PROYEK">Proyek</option>
+                                <option value="LATIHAN">Latihan</option>
+                            </select>
+                        </div>
+                    )}
+                    <p className="text-xs text-text-secondary bg-secondary/5 border border-secondary/10 rounded-xl p-3">
+                        Kolom ini langsung muncul di tabel Rekap. Setelah dibuat, klik ikon pensil di header kolom untuk menginput nilai seluruh siswa sekaligus. Nilai tersimpan sebagai riwayat dan otomatis masuk rata-rata, export Excel, dan halaman nilai siswa.
+                    </p>
+                    <div className="flex gap-3 pt-2">
+                        <Button variant="secondary" onClick={() => setShowAddColumn(null)} className="flex-1">
+                            Batal
+                        </Button>
+                        <Button onClick={handleAddColumn} loading={savingColumn} disabled={!newColumnTitle.trim()} className="flex-1">
+                            Buat Kolom
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Modal: Detail Sel Nilai */}
+            <Modal
+                open={!!cellDetail}
+                onClose={() => setCellDetail(null)}
+                title="Detail Nilai"
+            >
+                {cellDetail && (
+                    <div className="space-y-4">
+                        <div>
+                            <p className="text-xs text-text-secondary uppercase tracking-wider font-bold mb-1">Penilaian</p>
+                            <p className="text-lg font-bold text-text-main dark:text-white">{cellDetail.title}</p>
+                            <span className="inline-block mt-1 px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs font-bold">{cellDetail.category}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 border-t border-secondary/10 pt-4">
+                            <div>
+                                <p className="text-xs text-text-secondary uppercase tracking-wider font-bold mb-1">Siswa</p>
+                                <p className="font-bold text-text-main dark:text-white">{cellDetail.studentName}</p>
+                                <p className="text-xs text-text-secondary font-mono">{cellDetail.nis}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-text-secondary uppercase tracking-wider font-bold mb-1">Nilai</p>
+                                <p className="text-2xl font-black text-primary">{cellDetail.score ?? '-'}</p>
+                            </div>
+                        </div>
+                        {cellDetail.date && (
+                            <p className="text-xs text-text-secondary border-t border-secondary/10 pt-3">
+                                Dinilai pada {new Date(cellDetail.date).toLocaleString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                        )}
+
+                        {/* Riwayat perubahan nilai (kolom yang diinput manual guru) */}
+                        {cellDetail.source && (
+                            <div className="border-t border-secondary/10 pt-3">
+                                <p className="text-xs text-text-secondary uppercase tracking-wider font-bold mb-2">Riwayat Perubahan</p>
+                                {loadingHistory ? (
+                                    <p className="text-xs text-text-secondary">Memuat riwayat...</p>
+                                ) : cellHistory.length === 0 ? (
+                                    <p className="text-xs text-text-secondary">Belum ada perubahan tercatat.</p>
+                                ) : (
+                                    <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+                                        {cellHistory.map(h => (
+                                            <div key={h.id} className="flex items-center justify-between text-xs bg-secondary/5 rounded-lg px-3 py-2">
+                                                <span className="font-bold text-text-main dark:text-white">
+                                                    {h.old_score === null ? 'Diberi nilai' : `${h.old_score} →`} {h.new_score}
+                                                </span>
+                                                <span className="text-text-secondary text-right">
+                                                    {h.changed_by_name || 'Guru'} • {new Date(h.changed_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        <Button variant="secondary" onClick={() => setCellDetail(null)} className="w-full">
+                            Tutup
+                        </Button>
+                    </div>
+                )}
+            </Modal>
 
             {/* Export Success Toast */}
             {exportSuccess && (

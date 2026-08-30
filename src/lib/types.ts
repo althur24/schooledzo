@@ -162,9 +162,10 @@ export interface Assignment {
     teaching_assignment_id: string
     title: string
     description: string | null
-    type: 'TUGAS' | 'ULANGAN'
+    type: 'TUGAS' | 'PR' | 'PROYEK' | 'LATIHAN' | 'ULANGAN'
     due_date: string | null
     created_at: string
+    submission_mode?: 'ONLINE' | 'OFFLINE'
     teaching_assignment?: TeachingAssignment
 }
 
@@ -194,6 +195,7 @@ export interface StudentSubmission {
     submitted_at: string
     attachments: SubmissionAttachment[] | null
     is_late: boolean
+    is_offline?: boolean
     assignment?: Assignment
     student?: Student
 }

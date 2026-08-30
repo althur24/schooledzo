@@ -16,6 +16,7 @@ interface Quiz {
     deadline?: string | null
     is_active: boolean
     created_at: string
+    submission_mode?: string
     teaching_assignment: {
         subject: { name: string }
         class: { name: string }
@@ -63,8 +64,9 @@ export default function SiswaKuisPage() {
                 ])
 
                 const quizzesArray = Array.isArray(quizzesData) ? quizzesData : []
+                // Kuis offline dinilai langsung oleh guru — tidak tampil sebagai kuis yang harus dikerjakan
                 const myQuizzes = quizzesArray.filter((q: Quiz) =>
-                    q.is_active && q.teaching_assignment?.class?.name === myStudent.class.name
+                    q.is_active && q.submission_mode !== 'OFFLINE' && q.teaching_assignment?.class?.name === myStudent.class.name
                 )
                 setQuizzes(myQuizzes)
                 setSubmissions(Array.isArray(subsData) ? subsData : [])

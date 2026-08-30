@@ -68,6 +68,9 @@ export async function GET(request: NextRequest) {
                             )
                         `)
                         .in('submission.assignment_id', chunk)
+                        // Nilai offline (placeholder) bukan hasil koreksi submission —
+                        // dikeluarkan agar metrik SLA waktu koreksi & feedback tidak terdistorsi
+                        .eq('submission.is_offline', false)
                 ),
                 error: null
             })

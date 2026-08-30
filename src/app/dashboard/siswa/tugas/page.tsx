@@ -15,6 +15,7 @@ interface Assignment {
     type: string
     due_date: string | null
     created_at: string
+    submission_mode?: string
     teaching_assignment: {
         subject: { name: string }
         class: { name: string }
@@ -151,6 +152,7 @@ export default function SiswaTugasPage() {
                         const isLate = submission?.is_late || false
                         const grade = submission?.grade?.[0]
                         const canEdit = submission && !overdue && !grade
+                        const isOffline = assignment.submission_mode === 'OFFLINE'
 
                         return (
                             <div key={assignment.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-4 md:p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all group cursor-pointer">
@@ -164,6 +166,11 @@ export default function SiswaTugasPage() {
                                                 <span className="px-2.5 py-1 bg-primary/10 text-primary-dark dark:text-primary text-xs font-bold rounded-full">
                                                     {assignment.teaching_assignment?.subject?.name}
                                                 </span>
+                                                {isOffline && (
+                                                    <span className="px-2.5 py-1 bg-teal-100 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400 text-xs font-bold rounded-full">
+                                                        Offline
+                                                    </span>
+                                                )}
                                                 {isLate && (
                                                     <span className="px-2.5 py-1 bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400 text-xs font-bold rounded-full">
                                                         Terlambat
@@ -177,7 +184,7 @@ export default function SiswaTugasPage() {
                                     <p className="text-sm text-text-secondary dark:text-zinc-400 line-clamp-2">{assignment.description || 'Tidak ada deskripsi'}</p>
                                     
                                     {/* Submissions Stats / File info */}
-                                    {submission && (
+                                    {submission && !isOffline && (
                                         <div className="bg-secondary/5 rounded-lg p-3 text-sm flex flex-col gap-2">
                                             {submission.attachments && submission.attachments.length > 0 && (
                                                 <div className="flex items-center gap-2 text-text-main dark:text-white">
@@ -227,6 +234,13 @@ export default function SiswaTugasPage() {
                                         </div>
                                         
                                         <div className="flex items-center justify-between pt-2">
+                                            {isOffline ? (
+                                                <p className="text-xs text-text-secondary dark:text-zinc-400 italic flex items-center gap-1.5">
+                                                    <TickSquare set="bold" primaryColor="currentColor" size={14} />
+                                                    Dikumpulkan langsung ke guru{grade ? '' : ' — nilai muncul setelah dinilai'}
+                                                </p>
+                                            ) : (
+                                                <>
                                             <div>
                                                 {submission ? (
                                                     <span className="px-3 py-1 bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400 rounded-full text-xs font-bold flex items-center gap-1">
@@ -265,6 +279,8 @@ export default function SiswaTugasPage() {
                                                     </Button>
                                                 ) : null}
                                             </div>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
