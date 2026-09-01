@@ -139,15 +139,64 @@ function spawnServer(cwd, port, stdio = 'ignore') {
 }
 
 /**
- * Matikan server dengan aman: SIGTERM ke process group milik sendiri, tunggu
- * port benar-benar bebas (maks timeoutMs), lalu SIGKILL jika perlu.
- * Menggantikan pola `pkill -f 'next start.*3100'` yang bisa membunuh proses lain.
- * Return true kalau port bebas dalam timeout.
+ * Fallback stopServerSafe: SIGKILL ke process group kadang TIDAK mematikan rantai
+ * npm exec → next-server (terbukti empiris: proses tetap hidup memegang port).
+ * Kumpulkan PID yang BENAR-BENAR memegang port baseUrl (state LISTEN, port eksak),
+ * lalu bunuh HANYA yang cwd-nya sama dengan repo ini (proses milik run kita atau
+ * run yatim sebelumnya di repo yang sama). Proses node/next milik orang lain /
+ * project lain di port yang sama DIBIARKAN — sesuai filosofi file ini
+ * (pengganti pkill yang "bisa membunuh proses orang lain").
  */
-async function stopServerSafe(server, baseUrl, timeoutMs = 10000) {
+function killPortListeners(baseUrl) {
+    return new Promise((resolve) => {
+        let port
+        try { port = new URL(baseUrl).port } catch { return resolve() }
+        if (!port) return resolve()
+        require('child_process').exec(`lsof -tiTCP:${port} -sTCP:LISTEN`, (err, stdout) => {
+            const pids = (stdout || '').trim().split('\n').filter(Boolean)
+            if (err || pids.length === 0) return resolve()
+            let done = 0
+            const finish = () => { if (++done === pids.length) setTimeout(resolve, 500) }
+            pids.forEach((pid) => {
+                require('child_process').exec(`lsof -p ${pid} 2>/dev/null | awk '$4 == "cwd" {print $NF}'`, (e2, cout) => {
+                    const cwd = (cout || '').trim().split('\n')[0]
+                    let cmd = ''
+                    try { cmd = require('child_process').execSync(`ps -o command= -p ${pid}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() } catch { finish(); return }
+                    const cmdIsNodeNext = /next|node/i.test(cmd)
+                    if (cwd === process.cwd() && cmdIsNodeNext) {
+                        try { process.kill(Number(pid), 'SIGKILL') } catch { /* mungkin sudah mati */ }
+                    } else {
+                        console.warn(`[stopServerSafe] port ${port} dipegang proses asing (pid ${pid}, cwd ${cwd || '?'}, cmd ${cmd.slice(0, 60)}) — TIDAK dibunuh`)
+                    }
+                    finish()
+                })
+            })
+        })
+    })
+}
+
+/**
+ * Matikan server dengan aman: SIGTERM ke process group milik sendiri, grace
+ * poll maks 2 dtk, lalu ESKALASI SIGKILL (npm exec kadang menelan SIGTERM /
+ * next start lambat mati — tanpa eskalasi ini server lama tetap memegang port,
+ * server baru gagal bind, dan request mengenai proses LAMA: restart palsu yang
+ * membuat test cache misleading). Fallback terakhir killPortListeners (lihat
+ * catatan filosofinya di atas). Setelah itu tunggu port benar-benar bebas
+ * (maks timeoutMs). Return true = bebas.
+ */
+async function stopServerSafe(server, baseUrl, timeoutMs = 15000) {
     if (server && server.pid) {
         try { process.kill(-server.pid, 'SIGTERM') } catch { /* grup mungkin sudah mati */ }
+        // grace poll maks 2 dtk — jangan sleep buta, kalau sudah mati cepat lanjut
+        for (let i = 0; i < 4; i++) {
+            try { await fetch(baseUrl + '/login', { signal: AbortSignal.timeout(500) }); await new Promise(r => setTimeout(r, 500)) } catch { break }
+        }
+        try { process.kill(-server.pid, 'SIGKILL') } catch { /* grup mungkin sudah mati */ }
     }
+    const busy = await (async () => {
+        try { await fetch(baseUrl + '/login', { signal: AbortSignal.timeout(1000) }); return true } catch { return false }
+    })()
+    if (busy) await killPortListeners(baseUrl)
     const t0 = Date.now()
     while (Date.now() - t0 < timeoutMs) {
         try {
@@ -157,9 +206,6 @@ async function stopServerSafe(server, baseUrl, timeoutMs = 10000) {
         } catch {
             return true // koneksi ditolak → port bebas
         }
-    }
-    if (server && server.pid) {
-        try { process.kill(-server.pid, 'SIGKILL') } catch { }
     }
     return false
 }

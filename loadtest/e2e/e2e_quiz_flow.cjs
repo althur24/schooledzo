@@ -263,7 +263,10 @@ async function main() {
     console.log('[11] Guard students & scope all_years untuk SISWA')
     const studsOpen = await api('/api/students', siswaA.token)
     const studsOpenBody = await studsOpen.json().catch(() => null)
-    check('GET /api/students tanpa param → [] untuk SISWA', Array.isArray(studsOpenBody) && studsOpenBody.length === 0, `len=${Array.isArray(studsOpenBody) ? studsOpenBody.length : 'n/a'}`)
+    // [e30eea7] SISWA tanpa user_id → auto-scope DATA DIRI (dulu: [], sebelumnya pernah
+    // bocor roster sekolah). Yang penting: HANYA dirinya, bukan siswa lain.
+    const selfOnly = Array.isArray(studsOpenBody) && studsOpenBody.length === 1 && studsOpenBody[0].user_id === siswaA.user.id
+    check('GET /api/students tanpa param → hanya data diri (auto-scope)', selfOnly, `len=${Array.isArray(studsOpenBody) ? studsOpenBody.length : 'n/a'}`)
 
     const studsSelf = await api(`/api/students?user_id=${siswaA.user.id}`, siswaA.token)
     const studsSelfBody = await studsSelf.json().catch(() => null)

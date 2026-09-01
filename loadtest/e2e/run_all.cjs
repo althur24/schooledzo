@@ -69,8 +69,11 @@ async function startServer() {
     await require('./helpers.cjs').assertServerDb(BASE, !!(process.env.ENV_FILE || '').includes('staging'))
 }
 async function stopServer() {
-    // hanya membunuh process group milik sendiri — bukan pkill yang bisa kena proses lain
-    await stopServerSafe(server, BASE)
+    // hanya membunuh process group milik sendiri — bukan pkill yang kena proses lain.
+    // Port wajib bebas: restart palsu (server lama masih hidup) membuat skenario C4b
+    // mengetes proses LAMA dengan cache lama — hasil misleading, lebih baik gagal keras.
+    const freed = await stopServerSafe(server, BASE)
+    if (!freed) throw new Error('gagal mengehentikan server (port 3100 masih sibuk) — restart dibatalkan agar hasil test tidak misleading')
     server = null
 }
 // tunggu sampai kondisi DB terpenuhi (job butuh ~10-20s setelah boot)
@@ -90,11 +93,18 @@ async function waitFor(fn, timeoutMs = 90000, intervalMs = 3000) {
 // harus realistis (8 mnt); tanpa flag, SKIP cepat via jobNotDueUntil.
 async function waitForJob(fn, intervalMs = 5000) {
     if (jobNotDueUntil) return null
+    // Mode cepat regression: skip skenario job (B1/B2/B3/B4/B1b) tanpa menunggu
+    // timeout 90 detik per skenario — berguna saat menjalankan regresi yang tidak
+    // menyentuh scheduler (mis. uji RLS), memotong durasi dari ±8 mnt jadi ±2 mnt.
+    if (process.env.SKIP_JOB_SCENARIOS === '1') return null
     return waitFor(fn, RESET_SCHEDULER ? 480000 : 90000, intervalMs)
 }
-const jobSkipReason = () => jobNotDueUntil
-    ? `job notification tidak akan due sebelum ${new Date(jobNotDueUntil).toISOString()} (lock 9 mnt aktif) — jalankan dengan E2E_RESET_SCHEDULER=1 untuk test penuh`
-    : 'job tidak jalan dalam timeout — scheduler tidak di-reset'
+const jobSkipReason = () => {
+    if (process.env.SKIP_JOB_SCENARIOS === '1') return 'mode cepat regression (SKIP_JOB_SCENARIOS=1) — skenario job dilewati tanpa menunggu'
+    return jobNotDueUntil
+        ? `job notification tidak akan due sebelum ${new Date(jobNotDueUntil).toISOString()} (lock 9 mnt aktif) — jalankan dengan E2E_RESET_SCHEDULER=1 untuk test penuh`
+        : 'job tidak jalan dalam timeout — scheduler tidak di-reset'
+}
 
 async function http(path, opts = {}, token) {
     const t0 = Date.now()
