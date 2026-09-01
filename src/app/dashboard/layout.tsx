@@ -15,6 +15,42 @@ import AuthRetryScreen from '@/components/AuthRetryScreen'
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar_collapsed'
 
+// Nama sekolah menyusut sampai muat (auto-fit via pengukuran scrollWidth),
+// floor 11px — di bawah itu fallback ellipsis (overflow-hidden).
+function AutoFitSchoolName({ name }: { name: string }) {
+    const ref = useRef<HTMLSpanElement>(null)
+
+    useEffect(() => {
+        const el = ref.current
+        if (!el) return
+
+        const MAX = 20
+        const MIN = 11
+
+        const fit = () => {
+            let size = MAX
+            el.style.fontSize = `${MAX}px`
+            while (size > MIN && el.scrollWidth > el.clientWidth) {
+                size -= 0.5
+                el.style.fontSize = `${size}px`
+            }
+        }
+
+        fit()
+        const parent = el.parentElement
+        if (!parent || typeof ResizeObserver === 'undefined') return
+        const observer = new ResizeObserver(fit)
+        observer.observe(parent)
+        return () => observer.disconnect()
+    }, [name])
+
+    return (
+        <span ref={ref} className="text-xl font-bold text-white leading-none whitespace-nowrap overflow-hidden">
+            {name}
+        </span>
+    )
+}
+
 interface DashboardLayoutProps {
     children: ReactNode
 }
@@ -217,25 +253,25 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex items-center justify-between h-20">
                         {/* Hamburger (mobile) + Logo */}
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
                             <button
                                 onClick={() => setMobileMenuOpen(true)}
-                                className="lg:hidden p-2.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                                className="lg:hidden shrink-0 p-2.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
                                 aria-label="Buka menu"
                             >
                                 <Menu className="w-6 h-6" />
                             </button>
-                            <Link href="/dashboard" className="flex items-center gap-3 group">
-                                <img src="/logoedzo.png" alt="HIPPOCAMPUS Logo" className="w-10 h-10 rounded-xl shadow-lg shadow-emerald-500/20 group-hover:scale-110 transition-transform object-cover" />
-                                <div className="flex flex-col">
-                                    <span className="text-xl font-bold text-white leading-none">{user?.school_name || 'HIPPOCAMPUS'}</span>
-                                    <span className="text-xs text-slate-400 font-medium tracking-wide">Learning Management System</span>
+                            <Link href="/dashboard" className="flex items-center gap-2 sm:gap-3 group min-w-0">
+                                <img src="/logoedzo.png" alt="HIPPOCAMPUS Logo" className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-xl shadow-lg shadow-emerald-500/20 group-hover:scale-110 transition-transform object-cover" />
+                                <div className="flex flex-col min-w-0">
+                                    <AutoFitSchoolName name={user?.school_name || 'HIPPOCAMPUS'} />
+                                    <span className="hidden sm:block text-xs text-slate-400 font-medium tracking-wide truncate">Learning Management System</span>
                                 </div>
                             </Link>
                         </div>
 
                         {/* User info */}
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
                             <NotificationBell />
                             <div className="hidden sm:flex flex-col items-end">
                                 <span className="text-[10px] text-slate-400 font-medium tracking-wide">Login sebagai</span>
@@ -245,7 +281,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                                 </p>
                             </div>
                             <div className="relative group cursor-pointer">
-                                <div className="w-11 h-11 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-white font-bold text-lg shadow-lg group-hover:scale-105 transition-all">
+                                <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-white font-bold text-base sm:text-lg shadow-lg group-hover:scale-105 transition-all">
                                     {user?.full_name?.[0] || user?.username?.[0] || '?'}
                                 </div>
                                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-slate-900 rounded-full"></div>
