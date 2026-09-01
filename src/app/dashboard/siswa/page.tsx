@@ -69,7 +69,8 @@ export default function SiswaDashboard() {
         const fetchData = async () => {
             try {
                 // Fetch student data first to get class_id
-                const studentsRes = await fetch('/api/students')
+                // user_id WAJIB: tanpa ini guard SISWA di /api/students mengembalikan []
+                const studentsRes = await fetch(`/api/students?user_id=${user?.id}`)
                 const students = await studentsRes.json()
                 const myStudent = students.find((s: { user: { id: string } }) => s.user.id === user?.id)
                 setStudent(myStudent || null)
@@ -283,7 +284,8 @@ export default function SiswaDashboard() {
 
         const checkIncomplete = async () => {
             try {
-                const studentsRes = await fetch('/api/students')
+                // user_id WAJIB: tanpa ini guard SISWA di /api/students mengembalikan []
+                const studentsRes = await fetch(`/api/students?user_id=${user.id}`)
                 const students = await studentsRes.json()
                 const myStudent = students.find((s: any) => s.user.id === user.id)
 

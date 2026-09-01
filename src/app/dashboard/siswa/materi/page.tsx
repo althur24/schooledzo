@@ -90,7 +90,9 @@ export default function SiswaMateriPage() {
                         }
                     }))
                 } else {
-                    const studentsRes = await fetch('/api/students')
+                    // user_id WAJIB: tanpa ini guard SISWA di /api/students
+                    // mengembalikan [] sehingga materi tidak pernah tampil
+                    const studentsRes = await fetch(`/api/students?user_id=${user?.id}`)
                     if (!studentsRes.ok) throw new Error('Network error')
                     const students = await studentsRes.json()
                     const myStudent = students.find((s: { user: { id: string } }) => s.user.id === user?.id)
