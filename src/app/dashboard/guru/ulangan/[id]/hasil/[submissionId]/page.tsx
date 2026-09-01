@@ -134,13 +134,18 @@ export default function ExamGradingPage() {
                     is_graded: true
                 })
             })
-            if (!saveRes.ok) throw new Error('Failed to save grading')
+            // Echo pesan error server (mis. kegagalan upsert nilai) supaya guru tahu
+            // penyebabnya, bukan alert generik yang menyembunyikan masalah nyata.
+            if (!saveRes.ok) {
+                const errBody = await saveRes.json().catch(() => null)
+                throw new Error(errBody?.error || `Failed to save grading (HTTP ${saveRes.status})`)
+            }
 
             alert('Penilaian berhasil disimpan!')
             router.push(`/dashboard/guru/ulangan/${examId}?tab=hasil`)
         } catch (error) {
             console.error('Error saving:', error)
-            alert('Gagal menyimpan penilaian')
+            alert(`Gagal menyimpan penilaian: ${error instanceof Error ? error.message : 'kesalahan tidak diketahui'}`)
         } finally {
             setSaving(false)
         }

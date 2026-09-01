@@ -175,9 +175,16 @@ export async function PUT(
                 feedback: ans.feedback || null
             }))
 
-            await supabase
+            // Jangan telan error upsert diam-diam: kegagalan di sini membuat nilai
+            // essay guru hilang tanpa kabar (bug kolom feedback yang lama tak terdeteksi
+            // justru karena error ini di-skip). Gagal keras supaya ketahuan.
+            const { error: upsertError } = await supabase
                 .from('exam_answers')
                 .upsert(updates, { onConflict: 'submission_id,question_id' })
+            if (upsertError) {
+                console.error('Error upserting exam_answers (grading):', upsertError)
+                return NextResponse.json({ error: 'Gagal menyimpan nilai: ' + upsertError.message }, { status: 500 })
+            }
         }
 
         // Recalculate total score server-side (prevent client manipulation)
