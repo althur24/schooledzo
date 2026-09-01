@@ -9,6 +9,7 @@ import { TickSquare, TimeCircle, Danger, Calendar } from 'react-iconly'
 
 interface ExamResult {
     id: string
+    is_submitted?: boolean
     total_score: number | null
     max_score: number | null
     results_hidden?: boolean
@@ -56,7 +57,13 @@ export default function ExamResultPage() {
             const data = await res.json()
 
             if (Array.isArray(data) && data.length > 0) {
-                setResult(data[0])
+                const sub = data[0]
+                // Attempt yang belum terkumpul (mis. kadaluarsa tapi belum
+                // ditutup sweeper) tidak boleh dirender sebagai "Ulangan
+                // Selesai" — submitted_at null → "Invalid Date", skor null
+                if (sub.is_submitted && sub.submitted_at) {
+                    setResult(sub)
+                }
             }
         } catch (error) {
             console.error('Error:', error)

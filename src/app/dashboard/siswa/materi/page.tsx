@@ -24,7 +24,7 @@ interface Material {
     created_at: string
     teaching_assignment: {
         subject: { name: string }
-        class: { name: string }
+        class: { id?: string; name: string }
     }
 }
 
@@ -105,8 +105,10 @@ export default function SiswaMateriPage() {
                     const materialsRes = await fetch('/api/materials')
                     const materialsData = await materialsRes.json()
 
+                    // Filter by class_id (bukan nama): nama kelas duplikat
+                    // lintas tahun ajaran membuat pencocokan nama rapuh
                     classMaterials = materialsData.filter((m: Material) =>
-                        m.teaching_assignment?.class?.name === myStudent.class.name
+                        m.teaching_assignment?.class?.id === myStudent.class_id
                     )
                 }
 

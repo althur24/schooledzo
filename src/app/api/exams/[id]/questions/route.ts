@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound, resolveExamSchoolId } from '@/lib/tenantGuard'
 import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
@@ -33,6 +34,33 @@ export async function GET(
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
+
+        // Tenant guard: exam harus milik sekolah caller (IDOR lintas sekolah —
+        // paritas dengan /api/quizzes/[id]/questions). Cek sebelum soal dikirim.
+        if (tenantMismatch(await resolveExamSchoolId(id), schoolId)) {
+            return notFound()
+        }
+
+        // SISWA di luar kelas target tidak boleh membaca soal (integritas
+        // ulangan — sebelumnya siswa sekelas lain bisa membaca soal lebih awal)
+        if (user.role === 'SISWA') {
+            const { data: examTa } = await supabase
+                .from('exams')
+                .select('teaching_assignment:teaching_assignments(class_id)')
+                .eq('id', id)
+                .single()
+            const taClassId = (examTa?.teaching_assignment as any)?.class_id
+
+            const { data: student } = await supabase
+                .from('students')
+                .select('id, class_id')
+                .eq('user_id', user.id)
+                .single()
+
+            if (!student || !taClassId || student.class_id !== taClassId) {
+                return notFound()
+            }
+        }
 
         const { data, error } = await supabase
             .from('exam_questions')

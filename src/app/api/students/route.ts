@@ -22,9 +22,15 @@ export async function GET(request: NextRequest) {
 
         // SISWA hanya boleh membaca data dirinya sendiri — tanpa guard ini
         // endpoint membocorkan roster seluruh sekolah (nama, NIS, username)
-        // ke browser siswa mana pun.
-        if (user.role === 'SISWA' && user_id !== user.id) {
-            return NextResponse.json([])
+        // ke browser siswa mana pun. Auto-scope: user_id di-force ke diri
+        // sendiri agar SEMUA cabang di bawah (termasuk enrollment_year_id)
+        // tetap terfilter — cabang enrollment dulu lolos dari guard lama.
+        let effectiveUserId: string | null = user_id
+        if (user.role === 'SISWA') {
+            if (user_id && user_id !== user.id) {
+                return NextResponse.json([])
+            }
+            effectiveUserId = user.id
         }
 
         // If enrollment_year_id is provided, fetch students with their enrollment in that specific year
@@ -72,6 +78,12 @@ export async function GET(request: NextRequest) {
             if (class_id) enrollQuery = enrollQuery.eq('class_id', class_id)
             // Optional: filter by enrollment status
             if (status) enrollQuery = enrollQuery.eq('status', status)
+            // SISWA auto-scope: tanpa ini ?user_id=<sendiri>&enrollment_year_id=...
+            // membocorkan roster seluruh sekolah (NIS, nama, username) —
+            // guard di atas tidak menjangkau cabang ini sebelumnya.
+            if (user.role === 'SISWA') {
+                enrollQuery = enrollQuery.eq('student.user_id', user.id)
+            }
 
             const { data: enrollments, error: enrollError } = await enrollQuery
 
@@ -117,7 +129,7 @@ export async function GET(request: NextRequest) {
             if (angkatan) query = query.eq('angkatan', angkatan)
             if (school_level) query = query.eq('school_level', school_level)
             if (status) query = query.eq('status', status)
-            if (user_id) query = query.eq('user_id', user_id)
+            if (effectiveUserId) query = query.eq('user_id', effectiveUserId)
 
             const { data, error } = await query
 

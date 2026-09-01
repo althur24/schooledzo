@@ -19,7 +19,7 @@ interface Quiz {
     submission_mode?: string
     teaching_assignment: {
         subject: { name: string }
-        class: { name: string }
+        class: { id?: string; name: string }
     }
     questions: { count: number }[]
 }
@@ -64,9 +64,11 @@ export default function SiswaKuisPage() {
                 ])
 
                 const quizzesArray = Array.isArray(quizzesData) ? quizzesData : []
-                // Kuis offline dinilai langsung oleh guru — tidak tampil sebagai kuis yang harus dikerjakan
+                // Kuis offline dinilai langsung oleh guru — tidak tampil sebagai kuis yang harus dikerjakan.
+                // Filter by class_id (bukan nama): nama kelas duplikat lintas
+                // tahun ajaran membuat pencocokan nama rapuh
                 const myQuizzes = quizzesArray.filter((q: Quiz) =>
-                    q.is_active && q.submission_mode !== 'OFFLINE' && q.teaching_assignment?.class?.name === myStudent.class.name
+                    q.is_active && q.submission_mode !== 'OFFLINE' && q.teaching_assignment?.class?.id === myStudent.class_id
                 )
                 setQuizzes(myQuizzes)
                 setSubmissions(Array.isArray(subsData) ? subsData : [])

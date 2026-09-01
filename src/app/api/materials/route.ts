@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findTeachingAssignmentsOutsideSchool } from '@/lib/tenantGuard'
 import { archivedYearResponse } from '@/lib/academicYear'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // M2: Service Role Key required because app uses custom auth (not Supabase Auth),
 // so RLS policies depending on auth.uid() won't work. Role checks enforce authorization.
@@ -42,11 +43,14 @@ export async function GET(request: NextRequest) {
           academic_year_id,
           teacher:teachers(id, user:users(full_name)),
           subject:subjects(id, name),
-          class:classes(name),
+          class:classes(id, name),
           academic_year:academic_years(id, name, is_active)
         )
       `)
             .order('created_at', { ascending: false })
+            // Tiebreaker stabil untuk paginasi fetchAllRows (created_at identik
+            // untuk materi multi-kelas yang di-insert sekaligus)
+            .order('id', { ascending: false })
 
         if (teachingAssignmentId) {
             // Tenant guard: TA harus milik sekolah caller (param client dipercaya)
@@ -67,12 +71,18 @@ export async function GET(request: NextRequest) {
         } else if (allYears !== 'true') {
             // Filter by active year — via inner join (NOT .in(list): hundreds of TA ids
             // overflow the 16KB header limit at larger schools and break this endpoint)
-            const { data: activeYear } = await supabase
+            // Tahan kasus 2 tahun aktif: .single() error diam-diam → materi kosong.
+            const { data: activeYears } = await supabase
                 .from('academic_years')
                 .select('id')
                 .eq('is_active', true)
                 .eq('school_id', schoolId)
-                .single()
+                .order('created_at', { ascending: false })
+                .limit(2)
+            if ((activeYears || []).length > 1) {
+                console.warn(`[materials] Sekolah ${schoolId} punya ${activeYears!.length} tahun aktif — pakai yang terbaru`)
+            }
+            const activeYear = activeYears?.[0] || null
 
             if (activeYear) {
                 query = query.eq('teaching_assignment.academic_year_id', activeYear.id)
@@ -86,9 +96,28 @@ export async function GET(request: NextRequest) {
             query = query.eq('teaching_assignment.teacher_id', teacherId)
         }
 
-        const { data, error } = await query
+        // SISWA hanya melihat materi kelasnya sendiri (paritas dengan
+        // /api/assignments & /api/quizzes — sebelumnya materi semua kelas
+        // sekolah ikut terkirim ke browser siswa)
+        if (user.role === 'SISWA') {
+            const { data: student } = await supabase
+                .from('students')
+                .select('class_id')
+                .eq('user_id', user.id)
+                .single()
 
-        if (error) throw error
+            if (student?.class_id) {
+                query = query.eq('teaching_assignment.class_id', student.class_id)
+            } else {
+                // Siswa tanpa kelas -> kosong, jangan bocorkan kelas lain
+                return NextResponse.json([])
+            }
+        }
+
+        // fetchAllRows: materi satu sekolah setahun bisa >1000 baris
+        // (satu upload multi-kelas = banyak baris) — query biasa terpotong
+        // diam-diam di 1000 baris.
+        const data = await fetchAllRows(query)
 
         return NextResponse.json(data)
     } catch (error: any) {

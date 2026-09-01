@@ -18,7 +18,7 @@ interface Assignment {
     submission_mode?: string
     teaching_assignment: {
         subject: { name: string }
-        class: { name: string }
+        class: { id?: string; name: string }
     }
 }
 
@@ -40,6 +40,7 @@ export default function SiswaTugasPage() {
     const [loading, setLoading] = useState(true)
     const [submitting, setSubmitting] = useState<{ assignmentId: string; answer: string; type: 'text' | 'link'; files: SubmissionAttachment[] } | null>(null)
     const [saving, setSaving] = useState(false)
+    const [submitError, setSubmitError] = useState<string | null>(null)
 
     useEffect(() => {
         const fetchData = async () => {
@@ -66,8 +67,10 @@ export default function SiswaTugasPage() {
                 ])
 
                 const assignmentsArray = Array.isArray(assignmentsData) ? assignmentsData : []
+                // Filter by class_id (bukan nama): nama kelas duplikat
+                // lintas tahun ajaran membuat pencocokan nama rapuh
                 const myAssignments = assignmentsArray.filter((a: Assignment) =>
-                    a.teaching_assignment?.class?.name === myStudent.class.name
+                    a.teaching_assignment?.class?.id === myStudent.class_id
                 )
                 setAssignments(myAssignments)
                 setSubmissions(Array.isArray(submissionsData) ? submissionsData : [])
@@ -104,8 +107,9 @@ export default function SiswaTugasPage() {
     const handleSubmit = async () => {
         if (!submitting) return
         setSaving(true)
+        setSubmitError(null)
         try {
-            await fetch('/api/submissions', {
+            const res = await fetch('/api/submissions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -118,9 +122,20 @@ export default function SiswaTugasPage() {
                 })
             })
 
-            const res = await fetch(`/api/submissions?student_id=${studentId}`)
-            setSubmissions(await res.json())
+            // Tanpa cek ini POST yang gagal (500/dll) tetap menutup modal —
+            // siswa mengira tugasnya terkirim padahal tidak
+            if (!res.ok) {
+                const data = await res.json().catch(() => null)
+                setSubmitError(data?.error || 'Gagal mengumpulkan tugas. Coba lagi.')
+                return
+            }
+
+            const subsRes = await fetch(`/api/submissions?student_id=${studentId}`)
+            const subsData = await subsRes.json()
+            setSubmissions(Array.isArray(subsData) ? subsData : [])
             setSubmitting(null)
+        } catch {
+            setSubmitError('Gagal terhubung ke server. Periksa koneksi dan coba lagi.')
         } finally {
             setSaving(false)
         }
@@ -349,6 +364,10 @@ export default function SiswaTugasPage() {
                                             *Pastikan privasi video/link sudah diatur ke Publik atau "Anyone with the link".
                                         </p>
                                     </div>
+                                )}
+
+                                {submitError && (
+                                    <p className="text-sm text-red-500 dark:text-red-400">{submitError}</p>
                                 )}
 
                                 <div className="flex gap-3 pt-2">

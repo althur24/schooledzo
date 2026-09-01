@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { tenantMismatch, notFound, resolveExamSchoolId } from '@/lib/tenantGuard'
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncExamBatch } from '@/lib/examBatch'
@@ -32,6 +33,12 @@ export async function GET(
             .single()
 
         if (error) throw error
+
+        // Tenant guard: ulangan harus milik sekolah caller (IDOR lintas
+        // sekolah — paritas dengan /api/quizzes/[id] yang sudah punya guard)
+        if (tenantMismatch(await resolveExamSchoolId(id), schoolId)) {
+            return notFound()
+        }
 
         // Sibling batch (kelas paralel) — sumber definitif untuk checkbox
         // "Terapkan jadwal juga ke kelas paralel" (sessionStorage bisa hilang).

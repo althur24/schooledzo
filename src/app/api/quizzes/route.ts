@@ -41,12 +41,19 @@ export async function GET(request: NextRequest) {
             if (allYears !== 'true') {
                 // Filter by active year — via inner join (NOT .in(list): hundreds of TA ids
                 // overflow the 16KB header limit at larger schools and break this endpoint)
-                const { data: activeYear } = await supabase
+                // Tahan kasus 2 tahun aktif: .single() error diam-diam →
+                // activeYear null → seluruh daftar kuis kosong tanpa sebab.
+                const { data: activeYears } = await supabase
                     .from('academic_years')
                     .select('id')
                     .eq('is_active', true)
                     .eq('school_id', schoolId)
-                    .single()
+                    .order('created_at', { ascending: false })
+                    .limit(2)
+                if ((activeYears || []).length > 1) {
+                    console.warn(`[quizzes] Sekolah ${schoolId} punya ${activeYears!.length} tahun aktif — pakai yang terbaru`)
+                }
+                const activeYear = activeYears?.[0] || null
 
                 if (activeYear) {
                     query = query.eq('teaching_assignment.academic_year_id', activeYear.id)

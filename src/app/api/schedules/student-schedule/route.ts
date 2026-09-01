@@ -28,13 +28,20 @@ export async function GET(request: NextRequest) {
             return NextResponse.json([])
         }
 
-        // Get active academic year (scoped by school)
+        // Get active academic year (scoped by school).
+        // Tahan kasus 2 tahun aktif: .single() error diam-diam → jadwal kosong.
         let yearQuery = supabase
             .from('academic_years')
             .select('id')
             .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(2)
         if (schoolId) yearQuery = yearQuery.eq('school_id', schoolId)
-        const { data: activeYear } = await yearQuery.single()
+        const { data: activeYears } = await yearQuery
+        if ((activeYears || []).length > 1) {
+            console.warn(`[student-schedule] Sekolah ${schoolId} punya ${activeYears!.length} tahun aktif — pakai yang terbaru`)
+        }
+        const activeYear = activeYears?.[0] || null
 
         if (!activeYear) {
             return NextResponse.json([])

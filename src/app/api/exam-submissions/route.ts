@@ -140,12 +140,19 @@ export async function GET(request: NextRequest) {
 
         // Filter by active year when no specific exam is requested
         if (!examId && allYears !== 'true') {
-            const { data: activeYear } = await supabase
+            // Tahan kasus 2 tahun aktif: .single() error diam-diam →
+            // activeYear null → seluruh daftar submission kosong tanpa sebab.
+            const { data: activeYears } = await supabase
                 .from('academic_years')
                 .select('id')
                 .eq('is_active', true)
                 .eq('school_id', schoolId)
-                .single()
+                .order('created_at', { ascending: false })
+                .limit(2)
+            if ((activeYears || []).length > 1) {
+                console.warn(`[exam-submissions] Sekolah ${schoolId} punya ${activeYears!.length} tahun aktif — pakai yang terbaru`)
+            }
+            const activeYear = activeYears?.[0] || null
 
             if (activeYear) {
                 // Inner join filter replaces the old two-hop .in(list): hundreds of TA ids
