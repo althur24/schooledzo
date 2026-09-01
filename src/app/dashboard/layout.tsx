@@ -1,6 +1,6 @@
 'use client'
 
-import { ReactNode, useEffect, useRef, useState } from 'react'
+import { ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import Link from 'next/link'
@@ -14,6 +14,24 @@ import Sidebar from '@/components/Sidebar'
 import AuthRetryScreen from '@/components/AuthRetryScreen'
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar_collapsed'
+
+// Store eksternal untuk state sidebar yang di-persist ke localStorage.
+// Dipakai lewat useSyncExternalStore: server snapshot selalu false (bebas
+// hydration mismatch), nilai localStorage terbaca setelah hydration.
+const sidebarCollapsedStore = {
+    listeners: new Set<() => void>(),
+    get(): boolean {
+        try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true' } catch { return false }
+    },
+    set(next: boolean) {
+        try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)) } catch { /* private browsing */ }
+        for (const listener of sidebarCollapsedStore.listeners) listener()
+    },
+    subscribe(listener: () => void) {
+        sidebarCollapsedStore.listeners.add(listener)
+        return () => { sidebarCollapsedStore.listeners.delete(listener) }
+    },
+}
 
 // Nama sekolah menyusut sampai muat (auto-fit via pengukuran scrollWidth),
 // floor 11px — di bawah itu fallback ellipsis (overflow-hidden).
@@ -62,27 +80,24 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     const isIntentionalLogout = useRef(false)
 
     // Sidebar: desktop collapse (persisted) + mobile drawer
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+    const sidebarCollapsed = useSyncExternalStore(
+        sidebarCollapsedStore.subscribe,
+        sidebarCollapsedStore.get,
+        () => false,
+    )
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
-    useEffect(() => {
-        try {
-            setSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true')
-        } catch { /* private browsing */ }
-    }, [])
-
     const toggleSidebarCollapsed = () => {
-        setSidebarCollapsed(prev => {
-            const next = !prev
-            try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)) } catch { /* private browsing */ }
-            return next
-        })
+        sidebarCollapsedStore.set(!sidebarCollapsed)
     }
 
-    // Close mobile drawer on navigation
-    useEffect(() => {
+    // Tutup drawer mobile saat navigasi (termasuk browser back) —
+    // penyesuaian state saat render, bukan setState dalam effect.
+    const [prevPathname, setPrevPathname] = useState(pathname)
+    if (prevPathname !== pathname) {
+        setPrevPathname(pathname)
         setMobileMenuOpen(false)
-    }, [pathname])
+    }
 
     const handleLogout = async () => {
         isIntentionalLogout.current = true
