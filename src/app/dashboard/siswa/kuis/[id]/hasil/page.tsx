@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
 import PassageBlock from '@/components/PassageBlock'
+import { gradeAnswer } from '@/lib/questionTypeUtils'
 import { Star, TickSquare, CloseSquare, Paper } from 'react-iconly'
 
 interface QuizResult {
@@ -152,8 +153,13 @@ export default function HasilKuisPage() {
     const renderQuestion = (q: QuizQuestion, idx: number) => {
         const userAnswer = getAnswerForQuestion(q.id)
         const isAutoGraded = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(q.question_type)
+        // Pakai gradeAnswer (fungsi grading yang sama dengan server) — perbandingan
+        // string mentah salah untuk MULTIPLE_ANSWER (urutan/format JSON beda) dan
+        // TRUE_FALSE (beda kapitalisasi). Fallback ke skor saat jawaban tak tersedia.
         const isCorrect = isAutoGraded
-            ? userAnswer?.answer === q.correct_answer || (userAnswer?.score === q.points)
+            ? (userAnswer?.answer != null && q.correct_answer != null
+                ? gradeAnswer(q.question_type, userAnswer.answer, q.correct_answer, q.options, q.points).isCorrect
+                : userAnswer?.score === q.points)
             : (userAnswer?.score === q.points)
 
         return (

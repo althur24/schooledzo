@@ -85,6 +85,7 @@ type TabType = 'kuis' | 'tugas' | 'ulangan' | 'utsUas'
 export default function SiswaNilaiPage() {
     const { user } = useAuth()
     const [loading, setLoading] = useState(true)
+    const [loadError, setLoadError] = useState(false)
     const [groupedGrades, setGroupedGrades] = useState<SubjectGrades[]>([])
 
     // UI State
@@ -97,7 +98,9 @@ export default function SiswaNilaiPage() {
                 // Get student record
                 // user_id WAJIB: tanpa ini guard SISWA di /api/students mengembalikan []
                 const studentsRes = await fetch(`/api/students?user_id=${user?.id}`)
+                if (!studentsRes.ok) throw new Error('Gagal memuat data siswa')
                 const students = await studentsRes.json()
+                if (!Array.isArray(students)) throw new Error('Data siswa tidak valid')
                 const myStudent = students.find((s: { user: { id: string } }) => s.user.id === user?.id)
 
                 if (!myStudent) {
@@ -131,22 +134,28 @@ export default function SiswaNilaiPage() {
                 }
 
                 // Process Quiz Submissions
-                quizSubmissions.forEach((qs) => {
-                    const subjectName = qs.quiz?.teaching_assignment?.subject?.name || 'Lainnya'
-                    getOrInitSubject(subjectName).kuis.push(qs)
-                })
+                // Guard array: body error ({error:...}) membuat .forEach melempar
+                // → tertangkap catch → halaman "kosong" menyesatkan
+                if (Array.isArray(quizSubmissions)) {
+                    quizSubmissions.forEach((qs) => {
+                        const subjectName = qs.quiz?.teaching_assignment?.subject?.name || 'Lainnya'
+                        getOrInitSubject(subjectName).kuis.push(qs)
+                    })
+                }
 
                 // Process Assignment Submissions
-                submissions.forEach((sub) => {
-                    const subjectName = sub.assignment?.teaching_assignment?.subject?.name || 'Lainnya'
-                    const subject = getOrInitSubject(subjectName)
-                    if (sub.assignment.type === 'ULANGAN') {
-                        subject.ulangan.push(sub)
-                    } else {
-                        // TUGAS/PR/PROYEK/LATIHAN all count as tugas
-                        subject.tugas.push(sub)
-                    }
-                })
+                if (Array.isArray(submissions)) {
+                    submissions.forEach((sub) => {
+                        const subjectName = sub.assignment?.teaching_assignment?.subject?.name || 'Lainnya'
+                        const subject = getOrInitSubject(subjectName)
+                        if (sub.assignment.type === 'ULANGAN') {
+                            subject.ulangan.push(sub)
+                        } else {
+                            // TUGAS/PR/PROYEK/LATIHAN all count as tugas
+                            subject.tugas.push(sub)
+                        }
+                    })
+                }
 
                 // Process Exam Submissions (new ulangan system)
                 if (Array.isArray(examSubmissions)) {
@@ -168,6 +177,7 @@ export default function SiswaNilaiPage() {
 
             } catch (error) {
                 console.error('Error fetching grades:', error)
+                setLoadError(true)
             } finally {
                 setLoading(false)
             }
@@ -188,6 +198,15 @@ export default function SiswaNilaiPage() {
 
     if (loading) {
         return <div className="text-center text-slate-400 py-8">Memuat nilai...</div>
+    }
+
+    if (loadError) {
+        return (
+            <div className="text-center py-8 space-y-3">
+                <p className="text-red-500 dark:text-red-400 font-bold">Gagal memuat nilai</p>
+                <p className="text-text-secondary text-sm">Terjadi kesalahan saat mengambil data. Coba muat ulang halaman.</p>
+            </div>
+        )
     }
 
     // ==================== VIEW 1: Subject List ====================

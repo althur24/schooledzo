@@ -40,6 +40,9 @@ export default function SiswaDashboard() {
     const router = useRouter()
     const [student, setStudent] = useState<StudentData | null>(null)
     const [loading, setLoading] = useState(true)
+    // True bila fetch data utama gagal — tanpa ini halaman menampilkan
+    // "Semua Sudah Dikerjakan!"/"Libur!" yang menyesatkan saat server error
+    const [dataFailed, setDataFailed] = useState(false)
 
     // Dashboard Data State
     const [upcomingDeadlines, setUpcomingDeadlines] = useState<DeadlineItem[]>([])
@@ -71,7 +74,9 @@ export default function SiswaDashboard() {
                 // Fetch student data first to get class_id
                 // user_id WAJIB: tanpa ini guard SISWA di /api/students mengembalikan []
                 const studentsRes = await fetch(`/api/students?user_id=${user?.id}`)
+                if (!studentsRes.ok) throw new Error('Gagal memuat data siswa')
                 const students = await studentsRes.json()
+                if (!Array.isArray(students)) throw new Error('Data siswa tidak valid')
                 const myStudent = students.find((s: { user: { id: string } }) => s.user.id === user?.id)
                 setStudent(myStudent || null)
 
@@ -271,6 +276,7 @@ export default function SiswaDashboard() {
 
             } catch (error) {
                 console.error('Error:', error)
+                setDataFailed(true)
             } finally {
                 setLoading(false)
             }
@@ -512,6 +518,20 @@ export default function SiswaDashboard() {
 
     return (
         <div className="space-y-5 md:space-y-8 animate-in fade-in duration-500">
+            {/* Peringatan gagal memuat — jangan biarkan empty state perayaan
+                ("Semua Sudah Dikerjakan!" / "Libur!") menyembunyikan error */}
+            {!loading && dataFailed && (
+                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center flex-shrink-0">
+                        <Danger set="bold" size={18} />
+                    </div>
+                    <div>
+                        <p className="font-bold text-amber-700 dark:text-amber-400 text-sm">Gagal memuat sebagian data</p>
+                        <p className="text-amber-600/80 dark:text-amber-500/80 text-xs">Daftar tugas/jadwal di bawah mungkin tidak lengkap. Muat ulang halaman untuk mencoba lagi.</p>
+                    </div>
+                </div>
+            )}
+
             {/* Header Area */}
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
