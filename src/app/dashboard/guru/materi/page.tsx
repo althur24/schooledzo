@@ -6,7 +6,7 @@ import { Modal, Button, EmptyState, Toast, type ToastType, PageHeader } from '@/
 import Card from '@/components/ui/Card'
 import { Document as BookOpen, Paper as FileText, Video, Document as Type, Discovery as LinkIcon, Plus, Show as Eye, Delete as Trash, Download, ArrowRight, TickSquare as CheckCircle, Danger as AlertTriangle } from 'react-iconly'
 import { Loader2, WifiOff, CheckSquare } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { getPublicStorageUrl } from '@/lib/storagePublicUrl'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import {
     formatToOfflineMaterial,
@@ -331,11 +331,7 @@ export default function MateriPage() {
 
                 xhr.onload = async () => {
                     if (xhr.status >= 200 && xhr.status < 300) {
-                        const { data: { publicUrl } } = supabase.storage
-                            .from('materials')
-                            .getPublicUrl(path)
-
-                        resolve({ url: publicUrl })
+                        resolve({ url: getPublicStorageUrl('materials', path) })
                     } else {
                         reject(new Error(`Upload failed with status ${xhr.status}`))
                     }

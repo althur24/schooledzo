@@ -6,7 +6,7 @@ import Card from '@/components/ui/Card'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import { Document as BookOpen, User, Delete as Trash2, Video, Paper as FileText, Plus, Download, TickSquare as CheckCircle } from 'react-iconly'
 import { Loader2, Search, CheckSquare } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { getPublicStorageUrl } from '@/lib/storagePublicUrl'
 import {
     formatToOfflineMaterial,
     saveMaterialOffline,
@@ -201,14 +201,13 @@ export default function AdminMateriPage() {
                 }
             }
 
-            xhr.onload = () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    const { data: { publicUrl } } = supabase.storage.from('materials').getPublicUrl(path)
-                    resolve({ url: publicUrl })
-                } else {
-                    reject(new Error(`Upload gagal (status ${xhr.status})`))
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        resolve({ url: getPublicStorageUrl('materials', path) })
+                    } else {
+                        reject(new Error(`Upload gagal (status ${xhr.status})`))
+                    }
                 }
-            }
 
             xhr.onerror = () => reject(new Error('Masalah jaringan saat upload'))
             xhr.send(file)

@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 
-// M2: Service Role Key required for Storage signed URL generation (Storage API requires admin privileges)
+// M2: Service Role Key required for Storage signed URL generation (Storage API requires admin privileges).
+// Strict tanpa fallback anon (selaras src/lib/supabase.ts): tabel kini RLS-enabled —
+// fallback anon hanya menyembunyikan kegagalan. Fail-fast saat startup bila env hilang.
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY tidak ditemukan — upload butuh service key, jangan fallback ke anon.')
+}
 const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
 export async function POST(request: NextRequest) {

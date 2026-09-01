@@ -354,6 +354,7 @@ export type Database = {
         Row: {
           answer: string | null
           created_at: string | null
+          feedback: string | null
           id: string
           is_correct: boolean | null
           points_earned: number | null
@@ -363,6 +364,7 @@ export type Database = {
         Insert: {
           answer?: string | null
           created_at?: string | null
+          feedback?: string | null
           id?: string
           is_correct?: boolean | null
           points_earned?: number | null
@@ -372,6 +374,7 @@ export type Database = {
         Update: {
           answer?: string | null
           created_at?: string | null
+          feedback?: string | null
           id?: string
           is_correct?: boolean | null
           points_earned?: number | null
