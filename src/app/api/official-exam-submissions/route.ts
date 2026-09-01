@@ -21,9 +21,7 @@ export async function GET(request: NextRequest) {
         const studentId = request.nextUrl.searchParams.get('student_id')
         const classId = request.nextUrl.searchParams.get('class_id')
 
-        let query = supabase
-            .from('official_exam_submissions')
-            .select(`
+        const SUBMISSIONS_SELECT = `
                 id, exam_id, student_id, started_at, submitted_at, is_submitted,
                 total_score, max_score, violation_count, violations_log, is_graded, created_at, timer_override_until,
                 student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name), class:classes(id, school_level, grade_level)),
@@ -33,7 +31,11 @@ export async function GET(request: NextRequest) {
                     show_results_immediately, results_released,
                     subject:subjects(id, name, kkm)
                 )
-            `)
+            `
+
+        let query = supabase
+            .from('official_exam_submissions')
+            .select(SUBMISSIONS_SELECT)
             .order('created_at', { ascending: false })
             // Tiebreaker stabil untuk paginasi fetchAllRows (submissions dibuat
             // batch saat ujian serentak → created_at sering identik)
@@ -63,7 +65,38 @@ export async function GET(request: NextRequest) {
         // fetchAllRows: filter school/role/class dilakukan post-fetch di JS,
         // jadi query ini harus mengembalikan SEMUA baris — tanpa ini, tabel
         // >1000 submissions terpotong diam-diam sebelum sempat difilter.
-        const data = await fetchAllRows(query)
+        //
+        // Scope sekolah di SQL untuk GURU/ADMIN tanpa exam_id: filter embed
+        // (exam.school_id) tidak membatasi baris induk di PostgREST — dulu
+        // SEMUA baris semua sekolah ditarik dulu (full-table per request)
+        // baru difilter di JS. exam_id tunggal tidak perlu (satu exam = satu
+        // sekolah; filter JS line bawah sudah cukup).
+        let data: any[] = []
+        if (schoolId && user.role !== 'SISWA' && !examId) {
+            const { data: schoolExams } = await supabase
+                .from('official_exams')
+                .select('id')
+                .eq('school_id', schoolId)
+            const schoolExamIds = (schoolExams || []).map((e: any) => e.id)
+            if (schoolExamIds.length === 0) return NextResponse.json([])
+            // batchedIn per 100 id (batas URL) + fetchAllRows per chunk
+            // (ujian serentak >1000 peserta per sekolah)
+            data = await batchedIn<any>(
+                'exam_id', schoolExamIds,
+                async (chunk) => {
+                    let q = supabase
+                        .from('official_exam_submissions')
+                        .select(SUBMISSIONS_SELECT)
+                        .order('created_at', { ascending: false })
+                        .order('id', { ascending: false })
+                        .in('exam_id', chunk)
+                    if (studentId) q = q.eq('student_id', studentId)
+                    return { data: await fetchAllRows(q), error: null }
+                }
+            )
+        } else {
+            data = await fetchAllRows(query)
+        }
 
         let result = data || []
 

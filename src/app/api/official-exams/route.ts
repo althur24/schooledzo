@@ -48,6 +48,10 @@ export async function GET(request: NextRequest) {
 
         if (activeYear) {
             query = query.eq('academic_year_id', activeYear.id)
+        } else {
+            // No active year: return empty instead of leaking content across years
+            // (sebelumnya jatuh ke SEMUA tahun — ujian tahun lalu tiba-tiba muncul)
+            return NextResponse.json([])
         }
 
         if (examType) {

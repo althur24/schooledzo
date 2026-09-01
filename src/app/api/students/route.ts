@@ -4,6 +4,7 @@ import { hashPassword } from '@/lib/auth'
 import { getSchoolContextOrError, isErrorResponse, getSchoolCode } from '@/lib/schoolContext'
 import { tenantMismatch } from '@/lib/tenantGuard'
 import { logError } from '@/lib/logError'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // GET all students
 export async function GET(request: NextRequest) {
@@ -72,22 +73,30 @@ export async function GET(request: NextRequest) {
                 `)
                 .eq('academic_year_id', enrollment_year_id)
                 .order('created_at', { ascending: false })
-                .range(0, 4999)
+                // Tiebreaker stabil untuk paginasi fetchAllRows
+                .order('id', { ascending: false })
 
             // Optional: filter by enrollment class_id
             if (class_id) enrollQuery = enrollQuery.eq('class_id', class_id)
             // Optional: filter by enrollment status
             if (status) enrollQuery = enrollQuery.eq('status', status)
-            // SISWA auto-scope: tanpa ini ?user_id=<sendiri>&enrollment_year_id=...
-            // membocorkan roster seluruh sekolah (NIS, nama, username) —
-            // guard di atas tidak menjangkau cabang ini sebelumnya.
+            // SISWA auto-scope via kolom langsung. Filter embed (student.user_id)
+            // di PostgREST TIDAK membatasi baris induk — hanya men-null-kan embed
+            // (roster se-sekolah tetap terkirim lalu dibuang di JS) — terlalu
+            // rapuh dan boros. student_id membatasi di SQL sejak awal.
             if (user.role === 'SISWA') {
-                enrollQuery = enrollQuery.eq('student.user_id', user.id)
+                const { data: ownStudent } = await supabase
+                    .from('students')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .maybeSingle()
+                if (!ownStudent) return NextResponse.json([])
+                enrollQuery = enrollQuery.eq('student_id', ownStudent.id)
             }
 
-            const { data: enrollments, error: enrollError } = await enrollQuery
-
-            if (enrollError) throw enrollError
+            // fetchAllRows: .range(0, 4999) lama dipotong diam-diam PostgREST
+            // di 1000 baris — roster >1000 siswa (PIIS ~1000) terpotong tanpa error.
+            const enrollments = await fetchAllRows(enrollQuery)
 
             // Flatten and filter by school
             const result = (enrollments || [])
@@ -119,6 +128,9 @@ export async function GET(request: NextRequest) {
                     class:classes(id, name, grade_level, school_level)
                 `)
                 .order('created_at', { ascending: false })
+                // Tiebreaker unik: created_at bisa identik (import massal) —
+                // paginasi tanpa order stabil bisa melewatkan/duplikasi baris
+                .order('id', { ascending: false })
                 .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
 
             // School filter
@@ -149,7 +161,9 @@ export async function GET(request: NextRequest) {
         return NextResponse.json(allData)
     } catch (error) {
         logError('Error fetching students', error)
-        return NextResponse.json([])
+        // 500, bukan [] 200-OK: error DB harus terlihat sebagai error di client,
+        // bukan menyamar jadi "tidak ada siswa" (mis. admin mengira kelas kosong)
+        return NextResponse.json({ error: 'Server error' }, { status: 500 })
     }
 }
 
