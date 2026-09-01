@@ -550,17 +550,31 @@ export async function PUT(request: NextRequest) {
         // Helper: exam config sebagai objek tunggal (embed bisa array atau objek)
         const examCfgOf = (sub: any): any => Array.isArray(sub?.exam) ? sub.exam[0] : sub?.exam || {}
 
-        // Handle reset attempt (Admin only) — must be checked BEFORE the is_submitted guard
+        // Handle reset attempt — must be checked BEFORE the is_submitted guard
         if (reset_attempt) {
-            if (user.role !== 'ADMIN') {
-                return NextResponse.json({ error: 'Hanya admin yang dapat mereset attempt siswa' }, { status: 403 })
-            }
-
-            // K2 Security Fix: scope sekolah — admin hanya boleh mereset submission
-            // ujian sekolahnya sendiri (sebelumnya admin sekolah manapun bisa reset lintas sekolah)
+            // Otorisasi: ADMIN (scope sekolah) atau GURU yang mengajar kelas
+            // siswa ini untuk mapel ujian — scope sama dengan jalur save/grade
+            // di bawah (getTeacherScope + canTeachStudentSubmission), dipakai
+            // oleh tombol reset di monitor live guru maupun admin.
             const resetExamCfg = examCfgOf(currentSubmission)
-            if (resetExamCfg.school_id && schoolId && resetExamCfg.school_id !== schoolId) {
-                return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+            if (user.role === 'ADMIN') {
+                // K2 Security Fix: scope sekolah — admin hanya boleh mereset submission
+                // ujian sekolahnya sendiri (sebelumnya admin sekolah manapun bisa reset lintas sekolah)
+                if (resetExamCfg.school_id && schoolId && resetExamCfg.school_id !== schoolId) {
+                    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+                }
+            } else if (user.role === 'GURU') {
+                const { data: subStudent } = await supabase
+                    .from('students')
+                    .select('class_id')
+                    .eq('id', currentSubmission.student_id)
+                    .single()
+                const scope = await getTeacherScope(user.id, resetExamCfg.academic_year_id)
+                if (!canTeachStudentSubmission(scope, resetExamCfg.subject_id, subStudent?.class_id)) {
+                    return NextResponse.json({ error: 'Anda tidak mengajar kelas siswa ini' }, { status: 403 })
+                }
+            } else {
+                return NextResponse.json({ error: 'Tidak punya izin untuk melakukan reset' }, { status: 403 })
             }
 
             if (!currentSubmission.is_submitted) {
@@ -568,9 +582,9 @@ export async function PUT(request: NextRequest) {
             }
 
             // Batas soft reset: mode jendela → jam tutup; mode serentak → start + durasi.
-            // Hard Reset = pengecualian sengaja oleh admin: durasi penuh baru via timer_override_until
-            // (mode jendela: override tetap terpotong jam tutup oleh resolveWindowExpiry).
-            const examCfg: any = examCfgOf(currentSubmission)
+            // Hard Reset = pengecualian sengaja oleh guru/admin: durasi penuh baru via
+            // timer_override_until (override TIDAK dipotong jam tutup — src/lib/examExpiry.ts).
+            const examCfg = resetExamCfg
             const durationMs = (examCfg.duration_minutes || 0) * 60000
             const softLimitMs = examCfg.window_end_time
                 ? new Date(examCfg.window_end_time).getTime()

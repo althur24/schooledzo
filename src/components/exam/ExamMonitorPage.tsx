@@ -6,7 +6,8 @@ import Link from 'next/link'
 import { Card } from '@/components/ui'
 import {
     Loader2, ArrowLeft, GraduationCap, Users,
-    CheckCircle, AlertTriangle, Clock, PlayCircle, RefreshCw
+    CheckCircle, AlertTriangle, Clock, PlayCircle, RefreshCw,
+    RotateCcw, ChevronDown as ChevronDownIcon
 } from 'lucide-react'
 
 /**
@@ -19,6 +20,7 @@ import {
 
 interface StudentProgress {
     student_id: string
+    submission_id: string | null
     student_name: string
     nis: string
     class_name: string
@@ -63,6 +65,8 @@ export default function ExamMonitorPage({ examId, mode }: {
 }) {
     const router = useRouter()
     const monitorEndpoint = mode === 'ulangan' ? '/api/exam-submissions/monitor' : '/api/official-exam-submissions/monitor'
+    // Endpoint reset = endpoint monitor tanpa suffix /monitor (PUT reset_attempt soft/hard)
+    const resetEndpoint = mode === 'ulangan' ? '/api/exam-submissions' : '/api/official-exam-submissions'
 
     const [data, setData] = useState<MonitorData | null>(null)
     const [loading, setLoading] = useState(true)
@@ -71,6 +75,12 @@ export default function ExamMonitorPage({ examId, mode }: {
     const [classFilter, setClassFilter] = useState('')
     const [error, setError] = useState<string | null>(null)
     const [subjectKkms, setSubjectKkms] = useState<any[]>([])
+
+    // Reset attempt (soft/hard) langsung dari monitor live
+    const [resettingId, setResettingId] = useState<string | null>(null)
+    const [resetMenuId, setResetMenuId] = useState<string | null>(null)
+    const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+    const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     // Client-side countdown ticker (ticks every second between server refreshes)
     const [tickOffset, setTickOffset] = useState(0)
@@ -140,6 +150,50 @@ export default function ExamMonitorPage({ examId, mode }: {
         }, 1000)
         return () => clearInterval(ticker)
     }, [])
+
+    const showToast = (message: string, type: 'success' | 'error') => {
+        setToast({ type, message })
+        // Clear timer lama agar toast baru tidak terhapus dini oleh timeout toast sebelumnya
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+        toastTimerRef.current = setTimeout(() => setToast(null), 4000)
+    }
+
+    // Reset attempt langsung dari monitor live — sama dengan pola admin monitor
+    const handleResetAttempt = async (submissionId: string, studentName: string, resetMode: 'soft' | 'hard') => {
+        const confirmMsg = resetMode === 'soft'
+            ? `Soft Reset: Izinkan "${studentName}" melanjutkan ujian?\n\nTimer melanjutkan sisa waktu pengerjaan siswa tersebut dan pelanggaran di-reset. Jawaban yang sudah tersimpan tetap ada. Hanya bisa selama batas waktu pengerjaan belum lewat.`
+            : `Hard Reset: Mulai ulang ujian untuk "${studentName}"?\n\nSiswa akan mendapat durasi penuh baru terhitung sejak saat reset (terlepas dari jadwal berakhir ujian), TETAPI SEMUA JAWABAN AKAN DIHAPUS.`
+        if (!confirm(confirmMsg)) { setResetMenuId(null); return }
+        setResettingId(submissionId)
+        setResetMenuId(null)
+        try {
+            const res = await fetch(resetEndpoint, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ submission_id: submissionId, reset_attempt: resetMode })
+            })
+            if (res.ok) {
+                showToast(resetMode === 'hard' ? `Hard Reset untuk ${studentName} berhasil` : `Soft Reset untuk ${studentName} berhasil`, 'success')
+                fetchMonitorData(true)
+            } else {
+                const err = await res.json()
+                showToast(err.error || 'Gagal mereset attempt', 'error')
+            }
+        } catch {
+            showToast('Gagal mereset attempt', 'error')
+        } finally { setResettingId(null) }
+    }
+
+    // Close reset dropdown on outside click
+    useEffect(() => {
+        if (!resetMenuId) return
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement
+            if (!target.closest('[data-reset-menu]')) setResetMenuId(null)
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [resetMenuId])
 
     if (loading) {
         return <div className="flex justify-center py-20"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>
@@ -341,12 +395,13 @@ export default function ExamMonitorPage({ examId, mode }: {
                                 <th className="p-4 text-center">Nilai</th>
                                 <th className="p-4 text-center">Pelanggaran</th>
                                 <th className="p-4 text-right">Sisa Waktu</th>
+                                <th className="p-4 text-center">Aksi</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-black/5 dark:divide-white/5">
                             {filteredStudents.length === 0 ? (
                                 <tr>
-                                    <td colSpan={8} className="p-12 text-center text-text-secondary font-medium">
+                                    <td colSpan={9} className="p-12 text-center text-text-secondary font-medium">
                                         Tidak ada siswa yang sesuai filter.
                                     </td>
                                 </tr>
@@ -454,6 +509,53 @@ export default function ExamMonitorPage({ examId, mode }: {
                                                 )
                                             })()}
                                         </td>
+
+                                        {/* Aksi: Soft/Hard Reset (hanya untuk siswa yang sudah submit) */}
+                                        <td className="p-4 text-center">
+                                            {student.submission_id && student.status === 'submitted' ? (
+                                                <div className="relative inline-block text-left" data-reset-menu>
+                                                    <button
+                                                        onClick={() => setResetMenuId(resetMenuId === student.submission_id ? null : student.submission_id)}
+                                                        disabled={resettingId === student.submission_id}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400 rounded-lg hover:bg-orange-200 dark:hover:bg-orange-500/30 transition-colors text-xs font-bold disabled:opacity-50"
+                                                    >
+                                                        {resettingId === student.submission_id ? (
+                                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                        ) : (
+                                                            <RotateCcw className="w-3.5 h-3.5" />
+                                                        )}
+                                                        Reset
+                                                        <ChevronDownIcon className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    {resetMenuId === student.submission_id && (
+                                                        <div className="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-xl bg-white dark:bg-surface-dark shadow-xl ring-1 ring-black ring-opacity-5 border border-secondary/20 overflow-hidden">
+                                                            <div className="p-1.5">
+                                                                <button
+                                                                    onClick={() => handleResetAttempt(student.submission_id!, student.student_name, 'soft')}
+                                                                    className="w-full text-left px-3 py-2.5 hover:bg-secondary/10 rounded-lg transition-colors flex flex-col mb-1"
+                                                                >
+                                                                    <span className="font-bold text-text-main dark:text-white flex items-center gap-1.5 text-xs">
+                                                                        <RotateCcw className="w-3.5 h-3.5 text-blue-500" /> Soft Reset
+                                                                    </span>
+                                                                    <span className="text-text-secondary mt-0.5 text-[10px] leading-tight">Lanjutkan, timer tetap &amp; jawaban aman</span>
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleResetAttempt(student.submission_id!, student.student_name, 'hard')}
+                                                                    className="w-full text-left px-3 py-2.5 hover:bg-red-500/10 rounded-lg transition-colors flex flex-col"
+                                                                >
+                                                                    <span className="font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5 text-xs">
+                                                                        <RotateCcw className="w-3.5 h-3.5" /> Hard Reset
+                                                                    </span>
+                                                                    <span className="text-red-600/70 dark:text-red-400/80 mt-0.5 text-[10px] leading-tight">Mulai ulang (jawaban dihapus, timer penuh)</span>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <span className="text-text-secondary">-</span>
+                                            )}
+                                        </td>
                                     </tr>
                                 )
                             })}
@@ -461,6 +563,15 @@ export default function ExamMonitorPage({ examId, mode }: {
                     </table>
                 </div>
             </Card>
+
+            {/* Toast */}
+            {toast && (
+                <div className={`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-2xl text-sm font-bold text-white transition-all animate-in slide-in-from-bottom-4 ${
+                    toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+                }`}>
+                    {toast.message}
+                </div>
+            )}
         </div>
     )
 }
