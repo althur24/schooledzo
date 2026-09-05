@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "verify:math": "node scripts/verify-math-render.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",

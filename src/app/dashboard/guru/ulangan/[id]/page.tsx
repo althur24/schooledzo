@@ -7,11 +7,6 @@ import { useAuth } from '@/contexts/AuthContext'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
-// Dynamic imports for heavy components
-const MathTextarea = dynamic(() => import('@/components/MathTextarea'), {
-    ssr: false,
-    loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={3} readOnly />
-})
 // Static import for RichTextEditor — previously loaded as a lazy chunk via dynamic(),
 // which crashed the whole page white when the chunk no longer existed after a deploy
 import RichTextEditor from '@/components/RichTextEditor'
