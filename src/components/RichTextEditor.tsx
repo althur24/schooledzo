@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useCallback, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { ResizableImage } from './ResizableImageExtension'
@@ -8,7 +9,10 @@ import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import SmartText from './SmartText'
 import MathInsertMenu from './editor/MathInsertMenu'
+import { shouldSkipCrop, uploadQuestionImage } from '@/lib/questionImage'
 import './RichTextEditor.css'
+
+const ImageCropModal = dynamic(() => import('./ImageCropModal'), { ssr: false })
 
 interface RichTextEditorProps {
     value: string
@@ -29,6 +33,8 @@ export default function RichTextEditor({
 }: RichTextEditorProps) {
     const [isUploading, setIsUploading] = useState(false)
     const [showPreview, setShowPreview] = useState(false)
+    // Gambar yang menunggu konfirmasi crop di ImageCropModal
+    const [pendingImage, setPendingImage] = useState<File | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     const editor = useEditor({
@@ -68,7 +74,7 @@ export default function RichTextEditor({
                     const file = event.dataTransfer.files[0]
                     if (file.type.startsWith('image/')) {
                         event.preventDefault()
-                        handleImageUpload(file)
+                        handleIncomingImage(file)
                         return true
                     }
                 }
@@ -79,7 +85,7 @@ export default function RichTextEditor({
                     const file = event.clipboardData.files[0]
                     if (file.type.startsWith('image/')) {
                         event.preventDefault()
-                        handleImageUpload(file)
+                        handleIncomingImage(file)
                         return true
                     }
                 }
@@ -117,25 +123,14 @@ export default function RichTextEditor({
 
         setIsUploading(true)
         try {
-            const formData = new FormData()
-            formData.append('file', file)
-
-            const res = await fetch('/api/questions/upload-image', {
-                method: 'POST',
-                body: formData
-            })
-
-            if (!res.ok) {
-                const data = await res.json()
-                throw new Error(data.error || 'Upload gagal')
-            }
-
-            const data = await res.json()
+            const data = await uploadQuestionImage(file)
             if (data.url) {
+                // chain().focus() mengembalikan selection TipTap yang tersimpan —
+                // gambar masuk di posisi kursor saat file dipilih (bukan di akhir teks)
                 editor.chain().focus().setImage({ src: data.url }).run()
             }
-        } catch (error: any) {
-            alert(error.message || 'Gagal upload gambar')
+        } catch (error) {
+            alert(error instanceof Error ? error.message : 'Gagal upload gambar')
         } finally {
             setIsUploading(false)
             if (fileInputRef.current) {
@@ -144,9 +139,19 @@ export default function RichTextEditor({
         }
     }
 
+    // Pintu masuk semua jalur gambar (tombol / paste / drag): crop dulu via
+    // modal — kecuali GIF (animasi hilang jika lewat canvas, upload langsung).
+    const handleIncomingImage = (file: File) => {
+        if (shouldSkipCrop(file)) {
+            handleImageUpload(file)
+            return
+        }
+        setPendingImage(file)
+    }
+
     const onFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-            handleImageUpload(e.target.files[0])
+            handleIncomingImage(e.target.files[0])
         }
     }
 
@@ -333,6 +338,16 @@ export default function RichTextEditor({
                     <SmartText text={editor.getHTML()} className="rte-preview-content" as="div" />
                 </div>
             )}
+
+            {/* Crop gambar sebelum upload — dipicu tombol/paste/drag */}
+            <ImageCropModal
+                file={pendingImage}
+                onCancel={() => setPendingImage(null)}
+                onConfirm={(processed) => {
+                    setPendingImage(null)
+                    handleImageUpload(processed)
+                }}
+            />
         </div>
     )
 }

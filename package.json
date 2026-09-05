@@ -32,6 +32,7 @@
     "pdf-parse": "^2.4.5",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "react-easy-crop": "^6.2.3",
     "react-iconly": "^2.2.10",
     "recharts": "^3.6.0",
     "xlsx": "^0.18.5"

@@ -2,11 +2,14 @@ import React from 'react'
 import dynamic from 'next/dynamic'
 import { Plus } from 'react-iconly'
 import { plainToHtml } from '@/lib/richTextUtils'
+import { shouldSkipCrop, uploadQuestionImage } from '@/lib/questionImage'
 
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
     ssr: false,
     loading: () => <div className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-secondary text-sm">Memuat editor...</div>
 })
+
+const ImageCropModal = dynamic(() => import('@/components/ImageCropModal'), { ssr: false })
 
 interface QuestionOptionsEditorProps {
     questionType: string
@@ -25,6 +28,8 @@ export default function QuestionOptionsEditor({
 }: QuestionOptionsEditorProps) {
     // --- Image upload state (hooks must be before any early return) ---
     const [uploadingIdx, setUploadingIdx] = React.useState<number | null>(null)
+    // Gambar yang menunggu konfirmasi crop di ImageCropModal
+    const [pendingUploadFile, setPendingUploadFile] = React.useState<File | null>(null)
     const fileInputRef = React.useRef<HTMLInputElement>(null)
     const pendingUploadIdx = React.useRef<number | null>(null)
 
@@ -121,16 +126,13 @@ export default function QuestionOptionsEditor({
         fileInputRef.current?.click()
     }
 
-    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]
-        if (!file || pendingUploadIdx.current === null) return
+    // Upload gambar ke opsi yang sedang menunggu (pendingUploadIdx)
+    const uploadOptionImage = async (file: File) => {
+        if (pendingUploadIdx.current === null) return
         const idx = pendingUploadIdx.current
         setUploadingIdx(idx)
         try {
-            const formData = new FormData()
-            formData.append('file', file)
-            const res = await fetch('/api/questions/upload-image', { method: 'POST', body: formData })
-            const data = await res.json()
+            const data = await uploadQuestionImage(file)
             if (data.url) {
                 const letter = String.fromCharCode(65 + idx)
                 const imgTag = `<img src="${data.url}" alt="Opsi ${letter}" style="max-width:100%;border-radius:8px;" />`
@@ -139,16 +141,26 @@ export default function QuestionOptionsEditor({
                 const current = safeOptions[idx] || ''
                 newOptions[idx] = (current ? plainToHtml(current) : '') + imgTag
                 onChange(newOptions, correctAnswer)
-            } else {
-                alert('Gagal upload gambar: ' + (data.error || 'Terjadi kesalahan'))
             }
-        } catch {
-            alert('Gagal upload gambar')
+        } catch (error) {
+            alert(error instanceof Error ? error.message : 'Gagal upload gambar')
         } finally {
             setUploadingIdx(null)
             pendingUploadIdx.current = null
-            if (fileInputRef.current) fileInputRef.current.value = ''
         }
+    }
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (fileInputRef.current) fileInputRef.current.value = ''
+        if (!file || pendingUploadIdx.current === null) return
+
+        // GIF langsung upload (crop via canvas mematikan animasi)
+        if (shouldSkipCrop(file)) {
+            await uploadOptionImage(file)
+            return
+        }
+        setPendingUploadFile(file)
     }
 
     // Extract full <img ...> tags from an option's HTML (for the delete-✕ thumbnails)
@@ -285,6 +297,13 @@ export default function QuestionOptionsEditor({
                 ref={fileInputRef}
                 className="hidden"
                 onChange={handleFileChange}
+            />
+
+            {/* Crop gambar sebelum upload ke opsi */}
+            <ImageCropModal
+                file={pendingUploadFile}
+                onCancel={() => setPendingUploadFile(null)}
+                onConfirm={(processed) => uploadOptionImage(processed)}
             />
         </div>
     )

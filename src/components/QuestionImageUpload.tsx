@@ -1,6 +1,10 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import dynamic from 'next/dynamic'
+import { shouldSkipCrop, uploadQuestionImage } from '@/lib/questionImage'
+
+const ImageCropModal = dynamic(() => import('./ImageCropModal'), { ssr: false })
 
 interface QuestionImageUploadProps {
     imageUrl?: string | null
@@ -11,38 +15,35 @@ interface QuestionImageUploadProps {
 export default function QuestionImageUpload({ imageUrl, onImageChange, disabled }: QuestionImageUploadProps) {
     const [uploading, setUploading] = useState(false)
     const [showModal, setShowModal] = useState(false)
+    // Gambar yang menunggu konfirmasi crop di ImageCropModal
+    const [pendingFile, setPendingFile] = useState<File | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
+
+    const uploadFile = async (file: File) => {
+        setUploading(true)
+        try {
+            const data = await uploadQuestionImage(file)
+            onImageChange(data.url)
+            setShowModal(false)
+            setPendingFile(null)
+        } catch (error) {
+            alert(error instanceof Error ? error.message : 'Gagal upload gambar')
+        } finally {
+            setUploading(false)
+        }
+    }
 
     const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
+        if (fileInputRef.current) fileInputRef.current.value = ''
         if (!file) return
 
-        setUploading(true)
-        try {
-            const formData = new FormData()
-            formData.append('file', file)
-
-            const res = await fetch('/api/questions/upload-image', {
-                method: 'POST',
-                body: formData
-            })
-
-            if (!res.ok) {
-                const data = await res.json()
-                throw new Error(data.error || 'Upload gagal')
-            }
-
-            const data = await res.json()
-            onImageChange(data.url)
-            setShowModal(false)
-        } catch (error: any) {
-            alert(error.message || 'Gagal upload gambar')
-        } finally {
-            setUploading(false)
-            if (fileInputRef.current) {
-                fileInputRef.current.value = ''
-            }
+        // GIF langsung upload (crop via canvas mematikan animasi)
+        if (shouldSkipCrop(file)) {
+            await uploadFile(file)
+            return
         }
+        setPendingFile(file)
     }
 
     const handleRemove = () => {
@@ -130,12 +131,19 @@ export default function QuestionImageUpload({ imageUrl, onImageChange, disabled 
                             )}
 
                             <p className="text-xs text-text-secondary text-center">
-                                Format: JPG, PNG, GIF, WebP • Max 5MB
+                                Format: JPG, PNG, GIF, WebP • Max 5MB • GIF diunggah apa adanya (tanpa pemangkasan)
                             </p>
                         </div>
                     </div>
                 </div>
             )}
+
+            {/* Crop gambar sebelum upload */}
+            <ImageCropModal
+                file={pendingFile}
+                onCancel={() => setPendingFile(null)}
+                onConfirm={(processed) => uploadFile(processed)}
+            />
         </>
     )
 }

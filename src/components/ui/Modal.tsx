@@ -6,9 +6,15 @@ interface ModalProps {
     open: boolean
     onClose: () => void
     title: ReactNode
-    subtitle?: string
+    subtitle?: ReactNode
     children: ReactNode
     maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '4xl'
+    /**
+     * Animasi zoom saat buka (default). Matikan (false) untuk konten yang
+     * mengukur dimensi container saat mount (mis. react-easy-crop) — scaling
+     * animation membuat pengukuran awal meleset (react-easy-crop#428).
+     */
+    scaleIn?: boolean
 }
 
 const maxWidthClasses = {
@@ -26,7 +32,8 @@ export default function Modal({
     title,
     subtitle,
     children,
-    maxWidth = 'md'
+    maxWidth = 'md',
+    scaleIn = true
 }: ModalProps) {
     if (!open) return null
 
@@ -40,7 +47,7 @@ export default function Modal({
                 w-full ${maxWidthClasses[maxWidth]} 
                 max-h-[90vh] overflow-y-auto 
                 shadow-2xl shadow-primary/10
-                animate-in fade-in zoom-in-95 duration-200
+                animate-in fade-in ${scaleIn ? 'zoom-in-95 ' : ''}duration-200
             `}>
                 <div className="flex items-center justify-between mb-6">
                     <div>
