@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { deleteSession } from '@/lib/auth'
+import { isSecureRequest } from '@/lib/cookieSecure'
 
 export async function POST(request: NextRequest) {
     try {
@@ -14,14 +15,14 @@ export async function POST(request: NextRequest) {
         // Clear the cookies
         response.cookies.set('session_token', '', {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
+            secure: isSecureRequest(request),
             sameSite: 'lax',
             maxAge: 0,
             path: '/'
         })
         response.cookies.set('user_role', '', {
             httpOnly: false,
-            secure: process.env.NODE_ENV === 'production',
+            secure: isSecureRequest(request),
             sameSite: 'lax',
             maxAge: 0,
             path: '/'

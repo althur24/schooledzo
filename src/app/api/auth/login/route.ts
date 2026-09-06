@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateUser, createSession, SESSION_COOKIE_MAX_AGE } from '@/lib/auth'
+import { isSecureRequest } from '@/lib/cookieSecure'
 
 // M1 Security Fix: In-memory rate limiter untuk login.
 // PENTING: hanya PERCOBAAN GAGAL yang dihitung. Ratusan siswa login sukses
@@ -120,7 +121,7 @@ export async function POST(request: NextRequest) {
         // Set HTTP-only cookie
         response.cookies.set('session_token', sessionToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
+            secure: isSecureRequest(request),
             sameSite: 'lax',
             maxAge: SESSION_COOKIE_MAX_AGE,
             path: '/'
@@ -129,7 +130,7 @@ export async function POST(request: NextRequest) {
         // Set role cookie (non-httpOnly) for middleware-level route protection
         response.cookies.set('user_role', user.role, {
             httpOnly: false,
-            secure: process.env.NODE_ENV === 'production',
+            secure: isSecureRequest(request),
             sameSite: 'lax',
             maxAge: SESSION_COOKIE_MAX_AGE,
             path: '/'
