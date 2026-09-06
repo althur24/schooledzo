@@ -321,7 +321,19 @@ async function main() {
     // ---------- 11. [MON] GURU FETCH MONITOR ----------
     console.log('[11] [MON] Guru fetch monitor (service-role read exam_answers)')
     const monRes = await api(`/api/exam-submissions/monitor?exam_id=${exam1.id}`, guruTok)
+    const monBody = await monRes.json().catch(() => null)
     check('GET monitor sukses (200)', monRes.status === 200, `status ${monRes.status}`)
+    // Pelanggaran hasil flush batch (skenario offline) harus TERLIHAT di monitor guru
+    const monSiswaA = (monBody?.students || []).find(s => s.student_id === siswaA.student.id)
+    check('Monitor guru menampilkan violation_count siswa (2 dari [7b])', monSiswaA?.violation_count === 2, `count=${monSiswaA?.violation_count}`)
+
+    // Monitor ujian kedua: force-submitted via batch 3 pelanggaran → status submitted + count 3
+    const monRes2 = await api(`/api/exam-submissions/monitor?exam_id=${exam2.id}`, guruTok)
+    const monBody2 = await monRes2.json().catch(() => null)
+    const mon2SiswaA = (monBody2?.students || []).find(s => s.student_id === siswaA.student.id)
+    check('Monitor exam2: count 3 + status submitted (force submit terlihat guru)',
+        mon2SiswaA?.violation_count === 3 && mon2SiswaA?.status === 'submitted',
+        `count=${mon2SiswaA?.violation_count} status=${mon2SiswaA?.status}`)
 
     // ---------- 12. [RLS-A] PROBE ANON — lubang kebocoran TERTUTUP ----------
     console.log('[12] [RLS-A] Probe anon langsung ke PostgREST (meniru browser)')
