@@ -103,17 +103,19 @@ async function main() {
 
     // ════════ [1] REMEDIAL ULANGAN — policy HIGHEST via API ════════
     console.log('\n[1] Remedial ulangan (POST /api/exams) + validasi policy')
-    // Ulangan asli: s1=40, s2=40, s3=90
+    // Ulangan asli max_score 40 — sengaja BUKAN 100 untuk menangkap bug skala
+    // raw-vs-persen di titik merge (skor disimpan sebagai persen di perhitungan).
+    // s1=40%, s2=40%, s3=90%
     const examAsli = await mustInsert(supabase, 'exams', {
         title: `${U} Ulangan Asli`, start_time: pastStart, duration_minutes: 60,
         teaching_assignment_id: ta.id, is_active: true, max_violations: 3, created_by: guruUser.id,
     }, 'exam asli')
     created.exams.push(examAsli.id)
-    await mustInsert(supabase, 'exam_questions', { exam_id: examAsli.id, question_text: 'q', question_type: 'MULTIPLE_CHOICE', options: ['a', 'b'], correct_answer: 'A', points: 100, order_index: 1, status: 'approved' }, 'exam q')
-    const mkExamSub = async (st, score) => {
+    await mustInsert(supabase, 'exam_questions', { exam_id: examAsli.id, question_text: 'q', question_type: 'MULTIPLE_CHOICE', options: ['a', 'b'], correct_answer: 'A', points: 40, order_index: 1, status: 'approved' }, 'exam q')
+    const mkExamSub = async (st, pct) => {
         const sub = await mustInsert(supabase, 'exam_submissions', {
             exam_id: examAsli.id, student_id: st.id, started_at: pastStart, submitted_at: pastSubmit,
-            is_submitted: true, total_score: score, max_score: 100,
+            is_submitted: true, total_score: Math.round(pct / 100 * 40), max_score: 40,
         }, 'exam sub')
         created.examSubmissions.push(sub.id)
     }
@@ -144,10 +146,10 @@ async function main() {
     check('remedial ulangan dibuat → 200', remExamRes.status === 200, `status=${remExamRes.status}`)
     check('policy HIGHEST tersimpan', remExam?.remedial_score_policy === 'HIGHEST')
     if (remExam?.id) created.exams.push(remExam.id)
-    // s1 mengerjakan remedial: 80; s2 tidak mengerjakan
+    // s1 mengerjakan remedial: 80% (32/40); s2 tidak mengerjakan
     const remSub = await mustInsert(supabase, 'exam_submissions', {
         exam_id: remExam.id, student_id: s1.id, started_at: pastStart, submitted_at: pastSubmit,
-        is_submitted: true, total_score: 80, max_score: 100,
+        is_submitted: true, total_score: 32, max_score: 40,
     }, 'remedial exam sub')
     created.examSubmissions.push(remSub.id)
 
@@ -261,7 +263,7 @@ async function main() {
     const hasilUlanganRes = await api(`/api/exam-submissions?exam_id=${examAsli.id}&teacher_view=true`, tokGuru)
     const hasilUlangan = hasilUlanganRes.ok ? await hasilUlanganRes.json() : []
     const s1Hasil = (Array.isArray(hasilUlangan) ? hasilUlangan : []).find(s => s.student?.id === s1.id)
-    check('hasil ulangan guru: s1 total_score = 80 (HIGHEST)', s1Hasil?.total_score === 80, `score=${s1Hasil?.total_score}`)
+    check('hasil ulangan guru: s1 total_score = 32/40 (80% HIGHEST, proporsional max asli)', s1Hasil?.total_score === 32, `score=${s1Hasil?.total_score}`)
 
     const hasilOfficialRes = await api(`/api/official-exam-submissions?exam_id=${utsAsli.id}`, tokGuru)
     const hasilOfficial = hasilOfficialRes.ok ? await hasilOfficialRes.json() : []

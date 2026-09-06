@@ -13,6 +13,7 @@ interface QuizSubmission {
     id: string
     submitted_at: string | null
     total_score: number | null
+    merged_from_remedial?: boolean
     max_score: number | null
     is_graded: boolean | null
     needs_manual_review?: boolean | null
@@ -359,8 +360,18 @@ export default function QuizSubmissionsPage() {
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="flex items-baseline gap-1">
-                                                <span className="text-xl font-bold text-text-main dark:text-white">{sub.total_score ?? '—'}</span>
+                                                <span
+                                                    className="text-xl font-bold text-text-main dark:text-white"
+                                                    title={sub.merged_from_remedial ? `Nilai tergabung dengan remedial sesuai kebijakan nilai remedial — nilai mentah ujian asli tidak berubah` : undefined}
+                                                >
+                                                    {sub.total_score ?? '—'}
+                                                </span>
                                                 <span className="text-xs text-text-secondary dark:text-zinc-500">/{sub.max_score ?? '—'}</span>
+                                                {sub.merged_from_remedial && (
+                                                    <span className="ml-1 px-1.5 py-0.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 text-[10px] font-bold rounded-full border border-orange-200 dark:border-orange-500/30">
+                                                        GABUNG REMEDIAL
+                                                    </span>
+                                                )}
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">

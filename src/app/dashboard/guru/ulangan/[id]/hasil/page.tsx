@@ -13,6 +13,7 @@ interface ExamSubmission {
     submitted_at: string | null
     is_submitted: boolean
     total_score: number
+    merged_from_remedial?: boolean
     max_score: number
     is_graded: boolean
     violation_count: number
@@ -192,8 +193,12 @@ export default function GuruExamHasilPage() {
                                         </td>
                                         <td className="p-4 text-center">
                                             {sub.is_submitted ? (
-                                                <span className={`px-3 py-1 rounded-full font-bold ${getScoreColor(sub.total_score, sub.max_score)}`}>
+                                                <span
+                                                    className={`px-3 py-1 rounded-full font-bold ${getScoreColor(sub.total_score, sub.max_score)}`}
+                                                    title={sub.merged_from_remedial ? 'Nilai tergabung dengan remedial sesuai kebijakan nilai remedial — nilai mentah ujian asli tidak berubah' : undefined}
+                                                >
                                                     {sub.total_score}/{sub.max_score}
+                                                    {sub.merged_from_remedial && ' ⤴'}
                                                 </span>
                                             ) : (
                                                 <span className="text-text-secondary dark:text-zinc-500">-</span>

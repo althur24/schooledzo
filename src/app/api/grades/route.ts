@@ -219,8 +219,13 @@ export async function GET(request: NextRequest) {
             }
             const mergedQuizzes = Array.from(quizGroups.values()).map(group => {
                 const original = group.find(m => !m.is_remedial) || group[0]
+                const remedial = group.find(m => m.is_remedial)
                 const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
-                return { ...original, score: final !== null ? Math.round(final * 10) / 10 : original.score }
+                // Field internal merge (is_remedial/policy/cap) tidak ikut respons.
+                const { is_remedial: _ir, policy: _p, cap: _c, ...clean } = original
+                // graded_at = tanggal pengerjaan remedial bila ada (perilaku lama),
+                // selain itu tanggal ujian asli.
+                return { ...clean, score: final !== null ? Math.round(final * 10) / 10 : original.score, graded_at: (remedial ?? original).graded_at }
             })
             allGrades.push(...mergedQuizzes)
 
@@ -257,8 +262,10 @@ export async function GET(request: NextRequest) {
             }
             const mergedExams = Array.from(examGroups.values()).map(group => {
                 const original = group.find(m => !m.is_remedial) || group[0]
+                const remedial = group.find(m => m.is_remedial)
                 const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
-                return { ...original, score: final !== null ? Math.round(final * 10) / 10 : original.score }
+                const { is_remedial: _ir, policy: _p, cap: _c, ...clean } = original
+                return { ...clean, score: final !== null ? Math.round(final * 10) / 10 : original.score, graded_at: (remedial ?? original).graded_at }
             })
             allGrades.push(...mergedExams)
 
@@ -331,8 +338,10 @@ export async function GET(request: NextRequest) {
             }
             const mergedOfficial = Array.from(officialGroups.values()).map(group => {
                 const original = group.find(m => !m.is_remedial) || group[0]
+                const remedial = group.find(m => m.is_remedial)
                 const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
-                return { ...original, score: final !== null ? Math.round(final * 10) / 10 : original.score }
+                const { is_remedial: _ir, policy: _p, cap: _c, ...clean } = original
+                return { ...clean, score: final !== null ? Math.round(final * 10) / 10 : original.score, graded_at: (remedial ?? original).graded_at }
             })
             allGrades.push(...mergedOfficial)
 

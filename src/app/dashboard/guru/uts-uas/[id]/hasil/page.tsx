@@ -17,6 +17,7 @@ interface Submission {
     id: string
     student_id: string
     total_score: number
+    merged_from_remedial?: boolean
     max_score: number
     is_submitted: boolean
     is_graded: boolean
@@ -271,8 +272,11 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
                                         <td className="px-4 py-3 text-sm font-medium text-text-main dark:text-white">{sub.student?.user?.full_name || '-'}</td>
                                         <td className="px-4 py-3 text-center text-xs text-text-secondary">{sub.student?.nis || '-'}</td>
                                         <td className="px-4 py-3 text-center">
-                                            <span className={`font-bold text-sm ${pct >= getKkm(sub.student?.class_id) ? 'text-green-600' : pct >= getKkm(sub.student?.class_id) - 15 ? 'text-amber-600' : 'text-red-600'}`}>
-                                                {sub.total_score}/{sub.max_score} ({pct}%)
+                                            <span
+                                                className={`font-bold text-sm ${pct >= getKkm(sub.student?.class_id) ? 'text-green-600' : pct >= getKkm(sub.student?.class_id) - 15 ? 'text-amber-600' : 'text-red-600'}`}
+                                                title={sub.merged_from_remedial ? 'Nilai tergabung dengan remedial sesuai kebijakan nilai remedial — nilai mentah ujian asli tidak berubah' : undefined}
+                                            >
+                                                {sub.total_score}/{sub.max_score} ({pct}%){sub.merged_from_remedial ? ' ⤴' : ''}
                                             </span>
                                         </td>
                                         <td className="px-4 py-3 text-center text-xs">{sub.violation_count}</td>

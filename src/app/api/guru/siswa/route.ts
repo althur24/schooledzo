@@ -218,7 +218,7 @@ export async function GET(request: NextRequest) {
                 'exam_id', examIds,
                 (chunk) => supabase
                     .from('exam_submissions')
-                    .select('id, exam_id, student_id, total_score, is_submitted')
+                    .select('id, exam_id, student_id, total_score, max_score, is_submitted')
                     .in('exam_id', chunk)
                     .in('student_id', studentIds)
                     .eq('is_submitted', true)
@@ -340,8 +340,11 @@ export async function GET(request: NextRequest) {
                     if (!exam) return
                     const baseId = exam.remedial_for_id || exam.id
                     const entry = examGroups.get(baseId) || { scores: [] as any[], exam }
+                    // Persen (0-100) — konsisten dengan kuis/UTS/UAS dan skala
+                    // kebijakan CAP; sebelumnya raw total_score (skala max_score
+                    // ujian) sehingga CAP salah menerapkan batas.
                     entry.scores.push({
-                        score: es.total_score || 0,
+                        score: es.max_score > 0 ? (es.total_score / es.max_score) * 100 : (es.total_score || 0),
                         isRemedial: !!exam.is_remedial,
                         policy: exam.remedial_score_policy,
                         cap: exam.remedial_max_score,
