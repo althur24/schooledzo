@@ -15,7 +15,7 @@
 - Benchmark login 1000 siswa: `ENV_FILE=.env.staging UV_THREADPOOL_SIZE=16 node loadtest/e2e/load_login.cjs` (varian: `WAVE_MS=10000`, `SYNC=1`). Rate limit login hanya menghitung percobaan GAGAL (200 gagal/mnt/IP + 10 gagal/10mnt/username) — login sukses massal dari 1 IP WiFi tidak terblok.
 - 1000 VU ujian serentak: seed `ENV_FILE=.env.staging node loadtest/seed_loadtest.cjs` → `set -a; source .env.staging; set +a; UV_THREADPOOL_SIZE=16 npx next start -p 3000` (env WAJIB tersource — tanpa itu next start auto-load .env.local production!) → `k6 run -e BASE_URL=http://localhost:3000 -e FAST=1 -e EXAM_SECONDS=180 loadtest/tryout.js` → cleanup `ENV_FILE=.env.staging node loadtest/cleanup_loadtest.cjs`.
 - **Jangan pernah menimpa isi `.env.local` dengan key staging** (atau sebaliknya).
-- Migrasi ke staging: `supabase db push --db-url "postgres://postgres:<pw>@db.vkkgnredrfqqraonynte.supabase.co:5432/postgres"` (hostname `db.<ref>` — region-agnostik; pooler ap-south-1 tidak mengenal staging).
+- Migrasi ke staging: `bash loadtest/push-staging-migration.sh` — password DB staging tersimpan di `.env.staging` (`SUPABASE_DB_PASSWORD`, file di-gitignore, aman tidak masuk repo). Manual: `supabase db push --db-url "postgres://postgres:<pw>@db.vkkgnredrfqqraonynte.supabase.co:5432/postgres"` (hostname `db.<ref>` — region-agnostik; pooler ap-south-1 tidak mengenal staging). CLI lokal ter-link ke PRODUCTION — `supabase db push` tanpa `--db-url` = push ke prod!
 - Schema staging dibuat dari dump production (schema-only, tanpa data) + seed baseline `STAGING SCHOOL`. Template student username: `stg_template_siswa`.
 - TODO setelah load test selesai: rotate password DB + regenerate keys staging (pernah lewat chat).
 
