@@ -361,6 +361,75 @@ async function main() {
     const { count: notifAfter } = await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', P.userS2).eq('type', 'ULANGAN_BARU')
     check('N2 notifikasi ULANGAN_BARU tidak bertambah', notifAfter === notifBefore, { notifBefore, notifAfter })
 
+    console.log('\n== O. UTS/UAS: siswa kerjakan → koreksi esai → audit trail ==')
+    // UTS guru A (oeA dari section I) sudah punya 1 soal PG — tambah esai lalu publish
+    r = await api('POST', `/api/official-exams/${oeA}/questions`, { questions: [
+        { question_text: 'Jelaskan hukum Ohm', question_type: 'ESSAY', correct_answer: 'V=IR', points: 50 },
+    ] }, 'guru')
+    check('O1 tambah soal esai UTS 200', r.status === 200 && Array.isArray(r.data), r)
+    r = await api('PUT', `/api/official-exams/${oeA}`, { is_active: true }, 'guru')
+    check('O2 publish UTS 200', r.status === 200 && r.data?.is_active === true, r)
+    // siswa 1 (kelas A = target oeA) mulai
+    r = await api('GET', `/api/official-exams/${oeA}/questions`, null, 's1')
+    check('O3 siswa kelas target GET soal UTS → 200', r.status === 200 && Array.isArray(r.data) && r.data.length === 2, r)
+    r = await api('POST', '/api/official-exam-submissions', { exam_id: oeA }, 's1')
+    check('O4 start UTS 200', r.status === 200 && r.data?.id, r)
+    const oeSub = r.data.id
+    const { data: oeQs } = await supabase.from('official_exam_questions').select('id, question_type, correct_answer').eq('exam_id', oeA)
+    r = await api('PUT', '/api/official-exam-submissions', { submission_id: oeSub, answers: oeQs.map(q => ({ question_id: q.id, answer: q.question_type === 'ESSAY' ? 'Hukum Ohm menyatakan V=IR' : q.correct_answer })), submit: true }, 's1')
+    check('O5 submit UTS 200 (is_graded=false karena ada esai)', r.status === 200 && r.data?.is_submitted === true && r.data?.is_graded === false, r)
+    const beforeTotal = r.data?.total_score
+    // guru koreksi esai: 40/50
+    const { data: oeAns } = await supabase.from('official_exam_answers').select('id, question_id, points_earned').eq('submission_id', oeSub)
+    const essayAns = oeAns.find(a => a.question_id === oeQs.find(q => q.question_type === 'ESSAY').id)
+    r = await api('PUT', `/api/official-exam-submissions/${oeSub}`, { grades: [{ answer_id: essayAns.id, points_earned: 40 }] }, 'guru')
+    check('O6 koreksi esai UTS 200 & is_graded', r.status === 200 && r.data?.is_graded === true, r)
+    check('O7 total naik setelah koreksi (+' + (r.data?.total_score - beforeTotal) + ')', typeof r.data?.total_score === 'number' && r.data.total_score > beforeTotal, { beforeTotal, after: r.data?.total_score })
+    const { data: ghO } = await supabase.from('grade_history').select('*').eq('school_id', P.school).eq('source', 'OFFICIAL_EXAM').order('changed_at', { ascending: false }).limit(1)
+    check('O8 grade_history OFFICIAL_EXAM tercatat', ghO?.length === 1 && ghO[0].new_score === r.data?.total_score, ghO)
+    // grading attempt hidup official → 400 (siswa 2 belum submit UTS — juga kelas A)
+    r = await api('POST', '/api/official-exam-submissions', { exam_id: oeA }, 's2')
+    const oeSub2 = r.data?.id
+    if (oeSub2) {
+        const { data: oeAns2 } = await supabase.from('official_exam_answers').select('id').eq('submission_id', oeSub2).limit(1)
+        r = await api('PUT', `/api/official-exam-submissions/${oeSub2}`, { grades: (oeAns2 || []).map(a => ({ answer_id: a.id, points_earned: 1 })) }, 'guru')
+        check('O9 grading attempt UTS belum dikumpulkan → 400', r.status === 400, r)
+        // siswa 2 submit dengan jawaban SALAH SEMUA → skor rendah (basis remedial)
+        r = await api('PUT', '/api/official-exam-submissions', { submission_id: oeSub2, answers: oeQs.map(q => ({ question_id: q.id, answer: q.question_type === 'ESSAY' ? 'salah' : 'ZZZ' })), submit: true }, 's2')
+        check('O10 siswa 2 submit jawaban salah → skor rendah', r.status === 200 && (r.data?.total_score ?? 0) <= 10, r)
+    }
+
+    console.log('\n== P. Remedial UTS/UAS: guard + merge ==')
+    r = await api('POST', '/api/official-exams/duplicate', { source_exam_id: oeA, title: 'SMOKE Remedial UTS', start_time: iso(-60e3), duration_minutes: 30, is_remedial: true, allowed_student_ids: [P.student2], remedial_score_policy: 'HIGHEST' }, 'guru')
+    check('P1 buat remedial UTS 200', r.status === 200 && r.data?.id, r)
+    const oeRem = r.data.id
+    r = await api('PUT', `/api/official-exams/${oeRem}`, { is_active: true }, 'guru')
+    check('P2 publish remedial UTS 200', r.status === 200, r)
+    r = await api('POST', '/api/official-exam-submissions', { exam_id: oeRem }, 's1')
+    check('P3 siswa di luar allowed → 403', r.status === 403, r)
+    r = await api('POST', '/api/official-exam-submissions', { exam_id: oeRem }, 's2')
+    check('P4 siswa allowed start 200', r.status === 200 && r.data?.id, r)
+    const oeSubRem = r.data.id
+    const { data: remOQs } = await supabase.from('official_exam_questions').select('id, correct_answer, question_type').eq('exam_id', oeRem)
+    r = await api('PUT', '/api/official-exam-submissions', { submission_id: oeSubRem, answers: remOQs.map(q => ({ question_id: q.id, answer: q.question_type === 'ESSAY' ? 'V=IR' : q.correct_answer })), submit: true }, 's2')
+    check('P5 submit remedial UTS 200', r.status === 200 && r.data?.is_submitted === true, r)
+    // merge di GET submissions guru: skor S2 pada oeA harus merged (rendah → tinggi)
+    r = await api('GET', `/api/official-exam-submissions?exam_id=${oeA}`, null, 'guru')
+    const s2OeSub = (r.data || []).find(s => (s.student?.id || s.student_id) === P.student2)
+    check('P6 skor S2 merged di GET submissions (flag merged_from_remedial)', s2OeSub?.merged_from_remedial === true, s2OeSub && { total: s2OeSub.total_score, merged: s2OeSub.merged_from_remedial })
+    // skor asli siswa 2 (jawaban salah semua) di DB = 0; esai remedial belum dikoreksi
+    // guru (auto-grade 0) → remedial efektif = skor PG saja. Merge HIGHEST(0, pg) = pg.
+    const { data: s2Base } = await supabase.from('official_exam_submissions').select('total_score').eq('exam_id', oeA).eq('student_id', P.student2).single()
+    check('P7 skor merged > skor asli (HIGHEST bekerja)', (s2OeSub?.total_score ?? 0) > (s2Base?.total_score ?? 0), { base: s2Base?.total_score, merged: s2OeSub?.total_score })
+
+    console.log('\n== Q. Monitor Live: endpoint sehat ==')
+    r = await api('GET', `/api/exam-submissions/monitor?exam_id=${exam1}`, null, 'guru')
+    check('Q1 monitor ulangan 200 + ada submission', r.status === 200 && Array.isArray(r.data?.submissions || r.data?.students || r.data), typeof r.data === 'object' && Object.keys(r.data || {}).slice(0, 8))
+    r = await api('GET', `/api/official-exam-submissions/monitor?exam_id=${oeA}`, null, 'guru')
+    check('Q2 monitor UTS/UAS 200 + ada submission', r.status === 200 && Array.isArray(r.data?.submissions || r.data?.students || r.data), typeof r.data === 'object' && Object.keys(r.data || {}).slice(0, 8))
+    r = await api('GET', `/api/exam-submissions/monitor?exam_id=${exam1}`, null, 's1')
+    check('Q3 monitor ditolak untuk siswa (401/403)', r.status === 401 || r.status === 403, r)
+
     console.log(`\n=== HASIL: ${PASS} PASS, ${FAIL} FAIL ===`)
     if (process.env.SMOKE_KEEP !== '1') {
         console.log('\n== CLEANUP ==')
