@@ -9,7 +9,7 @@
 require('./helpers.cjs').loadEnvGuarded()
 const { createClient } = require('@supabase/supabase-js')
 const { spawn } = require('child_process')
-const bcrypt = require('bcryptjs')
+const bcrypt = require('bcrypt')
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 const PORT = 3100
@@ -53,13 +53,22 @@ async function main() {
     const runId = Date.now() % 100000
     const U = `lq_${runId}`
 
-    const { data: srcQuiz } = await supabase.from('quizzes').select('*').limit(1).single()
+    // Template quiz WAJIB punya TA (pembatas kelas) — siswa fixture ditaruh di
+    // kelas yang sama dengan TA quiz, kalau tidak POST start 403 "bukan kelas Anda".
+    const { data: srcQuiz } = await supabase
+        .from('quizzes')
+        .select('*, ta:teaching_assignments(class_id)')
+        .not('teaching_assignment_id', 'is', null)
+        .limit(1)
+        .single()
+    const taClass = Array.isArray(srcQuiz?.ta) ? srcQuiz.ta[0]?.class_id : srcQuiz?.ta?.class_id
+    if (!taClass) throw new Error('staging tidak punya quiz template dengan teaching_assignment — seed baseline STG01 belum ada')
     const { data: srcQ } = await supabase.from('quiz_questions').select('*').limit(1).single()
     const { data: school } = await supabase.from('schools').select('id').limit(1).single()
     const { data: studT } = await supabase.from('students').select('*').limit(1).single()
 
     const qzRow = { ...srcQuiz }
-    delete qzRow.id; delete qzRow.created_at
+    delete qzRow.id; delete qzRow.created_at; delete qzRow.ta // ta = embed, bukan kolom
     Object.assign(qzRow, { title: `${U} Kuis`, is_active: true, duration_minutes: 30, deadline: null, is_remedial: false, allowed_student_ids: [] })
     const { data: quiz } = await supabase.from('quizzes').insert(qzRow).select().single()
     created.quizzes.push(quiz.id)
@@ -81,7 +90,7 @@ async function main() {
         const { data: u } = await supabase.from('users').insert({ username: `${U}_${pad}`, full_name: `${U} Siswa ${pad}`, password_hash: passHash, role: 'SISWA', school_id: school.id }).select().single()
         const stuRow = { ...studT }
         delete stuRow.id; delete stuRow.created_at
-        Object.assign(stuRow, { user_id: u.id, nis: `${runId}${pad}`, school_id: studT?.school_id ?? school.id })
+        Object.assign(stuRow, { user_id: u.id, nis: `${runId}${pad}`, school_id: studT?.school_id ?? school.id, class_id: taClass })
         const { data: st } = await supabase.from('students').insert(stuRow).select().single()
         if (!st) throw new Error('gagal membuat student fixture')
         const { data: se } = await supabase.from('sessions').insert({ user_id: u.id, token: `${U}_tok_${pad}`, expires_at: new Date(Date.now() + 86400e3).toISOString() }).select().single()

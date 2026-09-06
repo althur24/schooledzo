@@ -11,7 +11,7 @@
  */
 require('./helpers.cjs').loadEnvGuarded()
 const { createClient } = require('@supabase/supabase-js')
-const bcrypt = require('bcryptjs')
+const bcrypt = require('bcrypt')
 const { assertMin, mustInsert, spawnServer, stopServerSafe, waitPortUp } = require('./helpers.cjs')
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -22,7 +22,7 @@ const DURATION_MS = 60 * 1000      // lama fase mengerjakan
 const SAVE_EVERY = [2000, 5000]    // autosave tiap 2-5 dtk (lebih rapat dari produksi: smoke)
 const NOTIF_EVERY_MS = 15000
 
-const metrics = { save: [], notif: [], start: [], submit: [], monitor: [], errors: 0, total: 0 }
+const metrics = { save: [], notif: [], start: [], submit: [], monitor: [], errors: 0, total: 0, statusHist: {} }
 function record(bucket, ms) { metrics[bucket].push(ms) }
 function pct(arr, p) { if (!arr.length) return -1; const s = [...arr].sort((a, b) => a - b); return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))]) }
 function fmtPct(arr, p) { return arr.length ? `${pct(arr, p)}ms` : 'n/a (n=0)' }
@@ -51,6 +51,7 @@ async function api(path, opts, token, bucket) {
         })
         const ms = Date.now() - t0
         metrics.total++
+        metrics.statusHist[res.status] = (metrics.statusHist[res.status] || 0) + 1
         if (res.status >= 500) metrics.errors++
         if (bucket) record(bucket, ms)
         let body = null
@@ -58,6 +59,7 @@ async function api(path, opts, token, bucket) {
         return { status: res.status, body }
     } catch (e) {
         metrics.total++; metrics.errors++
+        metrics.statusHist[`${e?.cause?.code || e?.code || 'fetch_error'}`] = (metrics.statusHist[`${e?.cause?.code || e?.code || 'fetch_error'}`] || 0) + 1
         return { status: 0, body: null }
     }
 }
@@ -179,6 +181,7 @@ async function main() {
     const errRate = metrics.total ? (metrics.errors / metrics.total * 100).toFixed(2) : '0'
     console.log('\n===== HASIL SMOKE 50 VU =====')
     console.log(`total request : ${metrics.total} (error ${metrics.errors} = ${errRate}%)`)
+    console.log(`histogram status: ${JSON.stringify(metrics.statusHist)}`)
     console.log(`start_exam    : n=${metrics.start.length} p50=${fmtPct(metrics.start, .5)} p95=${fmtPct(metrics.start, .95)}`)
     console.log(`save_answer   : n=${metrics.save.length} p50=${fmtPct(metrics.save, .5)} p95=${fmtPct(metrics.save, .95)}  (target p95<800)`)
     console.log(`notifications : n=${metrics.notif.length} p50=${fmtPct(metrics.notif, .5)} p95=${fmtPct(metrics.notif, .95)}  (target p95<300)`)

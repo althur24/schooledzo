@@ -1,9 +1,10 @@
 /**
  * Cleanup load test (versi Node dari loadtest/cleanup_loadtest.sql).
  * Menghapus SEMUA data bertanda lt_/LOADTEST (UUID prefix 7e57xx) dalam urutan FK-safe.
- * Jalankan: node loadtest/cleanup_loadtest.cjs
+ * Jalankan: node loadtest/cleanup_loadtest.cjs                       (production .env.local)
+ *           ENV_FILE=.env.staging node loadtest/cleanup_loadtest.cjs (staging)
  */
-require('dotenv').config({ path: '.env.local' })
+require('./e2e/helpers.cjs').loadEnvGuarded()
 const { createClient } = require('@supabase/supabase-js')
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 

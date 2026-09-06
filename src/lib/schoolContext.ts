@@ -27,11 +27,15 @@ export async function getSchoolContext(
         throw new AuthError('Unauthorized', 401)
     }
 
-    // cachedSession: micro-cache 30 dtk — hanya untuk endpoint polling
-    // frekuensi tinggi yang tidak sensitif (mis. notifikasi)
-    const user = opts?.cachedSession
-        ? await validateSessionCached(token)
-        : await validateSession(token)
+    // Micro-cache 30 dtk DEFAULT untuk semua route: dashboard siswa = ~15
+    // endpoint yang masing-masing tadinya 1 query session → kini 1 query per
+    // 30 dtk per user. 1000 siswa serentak = ~15.000 query session dihemat.
+    // Trade-off: lock akun / logout berlaku paling lambat 30 dtk (logout
+    // menghapus cache-nya sendiri via deleteSession). Route sensitif yang
+    // butuh data segar bisa pass { cachedSession: false }.
+    const user = opts?.cachedSession === false
+        ? await validateSession(token)
+        : await validateSessionCached(token)
     if (!user) {
         throw new AuthError('Session expired', 401)
     }

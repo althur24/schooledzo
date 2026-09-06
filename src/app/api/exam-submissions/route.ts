@@ -8,37 +8,7 @@ import { resolveWindowExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/li
 import { forceCloseExamSubmission } from '@/lib/autoCloseExpired'
 import { canManageExam } from '@/lib/teacherScope'
 import { fetchAllRows } from '@/lib/fetchAllRows'
-
-// Helper: send notification to teacher when student submits exam
-async function notifyTeacherExamSubmission(examId: string, studentName: string, isForceSubmit: boolean = false) {
-    try {
-        const { data: exam } = await supabase
-            .from('exams')
-            .select(`
-                title,
-                teaching_assignment:teaching_assignments(
-                    teacher:teachers(user_id)
-                )
-            `)
-            .eq('id', examId)
-            .single()
-
-        const teacherUserId = (exam?.teaching_assignment as any)?.teacher?.user_id
-        if (teacherUserId) {
-            await supabase.from('notifications').insert({
-                user_id: teacherUserId,
-                type: 'SUBMISSION_ULANGAN',
-                title: isForceSubmit ? 'Ulangan Dikumpulkan Otomatis' : 'Ulangan Dikumpulkan',
-                message: isForceSubmit
-                    ? `${studentName} ulangan "${exam?.title}" dikumpulkan otomatis karena pelanggaran`
-                    : `${studentName} telah mengumpulkan ulangan "${exam?.title}"`,
-                link: `/dashboard/guru/ulangan`
-            })
-        }
-    } catch (notifError) {
-        console.error('Error sending exam submission notification:', notifError)
-    }
-}
+import { bufferTeacherSubmissionNotification } from '@/lib/teacherNotifyBuffer'
 
 // GET exam submissions
 export async function GET(request: NextRequest) {
@@ -686,8 +656,8 @@ export async function PUT(request: NextRequest) {
                     })
                     .eq('id', submission_id)
 
-                // Notify teacher about force submission
-                await notifyTeacherExamSubmission(currentSubmission.exam_id, user.full_name || 'Siswa', true)
+                // Notify teacher about force submission (diagregasi per menit — lihat teacherNotifyBuffer)
+                bufferTeacherSubmissionNotification('exam', currentSubmission.exam_id, user.full_name || 'Siswa', true)
 
                 return NextResponse.json({
                     force_submitted: true,
@@ -780,8 +750,8 @@ export async function PUT(request: NextRequest) {
 
             if (error) throw error
 
-            // Notify teacher about exam submission
-            await notifyTeacherExamSubmission(currentSubmission.exam_id, user.full_name || 'Siswa')
+            // Notify teacher about exam submission (diagregasi per menit — lihat teacherNotifyBuffer)
+            bufferTeacherSubmissionNotification('exam', currentSubmission.exam_id, user.full_name || 'Siswa')
 
             const examConfig = currentSubmission.exam || {}
             const showImmediately = examConfig.show_results_immediately ?? true

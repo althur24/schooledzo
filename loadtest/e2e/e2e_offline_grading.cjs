@@ -27,7 +27,7 @@
  */
 require('./helpers.cjs').loadEnvGuarded()
 const { createClient } = require('@supabase/supabase-js')
-const bcrypt = require('bcryptjs')
+const bcrypt = require('bcrypt')
 const { mustInsert, makeApi, spawnServer, stopServerSafe, waitPortUp, assertServerDb } = require('./helpers.cjs')
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)

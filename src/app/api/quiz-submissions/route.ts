@@ -7,35 +7,7 @@ import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { resolveQuizExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/examExpiry'
 import { forceCloseQuizSubmission } from '@/lib/autoCloseExpired'
 import { fetchAllRows } from '@/lib/fetchAllRows'
-
-// Helper function for sending notifications
-async function sendQuizSubmissionNotification(quizId: string, userFullName: string) {
-    try {
-        const { data: quiz } = await supabase
-            .from('quizzes')
-            .select(`
-                title,
-                teaching_assignment:teaching_assignments(
-                    teacher:teachers(user_id)
-                )
-            `)
-            .eq('id', quizId)
-            .single()
-
-        const teacherUserId = (quiz?.teaching_assignment as any)?.teacher?.user_id
-        if (teacherUserId) {
-            await supabase.from('notifications').insert({
-                user_id: teacherUserId,
-                type: 'SUBMISSION_KUIS',
-                title: 'Kuis Dikumpulkan',
-                message: `${userFullName} telah mengumpulkan kuis "${quiz?.title}"`,
-                link: `/dashboard/guru/kuis`
-            })
-        }
-    } catch (notifError) {
-        console.error('Error sending quiz submission notification:', notifError)
-    }
-}
+import { bufferTeacherSubmissionNotification } from '@/lib/teacherNotifyBuffer'
 
 // Helper: notify student their quiz result is out (auto-graded only)
 async function sendQuizResultNotification(quizId: string, studentUserId: string, totalScore: number, maxScore: number) {
@@ -475,7 +447,25 @@ export async function POST(request: NextRequest) {
             if (!submit) {
                 const updateData: any = {}
                 if (answers && answers.length > 0) {
-                    updateData.answers = gradedAnswers.map(({ is_correct: _ic, score: _sc, ...rest }) => rest)
+                    // MERGE DELTA: client mengirim hanya jawaban yang berubah
+                    // sejak save terakhir (lihat halaman kuis). Kolom JSONB
+                    // di-merge per question_id — jawaban lama tidak tertimpa.
+                    // Client yang mengirim full set (resync offline) tetap
+                    // kompatibel: superset menang per soal.
+                    const incoming = gradedAnswers.map(({ is_correct: _ic, score: _sc, ...rest }) => rest)
+                    const existingArr = Array.isArray(existing.answers) ? existing.answers as Record<string, unknown>[] : []
+                    const merged = [...existingArr]
+                    const idxByQuestion = new Map(merged.map((a, i) => [a?.question_id, i]))
+                    for (const ans of incoming) {
+                        const i = idxByQuestion.get(ans.question_id)
+                        if (i === undefined) {
+                            idxByQuestion.set(ans.question_id, merged.length)
+                            merged.push(ans)
+                        } else {
+                            merged[i] = ans
+                        }
+                    }
+                    updateData.answers = merged
                 }
                 if (Object.keys(updateData).length > 0) {
                     await supabase
@@ -502,8 +492,8 @@ export async function POST(request: NextRequest) {
 
             if (error) throw error
 
-            // Notify
-            await sendQuizSubmissionNotification(quiz_id, user.full_name || 'Siswa')
+            // Notify (guru: diagregasi per menit — lihat teacherNotifyBuffer)
+            bufferTeacherSubmissionNotification('quiz', quiz_id, user.full_name || 'Siswa')
             if (allGraded) await sendQuizResultNotification(quiz_id, user.id, totalScore, maxScore)
 
             return NextResponse.json({ ...data, ...contract })
@@ -566,9 +556,9 @@ export async function POST(request: NextRequest) {
             throw error
         }
 
-        // Notify for new submission if submitted
+        // Notify for new submission if submitted (guru: diagregasi — teacherNotifyBuffer)
         if (submit) {
-            await sendQuizSubmissionNotification(quiz_id, user.full_name || 'Siswa')
+            bufferTeacherSubmissionNotification('quiz', quiz_id, user.full_name || 'Siswa')
             if (allGraded) await sendQuizResultNotification(quiz_id, user.id, totalScore, maxScore)
         }
 

@@ -86,6 +86,11 @@ export default function KerjakanKuisPage() {
     const timerRef = useRef<NodeJS.Timeout | null>(null)
     const answersRef = useRef(answers)
 
+    // Delta autosave: hanya soal yang berubah sejak flush sukses terakhir yang
+    // dikirim ke server (bukan seluruh set — kuis 50 soal essay berarti
+    // rewrite JSONB besar tiap 1,5 dtk per siswa). Server merge per question_id.
+    const dirtyQuestionsRef = useRef<Set<string>>(new Set())
+
     useEffect(() => {
         answersRef.current = answers
     }, [answers])
@@ -162,7 +167,23 @@ export default function KerjakanKuisPage() {
     const flushSaveToServer = async () => {
         const current = answersRef.current
         // Submission dibuat saat halaman dibuka (startTimeRef terisi) — tanpa itu belum ada yang bisa disimpan
-        if (!startTimeRef.current || Object.keys(current).length === 0) return
+        if (!startTimeRef.current) return
+
+        // Delta: kirim hanya soal dirty. Set dirty kosong (mis. tepat setelah
+        // load sebelum resume) → fallback kirim semua (superset, server merge aman).
+        const dirty = dirtyQuestionsRef.current
+        let payload: { question_id: string; answer: string }[]
+        let sentIds: Set<string> | null = null
+        if (dirty.size > 0) {
+            sentIds = new Set(dirty)
+            payload = Array.from(sentIds)
+                .filter(qId => current[qId] !== undefined)
+                .map(qId => ({ question_id: qId, answer: current[qId] }))
+        } else {
+            payload = Object.entries(current).map(([question_id, answer]) => ({ question_id, answer }))
+        }
+        if (payload.length === 0) return
+
         setSaveStatus('saving')
         try {
             const res = await fetch('/api/quiz-submissions', {
@@ -170,7 +191,7 @@ export default function KerjakanKuisPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     quiz_id: quizId,
-                    answers: Object.entries(current).map(([question_id, answer]) => ({ question_id, answer }))
+                    answers: payload
                 })
             })
             if (res.status === 409) {
@@ -188,16 +209,27 @@ export default function KerjakanKuisPage() {
                 setSaveStatus('idle')
                 return
             }
+            // Flush tersimpan (atau submission final — dirty tak relevan lagi):
+            // hapus hanya soal yang nilainya MASIH sama dengan yang terkirim.
+            // Soal yang diubah user selama flush in-flight tetap dirty (dikirim
+            // ulang oleh flush berikutnya).
+            if (res.ok && sentIds) {
+                const nowAnswers = answersRef.current
+                for (const p of payload) {
+                    if (nowAnswers[p.question_id] === p.answer) dirty.delete(p.question_id)
+                }
+            }
             setSaveStatus(res.ok ? 'saved' : 'error')
         } catch {
-            setSaveStatus('error') // jawaban lokal aman; perubahan berikutnya / reconnect akan mengirim ulang
+            setSaveStatus('error') // jawaban lokal aman; dirty bertahan → perubahan berikutnya / reconnect mengirim ulang
         }
     }
 
     // Satu pintu perubahan jawaban: state + localStorage + jadwalkan autosave server
-    const applyAnswersChange = (newAnswers: Record<string, string>) => {
+    const applyAnswersChange = (newAnswers: Record<string, string>, changedQuestionId?: string) => {
         setAnswers(newAnswers)
         saveAnswersToLocal(newAnswers)
+        if (changedQuestionId) dirtyQuestionsRef.current.add(changedQuestionId)
         scheduleSaveToServer()
     }
 
@@ -491,6 +523,10 @@ export default function KerjakanKuisPage() {
                 timeRemaining: remaining ?? 0
             })
             setAnswers(mergedAnswers)
+            // Full resync: setelah resume, semua jawaban merge dianggap dirty —
+            // autosave pertama berikutnya mengirim set lengkap (meng-cover kasus
+            // autosave gagal offline sebelumnya → server tertinggal).
+            dirtyQuestionsRef.current = new Set(Object.keys(mergedAnswers))
             setStartTime(existingSub.started_at)
             if (endsAtRef.current !== null) setTimeLeft(remaining) // Set timeLeft so modal shows live timer
 
@@ -896,8 +932,8 @@ export default function KerjakanKuisPage() {
                                                     <StudentAnswerInput
                                                         question={q}
                                                         value={answers[q.id]}
-                                                        onChange={(val) => { applyAnswersChange({ ...answers, [q.id]: val }) }}
-                                                        onChangeImmediate={(val) => { applyAnswersChange({ ...answers, [q.id]: val }) }}
+                                                        onChange={(val) => { applyAnswersChange({ ...answers, [q.id]: val }, q.id) }}
+                                                        onChangeImmediate={(val) => { applyAnswersChange({ ...answers, [q.id]: val }, q.id) }}
                                                     />
                                                 </div>
                                             )
@@ -940,8 +976,8 @@ export default function KerjakanKuisPage() {
                                     <StudentAnswerInput
                                         question={q}
                                         value={answers[q.id]}
-                                        onChange={(val) => { applyAnswersChange({ ...answers, [q.id]: val }) }}
-                                        onChangeImmediate={(val) => { applyAnswersChange({ ...answers, [q.id]: val }) }}
+                                        onChange={(val) => { applyAnswersChange({ ...answers, [q.id]: val }, q.id) }}
+                                        onChangeImmediate={(val) => { applyAnswersChange({ ...answers, [q.id]: val }, q.id) }}
                                     />
                                 </div>
                             )

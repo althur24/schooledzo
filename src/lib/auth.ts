@@ -1,4 +1,9 @@
-import bcrypt from 'bcryptjs'
+// bcrypt NATIVE (C++, async via libuv threadpool) — bukan bcryptjs (pure JS).
+// bcryptjs menjalankan compare (~60-100ms) di event loop: 1000 login serentak
+// jam 07:30 mengunci seluruh server ±100 dtk. Versi native berjalan di
+// threadpool sehingga event loop tetap melayani request lain.
+// Format hash $2a/$b$ kompatibel penuh dengan hash lama bcryptjs di DB.
+import bcrypt from 'bcrypt'
 import { supabaseAdmin as supabase } from './supabase'
 import { User, Session, AuthUser } from './types'
 
@@ -55,11 +60,14 @@ export async function createSession(userId: string): Promise<string | null> {
     return token
 }
 
-// In-process micro-cache untuk validasi session endpoint polling frekuensi
-// tinggi (notif dibell tiap 60 dtk per user). Trade-off: perubahan lock/logout
-// berlaku paling lambat TTL di bawah — hanya dipakai route tidak-sensitif.
+// In-process micro-cache untuk validasi session. DEFAULT untuk semua API route
+// (via getSchoolContext): dashboard siswa memanggil ~15 endpoint sekaligus —
+// tanpa cache itu = 15 query sessions ber-embed JOIN per page load; dengan
+// 1000 siswa serentak = puluhan ribu query hanya untuk auth.
+// Trade-off: lock/logout berlaku paling lambat TTL di bawah (logout instan —
+// deleteSession menghapus entry cache token itu).
 const SESSION_CACHE_TTL_MS = 30_000
-const SESSION_CACHE_MAX = 2000
+const SESSION_CACHE_MAX = 5000
 const sessionCache = new Map<string, { user: AuthUser; expiresAt: number }>()
 
 export async function validateSessionCached(token: string): Promise<AuthUser | null> {

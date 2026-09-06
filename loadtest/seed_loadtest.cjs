@@ -1,13 +1,13 @@
 /**
  * Seeder load test (versi Node dari loadtest/seed_loadtest.sql — hasil identik,
  * UUID deterministik prefix 7e57xx, token lt_token_0001..1000).
- * Dipakai karena kita tidak punya akses SQL Editor/psql dari sini.
  *
- * Jalankan: node loadtest/seed_loadtest.cjs
- * Bersihkan: node loadtest/cleanup_loadtest.cjs
+ * Jalankan: node loadtest/seed_loadtest.cjs                       (production .env.local)
+ *           ENV_FILE=.env.staging node loadtest/seed_loadtest.cjs (staging)
+ * Bersihkan: node loadtest/cleanup_loadtest.cjs (dengan ENV_FILE yang sama)
  * Idempotent (upsert by id, onConflict DO NOTHING).
  */
-require('dotenv').config({ path: '.env.local' })
+require('./e2e/helpers.cjs').loadEnvGuarded()
 const { createClient } = require('@supabase/supabase-js')
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 

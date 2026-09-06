@@ -53,20 +53,31 @@ for (let q = 1; q <= 50; q++) {
     FALLBACK_QUESTION_IDS.push('7e576000-0000-0000-0000-' + hex)
 }
 
+// Mode cepat (staging / CI): k6 run -e FAST=1 ... — ramp & hold dipersingkat
+// (total ±9 mnt, puncak 1000 VU tetap tercapai). Default: profil lengkap 22 mnt.
+const FAST = __ENV.FAST === '1'
+
 export const options = {
     scenarios: {
         tryout: {
             executor: 'ramping-vus',
             startVUs: 0,
-            stages: [
-                { duration: '3m', target: 250 },   // pemanasan
-                { duration: '4m', target: 750 },   // naik bertahap
-                { duration: '3m', target: 1000 },  // menuju puncak
-                { duration: '10m', target: 1000 }, // hold 1000 siswa
-                // ^ untuk simulasi penuh 30 menit: ubah jadi '30m'
-                //   dan sesuaikan EXAM_SECONDS
-                { duration: '2m', target: 0 },     // turun
-            ],
+            stages: FAST
+                ? [
+                    { duration: '1m', target: 500 },   // naik cepat
+                    { duration: '2m', target: 1000 },  // puncak 1000 siswa
+                    { duration: '5m', target: 1000 },  // hold 1000 siswa
+                    { duration: '1m', target: 0 },     // turun
+                ]
+                : [
+                    { duration: '3m', target: 250 },   // pemanasan
+                    { duration: '4m', target: 750 },   // naik bertahap
+                    { duration: '3m', target: 1000 },  // menuju puncak
+                    { duration: '10m', target: 1000 }, // hold 1000 siswa
+                    // ^ untuk simulasi penuh 30 menit: ubah jadi '30m'
+                    //   dan sesuaikan EXAM_SECONDS
+                    { duration: '2m', target: 0 },     // turun
+                ],
             gracefulRampDown: '30s',
         },
     },

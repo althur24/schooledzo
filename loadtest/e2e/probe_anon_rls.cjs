@@ -26,7 +26,7 @@
  */
 require('./helpers.cjs').loadEnvGuarded()
 const { createClient } = require('@supabase/supabase-js')
-const bcrypt = require('bcryptjs')
+const bcrypt = require('bcrypt')
 
 const anon = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
 const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)

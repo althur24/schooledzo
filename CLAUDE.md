@@ -11,6 +11,9 @@
 - Jumlah siswa virtual: `N_STUDENTS=300` (env, default 50)
 - `MONITOR=1` menambah 1 admin yang polling endpoint monitor tiap 15 dtk (mensimulasikan guru di halaman Monitor Live)
 - Guard `loadEnvGuarded()` di `loadtest/e2e/helpers.cjs` meng-abort script bila kombinasi env-file vs project-ref tidak cocok — jangan dihapus.
+- **`UV_THREADPOOL_SIZE=16` WAJIB saat load test** (dan di Railway production): bcrypt native jalan di libuv threadpool — default 4 thread membatasi ~50 login/dtk; 16 thread terbukti 1000 login/13,6 dtk (p95 3,5 dtk) di benchmark staging. Tanpa ini login serentak 07:30 akan mengantre.
+- Benchmark login 1000 siswa: `ENV_FILE=.env.staging UV_THREADPOOL_SIZE=16 node loadtest/e2e/load_login.cjs` (varian: `WAVE_MS=10000`, `SYNC=1`). Rate limit login hanya menghitung percobaan GAGAL (200 gagal/mnt/IP + 10 gagal/10mnt/username) — login sukses massal dari 1 IP WiFi tidak terblok.
+- 1000 VU ujian serentak: seed `ENV_FILE=.env.staging node loadtest/seed_loadtest.cjs` → `set -a; source .env.staging; set +a; UV_THREADPOOL_SIZE=16 npx next start -p 3000` (env WAJIB tersource — tanpa itu next start auto-load .env.local production!) → `k6 run -e BASE_URL=http://localhost:3000 -e FAST=1 -e EXAM_SECONDS=180 loadtest/tryout.js` → cleanup `ENV_FILE=.env.staging node loadtest/cleanup_loadtest.cjs`.
 - **Jangan pernah menimpa isi `.env.local` dengan key staging** (atau sebaliknya).
 - Migrasi ke staging: `supabase db push --db-url "postgres://postgres:<pw>@db.vkkgnredrfqqraonynte.supabase.co:5432/postgres"` (hostname `db.<ref>` — region-agnostik; pooler ap-south-1 tidak mengenal staging).
 - Schema staging dibuat dari dump production (schema-only, tanpa data) + seed baseline `STAGING SCHOOL`. Template student username: `stg_template_siswa`.
