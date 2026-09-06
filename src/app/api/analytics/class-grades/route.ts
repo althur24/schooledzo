@@ -160,9 +160,10 @@ export async function GET(request: NextRequest) {
         )
 
         // Get official exams (UTS/UAS) for this academic year
+        // (is_remedial + remedial_for_id dibutuhkan untuk merge nilai remedial)
         const { data: officialExams } = await supabase
             .from('official_exams')
-            .select('id, subject_id, target_class_ids')
+            .select('id, subject_id, target_class_ids, is_remedial, remedial_for_id')
             .eq('school_id', schoolId)
             .eq('academic_year_id', academicYearId)
 
@@ -285,27 +286,41 @@ export async function GET(request: NextRequest) {
             addGrade(ta.class_id, ta.subject_id, es.student_id, examScore)
         })
 
-        // Process official exam (UTS/UAS) submissions
+        // Process official exam (UTS/UAS) submissions.
+        // Remedial merge: nilai remedial MENGGANTIKAN nilai asli per (siswa,
+        // ujian dasar) — diambil yang tertinggi (pola sama dengan /api/grades).
+        // Tanpa ini siswa remedial menyumbang 2 skor UTS/UAS ke rata-rata kelas.
+        const officialBest = new Map<string, { studentId: string, baseExamId: string, score: number }>()
         officialExamSubmissions?.forEach(os => {
-            const score = os.max_score > 0
-                ? (os.total_score / os.max_score) * 100
-                : os.total_score
-
-            if (score === null || score === undefined) return
-
             const officialExam = officialExams?.find(oe => oe.id === os.exam_id)
             if (!officialExam) return
 
+            const score = os.max_score > 0
+                ? (os.total_score / os.max_score) * 100
+                : os.total_score
+            if (score === null || score === undefined) return
+
+            const baseExamId = (officialExam as any).remedial_for_id || officialExam.id
+            const key = `${os.student_id}:${baseExamId}`
+            const prev = officialBest.get(key)
+            if (!prev || score > prev.score) {
+                officialBest.set(key, { studentId: os.student_id, baseExamId, score })
+            }
+        })
+        officialBest.forEach(({ studentId, baseExamId, score }) => {
+            const baseExam = officialExams?.find(oe => oe.id === baseExamId)
+            if (!baseExam) return
+
             // Resolve the student's class IN THIS YEAR (not their current class), so a
             // student who has since moved up is still attributed to the right class.
-            const studentClass = studentClassByYear.get(os.student_id)
+            const studentClass = studentClassByYear.get(studentId)
             if (!studentClass) return
 
             // Only process if the student's class that year is among the exam's target classes
-            if (!officialExam.target_class_ids?.includes(studentClass)) return
+            if (!baseExam.target_class_ids?.includes(studentClass)) return
 
             // Attribute the grade to that class + the exam's subject
-            addGrade(studentClass, officialExam.subject_id, os.student_id, score)
+            addGrade(studentClass, baseExam.subject_id, studentId, score)
         })
 
         // Build result

@@ -60,6 +60,9 @@ async function main() {
     const guruA = await mkGuru('guruA') // mengajar mapel di kedua kelas
     const guruB = await mkGuru('guruB') // mengajar mapel LAIN — untuk uji scope 403
 
+    const adminUser = await mustInsert(supabase, 'users', { username: `${U}_admin`, full_name: `${U} Admin`, password_hash: passHash, role: 'ADMIN', school_id: school.id, must_change_password: false, is_locked: false }, 'user admin')
+    created.users.push(adminUser.id)
+
     const classA = await mustInsert(supabase, 'classes', { name: `${U} 9A`, academic_year_id: year.id, grade_level: 3, school_level: 'SMP' }, 'class A')
     const classB = await mustInsert(supabase, 'classes', { name: `${U} 9B`, academic_year_id: year.id, grade_level: 3, school_level: 'SMP' }, 'class B')
     created.classes.push(classA.id, classB.id)
@@ -220,6 +223,51 @@ async function main() {
     check('siswa NON-remedial TIDAK dapat notifikasi', !notifSiswaA2)
     check('judul notifikasi pakai label kustom ("UJIAN TENGAH")', notifSiswaA?.title?.includes('UJIAN TENGAH'), notifSiswaA?.title || '-')
     check('pesan role-aware: "Guru telah membuat"', notifSiswaA?.message?.includes('Guru telah membuat'), (notifSiswaA?.message || '').slice(0, 60))
+
+    // ════════ [5] PENILAIAN: remedial merge di /api/grades ════════
+    console.log('\n[5] Remedial merge di /api/grades (rekap/rapor/nilai siswa)')
+    // SiswaA menyelesaikan remedial dengan nilai 80 (asli 40) — via service-role
+    // (jalur penilaian sudah teruji di smoke_features [7]; fokus test ini pada merge)
+    const { data: remedialSub } = await supabase
+        .from('official_exam_submissions')
+        .select('id')
+        .eq('exam_id', remedialExam.id)
+        .eq('student_id', siswaA.student.id)
+        .maybeSingle()
+    await supabase
+        .from('official_exam_submissions')
+        .update({ is_submitted: true, is_graded: true, total_score: 80, max_score: 100, submitted_at: new Date().toISOString() })
+        .eq('id', remedialSub.id)
+
+    const tokAdmin = await doLogin(adminUser.username)
+    check('login admin', !!tokAdmin)
+    const gradesRes = await api(`/api/grades?academic_year_id=${year.id}`, tokAdmin)
+    const allGrades = gradesRes.ok ? await gradesRes.json() : []
+    const siswaAUtsGrades = allGrades.filter((g) =>
+        g.student_id === siswaA.student.id && g.subject_id === subject.id && g.grade_type === 'UTS')
+    check('siswa A punya TEPAT 1 nilai UTS (merge, bukan 40+80 ganda)', siswaAUtsGrades.length === 1, `n=${siswaAUtsGrades.length}`)
+    check('nilai UTS siswa A = 80 (tertinggi menang)', siswaAUtsGrades[0]?.score === 80, `score=${siswaAUtsGrades[0]?.score}`)
+    const siswaA2UtsGrades = allGrades.filter((g) =>
+        g.student_id === siswaA2.student.id && g.subject_id === subject.id && g.grade_type === 'UTS')
+    check('siswa non-remedial tetap 1 nilai (90)', siswaA2UtsGrades.length === 1 && siswaA2UtsGrades[0]?.score === 90)
+
+    // ════════ [6] ANALITIK: grade_count tidak ganda ════════
+    console.log('\n[6] Remedial merge di /api/analytics/class-grades')
+    const analyticsRes = await api(`/api/analytics/class-grades?academic_year_id=${year.id}`, tokAdmin)
+    const analytics = analyticsRes.ok ? await analyticsRes.json() : []
+    const classAAnalytics = analytics.find((c) => c.class_name === `${U} 9A`)
+    const subjAnalytics = classAAnalytics?.subjects?.find((s) => s.subject_id === subject.id)
+    const siswaADetail = subjAnalytics?.students?.find((s) => s.student_id === siswaA.student.id)
+    check('analitik: siswa A grade_count = 1 (merge)', siswaADetail?.grade_count === 1, `count=${siswaADetail?.grade_count}`)
+    check('analitik: rata-rata siswa A = 80 (bukan (40+80)/2=60)', siswaADetail?.average === 80, `avg=${siswaADetail?.average}`)
+
+    // ════════ [7] MONITOR: roster remedial hanya siswa terdaftar ════════
+    console.log('\n[7] Monitor roster remedial terfilter')
+    const monitorRes = await api(`/api/official-exam-submissions/monitor?exam_id=${remedialExam.id}`, tokGuruA)
+    const monitorData = monitorRes.ok ? await monitorRes.json() : null
+    const monitorIds = (monitorData?.students || []).map((s) => s.id)
+    check('monitor: hanya 2 siswa terdaftar remedial (bukan seluruh kelas)', monitorIds.length === 2, `n=${monitorIds.length}`)
+    check('monitor: siswa non-remedial TIDAK ada di roster', !monitorIds.includes(siswaA2.student.id))
 
     // ---------- RINGKASAN ----------
     console.log('\n════ RINGKASAN ════')

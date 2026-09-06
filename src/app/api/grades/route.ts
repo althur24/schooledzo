@@ -246,6 +246,8 @@ export async function GET(request: NextRequest) {
                         id,
                         title,
                         exam_type,
+                        is_remedial,
+                        remedial_for_id,
                         subject_id,
                         subject:subjects(id, name),
                         school_id,
@@ -273,13 +275,32 @@ export async function GET(request: NextRequest) {
                         id: os.id,
                         student_id: os.student_id,
                         subject_id: subject?.id,
+                        exam_id: exam?.id,
+                        remedial_for_id: exam?.remedial_for_id || null,
                         grade_type: exam?.exam_type || 'UTS', // 'UTS' or 'UAS'
                         score: Math.round(score * 10) / 10,
                         subject: { name: subject?.name || '-' },
                         graded_at: os.submitted_at
                     }
                 })
-            allGrades.push(...mappedOfficial)
+
+            // Remedial merge (UTS/UAS) — identik pola merge kuis di atas: nilai
+            // remedial MENGGANTIKAN nilai asli (bukan menambah) per (siswa,
+            // ujian dasar), diambil yang tertinggi. Tanpa ini siswa remedial
+            // tercatat 2 nilai UTS/UAS di rekap/rapor dan rata-ratanya terseret.
+            const officialGroups = new Map<string, any[]>()
+            for (const m of mappedOfficial) {
+                const base = m.remedial_for_id || m.exam_id
+                const key = `${m.student_id}:${base}`
+                if (!officialGroups.has(key)) officialGroups.set(key, [])
+                officialGroups.get(key)!.push(m)
+            }
+            const mergedOfficial = Array.from(officialGroups.values()).map(group => {
+                const original = group.find(m => !m.remedial_for_id) || group[0]
+                const best = group.reduce((a, b) => (b.score > a.score ? b : a))
+                return { ...original, score: best.score, graded_at: best.graded_at }
+            })
+            allGrades.push(...mergedOfficial)
 
             return NextResponse.json(allGrades)
         }

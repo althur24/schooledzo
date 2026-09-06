@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
         const { data: exam, error: examError } = await supabase
             .from('official_exams')
             .select(`
-                id, title, exam_type, duration_minutes, start_time, window_end_time, is_active, max_violations, subject_id, target_class_ids,
+                id, title, exam_type, duration_minutes, start_time, window_end_time, is_active, max_violations, subject_id, target_class_ids, is_remedial, allowed_student_ids,
                 subject:subjects(id, name, kkm, school_id)
             `)
             .eq('id', examId)
@@ -140,6 +140,16 @@ export async function GET(request: NextRequest) {
                 user: s.user,
                 class: e.class
             })
+        }
+
+        // Remedial: roster dibatasi ke siswa yang memang terdaftar remedial —
+        // tanpa ini seluruh kelas target tampil sebagai "belum mulai", yang
+        // menyesatkan guru (mirror perilaku monitor ulangan harian).
+        if ((exam as any).is_remedial && Array.isArray((exam as any).allowed_student_ids) && (exam as any).allowed_student_ids.length > 0) {
+            const allowed = new Set<string>((exam as any).allowed_student_ids)
+            for (let i = students.length - 1; i >= 0; i--) {
+                if (!allowed.has(students[i].id)) students.splice(i, 1)
+            }
         }
 
         if (!students || students.length === 0) {

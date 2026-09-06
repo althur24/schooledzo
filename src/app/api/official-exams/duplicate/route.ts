@@ -58,11 +58,15 @@ export async function POST(request: NextRequest) {
         // Kepemilikan guru: boleh menyalin hanya bila dia mengajar mapel source exam
         // DAN semua kelas targetnya (kecuali target diganti — cek target baru)
         if (user.role === 'GURU') {
-            const targetClassIds = target_class_ids || sourceExam.target_class_ids
+            // Array kosong adalah truthy di JS — fallback ke target sumber agar
+            // tidak lahir ujian tanpa kelas target dari payload kosong.
+            const effectiveTarget = (Array.isArray(target_class_ids) && target_class_ids.length > 0)
+                ? target_class_ids
+                : sourceExam.target_class_ids
             const sourceOk = await canManageOfficialExam(user, sourceExam)
             const targetOk = sourceOk && await canManageOfficialExam(user, {
                 subject_id: sourceExam.subject_id,
-                target_class_ids: targetClassIds,
+                target_class_ids: effectiveTarget,
                 academic_year_id: sourceExam.academic_year_id
             })
             if (!sourceOk || !targetOk) {
@@ -81,7 +85,10 @@ export async function POST(request: NextRequest) {
             is_active: false, // Default to inactive/draft
             is_randomized: sourceExam.is_randomized,
             max_violations: sourceExam.max_violations,
-            target_class_ids: target_class_ids || sourceExam.target_class_ids,
+            // Array kosong (truthy) fallback ke target sumber — lihat catatan scope di atas
+            target_class_ids: (Array.isArray(target_class_ids) && target_class_ids.length > 0)
+                ? target_class_ids
+                : sourceExam.target_class_ids,
             subject_id: sourceExam.subject_id,
             school_id: sourceExam.school_id,
             academic_year_id: sourceExam.academic_year_id,

@@ -187,7 +187,7 @@ async function sendExamReminders(user: AuthUser, counter: Counter) {
         const labels = await getMenuLabelsForSchool(user.school_id)
         const { data: student } = await supabase
             .from('students')
-            .select('class_id')
+            .select('id, class_id')
             .eq('user_id', user.id)
             .single()
 
@@ -198,7 +198,7 @@ async function sendExamReminders(user: AuthUser, counter: Counter) {
 
             const { data: officialExams } = await supabase
                 .from('official_exams')
-                .select('id, title, exam_type, start_time, target_class_ids, subject:subjects(name)')
+                .select('id, title, exam_type, start_time, target_class_ids, is_remedial, allowed_student_ids, subject:subjects(name)')
                 .eq('school_id', user.school_id)
                 .eq('is_active', true) // Only remind if it's already an active (approved) exam
                 .gt('start_time', now.toISOString())
@@ -207,6 +207,11 @@ async function sendExamReminders(user: AuthUser, counter: Counter) {
             if (officialExams && officialExams.length > 0) {
                 for (const exam of officialExams) {
                     if (!exam.target_class_ids?.includes(student.class_id)) continue
+                    // Remedial: hanya siswa terdaftar yang diingatkan — siswa
+                    // lain di kelas target tidak ikut ujian remedial.
+                    if ((exam as any).is_remedial && Array.isArray((exam as any).allowed_student_ids) && (exam as any).allowed_student_ids.length > 0) {
+                        if (!(exam as any).allowed_student_ids.includes((student as any).id)) continue
+                    }
 
                     // Check if ANY notification for this exam was already sent recently (any type)
                     const { data: existing } = await supabase
@@ -245,7 +250,7 @@ async function sendScheduledExamNotifications(user: AuthUser, counter: Counter) 
         const labels = await getMenuLabelsForSchool(user.school_id)
         const { data: student } = await supabase
             .from('students')
-            .select('class_id')
+            .select('id, class_id')
             .eq('user_id', user.id)
             .single()
 
@@ -253,7 +258,7 @@ async function sendScheduledExamNotifications(user: AuthUser, counter: Counter) 
             const now = new Date()
             const { data: scheduledExams } = await supabase
                 .from('official_exams')
-                .select('id, title, exam_type, start_time, target_class_ids, subject:subjects(name)')
+                .select('id, title, exam_type, start_time, target_class_ids, is_remedial, allowed_student_ids, subject:subjects(name)')
                 .eq('school_id', user.school_id)
                 .eq('is_active', true)
                 .gt('start_time', now.toISOString())
@@ -261,6 +266,11 @@ async function sendScheduledExamNotifications(user: AuthUser, counter: Counter) 
             if (scheduledExams && scheduledExams.length > 0) {
                 for (const exam of scheduledExams) {
                     if (!exam.target_class_ids?.includes(student.class_id)) continue
+                    // Remedial: hanya siswa terdaftar yang diberi tahu — siswa
+                    // lain di kelas target tidak ikut ujian remedial.
+                    if ((exam as any).is_remedial && Array.isArray((exam as any).allowed_student_ids) && (exam as any).allowed_student_ids.length > 0) {
+                        if (!(exam as any).allowed_student_ids.includes((student as any).id)) continue
+                    }
 
                     // Check if ANY notification for this exam already exists (any type)
                     const { data: existingInit } = await supabase

@@ -233,10 +233,10 @@ export async function GET(request: NextRequest) {
 
         let officialExams: any[] = []
         let officialExamSubs: any[] = []
-        if (uniqueSubjectIds.length > 0 && classId) {
+        if (true) {
             const { data: oeData } = await supabase
                 .from('official_exams')
-                .select('id, title, exam_type, subject_id, target_class_ids')
+                .select('id, title, exam_type, subject_id, target_class_ids, is_remedial, remedial_for_id')
                 .eq('school_id', schoolId)
                 .in('subject_id', uniqueSubjectIds)
 
@@ -332,20 +332,30 @@ export async function GET(request: NextRequest) {
                     }
                 })
 
-            // Official exam scores (UTS/UAS)
+            // Official exam scores (UTS/UAS) — dengan remedial merge: nilai
+            // remedial MENGGANTIKAN nilai asli per ujian dasar, diambil yang
+            // tertinggi (pola sama dengan /api/grades). Tanpa ini siswa
+            // remedial menyumbang 2 skor UTS/UAS per mata pelajaran.
+            const officialBest = new Map<string, { score: number, oe: any }>()
             officialExamSubs
                 .filter((os: any) => os.student_id === studentId && os.is_graded && os.max_score > 0)
                 .forEach((os: any) => {
                     const oe = officialExams.find((e: any) => e.id === os.exam_id)
-                    if (oe && subjectScores[oe.subject_id]) {
-                        const score = Math.round((os.total_score / os.max_score) * 100)
-                        if (oe.exam_type === 'UTS') {
-                            subjectScores[oe.subject_id].uts_scores.push(score)
-                        } else {
-                            subjectScores[oe.subject_id].uas_scores.push(score)
-                        }
-                    }
+                    if (!oe) return
+                    const baseId = oe.remedial_for_id || oe.id
+                    const score = Math.round((os.total_score / os.max_score) * 100)
+                    const prev = officialBest.get(baseId)
+                    if (!prev || score > prev.score) officialBest.set(baseId, { score, oe })
                 })
+            officialBest.forEach(({ score, oe }) => {
+                if (subjectScores[oe.subject_id]) {
+                    if (oe.exam_type === 'UTS') {
+                        subjectScores[oe.subject_id].uts_scores.push(score)
+                    } else {
+                        subjectScores[oe.subject_id].uas_scores.push(score)
+                    }
+                }
+            })
 
             return {
                 student_id: studentId,
