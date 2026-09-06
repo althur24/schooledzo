@@ -336,6 +336,14 @@ export default function TakeExamPage() {
             const examData = await examRes.json()
             const questionsData = await questionsRes.json()
 
+            // Abort bila soal gagal dimuat (mis. gate jadwal/kelas menolak) —
+            // tanpa ini POST start tetap jalan dan siswa masuk ujian 0 soal.
+            if (!questionsRes.ok || !Array.isArray(questionsData)) {
+                alert(typeof questionsData?.error === 'string' ? questionsData.error : `Gagal memuat soal ${labels.ulangan.toLowerCase()}`)
+                router.push('/dashboard/siswa/ulangan')
+                return
+            }
+
             setExam(examData)
 
             // Start submission

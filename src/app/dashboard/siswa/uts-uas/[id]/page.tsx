@@ -120,6 +120,14 @@ export default function TakeOfficialExamPage() {
             const examData = await examRes.json()
             const questionsData = await questionsRes.json()
 
+            // Abort bila soal gagal dimuat (mis. gate jadwal/kelas menolak) —
+            // tanpa ini POST start tetap jalan dan siswa masuk ujian 0 soal.
+            if (!questionsRes.ok || !Array.isArray(questionsData)) {
+                setAlertMessage(typeof questionsData?.error === 'string' ? questionsData.error : 'Gagal memuat soal ujian')
+                setTimeout(() => router.push('/dashboard/siswa/ulangan'), 2000)
+                return
+            }
+
             setExam(examData)
 
             // Start/resume submission

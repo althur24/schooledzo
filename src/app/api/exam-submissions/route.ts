@@ -714,17 +714,20 @@ export async function PUT(request: NextRequest) {
             // Build a lookup map for instant grading
             const questionMap = new Map(allQuestions.map(q => [q.id, q]))
 
-            // Cap payload: jumlah jawaban tidak mungkin melebihi jumlah soal ujian —
-            // array raksasa (script/spam/retry agresif) memakan bandwidth & pool DB
-            // saat 1000 siswa serentak.
-            if (answers.length > questionMap.size) {
-                return NextResponse.json({ error: 'Payload jawaban melebihi jumlah soal' }, { status: 400 })
-            }
-
             // Buang jawaban dengan question_id yang tidak ada di ujian ini —
             // tanpa filter, id arbitrer (ujian lain/script) jadi junk rows dan
             // meng-inflate answered_count di Monitor Live via RPC count.
+            // Filter juga menyelamatkan draft basi yang sah: jawaban soal yang
+            // dihapus guru (draft lama di localStorage siswa) lolos tanpa blokir.
             const validAnswers = answers.filter((ans: { question_id: string }) => questionMap.has(ans.question_id))
+
+            // Cap payload SETELAH filter junk: jumlah jawaban valid tidak mungkin
+            // melebihi jumlah soal — array raksasa (script/spam/retry agresif)
+            // memakan bandwidth & pool DB saat 1000 siswa serentak. Cap sebelum
+            // filter akan memblokir submit sah dengan draft basi (regresi N1).
+            if (validAnswers.length > questionMap.size) {
+                return NextResponse.json({ error: 'Payload jawaban melebihi jumlah soal' }, { status: 400 })
+            }
 
             // Grade all answers in memory
             const gradedAnswers = validAnswers.map((ans: { question_id: string; answer: string }) => {
