@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-const PUBLIC_PATHS = ['/login', '/api/auth', '/api/schools/public']
+const PUBLIC_PATHS = ['/login', '/api/auth', '/api/schools/public', '/api/ping']
 
 // Role-to-route mapping: which route prefixes each role is allowed to access
 const ROLE_ROUTE_RULES: Record<string, string[]> = {

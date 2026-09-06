@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import Link from 'next/link'
 import NotificationBell from '@/components/NotificationBell'
+import HeaderNetworkIndicator from '@/components/HeaderNetworkIndicator'
 import BottomNavigation from '@/components/BottomNavigation'
 import TutorialFAB from '@/components/TutorialFAB'
 import { Logout } from 'react-iconly'
@@ -287,6 +288,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
                         {/* User info */}
                         <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+                            <HeaderNetworkIndicator />
                             <NotificationBell />
                             <div className="hidden sm:flex flex-col items-end">
                                 <span className="text-[10px] text-slate-400 font-medium tracking-wide">Login sebagai</span>

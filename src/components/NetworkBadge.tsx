@@ -1,6 +1,7 @@
 'use client'
 
 import React from 'react'
+import WifiTierIcon, { type WifiTier } from '@/components/WifiTierIcon'
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -55,24 +56,13 @@ export default function NetworkBadge({ isOnline, saveStatus, latencyMs, showLabe
 
     return (
         <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg ${bg} ${color}`} title={title}>
-            <WifiIcon tier={tier} />
+            <WifiTierIcon tier={badgeTierToWifiTier(tier)} />
             {label && <span className="text-xs font-semibold hidden sm:inline">{label}</span>}
         </div>
     )
 }
 
-/** Ikon WiFi inline (3 busur + titik). Tanpa dependency tambahan. */
-function WifiIcon({ tier }: { tier: Tier }) {
-    const filled = tier === 'stable' ? 3 : tier === 'weak' ? 2 : 0
-    return (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M2 8.5C8 3.5 16 3.5 22 8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity={filled >= 3 ? 1 : 0.22} />
-            <path d="M5.5 12C9 9 15 9 18.5 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity={filled >= 2 ? 1 : 0.22} />
-            <path d="M9 15.5C10.5 14.3 13.5 14.3 15 15.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity={filled >= 1 ? 1 : 0.22} />
-            <circle cx="12" cy="19" r="1.6" fill="currentColor" />
-            {tier === 'offline' && (
-                <line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            )}
-        </svg>
-    )
+/** Peta tier badge ujian (3 tingkat) → tier ikon bersama (4 tingkat). */
+function badgeTierToWifiTier(tier: Tier): WifiTier {
+    return tier === 'stable' ? 'full' : tier === 'weak' ? 'two' : 'offline'
 }
