@@ -379,13 +379,17 @@ export async function DELETE(
             return NextResponse.json({ error: 'question_id required' }, { status: 400 })
         }
 
-        const { error } = await supabase
+        const { data: deleted, error } = await supabase
             .from('official_exam_questions')
             .delete()
             .eq('id', question_id)
             .eq('exam_id', id) // IDOR guard: soal harus milik ujian di URL, bukan ujian lain
+            .select()
 
         if (error) throw error
+        if (!deleted || deleted.length === 0) {
+            return NextResponse.json({ error: 'Soal tidak ditemukan di ujian ini' }, { status: 404 })
+        }
 
         invalidateExamQuestions(id)
 
