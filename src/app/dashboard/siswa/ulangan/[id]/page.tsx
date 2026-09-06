@@ -11,6 +11,7 @@ import ExamZoomControls from '@/components/exam/ExamZoomControls'
 import ExamZoomHint from '@/components/exam/ExamZoomHint'
 import useOnlineStatus from '@/hooks/useOnlineStatus'
 import useExamZoom from '@/hooks/useExamZoom'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 interface ExamQuestion {
     id: string
@@ -49,6 +50,7 @@ export default function TakeExamPage() {
     const params = useParams()
     const router = useRouter()
     const examId = params.id as string
+    const labels = useSchoolLabels()
 
     const [exam, setExam] = useState<Exam | null>(null)
     const [questions, setQuestions] = useState<ExamQuestion[]>([])
@@ -206,7 +208,7 @@ export default function TakeExamPage() {
                 pendingViolationsRef.current = []
                 persistViolationQueue()
                 setForceSubmitted(true)
-                alert('Ulangan otomatis dikumpulkan karena pelanggaran melebihi batas!')
+                alert(`${labels.ulangan} otomatis dikumpulkan karena pelanggaran melebihi batas!`)
                 router.push('/dashboard/siswa/ulangan')
                 return
             }
@@ -469,7 +471,7 @@ export default function TakeExamPage() {
             hasStarted.current = false
             setLoadError(!navigator.onLine
                 ? 'Koneksi terputus. Jawaban tersimpan lokal akan dikirim otomatis saat online. Periksa koneksi Anda lalu coba lagi.'
-                : 'Gagal memuat ulangan. Periksa koneksi Anda lalu coba lagi.')
+                : `Gagal memuat ${labels.ulangan}. Periksa koneksi Anda lalu coba lagi.`)
             setLoading(false)
         }
     }, [examId, router])
@@ -573,7 +575,7 @@ export default function TakeExamPage() {
 
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
             e.preventDefault()
-            e.returnValue = 'Anda sedang dalam ulangan. Keluar akan dihitung sebagai pelanggaran!'
+            e.returnValue = `Anda sedang dalam ${labels.ulangan}. Keluar akan dihitung sebagai pelanggaran!`
             return e.returnValue
         }
 
@@ -643,7 +645,7 @@ export default function TakeExamPage() {
             if (data.force_submitted) {
                 setForceSubmitted(true)
                 pendingViolationRef.current = false // cancel warning
-                alert('Ulangan otomatis dikumpulkan karena pelanggaran melebihi batas!')
+                alert(`${labels.ulangan} otomatis dikumpulkan karena pelanggaran melebihi batas!`)
                 router.push('/dashboard/siswa/ulangan')
                 return
             }
@@ -796,7 +798,7 @@ export default function TakeExamPage() {
             // (409 = ditutup paksa dengan jawaban yang tersimpan) — keduanya aman untuk lanjut
             if (!res.ok && res.status !== 400 && res.status !== 409) {
                 const errData = await res.json().catch(() => null)
-                throw new Error(errData?.error || 'Gagal mengumpulkan ulangan')
+                throw new Error(errData?.error || `Gagal mengumpulkan ${labels.ulangan}`)
             }
 
             // Clear localStorage after successful submit
@@ -809,7 +811,7 @@ export default function TakeExamPage() {
             router.push(`/dashboard/siswa/ulangan/${examId}/hasil`)
         } catch (error) {
             console.error('Error submitting:', error)
-            alert('Gagal mengumpulkan ulangan')
+            alert(`Gagal mengumpulkan ${labels.ulangan}`)
         } finally {
             setSubmitting(false)
         }
@@ -863,7 +865,7 @@ export default function TakeExamPage() {
             <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
                 <div className="text-center">
                     <div className="text-primary mb-4 animate-pulse mx-auto flex justify-center"><Document set="bold" primaryColor="currentColor" size="xlarge" /></div>
-                    <p className="text-text-secondary">Mempersiapkan ulangan...</p>
+                    <p className="text-text-secondary">Mempersiapkan {labels.ulangan}...</p>
                 </div>
             </div>
         )
@@ -872,7 +874,7 @@ export default function TakeExamPage() {
     if (!exam || !submission || questions.length === 0) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
-                <div className="text-center text-red-500 dark:text-red-400">Ulangan tidak dapat dimulai</div>
+                <div className="text-center text-red-500 dark:text-red-400">{labels.ulangan} tidak dapat dimulai</div>
             </div>
         )
     }
@@ -889,10 +891,10 @@ export default function TakeExamPage() {
                     <div className="text-center text-white p-8">
                         <div className="text-white mb-4 mx-auto flex justify-center"><Danger set="bold" primaryColor="currentColor" size="xlarge" /></div>
                         <h2 className="text-2xl font-bold mb-2">PERINGATAN!</h2>
-                        <p>Anda terdeteksi keluar dari halaman ulangan</p>
+                        <p>Anda terdeteksi keluar dari halaman {labels.ulangan}</p>
                         <p className="text-xl mt-4">Pelanggaran: {violationCount} / {maxViolations}</p>
                         {violationCount >= maxViolations - 1 && (
-                            <p className="text-yellow-300 mt-2 font-bold">Pelanggaran berikutnya akan mengumpulkan ulangan secara otomatis!</p>
+                            <p className="text-yellow-300 mt-2 font-bold">Pelanggaran berikutnya akan mengumpulkan {labels.ulangan} secara otomatis!</p>
                         )}
                     </div>
                 </div>
@@ -906,7 +908,7 @@ export default function TakeExamPage() {
                     </div>
                     <h2 className="text-3xl font-extrabold text-text-main dark:text-white mb-4 tracking-tight">Layar Penuh Diwajibkan</h2>
                     <p className="text-text-secondary mb-8 max-w-lg text-lg leading-relaxed">
-                        Ulangan ini diatur sedemikian rupa agar Anda mengerjakannya dalam mode layar penuh. Anda tidak dapat melihat soal atau melanjutkan sebelum masuk ke mode layar penuh.
+                        {labels.ulangan} ini diatur sedemikian rupa agar Anda mengerjakannya dalam mode layar penuh. Anda tidak dapat melihat soal atau melanjutkan sebelum masuk ke mode layar penuh.
                     </p>
                     <button 
                         onClick={requestFullscreen} 
@@ -1150,7 +1152,7 @@ export default function TakeExamPage() {
                                         className="px-5 py-2.5 md:px-8 md:py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white text-sm md:text-base rounded-xl font-medium hover:opacity-90 transition-opacity"
                                     >
                                         <span className="flex items-center gap-2">
-                                            <TickSquare set="bold" primaryColor="currentColor" size={20} /> Kumpulkan Ulangan
+                                            <TickSquare set="bold" primaryColor="currentColor" size={20} /> Kumpulkan {labels.ulangan}
                                         </span>
                                     </button>
                                 ) : (
@@ -1174,7 +1176,7 @@ export default function TakeExamPage() {
                         <div className="w-16 h-16 bg-green-500/20 text-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
                             <TickSquare set="bold" primaryColor="currentColor" size={32} />
                         </div>
-                        <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Kumpulkan Ulangan?</h3>
+                        <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Kumpulkan {labels.ulangan}?</h3>
                         <p className="text-text-secondary mb-2">
                             Anda telah menjawab <strong className="text-text-main dark:text-white">{answeredCount}</strong> dari <strong className="text-text-main dark:text-white">{questions.length}</strong> soal.
                         </p>
@@ -1214,7 +1216,7 @@ export default function TakeExamPage() {
                             Waktu Habis (Offline)
                         </h3>
                         <p className="text-text-secondary mb-6">
-                            Waktu ulangan telah habis, tetapi koneksi internet terputus. Jawaban Anda sudah tersimpan secara lokal dan akan dikumpulkan otomatis saat koneksi kembali.
+                            Waktu {labels.ulangan} telah habis, tetapi koneksi internet terputus. Jawaban Anda sudah tersimpan secara lokal dan akan dikumpulkan otomatis saat koneksi kembali.
                         </p>
                         <button
                             onClick={() => handleSubmit(true)}
@@ -1233,10 +1235,10 @@ export default function TakeExamPage() {
                             <TimeCircle set="bold" primaryColor="currentColor" size={40} />
                         </div>
                         <h3 className="text-2xl font-bold text-text-main dark:text-white mb-2">
-                            Lanjutkan Ulangan
+                            Lanjutkan {labels.ulangan}
                         </h3>
                         <p className="text-text-secondary mb-6">
-                            Ulangan ini belum diselesaikan. Waktu terus berjalan saat Anda meninggalkan halaman.
+                            {labels.ulangan} ini belum diselesaikan. Waktu terus berjalan saat Anda meninggalkan halaman.
                         </p>
 
                         <div className="grid grid-cols-2 gap-4 mb-6">
@@ -1262,7 +1264,7 @@ export default function TakeExamPage() {
                             }}
                             className="w-full px-6 py-4 bg-primary text-white rounded-xl font-bold hover:bg-primary-dark transition-all text-lg shadow-lg shadow-primary/20"
                         >
-                            🚀 Lanjutkan Ulangan
+                            🚀 Lanjutkan {labels.ulangan}
                         </button>
                     </div>
                 </div>

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef, type CSSProperties, type Poin
 import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
@@ -77,6 +78,7 @@ function EditExamPageInner() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const examId = params.id as string
     const highlightId = searchParams.get('highlight')
     const siblingParam = searchParams.get('siblings')
@@ -334,8 +336,8 @@ function EditExamPageInner() {
     const handleResetAttempt = async (submissionId: string, studentName: string, mode: 'soft' | 'hard') => {
         const isHard = mode === 'hard'
         if (!confirm(isHard
-            ? `PERINGATAN HARD RESET!\n\nApakah Anda yakin ingin melakukan HARD RESET untuk ulangan milik ${studentName}?\n\nSELURUH JAWABAN SAAT INI AKAN DIHAPUS dan siswa akan mengulang dari awal dengan durasi penuh baru, terhitung sejak saat reset (terlepas dari jadwal berakhir ulangan).`
-            : `Konfirmasi Soft Reset\n\nApakah Anda yakin ingin membuka akses kembali (Soft Reset) untuk ulangan milik ${studentName}?\n\nJawaban sebelumnya tidak akan dihapus, dan timer melanjutkan sisa waktu jendela ulangan (semua siswa selesai serentak). Hanya bisa dilakukan selama jendela waktu masih terbuka.`
+            ? `PERINGATAN HARD RESET!\n\nApakah Anda yakin ingin melakukan HARD RESET untuk ${labels.ulangan.toLowerCase()} milik ${studentName}?\n\nSELURUH JAWABAN SAAT INI AKAN DIHAPUS dan siswa akan mengulang dari awal dengan durasi penuh baru, terhitung sejak saat reset (terlepas dari jadwal berakhir ${labels.ulangan.toLowerCase()}).`
+            : `Konfirmasi Soft Reset\n\nApakah Anda yakin ingin membuka akses kembali (Soft Reset) untuk ${labels.ulangan.toLowerCase()} milik ${studentName}?\n\nJawaban sebelumnya tidak akan dihapus, dan timer melanjutkan sisa waktu jendela ${labels.ulangan.toLowerCase()} (semua siswa selesai serentak). Hanya bisa dilakukan selama jendela waktu masih terbuka.`
         )) return
         
         setResettingId(submissionId)
@@ -392,7 +394,7 @@ function EditExamPageInner() {
             const fresh = await res.json().catch(() => [])
             const freshQuestions = Array.isArray(fresh) ? fresh : []
             if (freshQuestions.length === 0) {
-                setAlertInfo({ type: 'warning', title: 'Belum Ada Soal', message: 'Minimal harus ada 1 soal untuk mempublish ulangan!' })
+                setAlertInfo({ type: 'warning', title: 'Belum Ada Soal', message: `Minimal harus ada 1 soal untuk mempublish ${labels.ulangan.toLowerCase()}!` })
                 return
             }
             // Segarkan state sekalian supaya indikator lain ikut benar
@@ -489,7 +491,7 @@ function EditExamPageInner() {
                         setAlertInfo({
                             type: 'error',
                             title: 'Gagal Menyalin Soal',
-                            message: `Soal gagal disalin ke ${batchSync.failed.length} kelas. Ulangan utama tetap terbit. Gunakan tombol "Salin Ulang Soal" di halaman ini untuk mencoba lagi.`
+                            message: `Soal gagal disalin ke ${batchSync.failed.length} kelas. ${labels.ulangan} utama tetap terbit. Gunakan tombol "Salin Ulang Soal" di halaman ini untuk mencoba lagi.`
                         })
                         setShowPublishConfirm(false)
                         fetchExam()
@@ -505,7 +507,7 @@ function EditExamPageInner() {
                         setAlertInfo({
                             type: 'error',
                             title: 'Gagal Menyalin Soal',
-                            message: 'Soal gagal disalin ke beberapa kelas. Ulangan utama tetap terbit. Gunakan tombol "Salin Ulang Soal" di halaman ini untuk mencoba lagi.'
+                            message: `Soal gagal disalin ke beberapa kelas. ${labels.ulangan} utama tetap terbit. Gunakan tombol "Salin Ulang Soal" di halaman ini untuk mencoba lagi.`
                         })
                         setShowPublishConfirm(false)
                         fetchExam()
@@ -525,11 +527,11 @@ function EditExamPageInner() {
                 }
                 // Re-fetch to sync UI with actual DB state
                 await fetchExam()
-                throw new Error(errData?.error || 'Gagal mempublish ulangan')
+                throw new Error(errData?.error || `Gagal mempublish ${labels.ulangan.toLowerCase()}`)
             }
         } catch (error: any) {
             console.error('Error publishing:', error)
-            setAlertInfo({ type: 'error', title: 'Gagal Publish', message: error.message || 'Terjadi kesalahan saat mempublish ulangan. Coba lagi.' })
+            setAlertInfo({ type: 'error', title: 'Gagal Publish', message: error.message || `Terjadi kesalahan saat mempublish ${labels.ulangan.toLowerCase()}. Coba lagi.` })
             setShowPublishConfirm(false)
         } finally {
             setPublishing(false)
@@ -640,7 +642,7 @@ function EditExamPageInner() {
                 body: JSON.stringify({ results_released: true })
             })
             if (res.ok) {
-                setAlertInfo({ type: 'success', title: 'Berhasil', message: 'Hasil ulangan telah dibagikan ke siswa.' })
+                setAlertInfo({ type: 'success', title: 'Berhasil', message: `Hasil ${labels.ulangan.toLowerCase()} telah dibagikan ke siswa.` })
                 fetchExam() // Refresh to update button visibility
             } else {
                 throw new Error('Gagal membagikan hasil')
@@ -1269,7 +1271,7 @@ function EditExamPageInner() {
     }
 
     if (!exam) {
-        return <div className="text-center text-text-secondary py-8">Ulangan tidak ditemukan</div>
+        return <div className="text-center text-text-secondary py-8">{labels.ulangan} tidak ditemukan</div>
     }
 
     return (
@@ -1305,7 +1307,7 @@ function EditExamPageInner() {
                                     <Upload set="bold" primaryColor="currentColor" size={20} />
                                 }
                             >
-                                Publish Ulangan
+                                Publish {labels.ulangan}
                             </Button>
                         )}
                         <div className="flex items-center gap-4 border-l border-secondary/20 pl-4">
@@ -1331,10 +1333,10 @@ function EditExamPageInner() {
                         <div className="w-5 h-5 text-blue-500 shrink-0"><User set="bold" primaryColor="currentColor" size={20} /></div>
                         <div>
                             <h4 className="font-bold text-blue-800 dark:text-blue-300 text-sm">
-                                Ulangan Multi-Kelas ({siblingIds.length + 1} kelas)
+                                {labels.ulangan} Multi-Kelas ({siblingIds.length + 1} kelas)
                             </h4>
                             <p className="text-xs text-blue-600/70 dark:text-blue-400/70 mt-0.5">
-                                Ulangan ini juga akan dibuat untuk kelas lainnya. Soal yang Anda tambahkan di sini akan otomatis disalin ke kelas lainnya saat publish.
+                                {labels.ulangan} ini juga akan dibuat untuk kelas lainnya. Soal yang Anda tambahkan di sini akan otomatis disalin ke kelas lainnya saat publish.
                             </p>
                         </div>
                     </div>
@@ -1350,7 +1352,7 @@ function EditExamPageInner() {
                                 Soal belum tersalin ke {syncFailedCount} kelas
                             </h4>
                             <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-0.5">
-                                Ulangan utama sudah terbit. Tekan tombol di samping untuk menyalin ulang soal ke kelas lainnya.
+                                {labels.ulangan} utama sudah terbit. Tekan tombol di samping untuk menyalin ulang soal ke kelas lainnya.
                             </p>
                         </div>
                         <Button size="sm" onClick={handleRetrySync} loading={retryingSync}>
@@ -1385,7 +1387,7 @@ function EditExamPageInner() {
                                 <div>
                                     <h3 className="font-bold text-red-600 dark:text-red-400">Ada {questions.filter(q => q.status === 'returned').length} soal yang dikembalikan admin</h3>
                                     <p className="text-sm text-red-500 dark:text-red-300">
-                                        Silakan perbaiki soal sesuai catatan admin agar ulangan bisa dipublikasikan.
+                                        Silakan perbaiki soal sesuai catatan admin agar {labels.ulangan.toLowerCase()} bisa dipublikasikan.
                                     </p>
                                 </div>
                             </div>
@@ -1547,9 +1549,9 @@ function EditExamPageInner() {
                                     <Brain size={20} />
                                 </div>
                                 <div>
-                                    <h3 className="font-bold text-amber-800 dark:text-amber-300">Ulangan Sedang Direview</h3>
+                                    <h3 className="font-bold text-amber-800 dark:text-amber-300">{labels.ulangan} Sedang Direview</h3>
                                     <p className="text-sm text-amber-700/80 dark:text-amber-400/80 mt-1">
-                                        Anda telah mempublikasi ulangan ini, tetapi ada soal yang masih menunggu persetujuan (oleh AI atau Admin). Ulangan akan otomatis terkirim ke siswa segera setelah semua soal disetujui.
+                                        Anda telah mempublikasi {labels.ulangan.toLowerCase()} ini, tetapi ada soal yang masih menunggu persetujuan (oleh AI atau Admin). {labels.ulangan} akan otomatis terkirim ke siswa segera setelah semua soal disetujui.
                                     </p>
                                 </div>
                             </div>
@@ -2486,7 +2488,7 @@ function EditExamPageInner() {
                 onSaveResults={handleSaveResults}
                 onSaveToBank={handleSaveToBank}
                 saving={saving}
-                targetLabel="Ulangan"
+                targetLabel={labels.ulangan}
                 aiReviewEnabled={aiReviewEnabled}
                 canGenerate={aiGenerateEnabled || user?.role === 'ADMIN'}
                 tagSuggestions={tagSuggestions}
@@ -2503,7 +2505,7 @@ function EditExamPageInner() {
                     onClose={() => setMode('list')}
                     onConfirm={handleAddBankQuestions}
                     saving={saving}
-                    targetLabel="Ulangan"
+                    targetLabel={labels.ulangan}
                 />
             )}
 
@@ -2567,7 +2569,7 @@ function EditExamPageInner() {
                     ) : submissions.length === 0 ? (
                         <Card padding="p-8" className="text-center">
                             <BarChart3 className="w-12 h-12 text-text-secondary/50 mx-auto mb-3" />
-                            <p className="text-text-secondary">Belum ada siswa yang mengerjakan ulangan ini.</p>
+                            <p className="text-text-secondary">Belum ada siswa yang mengerjakan {labels.ulangan.toLowerCase()} ini.</p>
                         </Card>
                     ) : (
                         <Card padding="p-0" className="overflow-hidden">
@@ -2748,14 +2750,14 @@ function EditExamPageInner() {
             <Modal
                 open={showPublishConfirm}
                 onClose={() => setShowPublishConfirm(false)}
-                title="🚀 Publish Ulangan?"
+                title={`🚀 Publish ${labels.ulangan}?`}
                 maxWidth="sm"
             >
                 <div className="text-center py-4">
                     <div className="w-20 h-20 bg-green-500/10 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
                         <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                     </div>
-                    <p className="text-text-secondary mb-8">Setelah dipublish, siswa bisa melihat ulangan ini dan dapat mulai mengerjakan sesuai jadwal. Pastikan soal sudah benar!</p>
+                    <p className="text-text-secondary mb-8">Setelah dipublish, siswa bisa melihat {labels.ulangan.toLowerCase()} ini dan dapat mulai mengerjakan sesuai jadwal. Pastikan soal sudah benar!</p>
                     <div className="flex gap-3">
                         <Button variant="secondary" onClick={() => setShowPublishConfirm(false)} className="flex-1">Batal</Button>
                         <Button onClick={confirmPublish} loading={publishing} className="flex-1">Ya, Publish</Button>
@@ -2767,11 +2769,11 @@ function EditExamPageInner() {
             <Modal
                 open={showEditSettings}
                 onClose={() => setShowEditSettings(false)}
-                title="⚙️ Pengaturan Ulangan"
+                title={`⚙️ Pengaturan ${labels.ulangan}`}
             >
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ulangan</label>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul {labels.ulangan}</label>
                         <input
                             type="text"
                             value={editForm.title}
@@ -2821,7 +2823,7 @@ function EditExamPageInner() {
                                 <span className="font-medium text-text-main dark:text-white">Terapkan jadwal ini juga ke {exam!.batch_siblings!.length} kelas paralel</span>
                                 <span className="block text-xs text-text-secondary mt-0.5">
                                     {exam!.batch_siblings!.map(s => s.class_name).join(', ')}
-                                    {exam?.is_active ? ' — hanya bisa saat ulangan belum dipublish' : ''}
+                                    {exam?.is_active ? ` — hanya bisa saat ${labels.ulangan.toLowerCase()} belum dipublish` : ''}
                                 </span>
                             </label>
                         </div>
@@ -2878,9 +2880,9 @@ function EditExamPageInner() {
                             <div className="w-16 h-16 bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <TickSquare set="bold" primaryColor="currentColor" size={32} />
                             </div>
-                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Ulangan Berhasil Dipublish!</h3>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">{labels.ulangan} Berhasil Dipublish!</h3>
                             <p className="text-sm text-text-secondary dark:text-zinc-400 mb-6">
-                                Siswa sekarang dapat melihat dan mengerjakan ulangan ini melalui dashboard mereka.
+                                Siswa sekarang dapat melihat dan mengerjakan {labels.ulangan.toLowerCase()} ini melalui dashboard mereka.
                             </p>
                         </>
                     ) : (
@@ -2888,9 +2890,9 @@ function EditExamPageInner() {
                             <div className="w-16 h-16 bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <TickSquare set="bold" primaryColor="currentColor" size={32} />
                             </div>
-                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Ulangan Dikirim ke Review Admin</h3>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">{labels.ulangan} Dikirim ke Review Admin</h3>
                             <p className="text-sm text-text-secondary dark:text-zinc-400 mb-6">
-                                Ada soal yang memerlukan persetujuan admin. Ulangan akan otomatis dipublikasikan ke siswa setelah admin menyetujui semua soal.
+                                Ada soal yang memerlukan persetujuan admin. {labels.ulangan} akan otomatis dipublikasikan ke siswa setelah admin menyetujui semua soal.
                             </p>
                         </>
                     )}

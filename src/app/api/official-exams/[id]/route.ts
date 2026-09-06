@@ -5,6 +5,7 @@ import { batchedIn, IN_BATCH_SIZE } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { logError } from '@/lib/logError'
 import { canManageOfficialExam } from '@/lib/teacherScope'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET single official exam
 export async function GET(
@@ -168,7 +169,8 @@ export async function PUT(
                 if (activeYear && data.target_class_ids?.length > 0) {
                     const isFuture = new Date(data.start_time) > new Date()
                     const startDate = new Date(data.start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })
-                    const examLabel = data.exam_type === 'UTS' ? 'UTS' : 'UAS'
+                    const labels = await getMenuLabelsForSchool(data.school_id)
+                    const examLabel = data.exam_type === 'UTS' ? labels.uts : labels.uas
                     const subjectName = (data as any).subject?.name || ''
 
                     // 1. Student Notifications
@@ -298,7 +300,8 @@ export async function PUT(
                     )] as string[]
 
                     if (userIds.length > 0) {
-                        const examLabel = data.exam_type === 'UTS' ? 'UTS' : 'UAS'
+                        const labels = await getMenuLabelsForSchool(data.school_id)
+                        const examLabel = data.exam_type === 'UTS' ? labels.uts : labels.uas
                         const subjectName = (data as any).subject?.name || ''
                         await supabase.from('notifications').insert(
                             userIds.map(uid => ({

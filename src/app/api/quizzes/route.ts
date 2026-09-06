@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findTeachingAssignmentsOutsideSchool, findQuizzesOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { getBatchSizes } from '@/lib/examBatch'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET all quizzes (filtered by teacher)
 export async function GET(request: NextRequest) {
@@ -168,8 +169,9 @@ export async function POST(request: NextRequest) {
         // duplicate_questions menyalin seluruh soal + kunci jawaban; tanpa guard
         // ini guru mana pun bisa exfiltrate soal guru/sekolah lain.
         if (remedial_for_id) {
+            const labels = await getMenuLabelsForSchool(schoolId)
             if ((await findQuizzesOutsideSchool([remedial_for_id], schoolId)).length > 0) {
-                return NextResponse.json({ error: 'Kuis sumber remedial tidak valid' }, { status: 403 })
+                return NextResponse.json({ error: `${labels.kuis} sumber remedial tidak valid` }, { status: 403 })
             }
             const { data: srcQuiz } = await supabase
                 .from('quizzes')
@@ -177,7 +179,7 @@ export async function POST(request: NextRequest) {
                 .eq('id', remedial_for_id)
                 .single()
             if (srcQuiz?.teaching_assignment_id !== teaching_assignment_id) {
-                return NextResponse.json({ error: 'Kuis remedial harus berasal dari kelas & mapel yang sama' }, { status: 400 })
+                return NextResponse.json({ error: `${labels.kuis} remedial harus berasal dari kelas & mapel yang sama` }, { status: 400 })
             }
         }
 

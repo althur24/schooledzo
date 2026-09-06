@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 import { Chart, Game, Edit, TimeCircle, ArrowLeft, Document } from 'react-iconly'
 
 // Interfaces
@@ -84,6 +86,7 @@ type TabType = 'kuis' | 'tugas' | 'ulangan' | 'utsUas'
 
 export default function SiswaNilaiPage() {
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const [loading, setLoading] = useState(true)
     const [loadError, setLoadError] = useState(false)
     const [groupedGrades, setGroupedGrades] = useState<SubjectGrades[]>([])
@@ -253,10 +256,10 @@ export default function SiswaNilaiPage() {
                                         {totalItems} Nilai Tercatat
                                     </p>
                                     <div className="flex gap-2 mt-4 text-xs relative z-10 flex-wrap">
-                                        <span className="px-2 py-1 bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400 rounded-md font-medium">Kuis: {subject.kuis?.length ?? 0}</span>
-                                        <span className="px-2 py-1 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 rounded-md font-medium">Tugas: {subject.tugas?.length ?? 0}</span>
-                                        <span className="px-2 py-1 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-md font-medium">Ulangan: {subject.ulangan?.length ?? 0}</span>
-                                        <span className="px-2 py-1 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 rounded-md font-medium">UTS/UAS: {subject.utsUas?.length ?? 0}</span>
+                                        <span className="px-2 py-1 bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400 rounded-md font-medium">{labels.kuis}: {subject.kuis?.length ?? 0}</span>
+                                        <span className="px-2 py-1 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 rounded-md font-medium">{labels.tugas}: {subject.tugas?.length ?? 0}</span>
+                                        <span className="px-2 py-1 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-md font-medium">{labels.ulangan}: {subject.ulangan?.length ?? 0}</span>
+                                        <span className="px-2 py-1 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 rounded-md font-medium">{labels.uts}/{labels.uas}: {subject.utsUas?.length ?? 0}</span>
                                     </div>
                                 </button>
                             )
@@ -269,17 +272,17 @@ export default function SiswaNilaiPage() {
 
     // ==================== VIEW 2: Subject Detail with Tabs ====================
     const tabs: { key: TabType; label: string; icon: any; color: string }[] = [
-        { key: 'kuis', label: 'Kuis', icon: Game, color: 'purple' },
-        { key: 'tugas', label: 'Tugas', icon: Edit, color: 'amber' },
-        { key: 'ulangan', label: 'Ulangan', icon: TimeCircle, color: 'red' },
-        { key: 'utsUas', label: 'UTS/UAS', icon: Document, color: 'indigo' },
+        { key: 'kuis', label: labels.kuis, icon: Game, color: 'purple' },
+        { key: 'tugas', label: labels.tugas, icon: Edit, color: 'amber' },
+        { key: 'ulangan', label: labels.ulangan, icon: TimeCircle, color: 'red' },
+        { key: 'utsUas', label: `${labels.uts}/${labels.uas}`, icon: Document, color: 'indigo' },
     ]
 
     const renderQuizList = () => (
         selectedSubject.kuis.length === 0 ? (
             <div className="text-center text-text-secondary dark:text-zinc-500 py-12 bg-white dark:bg-surface-dark rounded-xl border border-secondary/20 border-dashed flex flex-col items-center gap-4">
                 <div className="text-secondary flex"><Game set="bold" primaryColor="currentColor" size="xlarge" /></div>
-                Belum ada nilai kuis.
+                Belum ada nilai {labels.kuis}.
             </div>
         ) : (
             <div className="space-y-3">
@@ -308,7 +311,7 @@ export default function SiswaNilaiPage() {
         items.length === 0 ? (
             <div className="text-center text-text-secondary dark:text-zinc-500 py-12 bg-white dark:bg-surface-dark rounded-xl border border-secondary/20 border-dashed flex flex-col items-center gap-4">
                 <div className="text-secondary flex"><Edit set="bold" primaryColor="currentColor" size="xlarge" /></div>
-                Belum ada nilai tugas.
+                Belum ada nilai {labels.tugas}.
             </div>
         ) : (
             <div className="space-y-3">
@@ -345,7 +348,7 @@ export default function SiswaNilaiPage() {
         items.length === 0 ? (
             <div className="text-center text-text-secondary dark:text-zinc-500 py-12 bg-white dark:bg-surface-dark rounded-xl border border-secondary/20 border-dashed flex flex-col items-center gap-4">
                 <div className="text-secondary flex"><TimeCircle set="bold" primaryColor="currentColor" size="xlarge" /></div>
-                Belum ada nilai ulangan.
+                Belum ada nilai {labels.ulangan}.
             </div>
         ) : (
             <div className="space-y-3">
@@ -357,7 +360,7 @@ export default function SiswaNilaiPage() {
                                 <div className="flex-1">
                                     <div className="flex items-center gap-2 mb-1">
                                         <p className="text-text-main dark:text-white font-bold">{item.exam?.title}</p>
-                                        <span className="px-2 py-0.5 text-xs bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-md font-bold">Ulangan</span>
+                                        <span className="px-2 py-0.5 text-xs bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-md font-bold">{labels.ulangan}</span>
                                     </div>
                                     <p className="text-xs text-text-secondary dark:text-zinc-400">{new Date(item.submitted_at).toLocaleDateString('id-ID')}</p>
                                     {item.violation_count > 0 && (
@@ -401,7 +404,7 @@ export default function SiswaNilaiPage() {
         items.length === 0 ? (
             <div className="text-center text-text-secondary dark:text-zinc-500 py-12 bg-white dark:bg-surface-dark rounded-xl border border-secondary/20 border-dashed flex flex-col items-center gap-4">
                 <div className="text-secondary flex"><Document set="bold" primaryColor="currentColor" size="xlarge" /></div>
-                Belum ada nilai UTS/UAS.
+                Belum ada nilai {labels.uts}/{labels.uas}.
             </div>
         ) : (
             <div className="space-y-3">
@@ -411,7 +414,7 @@ export default function SiswaNilaiPage() {
                             <div className="flex items-center gap-2 mb-1">
                                 <p className="text-text-main dark:text-white font-bold">{item.exam?.title}</p>
                                 <span className={`px-2 py-0.5 text-xs rounded-md font-bold ${item.exam?.exam_type === 'UTS' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'}`}>
-                                    {item.exam?.exam_type}
+                                    {item.exam?.exam_type ? labelForGradeType(item.exam.exam_type, labels) : ''}
                                 </span>
                             </div>
                             <p className="text-xs text-text-secondary dark:text-zinc-400">{new Date(item.submitted_at).toLocaleDateString('id-ID')}</p>

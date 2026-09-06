@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 import { PageHeader, EmptyState } from '@/components/ui'
 import { Loader2, GraduationCap, BookOpen } from 'lucide-react'
 import { Document, TimeCircle, Danger, Play, TickSquare, Chart, Calendar } from 'react-iconly'
@@ -60,6 +62,7 @@ interface OfficialSubmission {
 
 export default function SiswaUlanganPage() {
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const [exams, setExams] = useState<Exam[]>([])
     const [submissions, setSubmissions] = useState<ExamSubmission[]>([])
     const [officialExams, setOfficialExams] = useState<OfficialExam[]>([])
@@ -205,8 +208,8 @@ export default function SiswaUlanganPage() {
     return (
         <div className="space-y-6">
             <PageHeader
-                title="Ulangan"
-                subtitle="Daftar ulangan yang tersedia"
+                title={labels.ulangan}
+                subtitle={`Daftar ${labels.ulangan} yang tersedia`}
                 icon={<div className="text-red-500 flex"><TimeCircle set="bold" primaryColor="currentColor" size="small" /></div>}
                 backHref="/dashboard/siswa"
             />
@@ -219,7 +222,7 @@ export default function SiswaUlanganPage() {
                     </div>
                     <div>
                         <h3 className="font-bold text-amber-700 dark:text-amber-400">Perhatian!</h3>
-                        <p className="text-sm text-amber-600/80 dark:text-amber-200/80">Saat mengerjakan ulangan, Anda <strong>tidak boleh keluar</strong> dari halaman ulangan. Jika keluar terlalu sering, ulangan akan dikumpulkan otomatis.</p>
+                        <p className="text-sm text-amber-600/80 dark:text-amber-200/80">Saat mengerjakan {labels.ulangan}, Anda <strong>tidak boleh keluar</strong> dari halaman {labels.ulangan}. Jika keluar terlalu sering, {labels.ulangan} akan dikumpulkan otomatis.</p>
                     </div>
                 </div>
             </div>
@@ -230,7 +233,7 @@ export default function SiswaUlanganPage() {
                 </div>
             ) : loadError ? (
                 <div className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl p-6 text-center space-y-3">
-                    <p className="text-red-600 dark:text-red-400 font-bold">Gagal memuat daftar ulangan</p>
+                    <p className="text-red-600 dark:text-red-400 font-bold">Gagal memuat daftar {labels.ulangan}</p>
                     <p className="text-sm text-text-secondary">Periksa koneksi internet Anda lalu coba lagi.</p>
                     <button
                         onClick={() => { setLoading(true); fetchData() }}
@@ -242,8 +245,8 @@ export default function SiswaUlanganPage() {
             ) : !hasAnyExams ? (
                 <EmptyState
                     icon={<div className="text-red-500 dark:text-red-200 flex"><Document set="bold" primaryColor="currentColor" size="xlarge" /></div>}
-                    title="Belum Ada Ulangan"
-                    description="Ulangan akan muncul di sini saat guru mempublishnya"
+                    title={`Belum Ada ${labels.ulangan}`}
+                    description={`${labels.ulangan} akan muncul di sini saat guru mempublishnya`}
                 />
             ) : (
                 <div className="space-y-8">
@@ -254,7 +257,7 @@ export default function SiswaUlanganPage() {
                                 <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
                                     <GraduationCap className="w-5 h-5" />
                                 </div>
-                                <h2 className="text-base md:text-lg font-bold text-text-main dark:text-white">UTS / UAS</h2>
+                                <h2 className="text-base md:text-lg font-bold text-text-main dark:text-white">{labels.uts} / {labels.uas}</h2>
                             </div>
                             <div className="grid gap-4 md:grid-cols-2">
                                 {officialExams.map((exam) => {
@@ -277,7 +280,7 @@ export default function SiswaUlanganPage() {
                                                             </span>
                                                             <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400' : 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400'}`}>
                                                                 {exam.exam_type === 'UTS' ? <BookOpen className="w-3 h-3 inline mr-1" /> : <GraduationCap className="w-3 h-3 inline mr-1" />}
-                                                                {exam.exam_type}
+                                                                {labelForGradeType(exam.exam_type, labels)}
                                                             </span>
                                                             {exam.is_remedial && (
                                                                 <span className="px-2.5 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm">
@@ -370,7 +373,7 @@ export default function SiswaUlanganPage() {
                                     <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
                                         <div className="text-red-500 dark:text-red-400 flex"><TimeCircle set="bold" primaryColor="currentColor" size={20} /></div>
                                     </div>
-                                    <h2 className="text-base md:text-lg font-bold text-text-main dark:text-white">Ulangan Harian</h2>
+                                    <h2 className="text-base md:text-lg font-bold text-text-main dark:text-white">{labels.ulangan} Harian</h2>
                                 </div>
                             )}
                             <div className="grid gap-4 md:grid-cols-2">
@@ -461,7 +464,7 @@ export default function SiswaUlanganPage() {
                                                         >
                                                             <div className="flex items-center justify-center gap-2">
                                                                 <Play set="bold" primaryColor="currentColor" size={20} />
-                                                                {status === 'in_progress' ? 'Lanjutkan Ulangan' : 'Mulai Ulangan'}
+                                                                {status === 'in_progress' ? `Lanjutkan ${labels.ulangan}` : `Mulai ${labels.ulangan}`}
                                                             </div>
                                                         </Link>
                                                     )}

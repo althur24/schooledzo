@@ -8,6 +8,8 @@ import ClassChipsSelector from '@/components/ClassChipsSelector'
 import { Edit as PenTool, Calendar, TimeCircle as Clock, Plus, ChevronDown, Paper, Activity, Search, Delete, Danger, Edit, TickSquare } from 'react-iconly'
 import { Loader2, Copy } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 
 interface TeachingAssignment {
     id: string
@@ -30,6 +32,7 @@ interface Assignment {
 
 export default function TugasPage() {
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const [assignments, setAssignments] = useState<Assignment[]>([])
     const [teachingAssignments, setTeachingAssignments] = useState<TeachingAssignment[]>([])
     const [studentCounts, setStudentCounts] = useState<Record<string, number>>({})
@@ -152,7 +155,7 @@ export default function TugasPage() {
                 })
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({}))
-                    alert(err.error || 'Gagal menyimpan perubahan tugas.')
+                    alert(err.error || `Gagal menyimpan perubahan ${labels.tugas.toLowerCase()}.`)
                     return
                 }
             } else {
@@ -176,7 +179,7 @@ export default function TugasPage() {
                 )
                 const failed = results.filter(r => r.status === 'rejected').length
                 if (failed > 0) {
-                    alert(`${results.length - failed} tugas berhasil dibuat, ${failed} gagal.`)
+                    alert(`${results.length - failed} ${labels.tugas.toLowerCase()} berhasil dibuat, ${failed} gagal.`)
                 }
             }
             
@@ -236,15 +239,15 @@ export default function TugasPage() {
             const failed = createResults.length - successful
 
             if (successful > 0) {
-                alert(`Tugas berhasil disalin ke ${successful} kelas.${failed > 0 ? ` (${failed} gagal)` : ''}`)
+                alert(`${labels.tugas} berhasil disalin ke ${successful} kelas.${failed > 0 ? ` (${failed} gagal)` : ''}`)
                 setShowCopy(false)
                 fetchData()
             } else {
-                alert('Gagal menyalin tugas. Silakan coba lagi.')
+                alert(`Gagal menyalin ${labels.tugas.toLowerCase()}. Silakan coba lagi.`)
             }
         } catch (error) {
             console.error('Error copying assignment:', error)
-            alert('Terjadi kesalahan saat menyalin tugas.')
+                alert(`Terjadi kesalahan saat menyalin ${labels.tugas.toLowerCase()}.`)
         } finally {
             setCopying(false)
         }
@@ -301,15 +304,15 @@ export default function TugasPage() {
     return (
         <div className="space-y-6">
             <PageHeader
-                title="Tugas"
-                subtitle="Buat dan kelola tugas siswa"
+                title={labels.tugas}
+                subtitle={`Buat dan kelola ${labels.tugas.toLowerCase()} siswa`}
                 icon={<div className="text-amber-500"><PenTool set="bold" primaryColor="currentColor" size={24} /></div>}
                 backHref="/dashboard/guru"
                 action={
                     <Button onClick={() => setShowModal(true)} data-tutorial="task-create-btn" icon={
                         <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
                     }>
-                        Buat Tugas
+                        Buat {labels.tugas}
                     </Button>
                 }
             />
@@ -322,7 +325,7 @@ export default function TugasPage() {
                     </div>
                     <input
                         type="text"
-                        placeholder="Cari tugas, PR, ulangan..."
+                        placeholder={`Cari ${labels.tugas.toLowerCase()}, PR, ${labels.ulangan.toLowerCase()}...`}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full pl-12 pr-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl focus:outline-none focus:border-primary/50 text-sm"
@@ -363,9 +366,9 @@ export default function TugasPage() {
             ) : filteredAssignments.length === 0 ? (
                 <EmptyState
                     icon={<div className="text-secondary"><Paper set="bold" primaryColor="currentColor" size={48} /></div>}
-                    title="Tidak Ada Tugas"
-                    description={searchQuery || filterClass || filterSubject ? "Tidak ada tugas yang cocok dengan filter pencarian" : "Buat tugas baru untuk siswa Anda"}
-                    action={!searchQuery && !filterClass && !filterSubject ? <Button onClick={() => setShowModal(true)}>Buat Tugas</Button> : <Button variant="secondary" onClick={() => { setSearchQuery(''); setFilterClass(''); setFilterSubject(''); }}>Reset Filter</Button>}
+                    title={`Tidak Ada ${labels.tugas}`}
+                    description={searchQuery || filterClass || filterSubject ? `Tidak ada ${labels.tugas.toLowerCase()} yang cocok dengan filter pencarian` : `Buat ${labels.tugas.toLowerCase()} baru untuk siswa Anda`}
+                    action={!searchQuery && !filterClass && !filterSubject ? <Button onClick={() => setShowModal(true)}>Buat {labels.tugas}</Button> : <Button variant="secondary" onClick={() => { setSearchQuery(''); setFilterClass(''); setFilterSubject(''); }}>Reset Filter</Button>}
                 />
             ) : (
                 <div className="space-y-4">
@@ -387,7 +390,7 @@ export default function TugasPage() {
                                         <div className="flex-1">
                                             <div className="flex items-center gap-2 mb-2 flex-wrap">
                                                 <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20">
-                                                    {assignment.type}
+                                                    {labelForGradeType(assignment.type, labels)}
                                                 </span>
                                                 {assignment.submission_mode === 'OFFLINE' && (
                                                     <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-200 dark:border-teal-500/20">
@@ -518,7 +521,7 @@ export default function TugasPage() {
             <Modal
                 open={showModal}
                 onClose={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '' }) }}
-                title={editingId ? "Edit Tugas" : "Buat Tugas Baru"}
+                title={editingId ? `Edit ${labels.tugas}` : `Buat ${labels.tugas} Baru`}
             >
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div data-tutorial="task-form-class">
@@ -532,13 +535,13 @@ export default function TugasPage() {
                         />
                     </div>
                     <div data-tutorial="task-form-title">
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Tugas</label>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul {labels.tugas}</label>
                         <input
                             type="text"
                             value={formData.title}
                             onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                             className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary/50"
-                            placeholder="Contoh: Tugas Matematika Bab 1"
+                            placeholder={`Contoh: ${labels.tugas} Matematika Bab 1`}
                             required
                         />
                     </div>
@@ -548,7 +551,7 @@ export default function TugasPage() {
                             value={formData.description}
                             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                             className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary/50 min-h-[100px]"
-                            placeholder="Jelaskan detail tugas di sini..."
+                            placeholder={`Jelaskan detail ${labels.tugas.toLowerCase()} di sini...`}
                         />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -560,11 +563,11 @@ export default function TugasPage() {
                                     onChange={(e) => setFormData({ ...formData, type: e.target.value })}
                                     className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none"
                                 >
-                                    <option value="TUGAS">Tugas</option>
+                                    <option value="TUGAS">{labels.tugas}</option>
                                     <option value="PR">PR</option>
                                     <option value="PROYEK">Proyek</option>
                                     <option value="LATIHAN">Latihan</option>
-                                    {formData.type === 'ULANGAN' && <option value="ULANGAN">Ulangan</option>}
+                                    {formData.type === 'ULANGAN' && <option value="ULANGAN">{labels.ulangan}</option>}
                                 </select>
                                 <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary"><ChevronDown set="bold" primaryColor="currentColor" size={20} /></div>
                             </div>
@@ -585,7 +588,7 @@ export default function TugasPage() {
                             Batal
                         </Button>
                         <Button type="submit" loading={saving} disabled={formData.teaching_assignment_ids.length === 0 || !formData.title} className="flex-1">
-                            {editingId ? 'Simpan Perubahan' : 'Buat Tugas'}
+                            {editingId ? 'Simpan Perubahan' : `Buat ${labels.tugas}`}
                         </Button>
                     </div>
                 </form>
@@ -594,11 +597,11 @@ export default function TugasPage() {
             <Modal
                 open={showCopy}
                 onClose={() => setShowCopy(false)}
-                title="Pakai Ulang Tugas"
+                title={`Pakai Ulang ${labels.tugas}`}
             >
                 <div className="space-y-4">
                     <div className="bg-secondary/10 p-4 rounded-xl mb-2">
-                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source Tugas: {copySourceAssignment?.title}</h4>
+                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source {labels.tugas}: {copySourceAssignment?.title}</h4>
                         <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
                             <span>Mata Pelajaran: <strong>{copySourceAssignment?.teaching_assignment?.subject?.name}</strong></span>
                         </div>
@@ -614,7 +617,7 @@ export default function TugasPage() {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Tugas Baru</label>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul {labels.tugas} Baru</label>
                         <input
                             type="text"
                             value={copyForm.title}
@@ -639,11 +642,11 @@ export default function TugasPage() {
                                     onChange={(e) => setCopyForm({ ...copyForm, type: e.target.value })}
                                     className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none"
                                 >
-                                    <option value="TUGAS">Tugas</option>
+                                    <option value="TUGAS">{labels.tugas}</option>
                                     <option value="PR">PR</option>
                                     <option value="PROYEK">Proyek</option>
                                     <option value="LATIHAN">Latihan</option>
-                                    {copyForm.type === 'ULANGAN' && <option value="ULANGAN">Ulangan</option>}
+                                    {copyForm.type === 'ULANGAN' && <option value="ULANGAN">{labels.ulangan}</option>}
                                 </select>
                                 <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary"><ChevronDown set="bold" primaryColor="currentColor" size={20} /></div>
                             </div>
@@ -672,7 +675,7 @@ export default function TugasPage() {
                             loading={copying}
                             className="flex-1"
                         >
-                            Salin Tugas
+                            Salin {labels.tugas}
                         </Button>
                     </div>
                 </div>
@@ -686,7 +689,7 @@ export default function TugasPage() {
             >
                 <div className="space-y-4">
                     <p className="text-text-main dark:text-slate-300">
-                        Apakah Anda yakin ingin menghapus tugas ini? Data siswa yang sudah mengumpulkan juga akan terhapus.
+                        Apakah Anda yakin ingin menghapus {labels.tugas.toLowerCase()} ini? Data siswa yang sudah mengumpulkan juga akan terhapus.
                     </p>
                     <div className="flex gap-3 pt-2">
                         <Button variant="secondary" onClick={() => setDeleteConfirmId(null)} className="flex-1">Batal</Button>

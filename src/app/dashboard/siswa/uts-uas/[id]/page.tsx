@@ -11,6 +11,8 @@ import ExamZoomControls from '@/components/exam/ExamZoomControls'
 import ExamZoomHint from '@/components/exam/ExamZoomHint'
 import useOnlineStatus from '@/hooks/useOnlineStatus'
 import useExamZoom from '@/hooks/useExamZoom'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 import { GraduationCap } from 'lucide-react'
 
 interface ExamQuestion {
@@ -47,6 +49,7 @@ export default function TakeOfficialExamPage() {
     const params = useParams()
     const router = useRouter()
     const examId = params.id as string
+    const labels = useSchoolLabels()
 
     const [exam, setExam] = useState<OfficialExam | null>(null)
     const [questions, setQuestions] = useState<ExamQuestion[]>([])
@@ -760,7 +763,7 @@ export default function TakeOfficialExamPage() {
                 <div className="max-w-4xl mx-auto flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                     <div className="flex items-center gap-3">
                         <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400' : 'bg-purple-500/20 text-purple-600 dark:text-purple-400'}`}>
-                            {exam.exam_type}
+                            {labelForGradeType(exam.exam_type, labels)}
                         </span>
                         <div>
                             <h1 className="text-base md:text-lg font-bold text-text-main dark:text-white">{exam.title}</h1>

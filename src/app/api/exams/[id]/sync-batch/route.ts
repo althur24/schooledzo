@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { resolveExamSchoolId, tenantMismatch } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncExamBatch } from '@/lib/examBatch'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // POST /api/exams/:id/sync-batch — salin ulang soal + terbitkan semua kelas satu batch.
 // Dipakai tombol "Salin Ulang Soal" setelah kegagalan penyalinan sebagian.
@@ -23,11 +24,15 @@ export async function POST(
 
         const { data: exam } = await supabase
             .from('exams').select('teaching_assignment_id, batch_id').eq('id', id).single()
-        if (!exam) return NextResponse.json({ error: 'Ulangan tidak ditemukan' }, { status: 404 })
+        if (!exam) {
+            const labels = await getMenuLabelsForSchool(schoolId)
+            return NextResponse.json({ error: `${labels.ulangan} tidak ditemukan` }, { status: 404 })
+        }
 
         // Tenant guard: ulangan harus milik sekolah caller
         if (tenantMismatch(await resolveExamSchoolId(id), schoolId)) {
-            return NextResponse.json({ error: 'Ulangan tidak ditemukan' }, { status: 404 })
+            const labels = await getMenuLabelsForSchool(schoolId)
+            return NextResponse.json({ error: `${labels.ulangan} tidak ditemukan` }, { status: 404 })
         }
 
         // Guru hanya boleh sync ujian miliknya sendiri

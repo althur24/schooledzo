@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { Modal, PageHeader, Button } from '@/components/ui'
 import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 interface ExamSubmission {
     id: string
@@ -39,6 +40,7 @@ interface Exam {
 export default function GuruExamHasilPage() {
     const params = useParams()
     const examId = params.id as string
+    const labels = useSchoolLabels()
 
     const [exam, setExam] = useState<Exam | null>(null)
     const [submissions, setSubmissions] = useState<ExamSubmission[]>([])
@@ -109,7 +111,7 @@ export default function GuruExamHasilPage() {
     if (!exam) {
         return (
             <div className="text-center py-8">
-                <p className="text-text-secondary">Ulangan tidak ditemukan</p>
+                <p className="text-text-secondary">{labels.ulangan} tidak ditemukan</p>
             </div>
         )
     }

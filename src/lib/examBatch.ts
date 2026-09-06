@@ -1,4 +1,5 @@
 import { supabaseAdmin } from './supabase'
+import { getMenuLabelsForSchool } from './serverLabels'
 
 /**
  * examBatch — sinkronisasi soal + status terbit untuk ujian/kuis multi-kelas
@@ -127,8 +128,9 @@ async function notifySiblingActivated(table: 'exams' | 'quizzes', targetId: stri
         if (userIds.length === 0) return
 
         const isQuiz = table === 'quizzes'
+        const labels = await getMenuLabelsForSchool(schoolId ?? null)
         const type = isQuiz ? 'KUIS_BARU' : 'ULANGAN_BARU'
-        const title = `${isQuiz ? 'Kuis' : 'Ulangan'} Baru: ${sibling.title}`
+        const title = `${isQuiz ? labels.kuis : labels.ulangan} Baru: ${sibling.title}`
         const subjectName = ta?.subject?.name || ''
         const startDate = sibling.start_time
             ? new Date(sibling.start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })

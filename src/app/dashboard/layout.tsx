@@ -13,6 +13,7 @@ import { Menu } from 'lucide-react'
 
 import Sidebar from '@/components/Sidebar'
 import AuthRetryScreen from '@/components/AuthRetryScreen'
+import { LabelsProvider } from '@/contexts/LabelsContext'
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar_collapsed'
 
@@ -74,7 +75,18 @@ interface DashboardLayoutProps {
     children: ReactNode
 }
 
+// LabelsProvider di luar semua branch render (termasuk exam mode &
+// change-password) supaya semua halaman dashboard bisa memakai
+// useSchoolLabels().
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
+    return (
+        <LabelsProvider>
+            <DashboardLayoutInner>{children}</DashboardLayoutInner>
+        </LabelsProvider>
+    )
+}
+
+function DashboardLayoutInner({ children }: DashboardLayoutProps) {
     const router = useRouter()
     const pathname = usePathname()
     const { user, logout, loading, authError, refreshUser } = useAuth()

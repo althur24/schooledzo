@@ -5,6 +5,7 @@ import { findTeachingAssignmentsOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
 import { getBatchSizes } from '@/lib/examBatch'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET all exams
 export async function GET(request: NextRequest) {
@@ -249,12 +250,13 @@ export async function POST(request: NextRequest) {
 
                 if (students && students.length > 0) {
                     const startDate = new Date(start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })
+                    const labels = await getMenuLabelsForSchool(schoolId)
                     await supabase.from('notifications').insert(
                         students.map((s: any) => ({
                             user_id: s.user_id,
                             type: 'REMEDIAL',
-                            title: `Remedial Ulangan: ${title}`,
-                            message: `Ulangan remedial telah dibuat untuk Anda. Mulai: ${startDate}`,
+                            title: `Remedial ${labels.ulangan}: ${title}`,
+                            message: `${labels.ulangan} remedial telah dibuat untuk Anda. Mulai: ${startDate}`,
                             link: '/dashboard/siswa/ulangan'
                         }))
                     )

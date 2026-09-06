@@ -24,6 +24,7 @@ import InlineQuestionTags from '@/components/InlineQuestionTags'
 import { detectTextDirection } from '@/lib/textDirection'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
     ssr: false,
@@ -78,6 +79,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     // Editor ini dipakai admin & guru (via wrapper guru/uts-uas/[id]) — link internal
     // mengikuti role pemakai agar tidak terlempar ke area peran lain
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const basePath = user?.role === 'GURU' ? '/dashboard/guru/uts-uas' : '/dashboard/admin/uts-uas'
     // Guru tidak punya halaman list uts-uas lagi (terpadu di halaman ulangan) — tombol
     // Kembali langsung ke sana, tanpa lewat redirect
@@ -370,7 +372,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
             ? (isUlangan ? examClass?.name : allClasses.find(c => c.id === resultsClassFilter)?.name)?.replace(/ /g, '_') || 'Filter'
             : 'Semua_Kelas'
 
-        const fileName = `Hasil_${isUlangan ? 'Ulangan' : exam.exam_type}_${exam.title.replace(/ /g, '_')}_${filterClassName}.xlsx`
+        const fileName = `Hasil_${isUlangan ? labels.ulangan : (exam.exam_type === 'UTS' ? labels.uts : labels.uas)}_${exam.title.replace(/ /g, '_')}_${filterClassName}.xlsx`
         
         XLSX.writeFile(wb, fileName)
     }
@@ -400,14 +402,14 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 // Gerbang khas ulangan: publish ditahan sampai semua soal selesai direview
                 if (isUlangan && newActive) {
                     if (updated.pending_publish) {
-                        showToast('Publish ditahan — ada soal yang masih menunggu review. Ulangan otomatis terkirim setelah semua soal disetujui.', 'warning')
+                        showToast(`Publish ditahan — ada soal yang masih menunggu review. ${labels.ulangan} otomatis terkirim setelah semua soal disetujui.`, 'warning')
                     } else {
-                        showToast('Ulangan berhasil dipublish!', 'success')
+                        showToast(`${labels.ulangan} berhasil dipublish!`, 'success')
                     }
                 }
             } else if (isUlangan) {
                 const err = await res.json().catch(() => null)
-                showToast(err?.error || 'Gagal mempublikasikan ulangan.', 'error')
+                showToast(err?.error || `Gagal mempublikasikan ${labels.ulangan}.`, 'error')
             }
         } finally { setSaving(false) }
     }
@@ -667,9 +669,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     </button>
                     <div className="flex items-center gap-3">
                         {isUlangan ? (
-                            <span className="px-3 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-sm font-bold rounded-full">Ulangan</span>
+                            <span className="px-3 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-sm font-bold rounded-full">{labels.ulangan}</span>
                         ) : (
-                            <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'}`}>{exam.exam_type}</span>
+                            <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'}`}>{exam.exam_type === 'UTS' ? labels.uts : labels.uas}</span>
                         )}
                         {exam.is_remedial && (
                             <span className="px-3 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-sm font-bold rounded-full">
@@ -1356,7 +1358,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 onSaveResults={handleRapihSaveToExam}
                 onSaveToBank={handleRapihSaveToBank}
                 saving={rapihSaving}
-                targetLabel="UTS/UAS"
+                targetLabel={`${labels.uts}/${labels.uas}`}
                 aiReviewEnabled={aiReviewEnabled}
                 canGenerate={true}
                 showBankSoal={false}
@@ -1374,7 +1376,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     onClose={() => setSoalMode('list')}
                     onConfirm={handleAddBankQuestions}
                     saving={saving}
-                    targetLabel="UTS/UAS"
+                    targetLabel={`${labels.uts}/${labels.uas}`}
                 />
             )}
 

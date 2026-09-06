@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { TimeCircle as Clock, Danger, Calendar, Category } from 'react-iconly'
 import { PlayCircle } from 'lucide-react'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 
 interface WarningItem {
     student_id: string
@@ -49,6 +51,7 @@ interface ScheduleEntry {
 export default function GuruDashboard() {
     const { user } = useAuth()
     const router = useRouter()
+    const labels = useSchoolLabels()
     const [warnings, setWarnings] = useState<WarningsData | null>(null)
     const [todaySchedule, setTodaySchedule] = useState<ScheduleEntry[]>([])
     const [loading, setLoading] = useState(true)
@@ -238,7 +241,7 @@ export default function GuruDashboard() {
                                             <div>
                                                 <div className="flex items-center gap-2 mb-2">
                                                     <span className="px-2.5 py-1 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs font-bold rounded-full">
-                                                        {exam.exam_type}
+                                                        {labelForGradeType(exam.exam_type, labels)}
                                                     </span>
                                                     <span className="text-xs font-bold text-text-secondary bg-black/5 dark:bg-white/5 px-2.5 py-1 rounded-full">
                                                         {exam.duration_minutes} Menit
@@ -279,7 +282,7 @@ export default function GuruDashboard() {
                                 <Clock set="bold" size={40} />
                             </div>
                             <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Tidak Ada Jadwal Mengajar</h3>
-                            <p className="text-text-secondary dark:text-zinc-400">Anda tidak memiliki jadwal kelas untuk hari ini. Waktu luang dapat digunakan untuk mengoreksi tugas atau menyiapkan materi.</p>
+                            <p className="text-text-secondary dark:text-zinc-400">Anda tidak memiliki jadwal kelas untuk hari ini. Waktu luang dapat digunakan untuk mengoreksi {labels.tugas.toLowerCase()} atau menyiapkan materi.</p>
                         </div>
                     ) : (
                         <div className="relative pl-6 lg:pl-8 space-y-8">

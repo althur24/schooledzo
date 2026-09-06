@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { logGradeChange } from '@/lib/gradeHistory'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // POST input nilai manual untuk kuis OFFLINE (dilaksanakan di luar LMS).
 // Sengaja terpisah dari POST /api/quiz-submissions (hot path ujian online:
@@ -34,13 +35,14 @@ export async function POST(request: NextRequest) {
             .eq('id', quiz_id)
             .single()
 
+        const labels = await getMenuLabelsForSchool(schoolId)
         if (!quiz) {
-            return NextResponse.json({ error: 'Kuis tidak ditemukan' }, { status: 404 })
+            return NextResponse.json({ error: `${labels.kuis} tidak ditemukan` }, { status: 404 })
         }
 
         // Input manual hanya untuk kuis offline — kuis online dinilai dari pengerjaan siswa
         if ((quiz as any).submission_mode !== 'OFFLINE') {
-            return NextResponse.json({ error: 'Input nilai manual hanya tersedia untuk kuis offline' }, { status: 400 })
+            return NextResponse.json({ error: `Input nilai manual hanya tersedia untuk ${labels.kuis.toLowerCase()} offline` }, { status: 400 })
         }
 
         const { data: teacher } = await supabase
@@ -51,7 +53,7 @@ export async function POST(request: NextRequest) {
 
         const quizTeacherId = (quiz as any)?.teaching_assignment?.teacher_id
         if (teacher && quizTeacherId && quizTeacherId !== teacher.id) {
-            return NextResponse.json({ error: 'Anda tidak memiliki akses untuk menilai kuis ini' }, { status: 403 })
+            return NextResponse.json({ error: `Anda tidak memiliki akses untuk menilai ${labels.kuis.toLowerCase()} ini` }, { status: 403 })
         }
 
         // Upsert submission manual (skala tetap 0-100: total = nilai, max = 100)

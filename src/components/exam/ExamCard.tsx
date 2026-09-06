@@ -6,6 +6,8 @@ import { Layers } from 'lucide-react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import DropdownMenu, { DropdownMenuItem } from '@/components/ui/DropdownMenu'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 
 export interface ExamCardStatus {
     label: string
@@ -76,6 +78,7 @@ export default function ExamCard({
     primaryAction,
     menuItems = [],
 }: ExamCardProps) {
+    const labels = useSchoolLabels()
     const noQuestions = (questionCount ?? 0) === 0
 
     return (
@@ -98,10 +101,10 @@ export default function ExamCard({
                         )}
                         {!isLive && status.label}
                     </span>
-                    <span className={`${typeBadgeBase} ${typeBadge.className}`}>{typeBadge.label}</span>
+                    <span className={`${typeBadgeBase} ${typeBadge.className}`}>{labelForGradeType(typeBadge.label, labels)}</span>
                     {(batchSize > 1) && (
                         <span
-                            title={`Soal ulangan ini tersinkron otomatis ke ${batchSize} kelas paralel`}
+                            title={`Soal ${labels.ulangan} ini tersinkron otomatis ke ${batchSize} kelas paralel`}
                             className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/20"
                         >
                             <Layers className="w-3.5 h-3.5" /> {batchSize} Kelas Paralel

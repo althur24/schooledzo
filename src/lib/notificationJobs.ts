@@ -2,6 +2,7 @@ import { supabaseAdmin as supabase } from './supabase'
 import { logError } from './logError'
 import { fetchAllRows } from './fetchAllRows'
 import { AuthUser } from './types'
+import { getMenuLabelsForSchool } from './serverLabels'
 
 /**
  * Proactive notification jobs (deadline reminders, exam reminders, cleanups).
@@ -57,6 +58,7 @@ async function cleanupStaleExamNotifications(user: AuthUser) {
 // Deadline reminder — check for assignments/quizzes due within 24 hours (SISWA)
 async function sendDeadlineReminders(user: AuthUser, counter: Counter) {
     try {
+        const labels = await getMenuLabelsForSchool(user.school_id)
         // Get student's id + class
         const { data: student } = await supabase
             .from('students')
@@ -113,7 +115,7 @@ async function sendDeadlineReminders(user: AuthUser, counter: Counter) {
                                 user_id: user.id,
                                 type: 'DEADLINE_REMINDER',
                                 title: `⏰ Deadline Segera: ${assignment.title}`,
-                                message: `Tugas ini harus dikumpulkan sebelum ${deadlineStr}`,
+                                message: `${labels.tugas} ini harus dikumpulkan sebelum ${deadlineStr}`,
                                 link: '/dashboard/siswa/tugas'
                             })
                             counter.inserts++
@@ -164,7 +166,7 @@ async function sendDeadlineReminders(user: AuthUser, counter: Counter) {
                                 user_id: user.id,
                                 type: 'DEADLINE_REMINDER',
                                 title: `⏰ Deadline Segera: ${quiz.title}`,
-                                message: `Kuis ini harus dikerjakan sebelum ${deadlineStr}`,
+                                message: `${labels.kuis} ini harus dikerjakan sebelum ${deadlineStr}`,
                                 link: '/dashboard/siswa/kuis'
                             })
                             counter.inserts++
@@ -182,6 +184,7 @@ async function sendDeadlineReminders(user: AuthUser, counter: Counter) {
 // UTS/UAS Reminder — check for exams starting within 24 hours (SISWA)
 async function sendExamReminders(user: AuthUser, counter: Counter) {
     try {
+        const labels = await getMenuLabelsForSchool(user.school_id)
         const { data: student } = await supabase
             .from('students')
             .select('class_id')
@@ -215,7 +218,7 @@ async function sendExamReminders(user: AuthUser, counter: Counter) {
                         .limit(1)
 
                     if (!existing || existing.length === 0) {
-                        const label = exam.exam_type === 'UTS' ? 'UTS' : 'UAS'
+                        const label = exam.exam_type === 'UTS' ? labels.uts : labels.uas
                         const startStr = new Date(exam.start_time).toLocaleString('id-ID')
                         await supabase.from('notifications').insert({
                             user_id: user.id,
@@ -239,6 +242,7 @@ async function sendExamReminders(user: AuthUser, counter: Counter) {
 // (e.g. exams made before the update, or missed) will still see "UTS/UAS Dijadwalkan".
 async function sendScheduledExamNotifications(user: AuthUser, counter: Counter) {
     try {
+        const labels = await getMenuLabelsForSchool(user.school_id)
         const { data: student } = await supabase
             .from('students')
             .select('class_id')
@@ -267,7 +271,7 @@ async function sendScheduledExamNotifications(user: AuthUser, counter: Counter) 
                         .limit(1)
 
                     if (!existingInit || existingInit.length === 0) {
-                        const label = exam.exam_type === 'UTS' ? 'UTS' : 'UAS'
+                        const label = exam.exam_type === 'UTS' ? labels.uts : labels.uas
                         const startStr = new Date(exam.start_time).toLocaleString('id-ID')
                         await supabase.from('notifications').insert({
                             user_id: user.id,
@@ -289,6 +293,7 @@ async function sendScheduledExamNotifications(user: AuthUser, counter: Counter) 
 // Teacher UTS/UAS Reminders (GURU)
 async function sendTeacherExamReminders(user: AuthUser, counter: Counter) {
     try {
+        const labels = await getMenuLabelsForSchool(user.school_id)
         const { data: teacher } = await supabase
             .from('teachers')
             .select('id')
@@ -339,7 +344,7 @@ async function sendTeacherExamReminders(user: AuthUser, counter: Counter) {
                                 .limit(1)
 
                             if (!existing || existing.length === 0) {
-                                const label = exam.exam_type === 'UTS' ? 'UTS' : 'UAS'
+                                const label = exam.exam_type === 'UTS' ? labels.uts : labels.uas
                                 const startStr = new Date(exam.start_time).toLocaleString('id-ID')
                                 await supabase.from('notifications').insert({
                                     user_id: user.id,
@@ -374,7 +379,7 @@ async function sendTeacherExamReminders(user: AuthUser, counter: Counter) {
                                 : new Date(exam.start_time).getTime() + (exam.duration_minutes || 0) * 60000
                             if (now.getTime() > windowEndMs) continue
 
-                            const label = exam.exam_type === 'UTS' ? 'UTS' : 'UAS'
+                            const label = exam.exam_type === 'UTS' ? labels.uts : labels.uas
                             const dimulaiTitle = `🔔 ${label} Dimulai: ${exam.title}`
 
                             const { data: existingDimulai } = await supabase

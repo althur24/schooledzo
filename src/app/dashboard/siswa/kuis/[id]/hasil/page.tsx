@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { PageHeader } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
@@ -83,6 +84,7 @@ function groupByPassage(questions: QuizQuestion[]): QuestionGroup[] {
 export default function HasilKuisPage() {
     const params = useParams()
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const quizId = params.id as string
 
     const [result, setResult] = useState<QuizResult | null>(null)
@@ -134,10 +136,10 @@ export default function HasilKuisPage() {
     if (!result.submitted_at) {
         return (
             <div className="text-center py-8 space-y-3">
-                <p className="text-text-main dark:text-white font-bold">Kuis ini belum kamu kumpulkan</p>
+                <p className="text-text-main dark:text-white font-bold">{labels.kuis} ini belum kamu kumpulkan</p>
                 <p className="text-text-secondary">Hasil baru tersedia setelah kamu menekan tombol Kumpulkan.</p>
                 <Link href={`/dashboard/siswa/kuis/${quizId}`} className="inline-block text-primary font-bold hover:underline">
-                    Kembali ke Kuis
+                    Kembali ke {labels.kuis}
                 </Link>
             </div>
         )
@@ -229,7 +231,7 @@ export default function HasilKuisPage() {
     return (
         <div className="space-y-6 max-w-3xl mx-auto">
             <PageHeader
-                title="Hasil Kuis"
+                title={`Hasil ${labels.kuis}`}
                 subtitle={quiz.title}
                 backHref="/dashboard/siswa/kuis"
             />
@@ -239,7 +241,7 @@ export default function HasilKuisPage() {
                     <Star set="bold" primaryColor="currentColor" size={60} />
                 </div>
                 <h2 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{quiz.title}</h2>
-                <p className="text-text-secondary">Kuis Selesai Dikerjakan</p>
+                <p className="text-text-secondary">{labels.kuis} Selesai Dikerjakan</p>
 
                 <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto mt-6">
                     <Card className="text-center">
@@ -300,7 +302,7 @@ export default function HasilKuisPage() {
                     href="/dashboard/siswa/kuis"
                     className="px-6 py-2.5 md:px-8 md:py-3 text-sm md:text-base bg-primary text-white rounded-xl hover:bg-primary-dark transition-colors font-semibold"
                 >
-                    Kembali ke Daftar Kuis
+                    Kembali ke Daftar {labels.kuis}
                 </Link>
             </div>
         </div>

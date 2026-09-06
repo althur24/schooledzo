@@ -9,6 +9,7 @@ import {
     CheckCircle, AlertTriangle, Clock, PlayCircle, RefreshCw,
     RotateCcw, ChevronDown as ChevronDownIcon
 } from 'lucide-react'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 interface StudentProgress {
     student_id: string
@@ -59,6 +60,7 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
     const { id: examId } = use(params)
     const spRaw = use(searchParams ?? Promise.resolve({}))
     const router = useRouter()
+    const labels = useSchoolLabels()
     const isUlangan = (spRaw as { type?: string } | undefined)?.type === 'ulangan'
     const monitorEndpoint = isUlangan ? '/api/exam-submissions/monitor' : '/api/official-exam-submissions/monitor'
     const resetEndpoint = isUlangan ? '/api/exam-submissions' : '/api/official-exam-submissions'
@@ -265,7 +267,7 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
                     </Link>
                     <div className="flex items-center gap-3">
                         <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600' : 'bg-purple-500/10 text-purple-600'}`}>
-                            {exam.exam_type}
+                            {exam.exam_type === 'UTS' ? labels.uts : labels.uas}
                         </span>
                         <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
                         {exam.is_active && (

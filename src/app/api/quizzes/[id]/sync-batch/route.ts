@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncQuizBatch } from '@/lib/examBatch'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // POST /api/quizzes/:id/sync-batch — salin ulang soal + terbitkan semua kelas satu batch.
 // Dipakai tombol "Salin Ulang Soal" setelah kegagalan penyalinan sebagian.
@@ -14,7 +15,7 @@ export async function POST(
         const { id } = await params
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user } = ctx
+        const { user, schoolId } = ctx
 
         if (user.role !== 'GURU' && user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -22,7 +23,10 @@ export async function POST(
 
         const { data: quiz } = await supabase
             .from('quizzes').select('teaching_assignment_id, batch_id').eq('id', id).single()
-        if (!quiz) return NextResponse.json({ error: 'Kuis tidak ditemukan' }, { status: 404 })
+        if (!quiz) {
+            const labels = await getMenuLabelsForSchool(schoolId)
+            return NextResponse.json({ error: `${labels.kuis} tidak ditemukan` }, { status: 404 })
+        }
 
         // Guru hanya boleh sync kuis miliknya sendiri
         if (user.role === 'GURU') {
@@ -31,7 +35,8 @@ export async function POST(
             const { data: ta } = await supabase
                 .from('teaching_assignments').select('teacher_id').eq('id', quiz.teaching_assignment_id).single()
             if (!teacher || ta?.teacher_id !== teacher.id) {
-                return NextResponse.json({ error: 'Anda tidak memiliki akses ke kuis ini' }, { status: 403 })
+                const labels = await getMenuLabelsForSchool(schoolId)
+                return NextResponse.json({ error: `Anda tidak memiliki akses ke ${labels.kuis.toLowerCase()} ini` }, { status: 403 })
             }
         }
 

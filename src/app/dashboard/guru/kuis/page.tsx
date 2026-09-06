@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
@@ -39,6 +40,7 @@ interface TeachingAssignment {
 export default function GuruKuisPage() {
     const { user } = useAuth()
     const router = useRouter()
+    const labels = useSchoolLabels()
     const [quizzes, setQuizzes] = useState<Quiz[]>([])
     const [teachingAssignments, setTeachingAssignments] = useState<TeachingAssignment[]>([])
     const [submissionCounts, setSubmissionCounts] = useState<Record<string, number>>({})
@@ -216,7 +218,7 @@ export default function GuruKuisPage() {
 
             if (!primaryRes.ok) {
                 const err = await primaryRes.json().catch(() => ({}))
-                alert(err.error || 'Gagal membuat kuis. Silakan coba lagi.')
+                alert(err.error || `Gagal membuat ${labels.kuis.toLowerCase()}. Silakan coba lagi.`)
                 return
             }
 
@@ -256,7 +258,7 @@ export default function GuruKuisPage() {
                     }
                 })
                 if (failedClassNames.length > 0) {
-                    alert(`Kuis utama berhasil dibuat. ${siblingIds.length} kelas tambahan berhasil, ${failedClassNames.length} GAGAL: ${failedClassNames.join(', ')}. Buat ulang kuis untuk kelas tersebut.`)
+                    alert(`${labels.kuis} utama berhasil dibuat. ${siblingIds.length} kelas tambahan berhasil, ${failedClassNames.length} GAGAL: ${failedClassNames.join(', ')}. Buat ulang ${labels.kuis.toLowerCase()} untuk kelas tersebut.`)
                 }
             }
 
@@ -325,7 +327,7 @@ export default function GuruKuisPage() {
             })
 
             if (targetIds.length === 0) {
-                alert('Gagal membuat kuis baru. Silakan coba lagi.')
+                alert(`Gagal membuat ${labels.kuis.toLowerCase()} baru. Silakan coba lagi.`)
                 return
             }
 
@@ -341,23 +343,23 @@ export default function GuruKuisPage() {
             })
 
             if (!copyRes.ok) {
-                alert('Berhasil membuat kuis, tetapi gagal menyalin soal.')
+                alert(`Berhasil membuat ${labels.kuis.toLowerCase()}, tetapi gagal menyalin soal.`)
             } else {
-                alert(`Kuis berhasil disalin ke ${targetIds.length} kelas.`)
+                alert(`${labels.kuis} berhasil disalin ke ${targetIds.length} kelas.`)
             }
 
             setShowCopy(false)
             fetchData()
         } catch (error) {
             console.error('Error copying quiz:', error)
-            alert('Terjadi kesalahan saat menyalin kuis.')
+            alert(`Terjadi kesalahan saat menyalin ${labels.kuis.toLowerCase()}.`)
         } finally {
             setCopying(false)
         }
     }
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Hapus kuis ini?')) return
+        if (!confirm(`Hapus ${labels.kuis.toLowerCase()} ini?`)) return
         await fetch(`/api/quizzes/${id}`, { method: 'DELETE' })
         fetchData()
     }
@@ -472,13 +474,13 @@ export default function GuruKuisPage() {
     return (
         <div className="space-y-6">
             <PageHeader
-                title="Kuis"
-                subtitle="Buat dan kelola kuis dengan AI"
+                title={labels.kuis}
+                subtitle={`Buat dan kelola ${labels.kuis.toLowerCase()} dengan AI`}
                 backHref="/dashboard/guru"
                 action={
                     <Button onClick={() => setShowCreate(true)} className="flex items-center gap-2" data-tutorial="quiz-create-btn">
                         <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
-                        Buat Kuis
+                        Buat {labels.kuis}
                     </Button>
                 }
             />
@@ -513,11 +515,11 @@ export default function GuruKuisPage() {
             ) : quizzes.length === 0 ? (
                 <EmptyState
                     icon={<div className="text-secondary"><Game set="bold" primaryColor="currentColor" size={48} /></div>}
-                    title="Belum Ada Kuis"
-                    description="Buat kuis pertama Anda dengan bantuan AI!"
+                    title={`Belum Ada ${labels.kuis}`}
+                    description={`Buat ${labels.kuis.toLowerCase()} pertama Anda dengan bantuan AI!`}
                     action={
                         <Button onClick={() => setShowCreate(true)}>
-                            Buat Kuis Sekarang
+                            Buat {labels.kuis} Sekarang
                         </Button>
                     }
                 />
@@ -541,7 +543,7 @@ export default function GuruKuisPage() {
                                         )}
                                         {(quiz.batch_size || 1) > 1 && (
                                             <span
-                                                title={`Soal kuis ini tersinkron otomatis ke ${quiz.batch_size} kelas paralel`}
+                                                title={`Soal ${labels.kuis.toLowerCase()} ini tersinkron otomatis ke ${quiz.batch_size} kelas paralel`}
                                                 className="flex items-center gap-1 px-2 py-0.5 bg-sky-500/10 text-sky-600 dark:text-sky-400 text-xs rounded-full border border-sky-200 dark:border-sky-500/20 font-bold"
                                             >
                                                 <Layers className="w-3.5 h-3.5" /> {quiz.batch_size} Kelas Paralel
@@ -648,7 +650,7 @@ export default function GuruKuisPage() {
             <Modal
                 open={showCreate}
                 onClose={() => setShowCreate(false)}
-                title="Buat Kuis Baru"
+                title={`Buat ${labels.kuis} Baru`}
             >
                 <div className="space-y-4">
                     <div data-tutorial="quiz-form-class">
@@ -661,13 +663,13 @@ export default function GuruKuisPage() {
                         />
                     </div>
                     <div data-tutorial="quiz-form-title">
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Kuis</label>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul {labels.kuis}</label>
                         <input
                             type="text"
                             value={form.title}
                             onChange={(e) => setForm({ ...form, title: e.target.value })}
                             className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="Contoh: Kuis Bab 1 - Bilangan Bulat"
+                            placeholder={`Contoh: ${labels.kuis} Bab 1 - Bilangan Bulat`}
                         />
                     </div>
                     <div data-tutorial="quiz-form-desc">
@@ -724,7 +726,7 @@ export default function GuruKuisPage() {
                             />
                         )}
                         <p className="text-xs text-text-secondary dark:text-zinc-500 mt-1">
-                            {hasAvailableFrom ? 'Siswa baru bisa memulai kuis setelah jam ini.' : 'Tanpa jam buka — siswa bisa langsung mengerjakan saat kuis aktif.'}
+                            {hasAvailableFrom ? `Siswa baru bisa memulai ${labels.kuis.toLowerCase()} setelah jam ini.` : `Tanpa jam buka — siswa bisa langsung mengerjakan saat ${labels.kuis.toLowerCase()} aktif.`}
                         </p>
                     </div>
                     <div data-tutorial="quiz-form-deadline">
@@ -749,7 +751,7 @@ export default function GuruKuisPage() {
                             />
                         )}
                         <p className="text-xs text-text-secondary dark:text-zinc-500 mt-1">
-                            {hasDeadline ? 'Siswa tidak bisa mengerjakan kuis setelah waktu ini.' : 'Tanpa batas waktu — siswa bisa mengerjakan kapan saja selama kuis aktif.'}
+                            {hasDeadline ? `Siswa tidak bisa mengerjakan ${labels.kuis.toLowerCase()} setelah waktu ini.` : `Tanpa batas waktu — siswa bisa mengerjakan kapan saja selama ${labels.kuis.toLowerCase()} aktif.`}
                         </p>
                     </div>
                     <div className="flex gap-3 pt-4" data-tutorial="quiz-form-submit">
@@ -766,7 +768,7 @@ export default function GuruKuisPage() {
                             loading={creating}
                             className="flex-1"
                         >
-                            Buat Kuis
+                            Buat {labels.kuis}
                         </Button>
                     </div>
                 </div>
@@ -775,11 +777,11 @@ export default function GuruKuisPage() {
             <Modal
                 open={showCopy}
                 onClose={() => setShowCopy(false)}
-                title="Pakai Ulang Kuis"
+                title={`Pakai Ulang ${labels.kuis}`}
             >
                 <div className="space-y-4">
                     <div className="bg-secondary/10 p-4 rounded-xl mb-2">
-                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source Kuis: {copySourceQuiz?.title}</h4>
+                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source {labels.kuis}: {copySourceQuiz?.title}</h4>
                         <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
                             <span>Mata Pelajaran: <strong>{copySourceQuiz?.teaching_assignment?.subject?.name}</strong></span>
                         </div>
@@ -795,7 +797,7 @@ export default function GuruKuisPage() {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Kuis Baru</label>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul {labels.kuis} Baru</label>
                         <input
                             type="text"
                             value={copyForm.title}
@@ -893,7 +895,7 @@ export default function GuruKuisPage() {
                             loading={copying}
                             className="flex-1"
                         >
-                            Salin Kuis
+                            Salin {labels.kuis}
                         </Button>
                     </div>
                 </div>

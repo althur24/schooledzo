@@ -1,5 +1,7 @@
 import { TickSquare, Discovery, InfoCircle, CloseSquare, Paper } from 'react-iconly'
 import { BrainCircuit } from 'lucide-react'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { MenuLabels, DEFAULT_MENU_LABELS } from '@/lib/labels'
 
 // ─────────────────────────────────────────────────────────
 // Shared question badges — satu sumber warna untuk guru & admin
@@ -46,14 +48,15 @@ export function DifficultyBadge({ difficulty }: { difficulty: string }) {
     return <span className={`${baseClass} ${cls}`}>{getDifficultyLabel(difficulty)}</span>
 }
 
-export function getSourceLabel(source?: string, sourceName?: string): string {
-    if (source === 'exam') return `Ulangan${sourceName ? `: ${sourceName}` : ''}`
-    if (source === 'quiz') return `Kuis${sourceName ? `: ${sourceName}` : ''}`
+export function getSourceLabel(source?: string, sourceName?: string, labels: MenuLabels = DEFAULT_MENU_LABELS): string {
+    if (source === 'exam') return `${labels.ulangan}${sourceName ? `: ${sourceName}` : ''}`
+    if (source === 'quiz') return `${labels.kuis}${sourceName ? `: ${sourceName}` : ''}`
     if (source === 'ai_generated') return 'AI Generated'
     return 'Manual'
 }
 
 export function SourceBadge({ source, sourceName }: { source?: string; sourceName?: string }) {
+    const labels = useSchoolLabels()
     const type = source || 'manual'
     const cls = type === 'exam'
         ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/20'
@@ -64,7 +67,7 @@ export function SourceBadge({ source, sourceName }: { source?: string; sourceNam
                 : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/20'
     return (
         <span className={`${baseClass} ${cls}`} title={sourceName || undefined}>
-            {getSourceLabel(type, sourceName)}
+            {getSourceLabel(type, sourceName, labels)}
         </span>
     )
 }

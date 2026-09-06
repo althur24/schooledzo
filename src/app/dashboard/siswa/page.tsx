@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 import { useRouter } from 'next/navigation'
 import { TimeCircle as Clock, Danger, Calendar, Document, Edit, ArrowRight, Notification } from 'react-iconly'
 import { PartyPopper, GraduationCap, Loader2, Megaphone } from 'lucide-react'
@@ -37,6 +39,7 @@ interface ScheduleEntry {
 
 export default function SiswaDashboard() {
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const router = useRouter()
     const [student, setStudent] = useState<StudentData | null>(null)
     const [loading, setLoading] = useState(true)
@@ -332,7 +335,7 @@ export default function SiswaDashboard() {
                             } else if (!foundResumeItem) {
                                 foundResumeItem = {
                                     type: 'Ulangan' as const,
-                                    title: e.exam?.title || 'Ulangan Tanpa Judul',
+                                    title: e.exam?.title || '',
                                     link: `/dashboard/siswa/ulangan/${e.exam_id}`,
                                 }
                             }
@@ -363,7 +366,7 @@ export default function SiswaDashboard() {
                             } else if (!foundResumeItem) {
                                 foundResumeItem = {
                                     type: 'Kuis' as const,
-                                    title: q.quiz?.title || 'Kuis Tanpa Judul',
+                                    title: q.quiz?.title || '',
                                     link: `/dashboard/siswa/kuis/${q.quiz_id}`,
                                 }
                             }
@@ -527,7 +530,7 @@ export default function SiswaDashboard() {
                     </div>
                     <div>
                         <p className="font-bold text-amber-700 dark:text-amber-400 text-sm">Gagal memuat sebagian data</p>
-                        <p className="text-amber-600/80 dark:text-amber-500/80 text-xs">Daftar tugas/jadwal di bawah mungkin tidak lengkap. Muat ulang halaman untuk mencoba lagi.</p>
+                        <p className="text-amber-600/80 dark:text-amber-500/80 text-xs">Daftar {labels.tugas}/jadwal di bawah mungkin tidak lengkap. Muat ulang halaman untuk mencoba lagi.</p>
                     </div>
                 </div>
             )}
@@ -589,7 +592,7 @@ export default function SiswaDashboard() {
                                 <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
                             </div>
                             <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Semua Sudah Dikerjakan!</h3>
-                            <p className="text-text-secondary dark:text-zinc-400">Keren, {user?.full_name?.split(' ')[0]}! Semua tugas, kuis, dan ulangan sudah selesai. 💪</p>
+                            <p className="text-text-secondary dark:text-zinc-400">Keren, {user?.full_name?.split(' ')[0]}! Semua {labels.tugas}, {labels.kuis}, dan {labels.ulangan} sudah selesai. 💪</p>
                         </div>
                     ) : (
                         <div className="grid gap-4">
@@ -608,7 +611,7 @@ export default function SiswaDashboard() {
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 mb-2">
                                                         <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wider ${styles.badge}`}>
-                                                            {item.type}
+                                                            {labelForGradeType(item.type, labels)}
                                                         </span>
                                                         <span className={`text-xs font-bold flex items-center gap-1 ${styles.text}`}>
                                                             <span className={styles.iconPulse ? "animate-pulse" : ""}>
@@ -810,7 +813,7 @@ export default function SiswaDashboard() {
                                 <Clock set="bold" size={40} />
                             </div>
                             <h3 className="text-2xl font-bold text-text-main dark:text-white mb-2">
-                                Ada {resumeItem.type} Belum Selesai!
+                                Ada {resumeItem.type === 'Kuis' ? labels.kuis : resumeItem.type === 'Ulangan' ? labels.ulangan : `${labels.uts}/${labels.uas}`} Belum Selesai!
                             </h3>
                             <div className="bg-surface-ground/50 dark:bg-surface-ground/30 rounded-xl p-4 my-6 border border-secondary/10">
                                 <p className="text-sm text-text-secondary dark:text-zinc-400 mb-1">

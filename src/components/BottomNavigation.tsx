@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import type { MenuLabels } from '@/lib/labels'
 import {
     Home, Document as DocumentIcon, Edit, Game, Graph, TimeCircle, User, Work,
-    Category, Bookmark, Chart, Ticket, Notification, Calendar, Folder
+    Category, Bookmark, Chart, Ticket, Notification, Calendar, Folder, Setting
 } from 'react-iconly'
 
 interface NavItem {
@@ -75,7 +77,19 @@ const adminArc: NavItem[] = [
     { icon: Ticket, label: 'Penugasan', path: '/dashboard/admin/penugasan' },
     { icon: Notification, label: 'Info', path: '/dashboard/admin/pengumuman' },
     { icon: Calendar, label: 'Jadwal', path: '/dashboard/admin/jadwal' },
+    { icon: Setting, label: 'Pengaturan', path: '/dashboard/admin/pengaturan' },
 ]
+
+// Label menu yang bisa dikustomisasi per-sekolah — hanya teks tampilan,
+// anchor tutorial tetap dari TUTORIAL_NAV_IDS (canonical, keyed by path).
+const BAR_LABEL_PATH_MAP: Record<string, (labels: MenuLabels) => string> = {
+    '/dashboard/siswa/tugas': (l) => l.tugas,
+    '/dashboard/siswa/ulangan': (l) => l.ulangan,
+    '/dashboard/siswa/kuis': (l) => l.kuis,
+    '/dashboard/guru/tugas': (l) => l.tugas,
+    '/dashboard/guru/ulangan': (l) => l.ulangan,
+    '/dashboard/guru/kuis': (l) => l.kuis,
+}
 
 // --- WALI ---
 const waliBarLeft: NavItem[] = [
@@ -96,6 +110,7 @@ const superAdminArc: NavItem[] = []
 export default function BottomNavigation() {
     const pathname = usePathname()
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const [isOpen, setIsOpen] = useState(false)
 
     useEffect(() => {
@@ -186,7 +201,7 @@ export default function BottomNavigation() {
                         ? 'text-white/50 dark:text-slate-600'
                         : 'text-slate-400 dark:text-slate-500'
                     }`}>
-                    {item.label}
+                    {BAR_LABEL_PATH_MAP[item.path]?.(labels) ?? item.label}
                 </span>
             </Link>
         )

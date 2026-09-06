@@ -6,6 +6,8 @@ import Link from 'next/link'
 import { PageHeader, Button, Modal } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 import {
     Loader2, ArrowLeft, GraduationCap, BarChart3, Users,
     CheckCircle, AlertTriangle, Save, ChevronDown, ChevronUp, History, Download, RefreshCw, XCircle, AlertCircle, Search, Filter
@@ -49,6 +51,7 @@ interface SubmissionDetail {
 export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: string }> }) {
     const { id: examId } = use(params)
     const router = useRouter()
+    const labels = useSchoolLabels()
 
     const [exam, setExam] = useState<any>(null)
     const [submissions, setSubmissions] = useState<Submission[]>([])
@@ -181,13 +184,13 @@ export default function GuruUtsUasHasilPage({ params }: { params: Promise<{ id: 
                 <Link
                     href={'/dashboard/guru/ulangan'}
                     className="inline-flex items-center justify-center p-3 mb-4 rounded-xl bg-white dark:bg-surface-dark border border-secondary/20 hover:border-primary text-text-secondary hover:text-primary transition-all shadow-sm"
-                    title="Kembali ke Daftar Ulangan"
+                    title={`Kembali ke Daftar ${labels.ulangan}`}
                 >
                     <ArrowLeft className="w-5 h-5" />
                 </Link>
                 <div className="flex items-center gap-3">
                     <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600' : 'bg-purple-500/10 text-purple-600'}`}>
-                        {exam.exam_type}
+                        {exam.exam_type ? labelForGradeType(exam.exam_type, labels) : ''}
                     </span>
                     <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
                 </div>

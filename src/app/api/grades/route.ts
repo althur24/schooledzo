@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch } from '@/lib/tenantGuard'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { logGradeChange } from '@/lib/gradeHistory'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // Create admin client to bypass RLS
 const supabase = createClient(
@@ -305,6 +306,8 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        const labels = await getMenuLabelsForSchool(schoolId)
+
         const { submission_id, assignment_id, student_id, score, feedback } = await request.json()
 
         if ((!submission_id && !(assignment_id && student_id)) || score === undefined) {
@@ -359,7 +362,7 @@ export async function POST(request: NextRequest) {
                 .single()
 
             if (!assignment) {
-                return NextResponse.json({ error: 'Tugas tidak ditemukan' }, { status: 404 })
+                return NextResponse.json({ error: `${labels.tugas} tidak ditemukan` }, { status: 404 })
             }
 
             // Penilaian tanpa submission hanya untuk tugas bertipe offline —
@@ -464,7 +467,7 @@ export async function POST(request: NextRequest) {
 
             const studentData = submission?.student as any
             if (studentData?.user_id) {
-                const assignmentTitle = (submission?.assignment as any)?.title || 'Tugas'
+                const assignmentTitle = (submission?.assignment as any)?.title || labels.tugas
                 const subjectName = (submission?.assignment as any)?.teaching_assignment?.subject?.name || ''
 
                 await supabase.from('notifications').insert({

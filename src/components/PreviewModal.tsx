@@ -4,6 +4,7 @@ import { useState } from 'react'
 import SmartText from '@/components/SmartText'
 import PassageBlock from '@/components/PassageBlock'
 import StudentAnswerInput from '@/components/StudentAnswerInput'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { TimeCircle, TickSquare, CloseSquare } from 'react-iconly'
 import { Eye, X } from 'lucide-react'
 
@@ -34,6 +35,7 @@ export default function PreviewModal({
     open, onClose, title, description, durationMinutes, questions, type
 }: PreviewModalProps) {
     const [answers, setAnswers] = useState<Record<string, string>>({})
+    const labels = useSchoolLabels()
 
     if (!open) return null
 
@@ -46,7 +48,7 @@ export default function PreviewModal({
     }
 
     const answeredCount = Object.keys(answers).length
-    const typeLabel = type === 'kuis' ? 'Kuis' : 'Ulangan'
+    const typeLabel = type === 'kuis' ? labels.kuis : labels.ulangan
 
     return (
         <div className="fixed inset-0 z-[100] bg-surface-light dark:bg-surface-dark overflow-y-auto">

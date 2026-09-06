@@ -10,6 +10,7 @@ import { canManageExam } from '@/lib/teacherScope'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { bufferTeacherSubmissionNotification } from '@/lib/teacherNotifyBuffer'
 import { mergeViolations, IncomingViolation } from '@/lib/violationBatch'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET exam submissions
 export async function GET(request: NextRequest) {
@@ -252,6 +253,8 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        const labels = await getMenuLabelsForSchool(schoolId)
+
         const { exam_id } = await request.json()
 
         if (!exam_id) {
@@ -311,7 +314,7 @@ export async function POST(request: NextRequest) {
         }
 
         if (existingSubmission?.is_submitted) {
-            return NextResponse.json({ error: 'Anda sudah mengumpulkan ulangan ini' }, { status: 400 })
+            return NextResponse.json({ error: `Anda sudah mengumpulkan ${labels.ulangan.toLowerCase()} ini` }, { status: 400 })
         }
 
         if (existingSubmission) {
@@ -320,14 +323,14 @@ export async function POST(request: NextRequest) {
 
         // === Sesi baru: semua gate wajib lolos ===
         if (!exam.is_active) {
-            return NextResponse.json({ error: 'Ulangan belum dibuka' }, { status: 400 })
+            return NextResponse.json({ error: `${labels.ulangan} belum dibuka` }, { status: 400 })
         }
 
         // Check start time + window pengerjaan
         const now = new Date()
         const startTime = new Date(exam.start_time)
         if (now < startTime) {
-            return NextResponse.json({ error: 'Ulangan belum dimulai' }, { status: 400 })
+            return NextResponse.json({ error: `${labels.ulangan} belum dimulai` }, { status: 400 })
         }
         if (exam.window_end_time) {
             // Mode jendela: siswa hanya boleh MEMULAI sebelum jam tutup
@@ -338,14 +341,14 @@ export async function POST(request: NextRequest) {
             // Mode serentak (lama): semua berakhir di start + durasi
             const endTime = new Date(startTime.getTime() + (exam.duration_minutes || 0) * 60 * 1000)
             if (now > endTime) {
-                return NextResponse.json({ error: 'Waktu pengerjaan ulangan sudah berakhir' }, { status: 400 })
+                return NextResponse.json({ error: `Waktu pengerjaan ${labels.ulangan.toLowerCase()} sudah berakhir` }, { status: 400 })
             }
         }
 
         // Verifikasi kelas siswa
         const examClassId = (exam.teaching_assignment as any)?.class_id
         if (examClassId && student.class_id !== examClassId) {
-            return NextResponse.json({ error: 'Ulangan ini bukan untuk kelas Anda' }, { status: 403 })
+            return NextResponse.json({ error: `${labels.ulangan} ini bukan untuk kelas Anda` }, { status: 403 })
         }
 
         // Verifikasi remedial
@@ -395,7 +398,7 @@ export async function POST(request: NextRequest) {
                     .maybeSingle()
                 if (raced && !raced.is_submitted) return resumeResponse(raced)
                 if (raced?.is_submitted) {
-                    return NextResponse.json({ error: 'Anda sudah mengumpulkan ulangan ini' }, { status: 400 })
+                    return NextResponse.json({ error: `Anda sudah mengumpulkan ${labels.ulangan.toLowerCase()} ini` }, { status: 400 })
                 }
             }
             throw insertError
@@ -591,6 +594,7 @@ export async function PUT(request: NextRequest) {
             ? violations
             : (violation ? [violation] : [])
         if (incomingViolations.length > 0) {
+            const labels = await getMenuLabelsForSchool(schoolId)
             const maxViolations = currentSubmission.exam?.max_violations || 3
             const merged = mergeViolations(
                 currentSubmission.violations_log || [],
@@ -662,7 +666,7 @@ export async function PUT(request: NextRequest) {
 
                 return NextResponse.json({
                     force_submitted: true,
-                    message: 'Ulangan otomatis dikumpulkan karena pelanggaran melebihi batas'
+                    message: `${labels.ulangan} otomatis dikumpulkan karena pelanggaran melebihi batas`
                 })
             }
 

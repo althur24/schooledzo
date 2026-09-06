@@ -13,9 +13,11 @@
  */
 
 import { supabaseAdmin as supabase } from '@/lib/supabase'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 export async function checkEndedOfficialExams(schoolId: string): Promise<void> {
     try {
+        const labels = await getMenuLabelsForSchool(schoolId)
         const now = new Date()
 
         // Get all active official exams for this school
@@ -81,7 +83,7 @@ export async function checkEndedOfficialExams(schoolId: string): Promise<void> {
 
             if (teacherUserIds.length === 0) continue
 
-            const examLabel = exam.exam_type === 'UTS' ? 'UTS' : 'UAS'
+            const examLabel = exam.exam_type === 'UTS' ? labels.uts : labels.uas
             const subjectName = (exam.subject as any)?.name || ''
 
             await supabase.from('notifications').insert(

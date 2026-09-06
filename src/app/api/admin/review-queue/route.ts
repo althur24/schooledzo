@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findQuestionBankQuestionsOutsideSchool, findExamQuizQuestionsOutsideSchool } from '@/lib/tenantGuard'
 import { pickBatchRepresentativeIds } from '@/lib/examBatch'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 /**
  * GET /api/admin/review-queue
@@ -346,7 +347,8 @@ export async function POST(request: NextRequest) {
                         : '↩️ Soal Anda dikembalikan oleh admin'
                     
                     if (parentTitle && (question_source === 'quiz' || question_source === 'exam')) {
-                        const typeName = question_source === 'quiz' ? 'Kuis' : 'Ulangan'
+                        const labels = await getMenuLabelsForSchool(schoolId)
+                        const typeName = question_source === 'quiz' ? labels.kuis : labels.ulangan
                         notifTitle = decision === 'approve'
                             ? `✅ Soal disetujui — ${typeName}: ${parentTitle}`
                             : `↩️ Soal dikembalikan — ${typeName}: ${parentTitle}`

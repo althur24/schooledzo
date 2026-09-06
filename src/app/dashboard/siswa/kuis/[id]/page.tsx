@@ -39,11 +39,13 @@ interface QuizAnswer {
 }
 
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 export default function KerjakanKuisPage() {
     const params = useParams()
     const router = useRouter()
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const quizId = params.id as string
 
     const [quiz, setQuiz] = useState<Quiz | null>(null)
@@ -347,7 +349,7 @@ export default function KerjakanKuisPage() {
         try {
             // Check Role
             if (user?.role === 'GURU' || user?.role === 'ADMIN') {
-                setError('Anda login sebagai Guru/Admin. Tidak dapat mengerjakan kuis sebagai Siswa.')
+                setError(`Anda login sebagai Guru/Admin. Tidak dapat mengerjakan ${labels.kuis} sebagai Siswa.`)
                 setLoading(false)
                 return
             }
@@ -355,7 +357,7 @@ export default function KerjakanKuisPage() {
             // Fetch Quiz Details
             const quizRes = await fetch(`/api/quizzes/${quizId}`)
             if (!quizRes.ok) {
-                setError('Gagal memuat kuis. Kuis mungkin tidak ditemukan atau belum aktif.')
+                setError(`Gagal memuat ${labels.kuis}. ${labels.kuis} mungkin tidak ditemukan atau belum aktif.`)
                 setLoading(false)
                 return
             }
@@ -389,7 +391,7 @@ export default function KerjakanKuisPage() {
             setLoadFailed(true)
             setError(!navigator.onLine
                 ? 'Koneksi terputus. Jawaban tersimpan lokal akan dikirim otomatis saat online. Periksa koneksi Anda lalu coba lagi.'
-                : 'Gagal memuat kuis. Periksa koneksi Anda lalu coba lagi.')
+                : `Gagal memuat ${labels.kuis}. Periksa koneksi Anda lalu coba lagi.`)
             setLoading(false)
         }
     }
@@ -585,7 +587,7 @@ export default function KerjakanKuisPage() {
             // Start ditolak server (belum dibuka / lewat deadline / dsb.) — JANGAN render
             // editor "hantu": submission tidak dibuat, autosave akan gagal terus-menerus.
             if (!res.ok) {
-                setError(startData?.error || 'Tidak bisa memulai kuis ini.')
+                setError(startData?.error || `Tidak bisa memulai ${labels.kuis} ini.`)
                 setLoadFailed(true)
                 setLoading(false)
                 return
@@ -596,7 +598,7 @@ export default function KerjakanKuisPage() {
             startNewAttemptTimer(quizData, new Date())
         } catch (e) {
             console.error('Error starting attempt:', e)
-            setError('Gagal memulai kuis. Periksa koneksi Anda lalu coba lagi.')
+            setError(`Gagal memulai ${labels.kuis}. Periksa koneksi Anda lalu coba lagi.`)
             setLoadFailed(true)
             setLoading(false)
         }
@@ -684,7 +686,7 @@ export default function KerjakanKuisPage() {
             // (409 = ditutup paksa dengan jawaban yang tersimpan) — keduanya aman untuk lanjut
             if (!res.ok && res.status !== 400 && res.status !== 409) {
                 const errData = await res.json().catch(() => null)
-                throw new Error(errData?.error || 'Gagal mengumpulkan kuis')
+                throw new Error(errData?.error || `Gagal mengumpulkan ${labels.kuis}`)
             }
 
             // Clear localStorage after successful submit
@@ -697,7 +699,7 @@ export default function KerjakanKuisPage() {
             }
         } catch (error) {
             console.error('Error submitting:', error)
-            alert('Gagal mengumpulkan kuis. Coba lagi.')
+            alert(`Gagal mengumpulkan ${labels.kuis}. Coba lagi.`)
             setSubmitting(false)
         }
     }
@@ -729,10 +731,10 @@ export default function KerjakanKuisPage() {
         return (
             <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 space-y-5 max-w-md mx-auto">
                 <div className="w-16 h-16 rounded-full bg-amber-500/15 flex items-center justify-center text-amber-500 text-3xl">⏱️</div>
-                <h2 className="text-xl font-bold text-text-main dark:text-white text-center">Waktu kuis ini sudah berakhir</h2>
+                <h2 className="text-xl font-bold text-text-main dark:text-white text-center">Waktu {labels.kuis} ini sudah berakhir</h2>
                 <div className="w-full space-y-2 text-sm">
                     <div className="flex justify-between px-4 py-2.5 rounded-xl bg-secondary/10">
-                        <span className="text-text-secondary">Kamu membuka kuis</span>
+                        <span className="text-text-secondary">Kamu membuka {labels.kuis}</span>
                         <span className="font-bold text-text-main dark:text-white">{fmt(closedInfo.started_at)}</span>
                     </div>
                     <div className="flex justify-between px-4 py-2.5 rounded-xl bg-secondary/10">
@@ -741,7 +743,7 @@ export default function KerjakanKuisPage() {
                     </div>
                 </div>
                 <p className="text-text-secondary text-sm text-center">
-                    Durasi kuis dihitung sejak kamu pertama membuka kuis, bukan sejak kamu mulai menjawab.
+                    Durasi {labels.kuis} dihitung sejak kamu pertama membuka {labels.kuis}, bukan sejak kamu mulai menjawab.
                     Jawaban yang tersimpan hingga batas waktu otomatis dikumpulkan.
                 </p>
 
@@ -770,7 +772,7 @@ export default function KerjakanKuisPage() {
                         Lihat Hasil
                     </Link>
                     <Link href="/dashboard/siswa/kuis" className="flex-1 text-center px-4 py-2.5 bg-secondary/80 text-text-main dark:text-white rounded-xl font-bold hover:bg-secondary transition-colors text-sm">
-                        Daftar Kuis
+                        Daftar {labels.kuis}
                     </Link>
                 </div>
             </div>
@@ -813,7 +815,7 @@ export default function KerjakanKuisPage() {
                 <button
                     onClick={beginNewAttempt}
                     className="w-full px-6 py-3.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-bold shadow-lg shadow-cyan-500/20 hover:scale-[1.01] transition-all">
-                    🚀 Mulai Kuis Sekarang
+                    🚀 Mulai {labels.kuis} Sekarang
                 </button>
                 <Link href="/dashboard/siswa/kuis" className="text-text-secondary hover:text-text-main text-sm transition-colors">
                     Kembali dulu, saya belum siap
@@ -1008,9 +1010,9 @@ export default function KerjakanKuisPage() {
                         <div className="w-16 h-16 bg-primary/20 text-primary rounded-full flex items-center justify-center mx-auto mb-4">
                             <TickSquare set="bold" primaryColor="currentColor" size={32} />
                         </div>
-                        <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Kumpulkan Kuis?</h3>
+                        <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Kumpulkan {labels.kuis}?</h3>
                         <p className="text-text-secondary mb-6">
-                            Apakah kamu yakin ingin mengumpulkan kuis ini? Jawaban tidak dapat diubah setelah dikumpulkan.
+                            Apakah kamu yakin ingin mengumpulkan {labels.kuis} ini? Jawaban tidak dapat diubah setelah dikumpulkan.
                         </p>
                         <div className="flex gap-3">
                             <button
@@ -1043,7 +1045,7 @@ export default function KerjakanKuisPage() {
                             Waktu Habis!
                         </h3>
                         <p className="text-text-secondary mb-6">
-                            Kuis telah otomatis dikumpulkan. Jawabanmu sudah tersimpan.
+                            {labels.kuis} telah otomatis dikumpulkan. Jawabanmu sudah tersimpan.
                         </p>
                         <button
                             onClick={() => router.push(`/dashboard/siswa/kuis/${quizId}/hasil`)}
@@ -1066,7 +1068,7 @@ export default function KerjakanKuisPage() {
                             Waktu Habis (Offline)
                         </h3>
                         <p className="text-text-secondary mb-6">
-                            Waktu kuis telah habis, tetapi koneksi internet terputus. Jawaban Anda sudah tersimpan secara lokal dan akan dikumpulkan otomatis saat koneksi kembali.
+                            Waktu {labels.kuis} telah habis, tetapi koneksi internet terputus. Jawaban Anda sudah tersimpan secara lokal dan akan dikumpulkan otomatis saat koneksi kembali.
                         </p>
                         <button
                             onClick={() => confirmSubmit(true)}
@@ -1086,10 +1088,10 @@ export default function KerjakanKuisPage() {
                             <TimeCircle set="bold" primaryColor="currentColor" size={40} />
                         </div>
                         <h3 className="text-2xl font-bold text-text-main dark:text-white mb-2">
-                            Ada Kuis yang Belum Selesai
+                            Ada {labels.kuis} yang Belum Selesai
                         </h3>
                         <p className="text-text-secondary mb-6">
-                            Kamu belum menyelesaikan kuis ini. Lanjutkan dari mana kamu berhenti.
+                            Kamu belum menyelesaikan {labels.kuis} ini. Lanjutkan dari mana kamu berhenti.
                         </p>
 
                         <div className="grid grid-cols-2 gap-4 mb-6">
@@ -1117,14 +1119,14 @@ export default function KerjakanKuisPage() {
                             }}
                             className="w-full px-6 py-4 bg-primary text-white rounded-xl font-bold hover:bg-primary-dark transition-all text-lg shadow-lg shadow-primary/20"
                         >
-                            🚀 Lanjutkan Kuis
+                            🚀 Lanjutkan {labels.kuis}
                         </button>
 
                         <button
                             onClick={() => router.push('/dashboard/siswa/kuis')}
                             className="w-full mt-3 px-6 py-3 text-text-secondary hover:text-text-main transition-colors text-sm"
                         >
-                            Kembali ke Daftar Kuis
+                            Kembali ke Daftar {labels.kuis}
                         </button>
                     </div>
                 </div>

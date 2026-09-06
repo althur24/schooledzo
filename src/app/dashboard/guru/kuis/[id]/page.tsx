@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef, type CSSProperties, type Poin
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
@@ -86,6 +87,7 @@ function EditQuizPageInner() {
     const params = useParams()
     const searchParams = useSearchParams()
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const quizId = params.id as string
     const highlightId = searchParams.get('highlight')
     const siblingParam = searchParams.get('siblings')
@@ -266,7 +268,7 @@ function EditQuizPageInner() {
                 }
                 setShowQuizSettings(false)
                 setApplyScheduleToSiblings(false)
-                showToast('Pengaturan kuis tersimpan', 'success')
+                showToast(`Pengaturan ${labels.kuis.toLowerCase()} tersimpan`, 'success')
                 fetchQuiz()
             } else {
                 const err = await res.json().catch(() => ({}))
@@ -367,7 +369,7 @@ function EditQuizPageInner() {
             const fresh = await res.json().catch(() => [])
             const freshQuestions = Array.isArray(fresh) ? fresh : []
             if (freshQuestions.length === 0) {
-                setAlertInfo({ type: 'warning', title: 'Belum Ada Soal', message: 'Minimal harus ada 1 soal untuk mempublish kuis!' })
+                setAlertInfo({ type: 'warning', title: 'Belum Ada Soal', message: `Minimal harus ada 1 soal untuk mempublish ${labels.kuis.toLowerCase()}!` })
                 return
             }
             // Segarkan state sekalian supaya indikator lain ikut benar
@@ -465,7 +467,7 @@ function EditQuizPageInner() {
                         setAlertInfo({
                             type: 'error',
                             title: 'Gagal Menyalin Soal',
-                            message: `Soal gagal disalin ke ${batchSync.failed.length} kelas. Kuis utama tetap terbit. Gunakan tombol "Salin Ulang Soal" di halaman ini untuk mencoba lagi.`
+                            message: `Soal gagal disalin ke ${batchSync.failed.length} kelas. ${labels.kuis} utama tetap terbit. Gunakan tombol "Salin Ulang Soal" di halaman ini untuk mencoba lagi.`
                         })
                         setShowPublishConfirm(false)
                         fetchQuiz()
@@ -481,7 +483,7 @@ function EditQuizPageInner() {
                         setAlertInfo({
                             type: 'error',
                             title: 'Gagal Menyalin Soal',
-                            message: 'Soal gagal disalin ke beberapa kelas. Kuis utama tetap terbit. Gunakan tombol "Salin Ulang Soal" di halaman ini untuk mencoba lagi.'
+                            message: `Soal gagal disalin ke beberapa kelas. ${labels.kuis} utama tetap terbit. Gunakan tombol "Salin Ulang Soal" di halaman ini untuk mencoba lagi.`
                         })
                         setShowPublishConfirm(false)
                         fetchQuiz()
@@ -501,11 +503,11 @@ function EditQuizPageInner() {
                 }
                 // Re-fetch to sync UI with actual DB state
                 await fetchQuiz()
-                throw new Error(errData?.error || 'Gagal mempublish kuis')
+                throw new Error(errData?.error || `Gagal mempublish ${labels.kuis.toLowerCase()}`)
             }
         } catch (error: any) {
             console.error('Error publishing:', error)
-            setAlertInfo({ type: 'error', title: 'Gagal Publish', message: error.message || 'Terjadi kesalahan saat mempublish kuis. Coba lagi.' })
+            setAlertInfo({ type: 'error', title: 'Gagal Publish', message: error.message || `Terjadi kesalahan saat mempublish ${labels.kuis.toLowerCase()}. Coba lagi.` })
             setShowPublishConfirm(false)
         } finally {
             setPublishing(false)
@@ -1060,8 +1062,8 @@ function EditQuizPageInner() {
         return (
             <EmptyState
                 icon={<div className="text-secondary"><Search set="bold" primaryColor="currentColor" size={48} /></div>}
-                title="Kuis tidak ditemukan"
-                description="Kuis yang Anda cari tidak tersedia."
+                title={`${labels.kuis} tidak ditemukan`}
+                description={`${labels.kuis} yang Anda cari tidak tersedia.`}
             />
         )
     }
@@ -1103,7 +1105,7 @@ function EditQuizPageInner() {
                                 data-tutorial="quiz-activate-btn"
                             >
                                 <Upload set="bold" primaryColor="currentColor" size={20} />
-                                Publish Kuis
+                                Publish {labels.kuis}
                             </Button>
                         )}
                         <div className="flex items-center gap-4">
@@ -1129,10 +1131,10 @@ function EditQuizPageInner() {
                         <div className="w-5 h-5 text-blue-500 shrink-0"><User set="bold" primaryColor="currentColor" size={20} /></div>
                         <div>
                             <h4 className="font-bold text-blue-800 dark:text-blue-300 text-sm">
-                                Kuis Multi-Kelas ({siblingIds.length + 1} kelas)
+                                {labels.kuis} Multi-Kelas ({siblingIds.length + 1} kelas)
                             </h4>
                             <p className="text-xs text-blue-600/70 dark:text-blue-400/70 mt-0.5">
-                                Kuis ini juga akan dibuat untuk kelas lainnya. Soal yang Anda tambahkan di sini akan otomatis disalin ke kelas lainnya saat publish.
+                                {labels.kuis} ini juga akan dibuat untuk kelas lainnya. Soal yang Anda tambahkan di sini akan otomatis disalin ke kelas lainnya saat publish.
                             </p>
                         </div>
                     </div>
@@ -1148,7 +1150,7 @@ function EditQuizPageInner() {
                                 Soal belum tersalin ke {syncFailedCount} kelas
                             </h4>
                             <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-0.5">
-                                Kuis utama sudah terbit. Tekan tombol di samping untuk menyalin ulang soal ke kelas lainnya.
+                                {labels.kuis} utama sudah terbit. Tekan tombol di samping untuk menyalin ulang soal ke kelas lainnya.
                             </p>
                         </div>
                         <Button size="sm" onClick={handleRetrySync} loading={retryingSync}>
@@ -1168,7 +1170,7 @@ function EditQuizPageInner() {
                         <div>
                             <h3 className="font-bold text-red-600 dark:text-red-400">Ada {questions.filter(q => q.status === 'returned').length} soal yang dikembalikan admin</h3>
                             <p className="text-sm text-red-500 dark:text-red-300">
-                                Silakan perbaiki soal sesuai catatan admin agar kuis bisa dipublikasikan.
+                                Silakan perbaiki soal sesuai catatan admin agar {labels.kuis.toLowerCase()} bisa dipublikasikan.
                             </p>
                         </div>
                     </div>
@@ -1328,9 +1330,9 @@ function EditQuizPageInner() {
                                     <Brain size={20} />
                                 </div>
                                 <div>
-                                    <h3 className="font-bold text-amber-800 dark:text-amber-300">Kuis Sedang Direview</h3>
+                                    <h3 className="font-bold text-amber-800 dark:text-amber-300">{labels.kuis} Sedang Direview</h3>
                                     <p className="text-sm text-amber-700/80 dark:text-amber-400/80 mt-1">
-                                        Anda telah mempublikasi kuis ini, tetapi ada soal yang masih menunggu persetujuan (oleh AI atau Admin). Kuis akan otomatis terkirim ke siswa segera setelah semua soal disetujui.
+                                        Anda telah mempublikasi {labels.kuis.toLowerCase()} ini, tetapi ada soal yang masih menunggu persetujuan (oleh AI atau Admin). {labels.kuis} akan otomatis terkirim ke siswa segera setelah semua soal disetujui.
                                     </p>
                                 </div>
                             </div>
@@ -2268,7 +2270,7 @@ function EditQuizPageInner() {
                 onSaveResults={handleSaveAIResults}
                 onSaveToBank={handleSaveToBank}
                 saving={saving}
-                targetLabel="Kuis"
+                targetLabel={labels.kuis}
                 aiReviewEnabled={aiReviewEnabled}
                 canGenerate={aiGenerateEnabled || user?.role === 'ADMIN'}
                 tagSuggestions={tagSuggestions}
@@ -2285,7 +2287,7 @@ function EditQuizPageInner() {
                     onClose={() => setMode('list')}
                     onConfirm={handleAddBankQuestions}
                     saving={saving}
-                    targetLabel="Kuis"
+                    targetLabel={labels.kuis}
                 />
             )}
 
@@ -2293,7 +2295,7 @@ function EditQuizPageInner() {
             <Modal
                 open={showPublishConfirm}
                 onClose={() => setShowPublishConfirm(false)}
-                title="Publish Kuis Ini?"
+                title={`Publish ${labels.kuis} Ini?`}
             >
                 <div className="text-center">
                     <div className="w-16 h-16 bg-green-500/20 text-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -2302,7 +2304,7 @@ function EditQuizPageInner() {
                         </svg>
                     </div>
                     <p className="text-text-secondary mb-6">
-                        Setelah dipublish, siswa akan langsung bisa melihat dan mengerjakan kuis ini. Pastikan semua soal sudah benar.
+                        Setelah dipublish, siswa akan langsung bisa melihat dan mengerjakan {labels.kuis.toLowerCase()} ini. Pastikan semua soal sudah benar.
                     </p>
                     <div className="flex gap-3">
                         <Button
@@ -2337,9 +2339,9 @@ function EditQuizPageInner() {
                             <div className="w-16 h-16 bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <TickSquare set="bold" primaryColor="currentColor" size={32} />
                             </div>
-                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Kuis Berhasil Dipublish!</h3>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">{labels.kuis} Berhasil Dipublish!</h3>
                             <p className="text-sm text-text-secondary dark:text-zinc-400 mb-6">
-                                Siswa sekarang dapat melihat dan mengerjakan kuis ini melalui dashboard mereka.
+                                Siswa sekarang dapat melihat dan mengerjakan {labels.kuis.toLowerCase()} ini melalui dashboard mereka.
                             </p>
                         </>
                     ) : (
@@ -2347,9 +2349,9 @@ function EditQuizPageInner() {
                             <div className="w-16 h-16 bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <TickSquare set="bold" primaryColor="currentColor" size={32} />
                             </div>
-                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Kuis Dikirim ke Review Admin</h3>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">{labels.kuis} Dikirim ke Review Admin</h3>
                             <p className="text-sm text-text-secondary dark:text-zinc-400 mb-6">
-                                Ada soal yang memerlukan persetujuan admin. Kuis akan otomatis dipublikasikan ke siswa setelah admin menyetujui semua soal.
+                                Ada soal yang memerlukan persetujuan admin. {labels.kuis} akan otomatis dipublikasikan ke siswa setelah admin menyetujui semua soal.
                             </p>
                         </>
                     )}
@@ -2365,7 +2367,7 @@ function EditQuizPageInner() {
             <Modal
                 open={showQuizSettings}
                 onClose={() => setShowQuizSettings(false)}
-                title="⚙️ Pengaturan Kuis"
+                title={`⚙️ Pengaturan ${labels.kuis}`}
             >
                 <div className="space-y-5">
                     <div>
@@ -2399,7 +2401,7 @@ function EditQuizPageInner() {
                             />
                         )}
                         <p className="text-xs text-text-secondary mt-1">
-                            {quizSettingsForm.has_available_from ? 'Siswa baru bisa memulai kuis setelah jam ini.' : 'Tanpa jam buka — siswa bisa langsung mengerjakan saat kuis aktif.'}
+                            {quizSettingsForm.has_available_from ? `Siswa baru bisa memulai ${labels.kuis.toLowerCase()} setelah jam ini.` : `Tanpa jam buka — siswa bisa langsung mengerjakan saat ${labels.kuis.toLowerCase()} aktif.`}
                         </p>
                     </div>
 
@@ -2422,7 +2424,7 @@ function EditQuizPageInner() {
                             />
                         )}
                         <p className="text-xs text-text-secondary mt-1">
-                            {quizSettingsForm.has_deadline ? 'Siswa tidak bisa memulai setelah waktu ini; yang sedang mengerjakan dipotong di jam ini.' : 'Tanpa batas waktu — siswa bisa mengerjakan kapan saja selama kuis aktif.'}
+                            {quizSettingsForm.has_deadline ? 'Siswa tidak bisa memulai setelah waktu ini; yang sedang mengerjakan dipotong di jam ini.' : `Tanpa batas waktu — siswa bisa mengerjakan kapan saja selama ${labels.kuis.toLowerCase()} aktif.`}
                         </p>
                     </div>
 

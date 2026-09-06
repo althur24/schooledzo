@@ -12,6 +12,7 @@
  */
 
 import { supabaseAdmin as supabase } from './supabase'
+import { getMenuLabelsForSchool } from './serverLabels'
 
 type SubmissionKind = 'exam' | 'quiz'
 
@@ -66,7 +67,8 @@ async function flush(key: string) {
             .select(`
                 title,
                 teaching_assignment:teaching_assignments(
-                    teacher:teachers(user_id)
+                    teacher:teachers(user_id),
+                    class:classes(school_id)
                 )
             `)
             .eq('id', entry.entityId)
@@ -75,11 +77,14 @@ async function flush(key: string) {
         // Embed PostgREST bisa berupa objek atau array — ambil elemen pertama
         const first = <T,>(v: T | T[] | null | undefined): T | undefined =>
             Array.isArray(v) ? v[0] : (v ?? undefined)
-        const ta = first(entity?.teaching_assignment as { teacher?: unknown } | { teacher?: unknown }[] | undefined)
+        const ta = first(entity?.teaching_assignment as { teacher?: unknown; class?: unknown } | { teacher?: unknown; class?: unknown }[] | undefined)
         const teacherUserId = (first(ta?.teacher as { user_id?: string } | { user_id?: string }[] | undefined))?.user_id
         if (!teacherUserId) return
 
-        const label = isExam ? 'ulangan' : 'kuis'
+        const classInfo = first(ta?.class as { school_id?: string } | { school_id?: string }[] | undefined)
+        const labels = await getMenuLabelsForSchool(classInfo?.school_id ?? null)
+        // mid-sentence di message: aslinya lowercase ("telah mengumpulkan ulangan ...")
+        const label = (isExam ? labels.ulangan : labels.kuis).toLowerCase()
         const who = entry.count === 1
             ? entry.names[0]
             : entry.count <= NAMES_CAP
@@ -94,8 +99,8 @@ async function flush(key: string) {
             user_id: teacherUserId,
             type: isExam ? 'SUBMISSION_ULANGAN' : 'SUBMISSION_KUIS',
             title: isExam
-                ? (entry.force ? 'Ulangan Dikumpulkan Otomatis' : 'Ulangan Dikumpulkan')
-                : 'Kuis Dikumpulkan',
+                ? (entry.force ? `${labels.ulangan} Dikumpulkan Otomatis` : `${labels.ulangan} Dikumpulkan`)
+                : `${labels.kuis} Dikumpulkan`,
             message,
             link: isExam ? '/dashboard/guru/ulangan' : '/dashboard/guru/kuis'
         })

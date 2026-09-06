@@ -1,5 +1,6 @@
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { syncExamBatch, syncQuizBatch } from '@/lib/examBatch'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 export async function checkAndAutoPublish(
     source: 'quiz' | 'exam',
@@ -123,7 +124,10 @@ export async function checkAndAutoPublish(
 
 async function sendPublishNotifications(source: 'quiz' | 'exam', parent: any) {
     try {
-        const titleType = source === 'quiz' ? 'Kuis' : 'Ulangan'
+        const classData = parent.teaching_assignment?.class as any
+        const schoolId = Array.isArray(classData) ? classData[0]?.school_id : classData?.school_id
+        const labels = await getMenuLabelsForSchool(schoolId ?? null)
+        const titleType = source === 'quiz' ? labels.kuis : labels.ulangan
         const link = source === 'quiz' ? '/dashboard/siswa/kuis' : '/dashboard/siswa/ulangan'
         const typeEnum = source === 'quiz' ? 'KUIS_BARU' : 'ULANGAN_BARU'
 

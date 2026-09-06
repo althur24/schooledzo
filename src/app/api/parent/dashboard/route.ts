@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET: Fetch dashboard data for parent (WALI) user — single child
 export async function GET(request: NextRequest) {
@@ -12,6 +13,8 @@ export async function GET(request: NextRequest) {
         if (user.role !== 'WALI') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
+
+        const labels = await getMenuLabelsForSchool(schoolId)
 
         // Find the child linked to this .wali account
         let child: any = null
@@ -120,7 +123,7 @@ export async function GET(request: NextRequest) {
 
             quizzes = (data || []).map((q: any) => ({
                 id: q.id,
-                title: q.quiz?.title || 'Kuis',
+                title: q.quiz?.title || labels.kuis,
                 score: q.max_score > 0 ? Math.round((q.total_score / q.max_score) * 100) : 0,
                 total_score: q.total_score,
                 max_score: q.max_score,
@@ -143,7 +146,7 @@ export async function GET(request: NextRequest) {
 
             exams = (data || []).map((e: any) => ({
                 id: e.id,
-                title: e.exam?.title || 'Ulangan',
+                title: e.exam?.title || labels.ulangan,
                 score: e.max_score > 0 ? Math.round((e.total_score / e.max_score) * 100) : 0,
                 total_score: e.total_score,
                 max_score: e.max_score,
@@ -166,7 +169,7 @@ export async function GET(request: NextRequest) {
 
             submissions = (data || []).map((s: any) => ({
                 id: s.id,
-                title: s.assignment?.title || 'Tugas',
+                title: s.assignment?.title || labels.tugas,
                 status: 'SUBMITTED', // semua baris di query ini memang sudah terkumpul
                 score: Array.isArray(s.grade) && s.grade.length > 0 ? s.grade[0].score : null,
                 submitted_at: s.submitted_at,

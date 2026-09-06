@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { useRouter } from 'next/navigation'
 import Card from '@/components/ui/Card'
 import PageHeader from '@/components/ui/PageHeader'
@@ -27,6 +28,7 @@ interface DashboardData {
 
 export default function WaliDashboardPage() {
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const router = useRouter()
     const [data, setData] = useState<DashboardData | null>(null)
     const [loading, setLoading] = useState(true)
@@ -132,22 +134,22 @@ export default function WaliDashboardPage() {
                 <Card className="text-center py-4">
                     <div className="flex justify-center"><Graph set="bold" primaryColor="#10b981" size={24} /></div>
                     <div className="text-2xl font-bold text-text-main dark:text-white mt-1">{avgScore ?? '-'}</div>
-                    <div className="text-[11px] text-text-secondary">Rata² Tugas</div>
+                    <div className="text-[11px] text-text-secondary">Rata² {labels.tugas}</div>
                 </Card>
                 <Card className="text-center py-4">
                     <div className="flex justify-center"><Game set="bold" primaryColor="#6366f1" size={24} /></div>
                     <div className="text-2xl font-bold text-text-main dark:text-white mt-1">{quizAvg ?? '-'}</div>
-                    <div className="text-[11px] text-text-secondary">Rata² Kuis</div>
+                    <div className="text-[11px] text-text-secondary">Rata² {labels.kuis}</div>
                 </Card>
                 <Card className="text-center py-4">
                     <div className="flex justify-center"><TimeCircle set="bold" primaryColor="#f59e0b" size={24} /></div>
                     <div className="text-2xl font-bold text-text-main dark:text-white mt-1">{examAvg ?? '-'}</div>
-                    <div className="text-[11px] text-text-secondary">Rata² Ulangan</div>
+                    <div className="text-[11px] text-text-secondary">Rata² {labels.ulangan}</div>
                 </Card>
                 <Card className="text-center py-4">
                     <div className="flex justify-center"><Edit set="bold" primaryColor="#ef4444" size={24} /></div>
                     <div className="text-2xl font-bold text-text-main dark:text-white mt-1">{child.totalAssignments}</div>
-                    <div className="text-[11px] text-text-secondary">Total Tugas</div>
+                    <div className="text-[11px] text-text-secondary">Total {labels.tugas}</div>
                 </Card>
             </div>
 
@@ -156,7 +158,7 @@ export default function WaliDashboardPage() {
                 <Card>
                     <h3 className="text-lg font-bold text-text-main dark:text-white mb-4 flex items-center gap-2">
                         <Graph set="bold" primaryColor="currentColor" size={20} />
-                        Nilai Tugas
+                        Nilai {labels.tugas}
                     </h3>
                     <div className="space-y-2">
                         {child.grades.map((grade: any) => {
@@ -180,7 +182,7 @@ export default function WaliDashboardPage() {
                 <Card>
                     <h3 className="text-lg font-bold text-text-main dark:text-white mb-4 flex items-center gap-2">
                         <Edit set="bold" primaryColor="currentColor" size={20} />
-                        Tugas Terbaru
+                        {labels.tugas} Terbaru
                     </h3>
                     <div className="space-y-2">
                         {child.recentSubmissions.map((sub: any) => (
@@ -211,7 +213,7 @@ export default function WaliDashboardPage() {
                 <Card>
                     <h3 className="text-lg font-bold text-text-main dark:text-white mb-4 flex items-center gap-2">
                         <Game set="bold" primaryColor="currentColor" size={20} />
-                        Kuis Terbaru
+                        {labels.kuis} Terbaru
                     </h3>
                     <div className="space-y-2">
                         {child.recentQuizzes.map((quiz: any) => (
@@ -239,7 +241,7 @@ export default function WaliDashboardPage() {
                 <Card>
                     <h3 className="text-lg font-bold text-text-main dark:text-white mb-4 flex items-center gap-2">
                         <TimeCircle set="bold" primaryColor="currentColor" size={20} />
-                        Ulangan Terbaru
+                        {labels.ulangan} Terbaru
                     </h3>
                     <div className="space-y-2">
                         {child.recentExams.map((exam: any) => (

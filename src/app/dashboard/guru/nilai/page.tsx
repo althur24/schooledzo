@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 import { PageHeader, Card, Button, StatsCard, EmptyState, Modal } from '@/components/ui'
 import { Chart, User, TickSquare, TimeCircle, Activity, Search, ArrowRight, Document, Discovery, Download, Paper, Edit, Plus } from 'react-iconly'
 import { GraduationCap } from 'lucide-react'
@@ -95,6 +97,7 @@ type TabType = 'rekap' | 'tugas' | 'kuis' | 'ulangan' | 'uts-uas' | 'export'
 export default function NilaiPage() {
     const { user } = useAuth()
     const searchParams = useSearchParams()
+    const labels = useSchoolLabels()
     const [activeTab, setActiveTab] = useState<TabType>('rekap')
     const [teachingAssignments, setTeachingAssignments] = useState<TeachingAssignment[]>([])
     const [selectedTA, setSelectedTA] = useState<string>('')
@@ -363,12 +366,12 @@ export default function NilaiPage() {
             'No',
             'NIS',
             'Nama Siswa',
-            ...tugasAssignments.map((_, i) => `T${i + 1}`),
-            ...quizzes.map((_, i) => `K${i + 1}`),
-            ...exams.map((_, i) => `U${i + 1}`),
-            ...ulanganAssignments.map((_, i) => `U${exams.length + i + 1}`),
-            ...utsExams.map((_, i) => `UTS${utsExams.length > 1 ? i + 1 : ''}`),
-            ...uasExams.map((_, i) => `UAS${uasExams.length > 1 ? i + 1 : ''}`),
+            ...tugasAssignments.map((_, i) => `${labels.tugas.charAt(0).toUpperCase()}${i + 1}`),
+            ...quizzes.map((_, i) => `${labels.kuis.charAt(0).toUpperCase()}${i + 1}`),
+            ...exams.map((_, i) => `${labels.ulangan.charAt(0).toUpperCase()}${i + 1}`),
+            ...ulanganAssignments.map((_, i) => `${labels.ulangan.charAt(0).toUpperCase()}${exams.length + i + 1}`),
+            ...utsExams.map((_, i) => `${labels.uts}${utsExams.length > 1 ? i + 1 : ''}`),
+            ...uasExams.map((_, i) => `${labels.uas}${uasExams.length > 1 ? i + 1 : ''}`),
             'Rata-rata'
         ]
 
@@ -461,7 +464,7 @@ export default function NilaiPage() {
 
     // Label kategori ramah untuk detail sel
     const categoryLabel = (type: string) =>
-        type === 'ULANGAN' ? 'Ulangan' : type === 'PR' ? 'PR' : type === 'PROYEK' ? 'Proyek' : type === 'LATIHAN' ? 'Latihan' : 'Tugas'
+        type === 'ULANGAN' ? labels.ulangan : type === 'PR' ? 'PR' : type === 'PROYEK' ? 'Proyek' : type === 'LATIHAN' ? 'Latihan' : labels.tugas
 
     // Buat kolom penilaian offline (Tugas/Ulangan/Kuis) dari halaman Nilai
     const handleAddColumn = async () => {
@@ -769,10 +772,10 @@ export default function NilaiPage() {
                     <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
                         {[
                             { id: 'rekap', label: 'Rekap', icon: Paper, color: 'bg-primary' },
-                            { id: 'tugas', label: `Tugas (${tugasAssignments.length})`, icon: Edit, color: 'bg-amber-500' },
-                            { id: 'kuis', label: `Kuis (${quizzes.length})`, icon: Discovery, color: 'bg-purple-500' },
-                            { id: 'ulangan', label: `Ulangan (${exams.length + ulanganAssignments.length})`, icon: TimeCircle, color: 'bg-red-500' },
-                            { id: 'uts-uas', label: `UTS/UAS (${officialExams.length})`, icon: Document, color: 'bg-indigo-500' },
+                            { id: 'tugas', label: `${labels.tugas} (${tugasAssignments.length})`, icon: Edit, color: 'bg-amber-500' },
+                            { id: 'kuis', label: `${labels.kuis} (${quizzes.length})`, icon: Discovery, color: 'bg-purple-500' },
+                            { id: 'ulangan', label: `${labels.ulangan} (${exams.length + ulanganAssignments.length})`, icon: TimeCircle, color: 'bg-red-500' },
+                            { id: 'uts-uas', label: `${labels.uts}/${labels.uas} (${officialExams.length})`, icon: Document, color: 'bg-indigo-500' },
                             { id: 'export', label: 'Export', icon: Download, color: 'bg-blue-500' }
                         ].map(tab => (
                             <button
@@ -800,7 +803,7 @@ export default function NilaiPage() {
                                     {/* Toolbar gradebook */}
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <p className="text-xs text-text-secondary">
-                                            Klik nilai untuk melihat judul penilaian • Kolom <span className="font-bold text-amber-600">T</span> = Tugas, <span className="font-bold text-purple-600">K</span> = Kuis, <span className="font-bold text-red-600">U</span> = Ulangan
+                                            Klik nilai untuk melihat judul penilaian • Kolom <span className="font-bold text-amber-600">{labels.tugas.charAt(0).toUpperCase()}</span> = {labels.tugas}, <span className="font-bold text-purple-600">{labels.kuis.charAt(0).toUpperCase()}</span> = {labels.kuis}, <span className="font-bold text-red-600">{labels.ulangan.charAt(0).toUpperCase()}</span> = {labels.ulangan}
                                         </p>
                                         {editingColumnId || editingQuizId ? (
                                             <div className="flex gap-2">
@@ -814,13 +817,13 @@ export default function NilaiPage() {
                                         ) : (
                                             <div className="flex gap-2">
                                                 <Button variant="secondary" size="sm" onClick={() => { setNewColumnType('TUGAS'); setShowAddColumn('TUGAS') }} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
-                                                    Tugas
+                                                    {labels.tugas}
                                                 </Button>
                                                 <Button variant="secondary" size="sm" onClick={() => setShowAddColumn('KUIS')} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
-                                                    Kuis
+                                                    {labels.kuis}
                                                 </Button>
                                                 <Button variant="secondary" size="sm" onClick={() => setShowAddColumn('ULANGAN')} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
-                                                    Ulangan
+                                                    {labels.ulangan}
                                                 </Button>
                                             </div>
                                         )}
@@ -834,7 +837,7 @@ export default function NilaiPage() {
                                                     {tugasAssignments.map((a, i) => (
                                                         <th key={a.id} title={a.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
                                                             <div className="flex flex-col items-center gap-1">
-                                                                <span className="px-2 py-1 text-xs rounded-full bg-amber-500/10 text-amber-600 border border-amber-200">T{i + 1}</span>
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-amber-500/10 text-amber-600 border border-amber-200">{labels.tugas.charAt(0).toUpperCase()}{i + 1}</span>
                                                                 <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{a.title}</span>
                                                                 {a.submission_mode === 'OFFLINE' && (
                                                                     editingColumnId === a.id ? (
@@ -851,7 +854,7 @@ export default function NilaiPage() {
                                                     {quizzes.map((q, i) => (
                                                         <th key={q.id} title={q.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
                                                             <div className="flex flex-col items-center gap-1">
-                                                                <span className="px-2 py-1 text-xs rounded-full bg-purple-500/10 text-purple-600 border border-purple-200">K{i + 1}</span>
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-purple-500/10 text-purple-600 border border-purple-200">{labels.kuis.charAt(0).toUpperCase()}{i + 1}</span>
                                                                 <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{q.title}</span>
                                                                 {q.submission_mode === 'OFFLINE' && (
                                                                     editingQuizId === q.id ? (
@@ -868,7 +871,7 @@ export default function NilaiPage() {
                                                     {exams.map((e, i) => (
                                                         <th key={e.id} title={e.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
                                                             <div className="flex flex-col items-center gap-1">
-                                                                <span className="px-2 py-1 text-xs rounded-full bg-red-500/10 text-red-600 border border-red-200">U{i + 1}</span>
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-red-500/10 text-red-600 border border-red-200">{labels.ulangan.charAt(0).toUpperCase()}{i + 1}</span>
                                                                 <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{e.title}</span>
                                                             </div>
                                                         </th>
@@ -876,7 +879,7 @@ export default function NilaiPage() {
                                                     {ulanganAssignments.map((a, i) => (
                                                         <th key={a.id} title={a.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
                                                             <div className="flex flex-col items-center gap-1">
-                                                                <span className="px-2 py-1 text-xs rounded-full bg-red-500/10 text-red-600 border border-red-200">U{exams.length + i + 1}</span>
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-red-500/10 text-red-600 border border-red-200">{labels.ulangan.charAt(0).toUpperCase()}{exams.length + i + 1}</span>
                                                                 <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{a.title}</span>
                                                                 {a.submission_mode === 'OFFLINE' && (
                                                                     editingColumnId === a.id ? (
@@ -893,7 +896,7 @@ export default function NilaiPage() {
                                                     {utsExams.map((oe, i) => (
                                                         <th key={oe.id} title={oe.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
                                                             <div className="flex flex-col items-center gap-1">
-                                                                <span className="px-2 py-1 text-xs rounded-full bg-indigo-500/10 text-indigo-600 border border-indigo-200">UTS{utsExams.length > 1 ? i + 1 : ''}</span>
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-indigo-500/10 text-indigo-600 border border-indigo-200">{labels.uts}{utsExams.length > 1 ? i + 1 : ''}</span>
                                                                 <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{oe.title}</span>
                                                             </div>
                                                         </th>
@@ -901,7 +904,7 @@ export default function NilaiPage() {
                                                     {uasExams.map((oe, i) => (
                                                         <th key={oe.id} title={oe.title} className="px-2 py-3 text-center text-text-secondary font-bold min-w-[72px]">
                                                             <div className="flex flex-col items-center gap-1">
-                                                                <span className="px-2 py-1 text-xs rounded-full bg-purple-500/10 text-purple-600 border border-purple-200">UAS{uasExams.length > 1 ? i + 1 : ''}</span>
+                                                                <span className="px-2 py-1 text-xs rounded-full bg-purple-500/10 text-purple-600 border border-purple-200">{labels.uas}{uasExams.length > 1 ? i + 1 : ''}</span>
                                                                 <span className="text-[10px] font-medium text-text-secondary/80 leading-tight line-clamp-2 break-words max-w-[90px]">{oe.title}</span>
                                                             </div>
                                                         </th>
@@ -963,7 +966,7 @@ export default function NilaiPage() {
                                                                             />
                                                                         ) : qs?.is_graded ? (
                                                                             <button
-                                                                                onClick={() => setCellDetail({ title: q.title, category: 'Kuis', studentName: student.user.full_name, nis: student.nis, score: Math.round((qs.total_score / qs.max_score) * 100), date: qs.submitted_at || null, source: 'QUIZ', refId: q.id, studentId: student.id })}
+                                                                                onClick={() => setCellDetail({ title: q.title, category: labels.kuis, studentName: student.user.full_name, nis: student.nis, score: Math.round((qs.total_score / qs.max_score) * 100), date: qs.submitted_at || null, source: 'QUIZ', refId: q.id, studentId: student.id })}
                                                                                 className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
                                                                                 title="Klik untuk detail"
                                                                             >
@@ -983,7 +986,7 @@ export default function NilaiPage() {
                                                                     <td key={e.id} className="px-4 py-4 text-center">
                                                                         {es ? (
                                                                             <button
-                                                                                onClick={() => setCellDetail({ title: e.title, category: 'Ulangan', studentName: student.user.full_name, nis: student.nis, score: Math.round((es.total_score / es.max_score) * 100), date: es.submitted_at || null })}
+                                                                                onClick={() => setCellDetail({ title: e.title, category: labels.ulangan, studentName: student.user.full_name, nis: student.nis, score: Math.round((es.total_score / es.max_score) * 100), date: es.submitted_at || null })}
                                                                                 className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
                                                                                 title="Klik untuk detail"
                                                                             >
@@ -1011,7 +1014,7 @@ export default function NilaiPage() {
                                                                             />
                                                                         ) : score !== undefined ? (
                                                                             <button
-                                                                                onClick={() => setCellDetail({ title: a.title, category: 'Ulangan', studentName: student.user.full_name, nis: student.nis, score, date: sub?.grade?.[0]?.graded_at || sub?.submitted_at || null, source: 'ASSIGNMENT', refId: a.id, studentId: student.id })}
+                                                                                onClick={() => setCellDetail({ title: a.title, category: labels.ulangan, studentName: student.user.full_name, nis: student.nis, score, date: sub?.grade?.[0]?.graded_at || sub?.submitted_at || null, source: 'ASSIGNMENT', refId: a.id, studentId: student.id })}
                                                                                 className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
                                                                                 title="Klik untuk detail"
                                                                             >
@@ -1029,7 +1032,7 @@ export default function NilaiPage() {
                                                                     <td key={oe.id} className="px-4 py-4 text-center">
                                                                         {os?.is_graded ? (
                                                                             <button
-                                                                                onClick={() => setCellDetail({ title: oe.title, category: 'UTS', studentName: student.user.full_name, nis: student.nis, score: os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0, date: os.submitted_at || null })}
+                                                                                onClick={() => setCellDetail({ title: oe.title, category: labels.uts, studentName: student.user.full_name, nis: student.nis, score: os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0, date: os.submitted_at || null })}
                                                                                 className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
                                                                                 title="Klik untuk detail"
                                                                             >
@@ -1049,7 +1052,7 @@ export default function NilaiPage() {
                                                                     <td key={oe.id} className="px-4 py-4 text-center">
                                                                         {os?.is_graded ? (
                                                                             <button
-                                                                                onClick={() => setCellDetail({ title: oe.title, category: 'UAS', studentName: student.user.full_name, nis: student.nis, score: os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0, date: os.submitted_at || null })}
+                                                                                onClick={() => setCellDetail({ title: oe.title, category: labels.uas, studentName: student.user.full_name, nis: student.nis, score: os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0, date: os.submitted_at || null })}
                                                                                 className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
                                                                                 title="Klik untuk detail"
                                                                             >
@@ -1087,11 +1090,11 @@ export default function NilaiPage() {
                                 <div className="space-y-4">
                                     <div className="flex justify-end">
                                         <Button variant="secondary" size="sm" onClick={() => { setNewColumnType('TUGAS'); setShowAddColumn('TUGAS') }} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
-                                            Kolom Tugas Offline
+                                            Kolom {labels.tugas} Offline
                                         </Button>
                                     </div>
                                     {tugasAssignments.length === 0 ? (
-                                        <EmptyState title="Belum ada tugas" description="Anda belum membuat tugas untuk kelas ini." icon={<div className="text-amber-200"><Edit set="bold" primaryColor="currentColor" size={48} /></div>} />
+                                        <EmptyState title={`Belum ada ${labels.tugas.toLowerCase()}`} description={`Anda belum membuat ${labels.tugas.toLowerCase()} untuk kelas ini.`} icon={<div className="text-amber-200"><Edit set="bold" primaryColor="currentColor" size={48} /></div>} />
                                     ) : (
                                         <div className="grid gap-4 md:grid-cols-2">
                                             {tugasAssignments.map(assignment => {
@@ -1107,7 +1110,7 @@ export default function NilaiPage() {
                                                                 {assignment.submission_mode === 'OFFLINE' && (
                                                                     <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-teal-500/10 text-teal-600 border border-teal-200 dark:border-teal-500/20">Offline</span>
                                                                 )}
-                                                                <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">{assignment.type}</span>
+                                                                <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">{categoryLabel(assignment.type)}</span>
                                                             </div>
                                                         </div>
                                                         <h3 className="text-lg font-bold text-text-main dark:text-white mb-1">{assignment.title}</h3>
@@ -1130,11 +1133,11 @@ export default function NilaiPage() {
                                 <div className="space-y-4">
                                     <div className="flex justify-end">
                                         <Button variant="secondary" size="sm" onClick={() => setShowAddColumn('KUIS')} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
-                                            Kolom Kuis Offline
+                                            Kolom {labels.kuis} Offline
                                         </Button>
                                     </div>
                                     {quizzes.length === 0 ? (
-                                        <EmptyState title="Belum ada kuis" description="Anda belum membuat kuis untuk kelas ini." icon={<div className="text-purple-200"><Discovery set="bold" primaryColor="currentColor" size={48} /></div>} />
+                                        <EmptyState title={`Belum ada ${labels.kuis.toLowerCase()}`} description={`Anda belum membuat ${labels.kuis.toLowerCase()} untuk kelas ini.`} icon={<div className="text-purple-200"><Discovery set="bold" primaryColor="currentColor" size={48} /></div>} />
                                     ) : (
                                         <div className="grid gap-4 md:grid-cols-2">
                                             {quizzes.map(quiz => {
@@ -1150,7 +1153,7 @@ export default function NilaiPage() {
                                                                 {quiz.submission_mode === 'OFFLINE' && (
                                                                     <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-teal-500/10 text-teal-600 border border-teal-200 dark:border-teal-500/20">Offline</span>
                                                                 )}
-                                                                <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">KUIS</span>
+                                                                <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">{labels.kuis}</span>
                                                             </div>
                                                         </div>
                                                         <h3 className="text-lg font-bold text-text-main dark:text-white mb-1">{quiz.title}</h3>
@@ -1173,11 +1176,11 @@ export default function NilaiPage() {
                                 <div className="space-y-4">
                                     <div className="flex justify-end">
                                         <Button variant="secondary" size="sm" onClick={() => setShowAddColumn('ULANGAN')} icon={<Plus set="bold" primaryColor="currentColor" size={16} />}>
-                                            Kolom Ulangan Offline
+                                            Kolom {labels.ulangan} Offline
                                         </Button>
                                     </div>
                                     {exams.length === 0 && ulanganAssignments.length === 0 ? (
-                                        <EmptyState title="Belum ada ulangan" description="Anda belum membuat ulangan untuk kelas ini." icon={<div className="text-red-200"><TimeCircle set="bold" primaryColor="currentColor" size={48} /></div>} />
+                                        <EmptyState title={`Belum ada ${labels.ulangan.toLowerCase()}`} description={`Anda belum membuat ${labels.ulangan.toLowerCase()} untuk kelas ini.`} icon={<div className="text-red-200"><TimeCircle set="bold" primaryColor="currentColor" size={48} /></div>} />
                                     ) : (
                                         <div className="grid gap-4 md:grid-cols-2">
                                             {exams.map(exam => {
@@ -1188,7 +1191,7 @@ export default function NilaiPage() {
                                                             <div className="w-10 h-10 rounded-full bg-red-500/10 text-red-600 flex items-center justify-center">
                                                                 <TimeCircle set="bold" primaryColor="currentColor" size={20} />
                                                             </div>
-                                                            <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">ULANGAN</span>
+                                                            <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">{labels.ulangan}</span>
                                                         </div>
                                                         <h3 className="text-lg font-bold text-text-main dark:text-white mb-1">{exam.title}</h3>
                                                         <p className="text-sm text-text-secondary mb-4">{subs.length} submission</p>
@@ -1213,7 +1216,7 @@ export default function NilaiPage() {
                                                                 {assignment.submission_mode === 'OFFLINE' && (
                                                                     <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-teal-500/10 text-teal-600 border border-teal-200 dark:border-teal-500/20">Offline</span>
                                                                 )}
-                                                                <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">ULANGAN</span>
+                                                                <span className="text-xs text-text-secondary bg-secondary/10 px-2 py-1 rounded-full font-medium">{labels.ulangan}</span>
                                                             </div>
                                                         </div>
                                                         <h3 className="text-lg font-bold text-text-main dark:text-white mb-1">{assignment.title}</h3>
@@ -1235,7 +1238,7 @@ export default function NilaiPage() {
                             {activeTab === 'uts-uas' && (
                                 <div className="space-y-4">
                                     {officialExams.length === 0 ? (
-                                        <EmptyState title="Belum ada UTS/UAS" description="Belum ada ujian UTS atau UAS untuk mata pelajaran dan kelas ini." icon={<div className="text-indigo-200"><GraduationCap className="w-12 h-12" /></div>} />
+                                        <EmptyState title={`Belum ada ${labels.uts}/${labels.uas}`} description={`Belum ada ujian ${labels.uts} atau ${labels.uas} untuk mata pelajaran dan kelas ini.`} icon={<div className="text-indigo-200"><GraduationCap className="w-12 h-12" /></div>} />
                                     ) : (
                                         <div className="grid gap-4 md:grid-cols-2">
                                             {officialExams.map(oe => {
@@ -1247,7 +1250,7 @@ export default function NilaiPage() {
                                                             <div className={`w-10 h-10 rounded-full flex items-center justify-center ${oe.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600' : 'bg-purple-500/10 text-purple-600'}`}>
                                                                 <GraduationCap className="w-5 h-5" />
                                                             </div>
-                                                            <span className={`text-xs px-2 py-1 rounded-full font-bold ${oe.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600' : 'bg-purple-500/10 text-purple-600'}`}>{oe.exam_type}</span>
+                                                            <span className={`text-xs px-2 py-1 rounded-full font-bold ${oe.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600' : 'bg-purple-500/10 text-purple-600'}`}>{labelForGradeType(oe.exam_type, labels)}</span>
                                                         </div>
                                                         <h3 className="text-lg font-bold text-text-main dark:text-white mb-1">{oe.title}</h3>
                                                         <p className="text-sm text-text-secondary mb-4">{subs.length} submission • {graded} dinilai</p>
@@ -1279,11 +1282,11 @@ export default function NilaiPage() {
                                         <p className="text-sm text-text-secondary mb-3 uppercase tracking-wider font-bold">Format export meliputi:</p>
                                         <ul className="text-sm text-text-main dark:text-white space-y-3">
                                             <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Nama dan NIS siswa</li>
-                                            <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Nilai Tugas (T1, T2, ...)</li>
-                                            <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Nilai Kuis (K1, K2, ...)</li>
-                                            <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Nilai Ulangan (U1, U2, ...)</li>
-                                            <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Nilai UTS</li>
-                                            <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Nilai UAS</li>
+                                            <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Nilai {labels.tugas} ({labels.tugas.charAt(0).toUpperCase()}1, {labels.tugas.charAt(0).toUpperCase()}2, ...)</li>
+                                            <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Nilai {labels.kuis} ({labels.kuis.charAt(0).toUpperCase()}1, {labels.kuis.charAt(0).toUpperCase()}2, ...)</li>
+                                            <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Nilai {labels.ulangan} ({labels.ulangan.charAt(0).toUpperCase()}1, {labels.ulangan.charAt(0).toUpperCase()}2, ...)</li>
+                                            <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Nilai {labels.uts}</li>
+                                            <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Nilai {labels.uas}</li>
                                             <li className="flex items-center gap-3"><span className="text-success"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span> Rata-rata nilai</li>
                                         </ul>
                                     </div>
@@ -1308,8 +1311,8 @@ export default function NilaiPage() {
             <Modal
                 open={!!showAddColumn}
                 onClose={() => setShowAddColumn(null)}
-                title={showAddColumn === 'ULANGAN' ? 'Tambah Kolom Ulangan' : showAddColumn === 'KUIS' ? 'Tambah Kolom Kuis' : 'Tambah Kolom Tugas'}
-                subtitle="Kolom penilaian untuk tugas/kuis/ulangan yang dilaksanakan di luar LMS"
+                title={showAddColumn === 'ULANGAN' ? `Tambah Kolom ${labels.ulangan}` : showAddColumn === 'KUIS' ? `Tambah Kolom ${labels.kuis}` : `Tambah Kolom ${labels.tugas}`}
+                subtitle={`Kolom penilaian untuk ${labels.tugas.toLowerCase()}/${labels.kuis.toLowerCase()}/${labels.ulangan.toLowerCase()} yang dilaksanakan di luar LMS`}
             >
                 <div className="space-y-4">
                     <div>
@@ -1318,7 +1321,7 @@ export default function NilaiPage() {
                             type="text"
                             value={newColumnTitle}
                             onChange={(e) => setNewColumnTitle(e.target.value)}
-                            placeholder={showAddColumn === 'ULANGAN' ? 'cth: Ulangan Harian Bab 3 (kertas)' : showAddColumn === 'KUIS' ? 'cth: Kuis Kosakata (lisan)' : 'cth: Praktik Membaca Puisi'}
+                            placeholder={showAddColumn === 'ULANGAN' ? `cth: ${labels.ulangan} Harian Bab 3 (kertas)` : showAddColumn === 'KUIS' ? `cth: ${labels.kuis} Kosakata (lisan)` : 'cth: Praktik Membaca Puisi'}
                             className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
                             autoFocus
                         />
@@ -1331,7 +1334,7 @@ export default function NilaiPage() {
                                 onChange={(e) => setNewColumnType(e.target.value)}
                                 className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
                             >
-                                <option value="TUGAS">Tugas</option>
+                                <option value="TUGAS">{labels.tugas}</option>
                                 <option value="PR">PR</option>
                                 <option value="PROYEK">Proyek</option>
                                 <option value="LATIHAN">Latihan</option>

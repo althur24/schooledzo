@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { resolveAssignmentSchoolId, tenantMismatch } from '@/lib/tenantGuard'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET submissions for an assignment
 export async function GET(request: NextRequest) {
@@ -172,7 +173,8 @@ export async function POST(request: NextRequest) {
 
             // Tugas offline dinilai langsung oleh guru — tidak menerima pengumpulan
             if (assignment?.submission_mode === 'OFFLINE') {
-                return NextResponse.json({ error: 'Tugas ini dinilai langsung oleh guru, tidak perlu dikumpulkan di sini' }, { status: 400 })
+                const labels = await getMenuLabelsForSchool(schoolId)
+                return NextResponse.json({ error: `${labels.tugas} ini dinilai langsung oleh guru, tidak perlu dikumpulkan di sini` }, { status: 400 })
             }
 
             if (assignment?.due_date && new Date() > new Date(assignment.due_date)) {

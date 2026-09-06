@@ -2,6 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import Card from '@/components/ui/Card'
 import { PageHeader, EmptyState } from '@/components/ui'
@@ -17,6 +18,7 @@ function StudentDetailContent() {
     const searchParams = useSearchParams()
     const classId = searchParams.get('class_id')
     const studentId = params.studentId as string
+    const labels = useSchoolLabels()
     const [data, setData] = useState<any>(null)
     const [loading, setLoading] = useState(true)
 
@@ -265,7 +267,7 @@ function StudentDetailContent() {
                                             <div className="flex items-center gap-1.5 mb-2">
                                                 <PenTool className="w-3.5 h-3.5 text-amber-500" />
                                                 <span className="text-xs font-bold text-text-main dark:text-white">
-                                                    Tugas
+                                                    {labels.tugas}
                                                 </span>
                                             </div>
                                             {subjData.tugas_scores.length > 0 ? (
@@ -289,7 +291,7 @@ function StudentDetailContent() {
                                             <div className="flex items-center gap-1.5 mb-2">
                                                 <Brain className="w-3.5 h-3.5 text-purple-500" />
                                                 <span className="text-xs font-bold text-text-main dark:text-white">
-                                                    Kuis
+                                                    {labels.kuis}
                                                 </span>
                                             </div>
                                             {subjData.kuis_scores.length > 0 ? (
@@ -313,7 +315,7 @@ function StudentDetailContent() {
                                             <div className="flex items-center gap-1.5 mb-2">
                                                 <Clock className="w-3.5 h-3.5 text-red-500" />
                                                 <span className="text-xs font-bold text-text-main dark:text-white">
-                                                    Ulangan
+                                                    {labels.ulangan}
                                                 </span>
                                             </div>
                                             {subjData.ulangan_scores.length > 0 ? (
@@ -337,7 +339,7 @@ function StudentDetailContent() {
                                             <div className="flex items-center gap-1.5 mb-2">
                                                 <GraduationCap className="w-3.5 h-3.5 text-indigo-500" />
                                                 <span className="text-xs font-bold text-text-main dark:text-white">
-                                                    UTS
+                                                    {labels.uts}
                                                 </span>
                                             </div>
                                             {(subjData.uts_scores || []).length > 0 ? (
@@ -361,7 +363,7 @@ function StudentDetailContent() {
                                             <div className="flex items-center gap-1.5 mb-2">
                                                 <FileText className="w-3.5 h-3.5 text-teal-500" />
                                                 <span className="text-xs font-bold text-text-main dark:text-white">
-                                                    UAS
+                                                    {labels.uas}
                                                 </span>
                                             </div>
                                             {(subjData.uas_scores || []).length > 0 ? (

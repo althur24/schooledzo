@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch } from '@/lib/tenantGuard'
 import { canManageOfficialExam } from '@/lib/teacherScope'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 export async function POST(request: NextRequest) {
     try {
@@ -164,7 +165,8 @@ export async function POST(request: NextRequest) {
 
                 if (students && students.length > 0) {
                     const startDate = new Date(start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })
-                    const examLabel = sourceExam.exam_type === 'UTS' ? 'UTS' : 'UAS'
+                    const labels = await getMenuLabelsForSchool(schoolId)
+                    const examLabel = sourceExam.exam_type === 'UTS' ? labels.uts : labels.uas
                     
                     await supabase.from('notifications').insert(
                         students.map((s: any) => ({

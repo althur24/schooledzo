@@ -9,6 +9,7 @@ import TimeWindowFields from '@/components/TimeWindowFields'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import { Plus, ChevronDown } from 'react-iconly'
 import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BookOpen, BarChart3, Copy, RefreshCw } from 'lucide-react'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 interface OfficialExam {
     id: string
@@ -45,6 +46,7 @@ interface ClassItem {
 
 export default function AdminUtsUasPage() {
     const router = useRouter()
+    const labels = useSchoolLabels()
     const [exams, setExams] = useState<OfficialExam[]>([])
     const [subjects, setSubjects] = useState<Subject[]>([])
     const [classes, setClasses] = useState<ClassItem[]>([])
@@ -162,7 +164,7 @@ export default function AdminUtsUasPage() {
             )
             const okCount = results.filter(r => r.status === 'fulfilled').length
             if (okCount === 0) {
-                showToast('Gagal membuat ulangan. Silakan coba lagi.', 'error')
+                showToast(`Gagal membuat ${labels.ulangan}. Silakan coba lagi.`, 'error')
                 return
             }
             setShowCreateTeacherExam(false)
@@ -361,15 +363,15 @@ export default function AdminUtsUasPage() {
 
     const handleDeleteUlangan = (id: string) => {
         setConfirmDialog({
-            title: 'Hapus Ulangan',
-            message: 'Hapus ulangan ini? Semua soal dan submission akan dihapus.',
+            title: `Hapus ${labels.ulangan}`,
+            message: `Hapus ${labels.ulangan} ini? Semua soal dan submission akan dihapus.`,
             onConfirm: async () => {
                 const res = await fetch(`/api/exams/${id}`, { method: 'DELETE' })
                 if (res.ok) {
-                    showToast('Ulangan berhasil dihapus', 'success')
+                    showToast(`${labels.ulangan} berhasil dihapus`, 'success')
                 } else {
                     const err = await res.json().catch(() => null)
-                    showToast(err?.error || 'Gagal menghapus ulangan', 'error')
+                    showToast(err?.error || `Gagal menghapus ${labels.ulangan}`, 'error')
                 }
                 fetchUlangan()
                 setConfirmDialog(null)
@@ -537,7 +539,7 @@ export default function AdminUtsUasPage() {
                     newExam = await res.json()
                 } else {
                     const err = await res.json().catch(() => null)
-                    showToast(err?.error || 'Gagal menduplikasi ulangan', 'error')
+                    showToast(err?.error || `Gagal menduplikasi ${labels.ulangan}`, 'error')
                     return
                 }
             } else {
@@ -651,15 +653,15 @@ export default function AdminUtsUasPage() {
     return (
         <div className="space-y-6">
             <PageHeader
-                title="Ulangan"
-                subtitle="Kelola ulangan harian guru & ujian UTS/UAS sekolah"
+                title={labels.ulangan}
+                subtitle={`Kelola ${labels.ulangan} harian guru & ujian ${labels.uts}/${labels.uas} sekolah`}
                 icon={<div className="text-indigo-500"><GraduationCap className="w-6 h-6" /></div>}
                 backHref="/dashboard/admin"
                 action={
                     <div className="flex gap-2">
                         {tab === 'ulangan' && (
                             <Button variant="secondary" onClick={() => setShowCreateTeacherExam(true)}>
-                                Buat Ulangan untuk Guru
+                                Buat {labels.ulangan} untuk Guru
                             </Button>
                         )}
                         <Button onClick={() => setShowCreate(true)} icon={
@@ -677,13 +679,13 @@ export default function AdminUtsUasPage() {
                     onClick={() => setTab('utsuas')}
                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${tab === 'utsuas' ? 'bg-white dark:bg-surface-dark text-primary shadow-sm' : 'text-text-secondary hover:text-text-main dark:hover:text-white'}`}
                 >
-                    UTS / UAS
+                    {labels.uts} / {labels.uas}
                 </button>
                 <button
                     onClick={() => setTab('ulangan')}
                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${tab === 'ulangan' ? 'bg-white dark:bg-surface-dark text-primary shadow-sm' : 'text-text-secondary hover:text-text-main dark:hover:text-white'}`}
                 >
-                    Ulangan
+                    {labels.ulangan}
                 </button>
             </div>
 
@@ -696,8 +698,8 @@ export default function AdminUtsUasPage() {
                         className="px-4 py-2 bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                     >
                         <option value="">Semua Tipe</option>
-                        <option value="UTS">UTS</option>
-                        <option value="UAS">UAS</option>
+                        <option value="UTS">{labels.uts}</option>
+                        <option value="UAS">{labels.uas}</option>
                     </select>
                 )}
                 <select
@@ -722,7 +724,7 @@ export default function AdminUtsUasPage() {
                 <EmptyState
                     icon={<div className="text-indigo-400"><GraduationCap className="w-12 h-12" /></div>}
                     title="Belum Ada Ujian"
-                    description="Buat ujian UTS atau UAS baru untuk kelas-kelas Anda."
+                    description={`Buat ujian ${labels.uts} atau ${labels.uas} baru untuk kelas-kelas Anda.`}
                     action={<Button onClick={() => setShowCreate(true)}>Buat Ujian Sekarang</Button>}
                 />
             ) : (
@@ -741,7 +743,7 @@ export default function AdminUtsUasPage() {
                                                     ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
                                                     : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
                                                     }`}>
-                                                    {exam.exam_type}
+                                                    {exam.exam_type === 'UTS' ? labels.uts : labels.uas}
                                                 </span>
                                                 {exam.is_remedial && (
                                                     <span className="px-2.5 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full">
@@ -867,8 +869,8 @@ export default function AdminUtsUasPage() {
                 ) : filteredUlangan.length === 0 ? (
                     <EmptyState
                         icon={<div className="text-indigo-400"><GraduationCap className="w-12 h-12" /></div>}
-                        title="Belum Ada Ulangan"
-                        description="Ulangan yang dibuat guru akan muncul di sini untuk dikelola, dimonitor, dan dikoreksi."
+                        title={`Belum Ada ${labels.ulangan}`}
+                        description={`${labels.ulangan} yang dibuat guru akan muncul di sini untuk dikelola, dimonitor, dan dikoreksi.`}
                     />
                 ) : (
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -886,7 +888,7 @@ export default function AdminUtsUasPage() {
                                             <div className="flex-1">
                                                 <div className="flex flex-wrap items-center gap-2 mb-2">
                                                     <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${status.color}`}>{status.label}</span>
-                                                    <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400">Ulangan</span>
+                                                    <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400">{labels.ulangan}</span>
                                                     {exam.is_remedial && (
                                                         <span className="px-2.5 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full">
                                                             REMEDIAL
@@ -963,7 +965,7 @@ export default function AdminUtsUasPage() {
                                             <Button
                                                 variant="outline" size="sm"
                                                 onClick={() => handleOpenDuplicate(exam, 'BIASA', 'ulangan')}
-                                                title="Duplikasi Ulangan"
+                                                title={`Duplikasi ${labels.ulangan}`}
                                                 className="text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-blue-200 dark:border-blue-900/30"
                                             >
                                                 <Copy className="w-4 h-4" />
@@ -1005,7 +1007,7 @@ export default function AdminUtsUasPage() {
                                 <label key={type} className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all font-bold ${form.exam_type === type ? 'border-primary bg-primary/5 text-primary' : 'border-secondary/20 hover:border-primary/50 text-text-main dark:text-white'}`}>
                                     <input type="radio" name="exam_type" checked={form.exam_type === type} onChange={() => setForm({ ...form, exam_type: type })} className="hidden" />
                                     {type === 'UTS' ? <BookOpen className="w-5 h-5" /> : <GraduationCap className="w-5 h-5" />}
-                                    {type}
+                                    {type === 'UTS' ? labels.uts : labels.uas}
                                 </label>
                             ))}
                         </div>
@@ -1037,7 +1039,7 @@ export default function AdminUtsUasPage() {
                             value={form.title}
                             onChange={(e) => setForm({ ...form, title: e.target.value })}
                             className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary/50"
-                            placeholder={`Contoh: ${form.exam_type} Matematika Semester 1`}
+                            placeholder={`Contoh: ${form.exam_type === 'UTS' ? labels.uts : labels.uas} Matematika Semester 1`}
                         />
                     </div>
 
@@ -1172,13 +1174,13 @@ export default function AdminUtsUasPage() {
             <Modal
                 open={showCreateTeacherExam}
                 onClose={() => setShowCreateTeacherExam(false)}
-                title="Buat Ulangan untuk Guru"
+                title={`Buat ${labels.ulangan} untuk Guru`}
             >
                 <div className="space-y-4">
                     <div className="flex items-start gap-3 p-3 bg-teal-500/10 text-teal-700 dark:text-teal-300 rounded-xl text-sm">
                         <BookOpen className="w-5 h-5 flex-shrink-0" />
                         <div>
-                            Ulangan dibuat sebagai <span className="font-bold">DRAFT atas nama guru</span> yang dipilih — langsung muncul di daftar ulangan guru terkait. Guru melengkapi soal dan mempublikasikannya.
+                            {labels.ulangan} dibuat sebagai <span className="font-bold">DRAFT atas nama guru</span> yang dipilih — langsung muncul di daftar {labels.ulangan} guru terkait. Guru melengkapi soal dan mempublikasikannya.
                         </div>
                     </div>
                     <div>
@@ -1212,13 +1214,13 @@ export default function AdminUtsUasPage() {
                         </div>
                     )}
                     <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ulangan <span className="text-red-500">*</span></label>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul {labels.ulangan} <span className="text-red-500">*</span></label>
                         <input
                             type="text"
                             value={teacherExamForm.title}
                             onChange={(e) => setTeacherExamForm({ ...teacherExamForm, title: e.target.value })}
                             className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="Contoh: Ulangan Harian Bab 2"
+                            placeholder={`Contoh: ${labels.ulangan} Harian Bab 2`}
                         />
                     </div>
                     <div>
@@ -1294,7 +1296,7 @@ export default function AdminUtsUasPage() {
                             disabled={creatingTeacherExam || !teacherExamForm.teacher_id || teacherExamForm.teaching_assignment_ids.length === 0 || !teacherExamForm.title || !teacherExamForm.start_time || teacherExamForm.duration_minutes < 5 || (teacherExamForm.schedule_mode === 'window' && !teacherExamForm.window_end_time)}
                             className="flex-1"
                         >
-                            Buat Ulangan (Draft)
+                            Buat {labels.ulangan} (Draft)
                         </Button>
                     </div>
                 </div>
@@ -1307,10 +1309,10 @@ export default function AdminUtsUasPage() {
                         <div className="flex items-center gap-3 p-3 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 rounded-xl">
                             <Copy className="w-5 h-5 flex-shrink-0" />
                             <div className="text-sm">
-                                <div>Sumber: <span className="font-bold">{duplicateExam.title}</span>{duplicateSource === 'ulangan' && <span className="ml-1 text-xs">(Ulangan)</span>}</div>
+                                <div>Sumber: <span className="font-bold">{duplicateExam.title}</span>{duplicateSource === 'ulangan' && <span className="ml-1 text-xs">({labels.ulangan})</span>}</div>
                                 <div className="text-xs opacity-80">
                                     {duplicateSource === 'ulangan' && duplicateMode === 'REMEDIAL' && ulanganRemedialMethod === 'BARU'
-                                        ? 'Ulangan baru akan dibuat dengan soal kosong'
+                                        ? `${labels.ulangan} baru akan dibuat dengan soal kosong`
                                         : `${duplicateExam.question_count} soal akan disalin otomatis`}
                                 </div>
                             </div>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { PageHeader, EmptyState } from '@/components/ui'
 import { Loader2 } from 'lucide-react'
 import { Game, Calendar, TimeCircle, Document, TickSquare } from 'react-iconly'
@@ -36,6 +37,7 @@ interface QuizSubmission {
 
 export default function SiswaKuisPage() {
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const [quizzes, setQuizzes] = useState<Quiz[]>([])
     const [submissions, setSubmissions] = useState<QuizSubmission[]>([])
     const [loading, setLoading] = useState(true)
@@ -88,8 +90,8 @@ export default function SiswaKuisPage() {
     return (
         <div className="space-y-6">
             <PageHeader
-                title="Kuis"
-                subtitle="Kerjakan kuis dari guru"
+                title={labels.kuis}
+                subtitle={`Kerjakan ${labels.kuis} dari guru`}
                 icon={<div className="text-purple-500 flex"><Game set="bold" primaryColor="currentColor" size="small" /></div>}
                 backHref="/dashboard/siswa"
             />
@@ -101,8 +103,8 @@ export default function SiswaKuisPage() {
             ) : quizzes.length === 0 ? (
                 <EmptyState
                     icon={<div className="text-secondary flex"><Game set="bold" primaryColor="currentColor" size="xlarge" /></div>}
-                    title="Belum Ada Kuis"
-                    description="Belum ada kuis aktif untuk kelasmu"
+                    title={`Belum Ada ${labels.kuis}`}
+                    description={`Belum ada ${labels.kuis} aktif untuk kelasmu`}
                 />
             ) : (
                 <div className="grid gap-4 md:grid-cols-2">
@@ -124,7 +126,7 @@ export default function SiswaKuisPage() {
                                         <div className="flex-1">
                                             <div className="flex items-center gap-2 mb-2">
                                                 <span className="px-2.5 py-1 bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400 text-xs font-bold rounded-full">
-                                                    Kuis
+                                                    {labels.kuis}
                                                 </span>
                                                 {isCompleted && (
                                                     <span className="px-2.5 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-xs font-bold rounded-full flex items-center gap-1">
@@ -215,7 +217,7 @@ export default function SiswaKuisPage() {
                                                         href={`/dashboard/siswa/kuis/${quiz.id}`}
                                                         className="w-full block text-center px-4 py-2.5 md:px-6 md:py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl font-bold shadow-lg shadow-orange-500/20 hover:shadow-orange-500/30 hover:scale-[1.02] transition-all text-sm md:text-base"
                                                     >
-                                                        Lanjutkan Kuis
+                                                        Lanjutkan {labels.kuis}
                                                     </Link>
                                                 )
                                             })()
@@ -224,7 +226,7 @@ export default function SiswaKuisPage() {
                                                 href={`/dashboard/siswa/kuis/${quiz.id}`}
                                                 className="w-full block text-center px-4 py-2.5 md:px-6 md:py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-bold shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 hover:scale-[1.02] transition-all text-sm md:text-base"
                                             >
-                                                Mulai Kuis
+                                                Mulai {labels.kuis}
                                             </Link>
                                         ) : notYetOpen ? (
                                             <div className="w-full text-center px-4 py-2.5 md:px-6 md:py-3 bg-secondary/10 text-text-secondary rounded-xl font-bold text-sm md:text-base">

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch, notFound } from '@/lib/tenantGuard'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // E3 Rescue draft: siswa kembali SETELAH attempt ditutup paksa (waktu habis /
 // kuis dinonaktifkan) tetapi perangkatnya masih menyimpan jawaban yang belum
@@ -58,7 +59,8 @@ export async function POST(
         // Hanya untuk attempt yang SUDAH ditutup — attempt yang masih berjalan
         // harus lewat jalur autosave/submit biasa.
         if (!sub.submitted_at) {
-            return NextResponse.json({ error: 'Kuis masih berjalan — gunakan tombol simpan biasa' }, { status: 400 })
+            const labels = await getMenuLabelsForSchool(schoolId)
+            return NextResponse.json({ error: `${labels.kuis} masih berjalan — gunakan tombol simpan biasa` }, { status: 400 })
         }
 
         // Merge per soal: snapshot server dulu, incoming (rescue) menang

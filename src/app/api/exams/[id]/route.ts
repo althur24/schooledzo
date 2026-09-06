@@ -6,6 +6,7 @@ import { isAIReviewEnabled } from '@/lib/triggerHOTS'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncExamBatch } from '@/lib/examBatch'
 import { canManageExam } from '@/lib/teacherScope'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET single exam
 export async function GET(
@@ -90,9 +91,10 @@ export async function PUT(
 
         // Kepemilikan: hanya ADMIN atau guru pemilik TA yang boleh mengubah ulangan ini
         // (pengetatan — sebelumnya semua guru bisa mengedit ulangan guru lain)
+        const labels = await getMenuLabelsForSchool(schoolId)
         const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
         if (!(await canManageExam(user, taTeacherId))) {
-            return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
+            return NextResponse.json({ error: `Anda tidak memiliki akses ke ${labels.ulangan.toLowerCase()} ini` }, { status: 403 })
         }
 
         const body = await request.json()
@@ -119,7 +121,7 @@ export async function PUT(
                 .eq('exam_id', id)
 
             if (!questions || questions.length === 0) {
-                return NextResponse.json({ error: 'Tidak bisa mempublikasikan ulangan tanpa soal. Tambahkan minimal 1 soal terlebih dahulu.' }, { status: 400 })
+                return NextResponse.json({ error: `Tidak bisa mempublikasikan ${labels.ulangan.toLowerCase()} tanpa soal. Tambahkan minimal 1 soal terlebih dahulu.` }, { status: 400 })
             }
             if (questions.length > 0) {
                 if (!aiEnabled) {
@@ -230,7 +232,7 @@ export async function PUT(
                             enrollments.map((e: any) => ({
                                 user_id: e.student.user_id,
                                 type: 'ULANGAN_BARU',
-                                title: `Ulangan Baru: ${data.title}`,
+                                title: `${labels.ulangan} Baru: ${data.title}`,
                                 message: `${subjectName} - Mulai: ${startDate}`,
                                 link: '/dashboard/siswa/ulangan'
                             }))
@@ -266,7 +268,7 @@ export async function PUT(
                                 user_id: e.student.user_id,
                                 type: 'NILAI_KELUAR',
                                 title: `Nilai Keluar: ${data.title}`,
-                                message: `${subjectName} — Hasil ulangan sudah bisa dilihat`,
+                                message: `${subjectName} — Hasil ${labels.ulangan.toLowerCase()} sudah bisa dilihat`,
                                 link: '/dashboard/siswa/ulangan'
                             }))
                         )
@@ -323,7 +325,8 @@ export async function DELETE(
         // Kepemilikan: hanya ADMIN atau guru pemilik TA yang boleh menghapus ulangan ini
         const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
         if (!(await canManageExam(user, taTeacherId))) {
-            return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
+            const labels = await getMenuLabelsForSchool(schoolId)
+            return NextResponse.json({ error: `Anda tidak memiliki akses ke ${labels.ulangan.toLowerCase()} ini` }, { status: 403 })
         }
 
         const { error } = await supabase

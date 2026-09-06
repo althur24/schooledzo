@@ -4,6 +4,7 @@ import { useEffect, useState, use } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Printer, ArrowLeft, GraduationCap, School, MapPin, Calendar, User, FileText } from 'lucide-react'
 import { Button } from '@/components/ui'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 interface Student {
     id: string
@@ -38,6 +39,7 @@ interface SubjectSummary {
 export default function RaporPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params)
     const router = useRouter()
+    const labels = useSchoolLabels()
     const [student, setStudent] = useState<Student | null>(null)
     const [summary, setSummary] = useState<SubjectSummary[]>([])
     const [loading, setLoading] = useState(true)
@@ -285,9 +287,9 @@ export default function RaporPage({ params }: { params: Promise<{ id: string }> 
                                 <tr className="bg-slate-50 text-slate-700 border-b border-slate-200 print:bg-slate-100">
                                     <th className="px-4 py-3 text-center w-12 font-bold">No</th>
                                     <th className="px-4 py-3 text-left font-bold">Mata Pelajaran</th>
-                                    <th className="px-4 py-3 text-center w-24">Tugas</th>
-                                    <th className="px-4 py-3 text-center w-24">Kuis</th>
-                                    <th className="px-4 py-3 text-center w-24">Ulangan</th>
+                                    <th className="px-4 py-3 text-center w-24">{labels.tugas}</th>
+                                    <th className="px-4 py-3 text-center w-24">{labels.kuis}</th>
+                                    <th className="px-4 py-3 text-center w-24">{labels.ulangan}</th>
                                     <th className="px-4 py-3 text-center w-24 bg-emerald-50/50 print:bg-transparent font-bold text-emerald-800 print:text-black">Nilai Akhir</th>
                                     <th className="px-4 py-3 text-center w-20 font-bold">Predikat</th>
                                 </tr>

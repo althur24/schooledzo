@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { PageHeader, Button, EmptyState } from '@/components/ui'
 import { Graph as BarChart3, Download } from 'react-iconly'
 import { Loader2 } from 'lucide-react'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 interface AcademicYear {
     id: string
@@ -55,6 +56,7 @@ interface StudentGrades {
 }
 
 export default function RekapNilaiPage() {
+    const labels = useSchoolLabels()
     const [academicYears, setAcademicYears] = useState<AcademicYear[]>([])
     const [classes, setClasses] = useState<Class[]>([])
     const [selectedYear, setSelectedYear] = useState('')
@@ -213,11 +215,11 @@ export default function RekapNilaiPage() {
         // Prepare Excel data
         const headers = ['No', 'NIS', 'Nama Siswa']
         subjects.forEach(s => {
-            headers.push(`${s.name} (Tugas)`)
-            headers.push(`${s.name} (Kuis)`)
-            headers.push(`${s.name} (Ulangan)`)
-            headers.push(`${s.name} (UTS)`)
-            headers.push(`${s.name} (UAS)`)
+            headers.push(`${s.name} (${labels.tugas})`)
+            headers.push(`${s.name} (${labels.kuis})`)
+            headers.push(`${s.name} (${labels.ulangan})`)
+            headers.push(`${s.name} (${labels.uts})`)
+            headers.push(`${s.name} (${labels.uas})`)
             headers.push(`${s.name} (Rata-rata)`)
         })
         headers.push('Rata-rata Keseluruhan')

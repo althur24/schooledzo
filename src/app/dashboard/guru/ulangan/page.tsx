@@ -10,6 +10,8 @@ import ExamCard from '@/components/exam/ExamCard'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 import { TimeCircle as Clock, Plus, Lock, ShieldDone, Swap, Graph, Edit, Document } from 'react-iconly'
 import { Loader2, CheckSquare, Square, RefreshCw, GraduationCap, BookOpen, Copy, Trash2, Activity } from 'lucide-react'
 
@@ -62,6 +64,7 @@ interface TeachingAssignment {
 export default function GuruUlanganPage() {
     const { user } = useAuth()
     const router = useRouter()
+    const labels = useSchoolLabels()
     const [exams, setExams] = useState<Exam[]>([])
     const [teachingAssignments, setTeachingAssignments] = useState<TeachingAssignment[]>([])
     const [submissionCounts, setSubmissionCounts] = useState<Record<string, number>>({})
@@ -267,7 +270,7 @@ export default function GuruUlanganPage() {
         const selectedTAs = teachingAssignments.filter(ta => form.teaching_assignment_ids.includes(ta.id))
         const subjectIds = [...new Set(selectedTAs.map(ta => ta.subject?.id).filter(Boolean))]
         if (subjectIds.length !== 1) {
-            alert('Untuk UTS/UAS, pilih kelas dari SATU mata pelajaran yang sama.')
+            alert(`Untuk ${labels.uts}/${labels.uas}, pilih kelas dari SATU mata pelajaran yang sama.`)
             return
         }
         const targetClassIds = [...new Set(selectedTAs.map(ta => ta.class?.id).filter(Boolean))] as string[]
@@ -332,7 +335,7 @@ export default function GuruUlanganPage() {
 
             if (!primaryRes.ok) {
                 const err = await primaryRes.json().catch(() => ({}))
-                alert(err.error || 'Gagal membuat ulangan. Silakan coba lagi.')
+                alert(err.error || `Gagal membuat ${labels.ulangan.toLowerCase()}. Silakan coba lagi.`)
                 return
             }
 
@@ -366,7 +369,7 @@ export default function GuruUlanganPage() {
                     }
                 })
                 if (failedClassNames.length > 0) {
-                    alert(`Ulangan utama berhasil dibuat. ${siblingIds.length} kelas tambahan berhasil, ${failedClassNames.length} GAGAL: ${failedClassNames.join(', ')}. Buat ulang ulangan untuk kelas tersebut.`)
+                    alert(`${labels.ulangan} utama berhasil dibuat. ${siblingIds.length} kelas tambahan berhasil, ${failedClassNames.length} GAGAL: ${failedClassNames.join(', ')}. Buat ulang ${labels.ulangan.toLowerCase()} untuk kelas tersebut.`)
                 }
             }
 
@@ -436,7 +439,7 @@ export default function GuruUlanganPage() {
             })
 
             if (targetIds.length === 0) {
-                alert('Gagal membuat ulangan baru. Silakan coba lagi.')
+                alert(`Gagal membuat ${labels.ulangan.toLowerCase()} baru. Silakan coba lagi.`)
                 return
             }
 
@@ -452,23 +455,23 @@ export default function GuruUlanganPage() {
             })
 
             if (!copyRes.ok) {
-                alert('Berhasil membuat ulangan, tetapi gagal menyalin soal.')
+                alert(`Berhasil membuat ${labels.ulangan.toLowerCase()}, tetapi gagal menyalin soal.`)
             } else {
-                alert(`Ulangan berhasil disalin ke ${targetIds.length} kelas.`)
+                alert(`${labels.ulangan} berhasil disalin ke ${targetIds.length} kelas.`)
             }
 
             setShowCopy(false)
             fetchData()
         } catch (error) {
             console.error('Error copying exam:', error)
-            alert('Terjadi kesalahan saat menyalin ulangan.')
+            alert(`Terjadi kesalahan saat menyalin ${labels.ulangan.toLowerCase()}.`)
         } finally {
             setCopying(false)
         }
     }
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Hapus ulangan ini?')) return
+        if (!confirm(`Hapus ${labels.ulangan.toLowerCase()} ini?`)) return
         await fetch(`/api/exams/${id}`, { method: 'DELETE' })
         fetchData()
     }
@@ -520,7 +523,7 @@ export default function GuruUlanganPage() {
     }
 
     const handleDeleteOfficial = async (id: string) => {
-        if (!confirm('Hapus ujian UTS/UAS ini? Semua soal & hasil pengerjaan siswa ikut terhapus.')) return
+        if (!confirm(`Hapus ujian ${labels.uts}/${labels.uas} ini? Semua soal & hasil pengerjaan siswa ikut terhapus.`)) return
         const res = await fetch(`/api/official-exams/${id}`, { method: 'DELETE' })
         if (!res.ok) {
             const data = await res.json().catch(() => null)
@@ -631,7 +634,7 @@ export default function GuruUlanganPage() {
                     router.push(`/dashboard/guru/ulangan/${newExam.id}`)
                 }
             } else {
-                alert('Gagal membuat ulangan remedial')
+                alert(`Gagal membuat ${labels.ulangan.toLowerCase()} remedial`)
             }
         } finally {
             setCreating(false)
@@ -680,15 +683,15 @@ export default function GuruUlanganPage() {
     return (
         <div className="space-y-6">
             <PageHeader
-                title="Ulangan"
+                title={labels.ulangan}
                 icon={<div className="text-red-500"><Clock set="bold" primaryColor="currentColor" size={24} /></div>}
                 backHref="/dashboard/guru"
-                subtitle="Ulangan harian & ujian UTS/UAS"
+                subtitle={`${labels.ulangan} harian & ujian ${labels.uts}/${labels.uas}`}
                 action={
                     <Button onClick={() => setShowCreate(true)} data-tutorial="exam-create-btn" icon={
                         <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
                     }>
-                        Buat Ulangan
+                        Buat {labels.ulangan}
                     </Button>
                 }
             />
@@ -761,14 +764,14 @@ export default function GuruUlanganPage() {
                     <div>
                         <h2 className="text-xl font-bold text-text-main dark:text-white mb-4 flex items-center gap-2">
                             <div className="text-red-500"><Clock set="bold" primaryColor="currentColor" size={24} /></div>
-                            Ulangan Harian
+                            {labels.ulangan} Harian
                         </h2>
                         {exams.length === 0 ? (
                             <div className="bg-secondary/5 border-2 border-dashed border-secondary/20 rounded-2xl p-8 text-center">
                                 <div className="text-secondary/50 mx-auto mb-3 flex justify-center"><Document set="bold" primaryColor="currentColor" size={48} /></div>
-                                <h3 className="font-bold text-text-main dark:text-white text-lg">Belum Ada Ulangan Harian</h3>
-                                <p className="text-text-secondary text-sm mb-4">Buat ulangan baru untuk kelas Anda dengan fitur pengawasan.</p>
-                                <Button onClick={() => setShowCreate(true)} size="sm">Buat Ulangan Sekarang</Button>
+                                <h3 className="font-bold text-text-main dark:text-white text-lg">Belum Ada {labels.ulangan} Harian</h3>
+                                <p className="text-text-secondary text-sm mb-4">Buat {labels.ulangan.toLowerCase()} baru untuk kelas Anda dengan fitur pengawasan.</p>
+                                <Button onClick={() => setShowCreate(true)} size="sm">Buat {labels.ulangan} Sekarang</Button>
                             </div>
                         ) : (
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -838,7 +841,7 @@ export default function GuruUlanganPage() {
                                         <ExamCard
                                             key={exam.id}
                                             status={status}
-                                            typeBadge={{ label: 'ULANGAN', className: 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/20' }}
+                                            typeBadge={{ label: labels.ulangan, className: 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/20' }}
                                             title={exam.title}
                                             description={exam.description}
                                             extraBadges={extraBadges}
@@ -863,12 +866,12 @@ export default function GuruUlanganPage() {
                     <div>
                         <h2 className="text-xl font-bold text-text-main dark:text-white mb-4 flex items-center gap-2">
                             <GraduationCap className="w-6 h-6 text-indigo-500" />
-                            Ujian UTS & UAS
+                            Ujian {labels.uts} & {labels.uas}
                         </h2>
                         {officialExams.length === 0 ? (
                             <div className="bg-secondary/5 border-2 border-dashed border-secondary/20 rounded-2xl p-8 text-center">
                                 <BookOpen className="w-12 h-12 text-secondary/50 mx-auto mb-3" />
-                                <h3 className="font-bold text-text-main dark:text-white text-lg">Belum Ada UTS/UAS</h3>
+                                <h3 className="font-bold text-text-main dark:text-white text-lg">Belum Ada {labels.uts}/{labels.uas}</h3>
                                 <p className="text-text-secondary text-sm">Tidak ada ujian resmi yang terkait dengan mata pelajaran Anda saat ini.</p>
                             </div>
                         ) : (
@@ -917,8 +920,8 @@ export default function GuruUlanganPage() {
                                             key={exam.id}
                                             status={status}
                                             typeBadge={exam.exam_type === 'UTS'
-                                                ? { label: 'UTS', className: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/20' }
-                                                : { label: 'UAS', className: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20' }}
+                                                ? { label: labels.uts, className: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/20' }
+                                                : { label: labels.uas, className: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20' }}
                                             title={exam.title}
                                             description={exam.description}
                                             extraBadges={extraBadges}
@@ -941,11 +944,11 @@ export default function GuruUlanganPage() {
             <Modal
                 open={showCopy}
                 onClose={() => setShowCopy(false)}
-                title="Pakai Ulang Ulangan"
+                title={`Pakai Ulang ${labels.ulangan}`}
             >
                 <div className="space-y-4">
                     <div className="bg-secondary/10 p-4 rounded-xl mb-2">
-                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source Ulangan: {copySourceExam?.title}</h4>
+                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source {labels.ulangan}: {copySourceExam?.title}</h4>
                         <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
                             <span>Mata Pelajaran: <strong>{copySourceExam?.teaching_assignment?.subject?.name}</strong></span>
                         </div>
@@ -961,7 +964,7 @@ export default function GuruUlanganPage() {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ulangan Baru</label>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul {labels.ulangan} Baru</label>
                         <input
                             type="text"
                             value={copyForm.title}
@@ -1036,7 +1039,7 @@ export default function GuruUlanganPage() {
                             loading={copying}
                             className="flex-1"
                         >
-                            Salin Ulangan
+                            Salin {labels.ulangan}
                         </Button>
                     </div>
                 </div>
@@ -1046,13 +1049,13 @@ export default function GuruUlanganPage() {
             <Modal
                 open={showOfficialCopy}
                 onClose={() => setShowOfficialCopy(false)}
-                title="Pakai Ulang UTS/UAS"
+                title={`Pakai Ulang ${labels.uts}/${labels.uas}`}
             >
                 <div className="space-y-4">
                     <div className="bg-secondary/10 p-4 rounded-xl">
                         <h4 className="font-bold text-text-main dark:text-white mb-1">Source Ujian: {officialCopySource?.title}</h4>
                         <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
-                            <span>Jenis: <strong>{officialCopySource?.exam_type}</strong></span>
+                            <span>Jenis: <strong>{officialCopySource ? labelForGradeType(officialCopySource.exam_type, labels) : ''}</strong></span>
                             <span>Mapel: <strong>{officialCopySource?.subject?.name}</strong></span>
                             <span>Soal: <strong>{officialCopySource?.question_count}</strong></span>
                         </div>
@@ -1124,7 +1127,7 @@ export default function GuruUlanganPage() {
             <Modal
                 open={showCreate}
                 onClose={() => setShowCreate(false)}
-                title={examKind === 'ULANGAN' ? 'Buat Ulangan Baru' : `Buat ${examKind} Baru`}
+                title={examKind === 'ULANGAN' ? `Buat ${labels.ulangan} Baru` : `Buat ${labelForGradeType(examKind, labels)} Baru`}
             >
                 <div className="space-y-4">
                     {/* Pilihan jenis: ulangan harian atau UTS/UAS resmi — satu pintu form */}
@@ -1140,13 +1143,13 @@ export default function GuruUlanganPage() {
                                         ? 'border-primary bg-primary/10 text-primary'
                                         : 'border-secondary/20 text-text-secondary hover:border-primary/40'}`}
                                 >
-                                    {k === 'ULANGAN' ? 'Ulangan' : k}
+                                    {labelForGradeType(k, labels)}
                                 </button>
                             ))}
                         </div>
                         {examKind !== 'ULANGAN' && (
                             <p className="text-xs text-text-secondary mt-2">
-                                {examKind} adalah ujian resmi sekolah — semua kelas terpilih mengerjakan pada jadwal yang sama (bisa mode serentak atau jendela waktu). Pilih kelas dari SATU mata pelajaran.
+                                {labelForGradeType(examKind, labels)} adalah ujian resmi sekolah — semua kelas terpilih mengerjakan pada jadwal yang sama (bisa mode serentak atau jendela waktu). Pilih kelas dari SATU mata pelajaran.
                             </p>
                         )}
                     </div>
@@ -1160,13 +1163,13 @@ export default function GuruUlanganPage() {
                         />
                     </div>
                     <div data-tutorial="exam-form-title">
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ulangan</label>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul {examKind === 'ULANGAN' ? labels.ulangan : 'Ujian'}</label>
                         <input
                             type="text"
                             value={form.title}
                             onChange={(e) => setForm({ ...form, title: e.target.value })}
                             className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary/50"
-                            placeholder="Contoh: UTS Matematika Bab 1-3"
+                            placeholder={`Contoh: ${labels.uts} Matematika Bab 1-3`}
                         />
                     </div>
                     <div data-tutorial="exam-form-desc">
@@ -1252,7 +1255,7 @@ export default function GuruUlanganPage() {
             <Modal
                 open={showRemedial}
                 onClose={() => setShowRemedial(false)}
-                title="Tugaskan Remedial Ulangan"
+                title={`Tugaskan Remedial ${labels.ulangan}`}
             >
                 {remedialLoading ? (
                     <div className="flex justify-center py-10">
@@ -1269,7 +1272,7 @@ export default function GuruUlanganPage() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai Ulangan Remedial</label>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai {labels.ulangan} Remedial</label>
                             <input
                                 type="datetime-local"
                                 value={remedialStartTime}

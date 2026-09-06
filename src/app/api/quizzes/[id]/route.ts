@@ -6,6 +6,7 @@ import { tenantMismatch, notFound, resolveQuizSchoolId } from '@/lib/tenantGuard
 
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET single quiz with questions
 export async function GET(
@@ -121,7 +122,8 @@ export async function PUT(
                 .single()
             
             if (!teacher || (quiz?.teaching_assignment as any)?.teacher_id !== teacher.id) {
-                return NextResponse.json({ error: 'Anda tidak memiliki akses ke kuis ini' }, { status: 403 })
+                const labels = await getMenuLabelsForSchool(schoolId)
+                return NextResponse.json({ error: `Anda tidak memiliki akses ke ${labels.kuis.toLowerCase()} ini` }, { status: 403 })
             }
         } else if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -145,6 +147,7 @@ export async function PUT(
         // is_active SEBELUM update — dipakai untuk membedakan publish pertama
         // (kirim notifikasi) vs re-PUT kuis yang sudah aktif (jangan spam notifikasi).
         const wasActive = quizForYear?.is_active === true
+        const labels = await getMenuLabelsForSchool(schoolId)
 
         const body = await request.json()
         const { title, description, duration_minutes, is_randomized, is_active, deadline, available_from } = body
@@ -171,7 +174,7 @@ export async function PUT(
                 .eq('quiz_id', id)
 
             if (!questions || questions.length === 0) {
-                return NextResponse.json({ error: 'Tidak bisa mempublikasikan kuis tanpa soal. Tambahkan minimal 1 soal terlebih dahulu.' }, { status: 400 })
+                return NextResponse.json({ error: `Tidak bisa mempublikasikan ${labels.kuis.toLowerCase()} tanpa soal. Tambahkan minimal 1 soal terlebih dahulu.` }, { status: 400 })
             }
             if (questions.length > 0) {
                 if (!aiEnabled) {
@@ -288,7 +291,7 @@ export async function PUT(
                                 students.map((s: any) => ({
                                     user_id: s.user_id,
                                     type: 'REMEDIAL',
-                                    title: `Remedial Kuis: ${data.title}`,
+                                    title: `Remedial ${labels.kuis}: ${data.title}`,
                                     message: `${subjectName} - ${data.duration_minutes || 0} menit. Segera kerjakan!`,
                                     link: '/dashboard/siswa/kuis'
                                 }))
@@ -308,7 +311,7 @@ export async function PUT(
                                 enrollments.map((e: any) => ({
                                     user_id: e.student.user_id,
                                     type: 'KUIS_BARU',
-                                    title: `Kuis Baru: ${data.title}`,
+                                    title: `${labels.kuis} Baru: ${data.title}`,
                                     message: `${subjectName} - ${data.duration_minutes || 0} menit`,
                                     link: '/dashboard/siswa/kuis'
                                 }))
@@ -363,7 +366,8 @@ export async function DELETE(
                 .single()
             
             if (!teacher || (quiz?.teaching_assignment as any)?.teacher_id !== teacher.id) {
-                return NextResponse.json({ error: 'Anda tidak memiliki akses ke kuis ini' }, { status: 403 })
+                const labels = await getMenuLabelsForSchool(schoolId)
+                return NextResponse.json({ error: `Anda tidak memiliki akses ke ${labels.kuis.toLowerCase()} ini` }, { status: 403 })
             }
         } else if (user.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

@@ -3,9 +3,11 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import type { MenuLabels } from '@/lib/labels'
 import {
     Home, Document as DocumentIcon, Edit, Game, Graph, TimeCircle, User, Work,
-    Category, Bookmark, Chart, Ticket, Notification, Calendar, Folder, ShieldDone
+    Category, Bookmark, Chart, Ticket, Notification, Calendar, Folder, ShieldDone, Setting
 } from 'react-iconly'
 import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
 
@@ -54,6 +56,7 @@ export const adminNav: NavItem[] = [
     { icon: Graph, label: 'Rekap Nilai', path: '/dashboard/admin/rekap-nilai' },
     { icon: Notification, label: 'Info', path: '/dashboard/admin/pengumuman' },
     { icon: Calendar, label: 'Jadwal', path: '/dashboard/admin/jadwal' },
+    { icon: Setting, label: 'Pengaturan', path: '/dashboard/admin/pengaturan' },
 ]
 
 export const waliNav: NavItem[] = [
@@ -72,9 +75,23 @@ interface SidebarProps {
     onCloseMobile: () => void
 }
 
+// Path menu yang labelnya bisa dikustomisasi per-sekolah (lihat src/lib/labels.ts).
+// NavItem.label di atas tetap canonical — dipakai untuk anchor data-tutorial —
+// hanya TEKS yang dirender yang diganti.
+const LABEL_PATH_MAP: Record<string, (labels: MenuLabels) => string> = {
+    '/dashboard/siswa/tugas': (l) => l.tugas,
+    '/dashboard/siswa/ulangan': (l) => l.ulangan,
+    '/dashboard/siswa/kuis': (l) => l.kuis,
+    '/dashboard/guru/tugas': (l) => l.tugas,
+    '/dashboard/guru/ulangan': (l) => l.ulangan,
+    '/dashboard/guru/kuis': (l) => l.kuis,
+    '/dashboard/admin/uts-uas': (l) => `${l.uts}/${l.uas}`,
+}
+
 export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile }: SidebarProps) {
     const pathname = usePathname()
     const { user } = useAuth()
+    const labels = useSchoolLabels()
 
     if (!user) return null
 
@@ -111,6 +128,7 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onClo
             {navItems.map((item) => {
                 const active = isActive(item.path)
                 const IconComponent = item.icon
+                const displayLabel = LABEL_PATH_MAP[item.path]?.(labels) ?? item.label
 
                 return (
                     <Link
@@ -118,7 +136,7 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onClo
                         href={item.path}
                         onClick={onNavigate}
                         data-tutorial={withTutorialAttrs ? `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}` : undefined}
-                        title={iconOnly ? item.label : undefined}
+                        title={iconOnly ? displayLabel : undefined}
                         className={`flex items-center rounded-xl transition-all duration-200 group ${iconOnly ? 'justify-center px-0 py-3' : 'gap-3 px-3 py-3'
                             } ${active
                                 ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-emerald-400 font-bold'
@@ -135,7 +153,7 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onClo
                                 size="small"
                             />
                         </div>
-                        {!iconOnly && <span className="text-sm whitespace-nowrap">{item.label}</span>}
+                        {!iconOnly && <span className="text-sm whitespace-nowrap">{displayLabel}</span>}
                     </Link>
                 )
             })}

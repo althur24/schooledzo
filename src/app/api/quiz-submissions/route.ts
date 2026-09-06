@@ -8,6 +8,7 @@ import { resolveQuizExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/
 import { forceCloseQuizSubmission } from '@/lib/autoCloseExpired'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { bufferTeacherSubmissionNotification } from '@/lib/teacherNotifyBuffer'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // Helper: notify student their quiz result is out (auto-graded only)
 async function sendQuizResultNotification(quizId: string, studentUserId: string, totalScore: number, maxScore: number) {
@@ -272,6 +273,8 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        const labels = await getMenuLabelsForSchool(schoolId)
+
         const { quiz_id, answers, submit } = await request.json()
 
         if (!quiz_id) {
@@ -297,7 +300,7 @@ export async function POST(request: NextRequest) {
 
         // Kuis offline dinilai langsung oleh guru — tidak menerima attempt siswa
         if ((quiz as any).submission_mode === 'OFFLINE') {
-            return NextResponse.json({ error: 'Kuis ini dinilai langsung oleh guru, tidak dikerjakan di sini' }, { status: 400 })
+            return NextResponse.json({ error: `${labels.kuis} ini dinilai langsung oleh guru, tidak dikerjakan di sini` }, { status: 400 })
         }
 
         // Remedial guard
@@ -328,24 +331,24 @@ export async function POST(request: NextRequest) {
             // Attempt BARU hanya untuk kuis yang sudah dipublikasi — draft tidak
             // boleh dikerjakan siswa walau tahu UUID-nya.
             if (!quiz.is_active) {
-                return NextResponse.json({ error: 'Kuis belum aktif' }, { status: 403 })
+                return NextResponse.json({ error: `${labels.kuis} belum aktif` }, { status: 403 })
             }
             // dan hanya untuk siswa di kelas yang dituju kuis ini.
             const ta = Array.isArray(quiz.teaching_assignment) ? quiz.teaching_assignment[0] : quiz.teaching_assignment
             if (ta?.class_id && student.class_id && ta.class_id !== student.class_id) {
-                return NextResponse.json({ error: 'Kuis ini bukan untuk kelas Anda' }, { status: 403 })
+                return NextResponse.json({ error: `${labels.kuis} ini bukan untuk kelas Anda` }, { status: 403 })
             }
             if (quiz.available_from && new Date() < new Date(quiz.available_from)) {
-                return NextResponse.json({ error: 'Kuis belum dibuka' }, { status: 400 })
+                return NextResponse.json({ error: `${labels.kuis} belum dibuka` }, { status: 400 })
             }
             if (quiz.deadline && new Date() > new Date(quiz.deadline)) {
-                return NextResponse.json({ error: 'Kuis sudah melewati deadline' }, { status: 400 })
+                return NextResponse.json({ error: `${labels.kuis} sudah melewati deadline` }, { status: 400 })
             }
         }
 
         // Attempt yang sudah dikumpulkan tidak boleh ditimpa ulang (selaras ulangan/UTS-UAS)
         if (existing?.submitted_at) {
-            return NextResponse.json({ error: 'Kuis sudah dikumpulkan' }, { status: 400 })
+            return NextResponse.json({ error: `${labels.kuis} sudah dikumpulkan` }, { status: 400 })
         }
 
         // Penegakan batas waktu di server untuk attempt berjalan:
@@ -540,7 +543,7 @@ export async function POST(request: NextRequest) {
                     .maybeSingle()
                 if (raced) {
                     if (raced.submitted_at) {
-                        return NextResponse.json({ error: 'Kuis sudah dikumpulkan' }, { status: 400 })
+                        return NextResponse.json({ error: `${labels.kuis} sudah dikumpulkan` }, { status: 400 })
                     }
                     // Fallback jawaban juga berlaku di jalur race: submit tanpa answers
                     // memakai jawaban yang tersimpan di attempt pemenang race — jangan

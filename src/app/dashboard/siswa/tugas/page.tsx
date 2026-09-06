@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import { Loader2 } from 'lucide-react'
 import { Edit, TimeCircle, TickSquare, Paper, Discovery, Calendar, Star, Document } from 'react-iconly'
@@ -34,6 +36,7 @@ interface Submission {
 
 export default function SiswaTugasPage() {
     const { user } = useAuth()
+    const labels = useSchoolLabels()
     const [assignments, setAssignments] = useState<Assignment[]>([])
     const [submissions, setSubmissions] = useState<Submission[]>([])
     const [studentId, setStudentId] = useState<string | null>(null)
@@ -126,7 +129,7 @@ export default function SiswaTugasPage() {
             // siswa mengira tugasnya terkirim padahal tidak
             if (!res.ok) {
                 const data = await res.json().catch(() => null)
-                setSubmitError(data?.error || 'Gagal mengumpulkan tugas. Coba lagi.')
+                setSubmitError(data?.error || `Gagal mengumpulkan ${labels.tugas}. Coba lagi.`)
                 return
             }
 
@@ -144,8 +147,8 @@ export default function SiswaTugasPage() {
     return (
         <div className="space-y-6">
             <PageHeader
-                title="Tugas Saya"
-                subtitle="Daftar tugas yang harus dikerjakan"
+                title={`${labels.tugas} Saya`}
+                subtitle={`Daftar ${labels.tugas} yang harus dikerjakan`}
                 icon={<div className="text-amber-500 flex"><Edit set="bold" primaryColor="currentColor" size="small" /></div>}
                 backHref="/dashboard/siswa"
             />
@@ -157,8 +160,8 @@ export default function SiswaTugasPage() {
             ) : assignments.length === 0 ? (
                 <EmptyState
                     icon={<div className="text-pink-500 dark:text-pink-200 flex"><Edit set="bold" primaryColor="currentColor" size="xlarge" /></div>}
-                    title="Belum Ada Tugas"
-                    description="Belum ada tugas tersedia untuk kelasmu"
+                    title={`Belum Ada ${labels.tugas}`}
+                    description={`Belum ada ${labels.tugas} tersedia untuk kelasmu`}
                 />
             ) : (
                 <div className="grid gap-4 md:grid-cols-2">
@@ -177,7 +180,7 @@ export default function SiswaTugasPage() {
                                         <div className="flex-1">
                                             <div className="flex items-center gap-2 mb-2">
                                                 <span className="px-2.5 py-1 bg-amber-100 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400 text-xs font-bold rounded-full">
-                                                    {assignment.type}
+                                                    {labelForGradeType(assignment.type, labels)}
                                                 </span>
                                                 <span className="px-2.5 py-1 bg-primary/10 text-primary-dark dark:text-primary text-xs font-bold rounded-full">
                                                     {assignment.teaching_assignment?.subject?.name}
@@ -304,7 +307,7 @@ export default function SiswaTugasPage() {
                         )
                     })}
 
-                    <Modal open={!!submitting} onClose={() => setSubmitting(null)} title="Kumpulkan Tugas">
+                    <Modal open={!!submitting} onClose={() => setSubmitting(null)} title={`Kumpulkan ${labels.tugas}`}>
                         {submitting && (
                             <div className="space-y-5">
                                 {/* Tab Toggle */}

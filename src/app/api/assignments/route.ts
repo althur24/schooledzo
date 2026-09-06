@@ -5,6 +5,7 @@ import { findTeachingAssignmentsOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // batchedIn per 100 id (batas URL) + fetchAllRows per chunk: satu chunk 100 id
 // bisa mengandung >1000 baris submissions yang otherwise terpotong diam-diam.
@@ -203,8 +204,9 @@ export async function POST(request: NextRequest) {
                         const userIds = enrollments.map((e: any) => e.student.user_id)
                         const notifType = 'TUGAS_BARU'
                         const subjectName = (ta.subject as any)?.name || ''
-                        const typeLabels: Record<string, string> = { TUGAS: 'Tugas', PR: 'PR', PROYEK: 'Proyek', LATIHAN: 'Latihan', ULANGAN: 'Ulangan' }
-                        const typeLabel = typeLabels[type] || 'Tugas'
+                        const labels = await getMenuLabelsForSchool(schoolId)
+                        const typeLabels: Record<string, string> = { TUGAS: labels.tugas, PR: 'PR', PROYEK: 'Proyek', LATIHAN: 'Latihan', ULANGAN: labels.ulangan }
+                        const typeLabel = typeLabels[type] || labels.tugas
 
                         await supabase.from('notifications').insert(
                             userIds.map((uid: string) => ({

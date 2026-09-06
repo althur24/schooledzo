@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { PageHeader } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import { TickSquare, TimeCircle, Danger, Calendar } from 'react-iconly'
@@ -43,6 +44,7 @@ interface Answer {
 export default function ExamResultPage() {
     const params = useParams()
     const examId = params.id as string
+    const labels = useSchoolLabels()
     const [result, setResult] = useState<ExamResult | null>(null)
     const [answers, setAnswers] = useState<Answer[]>([])
     const [loading, setLoading] = useState(true)
@@ -115,7 +117,7 @@ export default function ExamResultPage() {
     return (
         <div className="space-y-6 max-w-3xl mx-auto">
             <PageHeader
-                title="Hasil Ulangan"
+                title={`Hasil ${labels.ulangan}`}
                 subtitle={result.exam?.title}
                 backHref="/dashboard/siswa/ulangan"
             />
@@ -169,7 +171,7 @@ export default function ExamResultPage() {
             <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 flex items-center gap-3">
                 <div className="text-green-500 flex"><TickSquare set="bold" size="large" primaryColor="currentColor" /></div>
                 <div>
-                    <p className="text-green-600 dark:text-green-400 font-bold">Ulangan Selesai</p>
+                    <p className="text-green-600 dark:text-green-400 font-bold">{labels.ulangan} Selesai</p>
                     <p className="text-sm text-text-secondary">Dikumpulkan pada {new Date(result.submitted_at).toLocaleString('id-ID')}</p>
                 </div>
             </div>
@@ -178,7 +180,7 @@ export default function ExamResultPage() {
                 href="/dashboard/siswa/ulangan"
                 className="block w-full text-center px-6 py-3 bg-primary/10 text-primary-dark dark:text-primary rounded-xl hover:bg-primary/20 transition-colors font-bold"
             >
-                ← Kembali ke Daftar Ulangan
+                ← Kembali ke Daftar {labels.ulangan}
             </Link>
         </div>
     )

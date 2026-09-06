@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch, notFound } from '@/lib/tenantGuard'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET single submission
 export async function GET(
@@ -99,7 +100,8 @@ export async function PUT(
         // tertimpa begitu siswa menekan submit (processExisting menulis ulang
         // total_score/is_graded).
         if (!sub.submitted_at) {
-            return NextResponse.json({ error: 'Kuis ini belum dikumpulkan siswa — tidak bisa dinilai' }, { status: 400 })
+            const labels = await getMenuLabelsForSchool(schoolId)
+            return NextResponse.json({ error: `${labels.kuis} ini belum dikumpulkan siswa — tidak bisa dinilai` }, { status: 400 })
         }
 
         // Validasi skor: wajib number, tidak negatif, tidak melebihi max, tidak null

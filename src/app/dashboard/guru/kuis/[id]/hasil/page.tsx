@@ -7,6 +7,7 @@ import { PageHeader, Card, Button, EmptyState, StatsCard } from '@/components/ui
 import { InfoCircle, TickSquare, User, TimeCircle, Document, ArrowDown, ChevronDown } from 'react-iconly'
 import { Loader2 } from 'lucide-react'
 import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 interface QuizSubmission {
     id: string
@@ -40,6 +41,7 @@ interface Student {
 export default function QuizSubmissionsPage() {
     const params = useParams()
     const quizId = params.id as string
+    const labels = useSchoolLabels()
 
     const [submissions, setSubmissions] = useState<QuizSubmission[]>([])
     const [quiz, setQuiz] = useState<Quiz | null>(null)
@@ -166,7 +168,7 @@ export default function QuizSubmissionsPage() {
     return (
         <div className="space-y-6">
             <PageHeader
-                title={`Hasil Kuis: ${quiz?.title || ''}`}
+                title={`Hasil ${labels.kuis}: ${quiz?.title || ''}`}
                 subtitle={`${quiz?.teaching_assignment?.class?.name} • ${quiz?.teaching_assignment?.subject?.name} • ${submitted.length} Pengumpulan`}
                 backHref="/dashboard/guru/kuis"
             />
@@ -195,7 +197,7 @@ export default function QuizSubmissionsPage() {
                 <Card className="overflow-hidden p-0">
                     <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-secondary/20 dark:border-white/5 bg-secondary/5">
                         <div>
-                            <p className="font-bold text-text-main dark:text-white">Input Nilai (Kuis Offline)</p>
+                            <p className="font-bold text-text-main dark:text-white">Input Nilai ({labels.kuis} Offline)</p>
                             <p className="text-xs text-text-secondary">Isi nilai lalu klik Simpan Semua — riwayat penilaian tersimpan otomatis</p>
                         </div>
                         <Button onClick={saveOfflineScores} loading={savingOffline} size="sm" disabled={Object.keys(offlineScores).length === 0}>
@@ -330,7 +332,7 @@ export default function QuizSubmissionsPage() {
                 <EmptyState
                     icon={<div className="text-secondary"><Document set="bold" primaryColor="currentColor" size={48} /></div>}
                     title="Belum ada pengumpulan"
-                    description="Belum ada siswa yang mengerjakan dan mengumpulkan kuis ini."
+                    description={`Belum ada siswa yang mengerjakan dan mengumpulkan ${labels.kuis.toLowerCase()} ini.`}
                 />
             ) : (
                 <Card className="overflow-hidden">

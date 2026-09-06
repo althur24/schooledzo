@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Card } from '@/components/ui'
+import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 import {
     Loader2, ArrowLeft, GraduationCap, Users,
     CheckCircle, AlertTriangle, Clock, PlayCircle, RefreshCw,
@@ -64,6 +66,7 @@ export default function ExamMonitorPage({ examId, mode }: {
     mode: 'ulangan' | 'official'
 }) {
     const router = useRouter()
+    const labels = useSchoolLabels()
     const monitorEndpoint = mode === 'ulangan' ? '/api/exam-submissions/monitor' : '/api/official-exam-submissions/monitor'
     // Endpoint reset = endpoint monitor tanpa suffix /monitor (PUT reset_attempt soft/hard)
     const resetEndpoint = mode === 'ulangan' ? '/api/exam-submissions' : '/api/official-exam-submissions'
@@ -209,7 +212,7 @@ export default function ExamMonitorPage({ examId, mode }: {
                     <p className="font-bold text-orange-800 dark:text-orange-400 mb-2">Ujian Belum Dimulai</p>
                     <p className="text-sm text-orange-700 dark:text-orange-500 mb-4">Waktu mulai: {new Date(data.exam.start_time).toLocaleString('id-ID')}</p>
                     <button onClick={() => router.push('/dashboard/guru/ulangan')} className="text-primary hover:underline font-bold">
-                        Kembali ke Daftar Ulangan
+                        Kembali ke Daftar {labels.ulangan}
                     </button>
                 </div>
             );
@@ -221,7 +224,7 @@ export default function ExamMonitorPage({ examId, mode }: {
                 <h2 className="text-xl font-bold text-text-main dark:text-white">Gagal Memuat Monitor</h2>
                 <p className="text-text-secondary">{error || 'Data ujian tidak ditemukan atau Anda tidak memiliki akses.'}</p>
                 <button onClick={() => router.push('/dashboard/guru/ulangan')} className="text-primary hover:underline font-bold">
-                    Kembali ke Daftar Ulangan
+                    Kembali ke Daftar {labels.ulangan}
                 </button>
             </div>
         )
@@ -275,18 +278,18 @@ export default function ExamMonitorPage({ examId, mode }: {
                     <Link
                         href={'/dashboard/guru/ulangan'}
                         className="inline-flex items-center justify-center p-3 mb-4 rounded-xl bg-white dark:bg-surface-dark border border-secondary/20 hover:border-primary text-text-secondary hover:text-primary transition-all shadow-sm"
-                        title="Kembali ke Daftar Ulangan"
+                        title={`Kembali ke Daftar ${labels.ulangan}`}
                     >
                         <ArrowLeft className="w-5 h-5" />
                     </Link>
                     <div className="flex items-center gap-3">
                         {mode === 'ulangan' ? (
                             <span className="px-3 py-1 text-sm font-bold rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400">
-                                Ulangan
+                                {labels.ulangan}
                             </span>
                         ) : (
                             <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600' : 'bg-purple-500/10 text-purple-600'}`}>
-                                {exam.exam_type}
+                                {labelForGradeType(exam.exam_type, labels)}
                             </span>
                         )}
                         <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
