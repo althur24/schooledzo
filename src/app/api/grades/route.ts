@@ -303,6 +303,9 @@ export async function GET(request: NextRequest) {
             if (studentId) {
                 officialExamQuery = officialExamQuery.eq('student_id', studentId)
             }
+            // order('id') wajib sebelum fetchAllRows — paginasi range tanpa
+            // order stabil bisa melewatkan/duplikasi baris diam-diam
+            officialExamQuery = officialExamQuery.order('id')
 
             const officialSubmissions = await fetchAllRows(officialExamQuery, 1000, 50)
 

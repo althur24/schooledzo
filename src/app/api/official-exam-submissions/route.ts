@@ -839,40 +839,47 @@ export async function PUT(request: NextRequest) {
 
             const questionMap = new Map(allQuestions.map(q => [q.id, q]))
 
-            const gradedAnswers = answers.map((ans: { question_id: string; answer: string }) => {
-                const question = questionMap.get(ans.question_id)
-                
-                let isCorrect = false
-                let pointsEarned = 0
+            // Cap payload: jumlah jawaban tidak mungkin melebihi jumlah soal ujian —
+            // array raksasa (script/spam/retry agresif) memakan bandwidth & pool DB
+            // saat 1000 siswa serentak.
+            if (answers.length > questionMap.size) {
+                return NextResponse.json({ error: 'Payload jawaban melebihi jumlah soal' }, { status: 400 })
+            }
 
-                if (question) {
-                    const graded = gradeAnswer(
-                        question.question_type,
-                        ans.answer,
-                        question.correct_answer,
-                        question.options,
-                        question.points || 10
-                    )
-                    isCorrect = graded.isCorrect
-                    pointsEarned = graded.pointsEarned
-                }
+            // Buang jawaban dengan question_id yang tidak ada di ujian ini —
+            // tanpa filter, id arbitrer (ujian lain/script) jadi junk rows dan
+            // meng-inflate answered_count di Monitor Live via RPC count.
+            const validAnswers = answers.filter((ans: { question_id: string }) => questionMap.has(ans.question_id))
+
+            const gradedAnswers = validAnswers.map((ans: { question_id: string; answer: string }) => {
+                const question = questionMap.get(ans.question_id)!
+
+                const graded = gradeAnswer(
+                    question.question_type,
+                    ans.answer,
+                    question.correct_answer,
+                    question.options,
+                    question.points || 10
+                )
 
                 return {
                     submission_id,
                     question_id: ans.question_id,
                     answer: ans.answer,
-                    is_correct: isCorrect,
-                    points_earned: Math.round(pointsEarned)
+                    is_correct: graded.isCorrect,
+                    points_earned: Math.round(graded.pointsEarned)
                 }
             })
 
-            const { error: upsertError } = await supabase
-                .from('official_exam_answers')
-                .upsert(gradedAnswers, {
-                    onConflict: 'submission_id,question_id'
-                })
+            if (gradedAnswers.length > 0) {
+                const { error: upsertError } = await supabase
+                    .from('official_exam_answers')
+                    .upsert(gradedAnswers, {
+                        onConflict: 'submission_id,question_id'
+                    })
 
-            if (upsertError) throw upsertError
+                if (upsertError) throw upsertError
+            }
         }
 
         // Handle final submission

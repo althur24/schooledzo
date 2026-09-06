@@ -96,7 +96,10 @@ export async function GET(
         const totalMaxScore = allQuestions.reduce((sum, q) => sum + (q.points || 0), 0)
 
         // 3) Fetch all submitted exam submissions
-        const { data: submissions } = await supabase
+        // fetchAllRows: ujian serentak 1000+ peserta — query biasa terpotong
+        // diam-diam di 1000 baris sehingga analitik (rata-rata, distribusi,
+        // ranking) kehilangan siswa tanpa error. order('id') = tiebreaker stabil.
+        const allSubmissions = await fetchAllRows(supabase
             .from('exam_submissions')
             .select(`
                 id, student_id, started_at, submitted_at, total_score, max_score,
@@ -105,8 +108,7 @@ export async function GET(
             `)
             .eq('exam_id', examId)
             .eq('is_submitted', true)
-
-        const allSubmissions = submissions || []
+            .order('id'))
 
         // 4) Fetch all exam_answers for these submissions (normalized table)
         // batchedIn per 100 submission id (batas URL) + fetchAllRows per chunk:

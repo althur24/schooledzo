@@ -130,6 +130,23 @@ export async function PUT(
         const id = params.id
         const { answers, is_graded } = await request.json()
 
+        // Guard integritas: hanya submission yang SUDAH dikumpulkan yang boleh
+        // dinilai — nilai koreksi guru pada attempt yang masih berjalan akan
+        // tertimpa autosave/submit siswa berikutnya (points_earned semua jawaban
+        // di-upsert ulang saat autosave), dan is_graded:true pada attempt hidup
+        // membuat state inkonsisten. Paritas guard di quiz-submissions/[id].
+        const { data: subCheck } = await supabase
+            .from('exam_submissions')
+            .select('is_submitted')
+            .eq('id', id)
+            .single()
+        if (!subCheck) {
+            return NextResponse.json({ error: 'Submission tidak ditemukan' }, { status: 404 })
+        }
+        if (!subCheck.is_submitted) {
+            return NextResponse.json({ error: 'Ulangan ini belum dikumpulkan siswa — tidak bisa dinilai' }, { status: 400 })
+        }
+
         // Verify teacher owns the teaching assignment for this exam (ADMIN bypass)
         if (user.role === 'GURU') {
             const { data: teacher } = await supabase

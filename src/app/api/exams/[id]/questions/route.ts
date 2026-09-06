@@ -8,6 +8,7 @@ import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncQuestionsToBank } from '@/lib/questionBankSync'
 import { canManageExam } from '@/lib/teacherScope'
 import { syncDraftExamQuestions } from '@/lib/examBatch'
+import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
 
 /**
  * Mirror soal ke sibling batch (draft) setelah mutasi sukses.
@@ -42,11 +43,15 @@ export async function GET(
         }
 
         // SISWA di luar kelas target tidak boleh membaca soal (integritas
-        // ulangan — sebelumnya siswa sekelas lain bisa membaca soal lebih awal)
+        // ulangan — sebelumnya siswa sekelas lain bisa membaca soal lebih awal),
+        // dan soal hanya boleh dibaca saat ulangan aktif & sudah dimulai —
+        // sebelumnya draft/pra-jadwal bisa dibaca lebih awal via API langsung.
+        // Pengecualian: siswa yang sudah punya attempt tetap boleh memuat soal
+        // (resume setelah ujian ditarik/diakhiri tidak boleh blank).
         if (user.role === 'SISWA') {
             const { data: examTa } = await supabase
                 .from('exams')
-                .select('teaching_assignment:teaching_assignments(class_id)')
+                .select('is_active, start_time, teaching_assignment:teaching_assignments(class_id)')
                 .eq('id', id)
                 .single()
             const taClassId = (examTa?.teaching_assignment as any)?.class_id
@@ -59,6 +64,18 @@ export async function GET(
 
             if (!student || !taClassId || student.class_id !== taClassId) {
                 return notFound()
+            }
+
+            const { data: mySubmission } = await supabase
+                .from('exam_submissions')
+                .select('id')
+                .eq('exam_id', id)
+                .eq('student_id', student.id)
+                .limit(1)
+            const hasAttempt = (mySubmission || []).length > 0
+            const started = examTa?.start_time ? new Date(examTa.start_time).getTime() <= Date.now() : true
+            if (!hasAttempt && (!examTa?.is_active || !started)) {
+                return NextResponse.json({ error: 'Ulangan belum tersedia' }, { status: 403 })
             }
         }
 
@@ -139,7 +156,7 @@ export async function POST(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
+            .select('is_active, teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -151,6 +168,13 @@ export async function POST(
         const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
         if (!(await canManageExam(user, taTeacherId))) {
             return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
+        }
+
+        // Integritas ujian: soal terkunci saat ulangan aktif — perubahan kunci
+        // jawaban/poin mid-exam menggeser nilai siswa yang belum submit, dan
+        // penghapusan soal memutus relasi jawaban tersimpan. Tarik ke draft dulu.
+        if (examForYear?.is_active) {
+            return NextResponse.json({ error: 'Ulangan sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
         }
 
         const body = await request.json()
@@ -226,6 +250,8 @@ export async function POST(
             .select()
 
         if (error) throw error
+
+        invalidateExamQuestions(id)
 
         // --- Auto-sync to question_bank (Fire and Forget) ---
         // Fetch exam data to get title, subject_id, teacher_id
@@ -316,7 +342,7 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
+            .select('is_active, teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -328,6 +354,13 @@ export async function PUT(
         const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
         if (!(await canManageExam(user, taTeacherId))) {
             return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
+        }
+
+        // Integritas ujian: soal terkunci saat ulangan aktif — perubahan kunci
+        // jawaban/poin mid-exam menggeser nilai siswa yang belum submit, dan
+        // penghapusan soal memutus relasi jawaban tersimpan. Tarik ke draft dulu.
+        if (examForYear?.is_active) {
+            return NextResponse.json({ error: 'Ulangan sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
         }
 
         const body = await request.json()
@@ -380,6 +413,8 @@ export async function PUT(
 
         if (error) throw error
 
+        invalidateExamQuestions(id)
+
         // Re-trigger HOTS analysis (fire-and-forget) — hanya bila konten berubah
         if (data && aiEnabled && contentChanged) {
             const { data: exam } = await supabase.from('exams')
@@ -423,7 +458,7 @@ export async function DELETE(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
+            .select('is_active, teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -435,6 +470,13 @@ export async function DELETE(
         const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
         if (!(await canManageExam(user, taTeacherId))) {
             return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
+        }
+
+        // Integritas ujian: soal terkunci saat ulangan aktif — perubahan kunci
+        // jawaban/poin mid-exam menggeser nilai siswa yang belum submit, dan
+        // penghapusan soal memutus relasi jawaban tersimpan. Tarik ke draft dulu.
+        if (examForYear?.is_active) {
+            return NextResponse.json({ error: 'Ulangan sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
         }
 
         const questionId = request.nextUrl.searchParams.get('question_id')
@@ -457,6 +499,8 @@ export async function DELETE(
 
             if (error) throw error
         }
+
+        invalidateExamQuestions(id)
 
         await syncBatchDraft(id)
 

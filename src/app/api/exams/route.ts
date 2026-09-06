@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
-import { findTeachingAssignmentsOutsideSchool } from '@/lib/tenantGuard'
+import { findTeachingAssignmentsOutsideSchool, findExamsOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
 import { getBatchSizes } from '@/lib/examBatch'
@@ -205,6 +205,33 @@ export async function POST(request: NextRequest) {
         const yearStatus = await getYearStatusByTA(teaching_assignment_id)
         if (yearStatus === 'COMPLETED') return archivedYearResponse()
 
+        // Tenant guard: exam sumber duplikasi/remedial harus milik sekolah caller —
+        // duplicate_questions menyalin seluruh soal + kunci jawaban; tanpa guard
+        // ini guru mana pun bisa exfiltrate soal guru/sekolah lain.
+        const duplicateSourceId = duplicate_from_exam_id || (is_remedial ? remedial_for_id : null)
+        if (duplicateSourceId) {
+            if ((await findExamsOutsideSchool([duplicateSourceId], schoolId)).length > 0) {
+                return NextResponse.json({ error: 'Ulangan sumber tidak valid' }, { status: 403 })
+            }
+            const { data: srcExam } = await supabase
+                .from('exams')
+                .select('teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
+                .eq('id', duplicateSourceId)
+                .single()
+            const srcTa = srcExam?.teaching_assignment as any
+            if (user.role === 'GURU') {
+                // Sumber harus penugasan guru sendiri — guru lain sekalipun sed sekolah
+                const scope = await getTeacherScope(user.id)
+                if (!srcTa || !ownsTeachingAssignment(scope, srcTa.teacher_id)) {
+                    return NextResponse.json({ error: 'Ulangan sumber remedial/duplikasi harus milik penugasan Anda sendiri' }, { status: 403 })
+                }
+            }
+            // Remedial: kelas & mapel harus sama dengan TA target (paritas guard kuis)
+            if (is_remedial && srcExam?.teaching_assignment_id !== teaching_assignment_id) {
+                return NextResponse.json({ error: 'Ulangan remedial harus berasal dari kelas & mapel yang sama' }, { status: 400 })
+            }
+        }
+
         const { data, error } = await supabase
             .from('exams')
             .insert({
@@ -231,8 +258,8 @@ export async function POST(request: NextRequest) {
         if (error) throw error
 
         // Handle question duplication: remedial (salin dari exam sumber remedial)
-        // atau duplikasi biasa (duplicate_from_exam_id, meniru official-exams/duplicate)
-        const duplicateSourceId = duplicate_from_exam_id || (is_remedial ? remedial_for_id : null)
+        // atau duplikasi biasa (duplicate_from_exam_id, meniru official-exams/duplicate).
+        // duplicateSourceId sudah tervalidasi tenant/ownership di guard atas.
         if (duplicate_questions && duplicateSourceId) {
             const { data: originalQuestions, error: fetchError } = await supabase
                 .from('exam_questions')

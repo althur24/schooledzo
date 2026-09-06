@@ -5,6 +5,7 @@ import { triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } fro
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { logError } from '@/lib/logError'
 import { canManageOfficialExam } from '@/lib/teacherScope'
+import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
 
 // GET questions for an official exam
 export async function GET(
@@ -26,6 +27,58 @@ export async function GET(
                 .single()
             if (examRow?.school_id && examRow.school_id !== schoolId) {
                 return NextResponse.json({ error: 'Ujian tidak ditemukan' }, { status: 404 })
+            }
+        }
+
+        // SISWA: soal hanya boleh dibaca oleh kelas target, saat ujian aktif &
+        // sudah dimulai — sebelumnya siswa kelas mana pun di sekolah bisa membaca
+        // soal (termasuk draft/pra-jadwal) via API langsung. Pengecualian: siswa
+        // yang sudah punya attempt tetap boleh memuat soal (resume setelah ujian
+        // ditarik/diakhiri tidak boleh blank). Paritas gate POST attempt.
+        if (user.role === 'SISWA') {
+            const { data: examScope } = await supabase
+                .from('official_exams')
+                .select('is_active, start_time, target_class_ids, academic_year_id')
+                .eq('id', id)
+                .single()
+            if (!examScope) {
+                return NextResponse.json({ error: 'Ujian tidak ditemukan' }, { status: 404 })
+            }
+
+            const { data: student } = await supabase
+                .from('students')
+                .select('id, class_id')
+                .eq('user_id', user.id)
+                .single()
+            if (!student) {
+                return NextResponse.json({ error: 'Ujian tidak ditemukan' }, { status: 404 })
+            }
+
+            const { data: mySubmission } = await supabase
+                .from('official_exam_submissions')
+                .select('id')
+                .eq('exam_id', id)
+                .eq('student_id', student.id)
+                .limit(1)
+            const hasAttempt = (mySubmission || []).length > 0
+
+            if (!hasAttempt) {
+                // Kelas siswa: utamakan enrollment ACTIVE di tahun ujian (selaras gate attempt)
+                let studentClassId = student.class_id
+                const { data: enrollment } = await supabase
+                    .from('student_enrollments')
+                    .select('class_id')
+                    .eq('student_id', student.id)
+                    .eq('academic_year_id', examScope.academic_year_id)
+                    .eq('status', 'ACTIVE')
+                    .maybeSingle()
+                if (enrollment?.class_id) studentClassId = enrollment.class_id
+
+                const classAllowed = examScope.target_class_ids?.includes(studentClassId)
+                const started = examScope.start_time ? new Date(examScope.start_time).getTime() <= Date.now() : true
+                if (!classAllowed || !examScope.is_active || !started) {
+                    return NextResponse.json({ error: 'Ujian belum tersedia' }, { status: 403 })
+                }
             }
         }
 
@@ -90,11 +143,18 @@ export async function POST(
         {
             const { data: examScope } = await supabase
                 .from('official_exams')
-                .select('subject_id, target_class_ids, academic_year_id, school_id')
+                .select('is_active, subject_id, target_class_ids, academic_year_id, school_id')
                 .eq('id', id)
                 .single()
             if (!examScope || !(await canManageOfficialExam(user, examScope))) {
                 return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
+
+            // Integritas ujian: soal terkunci saat ujian aktif — perubahan kunci
+            // jawaban/poin mid-exam menggeser nilai siswa yang belum submit, dan
+            // penghapusan soal memutus relasi jawaban tersimpan. Tarik ke draft dulu.
+            if (examScope.is_active) {
+                return NextResponse.json({ error: 'Ujian sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
             }
         }
 
@@ -143,6 +203,8 @@ export async function POST(
             .select()
 
         if (error) throw error
+
+        invalidateExamQuestions(id)
 
         // Trigger HOTS analysis for questions NOT already approved from bank soal
         if (data && data.length > 0) {
@@ -210,11 +272,18 @@ export async function PUT(
         {
             const { data: examScope } = await supabase
                 .from('official_exams')
-                .select('subject_id, target_class_ids, academic_year_id, school_id')
+                .select('is_active, subject_id, target_class_ids, academic_year_id, school_id')
                 .eq('id', id)
                 .single()
             if (!examScope || !(await canManageOfficialExam(user, examScope))) {
                 return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
+
+            // Integritas ujian: soal terkunci saat ujian aktif — perubahan kunci
+            // jawaban/poin mid-exam menggeser nilai siswa yang belum submit, dan
+            // penghapusan soal memutus relasi jawaban tersimpan. Tarik ke draft dulu.
+            if (examScope.is_active) {
+                return NextResponse.json({ error: 'Ujian sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
             }
         }
 
@@ -251,10 +320,16 @@ export async function PUT(
             .from('official_exam_questions')
             .update(updateData)
             .eq('id', question_id)
+            .eq('exam_id', id) // IDOR guard: soal harus milik ujian di URL, bukan ujian lain
             .select()
-            .single()
+            .maybeSingle()
 
         if (error) throw error
+        if (!data) {
+            return NextResponse.json({ error: 'Soal tidak ditemukan di ujian ini' }, { status: 404 })
+        }
+
+        invalidateExamQuestions(id)
 
         return NextResponse.json(data)
     } catch (error) {
@@ -283,11 +358,18 @@ export async function DELETE(
         {
             const { data: examScope } = await supabase
                 .from('official_exams')
-                .select('subject_id, target_class_ids, academic_year_id, school_id')
+                .select('is_active, subject_id, target_class_ids, academic_year_id, school_id')
                 .eq('id', id)
                 .single()
             if (!examScope || !(await canManageOfficialExam(user, examScope))) {
                 return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
+
+            // Integritas ujian: soal terkunci saat ujian aktif — perubahan kunci
+            // jawaban/poin mid-exam menggeser nilai siswa yang belum submit, dan
+            // penghapusan soal memutus relasi jawaban tersimpan. Tarik ke draft dulu.
+            if (examScope.is_active) {
+                return NextResponse.json({ error: 'Ujian sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
             }
         }
 
@@ -301,8 +383,11 @@ export async function DELETE(
             .from('official_exam_questions')
             .delete()
             .eq('id', question_id)
+            .eq('exam_id', id) // IDOR guard: soal harus milik ujian di URL, bukan ujian lain
 
         if (error) throw error
+
+        invalidateExamQuestions(id)
 
         return NextResponse.json({ success: true })
     } catch (error) {

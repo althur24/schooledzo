@@ -248,12 +248,20 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'Passage ID required' }, { status: 400 })
         }
 
-        // Get existing passage to check old audio URL
+        // Get existing passage to check old audio URL + ownership
+        // (IDOR guard: passage milik guru lain tidak boleh bisa dimutasi)
         const { data: existingPassage } = await supabase
             .from('question_passages')
-            .select('audio_url')
+            .select('audio_url, teacher_id')
             .eq('id', id)
             .single()
+
+        if (!existingPassage) {
+            return NextResponse.json({ error: 'Passage tidak ditemukan' }, { status: 404 })
+        }
+        if (existingPassage.teacher_id !== teacher.id) {
+            return NextResponse.json({ error: 'Anda tidak memiliki akses ke passage ini' }, { status: 403 })
+        }
 
         // If audio changed, delete old audio from storage
         const oldAudioUrl = existingPassage?.audio_url
@@ -367,6 +375,16 @@ export async function DELETE(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        const { data: teacher } = await supabase
+            .from('teachers')
+            .select('id')
+            .eq('user_id', user.id)
+            .single()
+
+        if (!teacher) {
+            return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
+        }
+
         const { searchParams } = new URL(request.url)
         const id = searchParams.get('id')
 
@@ -374,12 +392,20 @@ export async function DELETE(request: NextRequest) {
             return NextResponse.json({ error: 'Passage ID required' }, { status: 400 })
         }
 
-        // Get passage first to retrieve audio_url for cleanup
+        // Get passage first to retrieve audio_url for cleanup + ownership
+        // (IDOR guard: passage milik guru lain tidak boleh bisa dihapus)
         const { data: existingPassage } = await supabase
             .from('question_passages')
-            .select('audio_url')
+            .select('audio_url, teacher_id')
             .eq('id', id)
             .single()
+
+        if (!existingPassage) {
+            return NextResponse.json({ error: 'Passage tidak ditemukan' }, { status: 404 })
+        }
+        if (existingPassage.teacher_id !== teacher.id) {
+            return NextResponse.json({ error: 'Anda tidak memiliki akses ke passage ini' }, { status: 403 })
+        }
 
         // Delete questions first (or they'll be orphaned if ON DELETE SET NULL)
         await supabase

@@ -105,9 +105,18 @@ export async function PUT(
         // submission (bukan semua kelas target); ADMIN satu sekolah.
         const { data: subForAuth } = await supabase
             .from('official_exam_submissions')
-            .select('student:students(class_id), exam:official_exams(school_id, subject_id, target_class_ids, academic_year_id)')
+            .select('is_submitted, student:students(class_id), exam:official_exams(school_id, subject_id, target_class_ids, academic_year_id)')
             .eq('id', id)
             .single()
+        if (!subForAuth) {
+            return NextResponse.json({ error: 'Submission tidak ditemukan' }, { status: 404 })
+        }
+        // Guard integritas: hanya submission yang SUDAH dikumpulkan yang boleh
+        // dinilai — nilai koreksi guru pada attempt yang masih berjalan akan
+        // tertimpa autosave/submit siswa berikutnya. Paritas guard quiz-submissions/[id].
+        if (!subForAuth.is_submitted) {
+            return NextResponse.json({ error: 'Ujian ini belum dikumpulkan siswa — tidak bisa dinilai' }, { status: 400 })
+        }
         const authExam: any = Array.isArray(subForAuth?.exam) ? subForAuth.exam[0] : subForAuth?.exam || {}
         if (user.role === 'GURU') {
             const authStudent: any = Array.isArray(subForAuth?.student) ? subForAuth.student[0] : subForAuth?.student
