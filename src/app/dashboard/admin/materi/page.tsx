@@ -6,7 +6,6 @@ import Card from '@/components/ui/Card'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import { Document as BookOpen, User, Delete as Trash2, Video, Paper as FileText, Plus, Download, TickSquare as CheckCircle } from 'react-iconly'
 import { Loader2, Search, CheckSquare } from 'lucide-react'
-import { getPublicStorageUrl } from '@/lib/storagePublicUrl'
 import {
     formatToOfflineMaterial,
     saveMaterialOffline,
@@ -185,15 +184,13 @@ export default function AdminMateriPage() {
             throw new Error(err.error || 'Gagal mendapatkan token upload')
         }
 
-        const { path, token } = await signRes.json()
+        const { signedUrl, publicUrl } = await signRes.json()
 
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest()
-            const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-            const uploadUrl = `${supabaseUrl}/storage/v1/object/upload/sign/materials/${path}?token=${token}`
 
-            xhr.open('PUT', uploadUrl)
-            xhr.setRequestHeader('Content-Type', file.type)
+            xhr.open('PUT', signedUrl)
+            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream')
 
             xhr.upload.onprogress = (event) => {
                 if (event.lengthComputable) {
@@ -203,7 +200,7 @@ export default function AdminMateriPage() {
 
                 xhr.onload = () => {
                     if (xhr.status >= 200 && xhr.status < 300) {
-                        resolve({ url: getPublicStorageUrl('materials', path) })
+                        resolve({ url: publicUrl })
                     } else {
                         reject(new Error(`Upload gagal (status ${xhr.status})`))
                     }

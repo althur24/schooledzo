@@ -47,3 +47,8 @@ offline/config.json
 
 # Supabase CLI local state (berisi kredensial link/pooler)
 supabase/.temp/
+
+# Artefak satu-off migrasi storage → R2 (backup rollback + inventory)
+migrate-backup/
+migrate-r2-*.json
+

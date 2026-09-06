@@ -6,7 +6,7 @@
  *
  * Skenario (fixture mandiri STG01, dibersihkan di akhir):
  *  [1]  Login per role via /api/auth/login (password fixture nyata, bcrypt)
- *  [2]  Materi rantai penuh: sign upload → PUT storage → create → scope kelas
+ *  [2]  Materi rantai penuh: sign upload → PUT R2 (presigned) → create → scope kelas
  *       siswa & TA guru → public URL → DELETE → hilang
  *  [3]  Upload tugas online + audio (route strict service-key)
  *  [4]  Jadwal: admin POST schedule+entries → siswa GET student-schedule scoped
@@ -38,6 +38,7 @@ const created = {
     officialExams: [], officialQuestions: [], officialSubmissions: [], officialAnswers: [],
     schedules: [], announcements: [], questionBank: [],
     storagePaths: [],
+    r2Keys: [],
 }
 const results = []
 function check(name, cond, detail = '') {
@@ -141,33 +142,40 @@ async function main() {
     created.sessions.push(tokGuruB)
 
     // ════════ [2] MATERI RANTAI PENUH ════════
-    console.log('[2] Materi: sign upload → PUT storage → create → scope → public URL → delete')
-    // 2a. Sign upload (guru A)
+    console.log('[2] Materi: sign upload → PUT R2 → create → scope → public URL → delete')
+    // 2a. Sign upload (guru A) — materi upload baru via presigned PUT ke Cloudflare R2
     const signRes = await api('/api/materials/upload', tokGuruA, {
-        method: 'POST', body: JSON.stringify({ filename: 'smoke materi uji.pdf' }),
+        method: 'POST', body: JSON.stringify({ filename: 'smoke materi uji.pdf', contentType: 'application/pdf' }),
     })
     const sign = await signRes.json().catch(() => null)
-    check('POST /api/materials/upload sign → 200 + signedUrl', signRes.status === 200 && !!sign?.signedUrl, `status ${signRes.status}`)
-    // 2b. PUT file ke storage (browser behavior)
+    check('POST /api/materials/upload sign → 200 + signedUrl R2', signRes.status === 200 && !!sign?.signedUrl, `status ${signRes.status}`)
+    // 2b. PUT file ke R2 (paritas perilaku browser: PUT signedUrl + Content-Type)
     let putOk = false, publicOk = false
     if (sign?.signedUrl) {
-        const put = await fetch(sign.signedUrl, { method: 'PUT', headers: { 'Content-Type': 'application/pdf' }, body: Buffer.from('%PDF-smoke-materi') })
-        putOk = put.status === 200
-        created.storagePaths.push('materials:' + sign.path)
-        const pubUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/materials/${sign.path}`
-        const pub = await fetch(pubUrl)
-        publicOk = pub.status === 200
-        check('PUT file ke storage (signed URL) → 200', putOk, `status ${put?.status}`)
-        check('public URL materi bisa dibaca (paritas getPublicStorageUrl)', publicOk, `status ${pub.status}`)
+        try {
+            const put = await fetch(sign.signedUrl, { method: 'PUT', headers: { 'Content-Type': 'application/pdf' }, body: Buffer.from('%PDF-smoke-materi') })
+            putOk = put.status === 200
+            check('PUT file ke R2 (presigned URL) → 200', putOk, `status ${put.status}`)
+        } catch (e) {
+            check('PUT file ke R2 (presigned URL) → 200', false, `fetch error: ${e.message} | cause: ${e.cause?.message || e.cause?.code || '?'}`)
+        }
+        if (sign.path) created.r2Keys.push(sign.path)
+        try {
+            const pub = await fetch(sign.publicUrl)
+            publicOk = pub.status === 200
+            check('public URL materi R2 bisa dibaca (paritas publicR2Url)', publicOk, `status ${pub.status}`)
+        } catch (e) {
+            check('public URL materi R2 bisa dibaca (paritas publicR2Url)', false, `fetch error: ${e.message} | cause: ${e.cause?.message || e.cause?.code || '?'}`)
+        }
     } else {
-        check('PUT file ke storage (signed URL) → 200', false, 'sign gagal')
-        check('public URL materi bisa dibaca (paritas getPublicStorageUrl)', false, 'sign gagal')
+        check('PUT file ke R2 (presigned URL) → 200', false, 'sign gagal')
+        check('public URL materi R2 bisa dibaca (paritas publicR2Url)', false, 'sign gagal')
     }
     // 2c. Create materi untuk kelas A & B (type harus enum: PDF/VIDEO/TEXT/LINK).
     // Respons route = { created: n, items: [...] } (satu baris per TA).
     const matARes = await api('/api/materials', tokGuruA, {
         method: 'POST',
-        body: JSON.stringify({ title: `${U} Materi Kelas A`, type: 'PDF', content_url: sign?.path || 'x', teaching_assignment_id: taA.id }),
+            body: JSON.stringify({ title: `${U} Materi Kelas A`, type: 'PDF', content_url: sign?.publicUrl || 'x', teaching_assignment_id: taA.id }),
     })
     const matAJson = await matARes.json().catch(() => null)
     const matA = Array.isArray(matAJson?.items) ? matAJson.items[0] : (Array.isArray(matAJson) ? matAJson[0] : matAJson)
@@ -474,10 +482,23 @@ async function cleanup() {
     console.log('\ncleanup...')
     const del = (t, ids) => ids.length ? supabase.from(t).delete().in('id', ids) : Promise.resolve()
     const delBy = (t, col, ids) => ids.length ? supabase.from(t).delete().in(col, ids) : Promise.resolve()
-    // storage objects (prefix bucket per jenis: materi/audio → materials, tugas → submissions)
+    // storage objects (prefix bucket per jenis: audio → materials Supabase, tugas → submissions)
     for (const p of created.storagePaths) {
         if (p.startsWith('materials:')) await supabase.storage.from('materials').remove([p.slice(9)]).catch(() => { })
         else if (p.startsWith('submissions:')) await supabase.storage.from('submissions').remove([p.slice(11)]).catch(() => { })
+    }
+    // R2 objects (upload materi via presigned PUT ke Cloudflare R2)
+    if (created.r2Keys.length && process.env.R2_ACCESS_KEY_ID) {
+        const { S3Client, DeleteObjectsCommand } = require('@aws-sdk/client-s3')
+        const r2 = new S3Client({
+            region: 'auto',
+            endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+            credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY },
+        })
+        await r2.send(new DeleteObjectsCommand({
+            Bucket: process.env.R2_BUCKET,
+            Delete: { Objects: created.r2Keys.map(k => ({ Key: k })) },
+        })).catch(() => { })
     }
     // exam chain
     await delBy('exam_answers', 'submission_id', created.examSubmissions)

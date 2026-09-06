@@ -1,17 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { presignR2PutUrl, publicR2Url } from '@/lib/r2'
 
-// M2: Service Role Key required for Storage signed URL generation (Storage API requires admin privileges).
-// Strict tanpa fallback anon (selaras src/lib/supabase.ts): tabel kini RLS-enabled —
-// fallback anon hanya menyembunyikan kegagalan. Fail-fast saat startup bila env hilang.
-if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY tidak ditemukan — upload butuh service key, jangan fallback ke anon.')
-}
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-)
+// Upload materi via presigned PUT ke Cloudflare R2 (src/lib/r2.ts fail-fast
+// saat env R2 hilang). Cek role & school context tidak berubah dari versi
+// Supabase Storage sebelumnya — file lama tetap disajikan dari Supabase.
 
 export async function POST(request: NextRequest) {
     try {
@@ -34,29 +27,17 @@ export async function POST(request: NextRequest) {
         const uniqueId = Math.random().toString(36).substring(2, 15)
         const timestamp = Date.now()
         const schoolPrefix = schoolId || 'global'
-        const storagePath = `${schoolPrefix}/${timestamp}-${uniqueId}.${fileExt}`
+        const storagePath = `materials/${schoolPrefix}/${timestamp}-${uniqueId}.${fileExt}`
 
-        console.log(`Generating signed upload URL for: ${storagePath}`)
+        const signedUrl = await presignR2PutUrl(storagePath, contentType || 'application/octet-stream')
 
-        // Create Signed Upload URL
-        const { data, error } = await supabase.storage
-            .from('materials')
-            .createSignedUploadUrl(storagePath)
-
-        if (error) {
-            console.error('Signed URL Error:', error)
-            return NextResponse.json({ error: error.message }, { status: 500 })
-        }
-
-        // Return path and token/signedUrl
-        // data contains { signedUrl, token, path }
         return NextResponse.json({
-            path: data.path,
-            token: data.token,
-            signedUrl: data.signedUrl
+            path: storagePath,
+            signedUrl,
+            publicUrl: publicR2Url(storagePath)
         })
 
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Server Error:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
     }
