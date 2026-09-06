@@ -50,7 +50,7 @@ interface OfficialExam {
     is_active: boolean
     question_count: number
     target_class_ids: string[]
-    subject: { id: string; name: string }
+    subject: { id: string; name: string; kkm?: number }
     created_by?: string | null
     creator_role?: string | null
 }
@@ -129,6 +129,22 @@ export default function GuruUlanganPage() {
     const [remedialLoading, setRemedialLoading] = useState(false)
     const [remedialStartTime, setRemedialStartTime] = useState('')
     const [remedialKkm, setRemedialKkm] = useState(75)
+
+    // Remedial UTS/UAS (ujian resmi) States
+    const [showOfficialRemedial, setShowOfficialRemedial] = useState(false)
+    const [officialRemedialSource, setOfficialRemedialSource] = useState<OfficialExam | null>(null)
+    const [officialRemedialStudents, setOfficialRemedialStudents] = useState<any[]>([])
+    const [officialRemedialSelectedIds, setOfficialRemedialSelectedIds] = useState<string[]>([])
+    const [officialRemedialLoading, setOfficialRemedialLoading] = useState(false)
+    const [officialRemedialCreating, setOfficialRemedialCreating] = useState(false)
+    const [officialRemedialKkm, setOfficialRemedialKkm] = useState(75)
+    const [officialRemedialForm, setOfficialRemedialForm] = useState({
+        title: '',
+        start_time: '',
+        duration_minutes: 60,
+        schedule_mode: 'sync' as 'sync' | 'window',
+        window_end_time: '',
+    })
 
     // Tutorial event: open/close create modal when tutorial requests it
     useEffect(() => {
@@ -532,6 +548,124 @@ export default function GuruUlanganPage() {
         fetchData()
     }
 
+    // ── Remedial UTS/UAS ──────────────────────────────────────────────
+    // Mirror alur admin (uts-uas/page.tsx handleOpenDuplicate REMEDIAL):
+    // daftar siswa dari GET official-exam-submissions (guru-scoped — hanya
+    // siswa kelas yang diajar), KKM granular per jenjang, semua baris
+    // submission dihitung (non-pengikut = 0, identik admin).
+    const openOfficialRemedialModal = async (exam: OfficialExam) => {
+        setOfficialRemedialSource(exam)
+        setShowOfficialRemedial(true)
+        setOfficialRemedialLoading(true)
+        setOfficialRemedialSelectedIds([])
+        setOfficialRemedialForm({
+            title: `Remedial ${exam.title}`,
+            start_time: '',
+            duration_minutes: exam.duration_minutes,
+            schedule_mode: exam.window_end_time ? 'window' : 'sync',
+            window_end_time: '',
+        })
+
+        try {
+            let kkm = exam.subject?.kkm || 75
+            // KKM granular per jenjang (mirror admin)
+            try {
+                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${exam.subject?.id}`)
+                if (kkmRes.ok) {
+                    const kkmData = await kkmRes.json()
+                    // Ambil granular dari kelas siswa pertama (ujian resmi satu
+                    // mapel bisa lintas kelas — jenjang biasanya seragam)
+                    const kkmEntries = Array.isArray(kkmData) ? kkmData : []
+                    const first = kkmEntries[0]
+                    if (first?.school_level && first?.grade_level) {
+                        const granular = kkmEntries.find((k: any) =>
+                            k.school_level === first.school_level && k.grade_level === first.grade_level)
+                        if (granular) kkm = granular.kkm
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch granular KKM', e)
+            }
+            setOfficialRemedialKkm(kkm)
+
+            // Submissions guru-scoped (endpoint sudah filter mapel+kelas diajar,
+            // termasuk merge nilai remedial terbaik bila sudah pernah remedial)
+            const subsRes = await fetch(`/api/official-exam-submissions?exam_id=${exam.id}`)
+            const subsData = await subsRes.json()
+            const subs = Array.isArray(subsData) ? subsData : []
+
+            const studentsWithScores = subs.map((sub: any) => {
+                const pct = sub.max_score > 0 ? (sub.total_score / sub.max_score) * 100 : 0
+                const score = Math.round(pct)
+                return {
+                    id: sub.student?.id,
+                    name: sub.student?.user?.full_name || '-',
+                    nis: sub.student?.nis || '-',
+                    score,
+                    needsRemedial: score < kkm,
+                    submitted: !!sub.is_submitted,
+                }
+            }).filter((s: any) => s.id)
+
+            studentsWithScores.sort((a: any, b: any) => a.score - b.score)
+
+            setOfficialRemedialStudents(studentsWithScores)
+            setOfficialRemedialSelectedIds(studentsWithScores.filter((s: any) => s.needsRemedial).map((s: any) => s.id))
+        } catch (error) {
+            console.error('Error fetching official remedial data:', error)
+            alert('Gagal memuat data siswa untuk remedial')
+        } finally {
+            setOfficialRemedialLoading(false)
+        }
+    }
+
+    const handleCreateOfficialRemedial = async () => {
+        if (!officialRemedialSource || !officialRemedialForm.title || !officialRemedialForm.start_time || officialRemedialSelectedIds.length === 0) return
+        setOfficialRemedialCreating(true)
+        try {
+            // Kelas target = IRISAN kelas yang diajar guru × kelas target ujian
+            // (API duplicate menolak guru yang tidak mengajar SEMUA kelas target —
+            //  tanpa irisan, guru sebagian kelas selalu 403).
+            const taughtClassIds = new Set(teachingAssignments.map((ta: any) => ta.class?.id || ta.class_id))
+            const targetClassIds = (officialRemedialSource.target_class_ids || []).filter((cid: string) => taughtClassIds.has(cid))
+
+            if (targetClassIds.length === 0) {
+                alert('Anda tidak mengajar kelas target ujian ini.')
+                return
+            }
+
+            const res = await fetch('/api/official-exams/duplicate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_exam_id: officialRemedialSource.id,
+                    title: officialRemedialForm.title,
+                    start_time: new Date(officialRemedialForm.start_time).toISOString(),
+                    duration_minutes: officialRemedialForm.duration_minutes,
+                    window_end_time: officialRemedialForm.schedule_mode === 'window' && officialRemedialForm.window_end_time
+                        ? new Date(officialRemedialForm.window_end_time).toISOString()
+                        : null,
+                    target_class_ids: targetClassIds,
+                    is_remedial: true,
+                    allowed_student_ids: officialRemedialSelectedIds,
+                })
+            })
+            const data = await res.json().catch(() => null)
+            if (!res.ok) {
+                alert(data?.error || 'Gagal membuat ujian remedial.')
+                return
+            }
+            alert(`Ujian remedial berhasil dibuat sebagai draft. Publish di editor agar siswa terpilih bisa mengerjakan.`)
+            setShowOfficialRemedial(false)
+            fetchData()
+        } catch (error) {
+            console.error('Error creating official remedial:', error)
+            alert('Terjadi kesalahan saat membuat ujian remedial.')
+        } finally {
+            setOfficialRemedialCreating(false)
+        }
+    }
+
     const handleOpenRemedial = async (exam: Exam) => {
         setRemedialExam(exam)
         setShowRemedial(true)
@@ -896,6 +1030,12 @@ export default function GuruUlanganPage() {
                                             onClick: () => router.push(`/dashboard/guru/uts-uas/${exam.id}/hasil`),
                                         },
                                         {
+                                            label: `Buat Remedial ${exam.exam_type === 'UTS' ? labels.uts : labels.uas}`,
+                                            show: isDone && !(exam as any).is_remedial,
+                                            icon: <RefreshCw className="w-4 h-4" />,
+                                            onClick: () => openOfficialRemedialModal(exam),
+                                        },
+                                        {
                                             label: 'Pakai Ulang',
                                             show: isDone || isLive,
                                             icon: <Copy className="w-4 h-4" />,
@@ -909,11 +1049,18 @@ export default function GuruUlanganPage() {
                                         },
                                     ]
 
-                                    const extraBadges = exam.creator_role === 'ADMIN' ? [(
-                                        <span key="admin" className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
-                                            Dibuatkan Admin
-                                        </span>
-                                    )] : []
+                                    const extraBadges = [
+                                        ...((exam as any).is_remedial ? [(
+                                            <span key="remedial" className="px-2 py-0.5 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm animate-pulse-slow">
+                                                REMEDIAL
+                                            </span>
+                                        )] : []),
+                                        ...(exam.creator_role === 'ADMIN' ? [(
+                                            <span key="admin" className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
+                                                Dibuatkan Admin
+                                            </span>
+                                        )] : []),
+                                    ]
 
                                     return (
                                         <ExamCard
@@ -1122,6 +1269,106 @@ export default function GuruUlanganPage() {
                         </Button>
                     </div>
                 </div>
+            </Modal>
+
+            {/* Modal Remedial UTS/UAS — ujian resmi untuk siswa di bawah KKM (mirror alur admin) */}
+            <Modal
+                open={showOfficialRemedial}
+                onClose={() => setShowOfficialRemedial(false)}
+                title={`Buat Remedial ${officialRemedialSource?.exam_type === 'UAS' ? labels.uas : labels.uts}`}
+            >
+                {officialRemedialLoading ? (
+                    <div className="flex justify-center py-10">
+                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                    </div>
+                ) : officialRemedialSource ? (
+                    <div className="space-y-4">
+                        <div className="bg-secondary/10 p-4 rounded-xl">
+                            <h4 className="font-bold text-text-main dark:text-white mb-1">{officialRemedialSource.title}</h4>
+                            <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
+                                <span>Mapel: <strong>{officialRemedialSource.subject?.name}</strong></span>
+                                <span>KKM: <strong className="text-red-500">{officialRemedialKkm}</strong></span>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Remedial</label>
+                            <input
+                                type="text"
+                                value={officialRemedialForm.title}
+                                onChange={(e) => setOfficialRemedialForm({ ...officialRemedialForm, title: e.target.value })}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        </div>
+                        <TimeWindowFields
+                            value={{
+                                mode: officialRemedialForm.schedule_mode,
+                                start_time: officialRemedialForm.start_time,
+                                duration_minutes: String(officialRemedialForm.duration_minutes),
+                                window_end_time: officialRemedialForm.window_end_time,
+                            }}
+                            onChange={(v: any) => setOfficialRemedialForm(prev => ({
+                                ...prev,
+                                schedule_mode: v.mode,
+                                start_time: v.start_time || prev.start_time,
+                                duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || prev.duration_minutes : prev.duration_minutes,
+                                window_end_time: v.mode === 'window' ? v.window_end_time : '',
+                            }))}
+                            durationRequired
+                        />
+                        <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                                <label className="block text-sm font-bold text-text-main dark:text-white">
+                                    Pilih Siswa ({officialRemedialSelectedIds.length} terpilih)
+                                </label>
+                                <span className="text-xs text-text-secondary">Merah = di bawah KKM</span>
+                            </div>
+                            <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                                {officialRemedialStudents.length === 0 ? (
+                                    <p className="text-sm text-text-secondary text-center py-4">Tidak ada data pengerjaan siswa untuk ujian ini</p>
+                                ) : (
+                                    officialRemedialStudents.map((student) => {
+                                        const isSelected = officialRemedialSelectedIds.includes(student.id)
+                                        return (
+                                            <div
+                                                key={student.id}
+                                                onClick={() => {
+                                                    if (isSelected) {
+                                                        setOfficialRemedialSelectedIds(prev => prev.filter(id => id !== student.id))
+                                                    } else {
+                                                        setOfficialRemedialSelectedIds(prev => [...prev, student.id])
+                                                    }
+                                                }}
+                                                className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${isSelected ? 'border-primary bg-primary/5 dark:bg-primary/20' : 'border-secondary/20 bg-white dark:bg-surface-dark hover:bg-secondary/5'}`}
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    {isSelected ? <CheckSquare className="text-primary w-5 h-5" /> : <Square className="text-secondary/50 w-5 h-5" />}
+                                                    <span className="font-medium text-text-main dark:text-white">{student.name}</span>
+                                                </div>
+                                                <div className={`px-2 py-1 rounded text-xs font-bold ${student.needsRemedial ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'}`}>
+                                                    Nilai: {student.score}
+                                                </div>
+                                            </div>
+                                        )
+                                    })
+                                )}
+                            </div>
+                        </div>
+                        <p className="text-xs text-text-secondary bg-sky-500/10 border border-sky-500/20 rounded-xl p-3">
+                            ℹ️ Ujian remedial dibuat sebagai <strong>draft</strong> — publish di editor agar siswa terpilih bisa mengerjakan. Nilai remedial otomatis diambil yang tertinggi. Hanya siswa terpilih yang bisa memulai.
+                        </p>
+                        <div className="flex gap-3 pt-2">
+                            <Button variant="secondary" onClick={() => setShowOfficialRemedial(false)} className="flex-1">Batal</Button>
+                            <Button
+                                onClick={handleCreateOfficialRemedial}
+                                disabled={officialRemedialCreating || !officialRemedialForm.title || !officialRemedialForm.start_time || officialRemedialForm.duration_minutes < 5 || (officialRemedialForm.schedule_mode === 'window' && !officialRemedialForm.window_end_time) || officialRemedialSelectedIds.length === 0}
+                                loading={officialRemedialCreating}
+                                className="flex-1"
+                            >
+                                Proses Remedial
+                            </Button>
+                        </div>
+                    </div>
+                ) : null}
             </Modal>
 
             <Modal
