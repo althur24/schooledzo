@@ -1,0 +1,11 @@
+-- Index untuk grades(submission_id).
+--
+-- FK grades.submission_id tidak otomatis di-index oleh Postgres, sementara
+-- endpoint dashboard (guru/warnings, guru/siswa, analytics/class-grades,
+-- parent/dashboard) memakai .in('submission_id', chunk) — tanpa index ini
+-- setiap query sequential-scan seluruh tabel grades, makin lambat seiring
+-- akumulasi baris (ujian 1000 siswa mempercepat pertumbuhannya).
+--
+-- CREATE INDEX IF NOT EXISTS + CONCURRENTLY tidak kompatibel di dalam
+-- transaksi migrasi; IF NOT EXISTS saja cukup aman untuk idempotensi.
+CREATE INDEX IF NOT EXISTS idx_grades_submission ON grades(submission_id);

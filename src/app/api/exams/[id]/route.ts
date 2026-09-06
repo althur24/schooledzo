@@ -81,7 +81,7 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id, results_released, start_time, teaching_assignment:teaching_assignments(teacher_id)')
+            .select('teaching_assignment_id, results_released, start_time, is_active, teaching_assignment:teaching_assignments(teacher_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -207,8 +207,11 @@ export async function PUT(
 
         if (error) throw error
 
-        // If exam was just activated (truly active), send notifications
-        if (finalIsActive === true && data?.teaching_assignment?.class_id) {
+        // Notifikasi hanya saat transisi draft→publish (false→true). Re-PUT
+        // is_active:true (mis. edit judul) tidak boleh mengirim ulang notifikasi
+        // ke sekelas — paritas guard wasActive di quizzes/[id] & dedup official-exams.
+        const justPublished = finalIsActive === true && !examForYear?.is_active
+        if (justPublished && data?.teaching_assignment?.class_id) {
             try {
                 // Get the active academic year
                 const { data: activeYear } = await supabase
@@ -224,6 +227,7 @@ export async function PUT(
                         .select('student:students(user_id)')
                         .eq('academic_year_id', activeYear.id)
                         .eq('class_id', data.teaching_assignment.class_id)
+                        .eq('status', 'ACTIVE') // siswa pindah/keluar tidak dinotifikasi
 
                     if (enrollments && enrollments.length > 0) {
                         const subjectName = data.teaching_assignment.subject?.name || ''

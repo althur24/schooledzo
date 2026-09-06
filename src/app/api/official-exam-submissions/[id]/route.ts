@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { getTeacherScope, canTeachStudentSubmission } from '@/lib/teacherScope'
 import { logError } from '@/lib/logError'
+import { logGradeChange } from '@/lib/gradeHistory'
 
 // GET submission detail with answers
 export async function GET(
@@ -105,7 +106,7 @@ export async function PUT(
         // submission (bukan semua kelas target); ADMIN satu sekolah.
         const { data: subForAuth } = await supabase
             .from('official_exam_submissions')
-            .select('is_submitted, student:students(class_id), exam:official_exams(school_id, subject_id, target_class_ids, academic_year_id)')
+            .select('is_submitted, student_id, total_score, max_score, student:students(class_id), exam:official_exams(id, title, school_id, subject_id, target_class_ids, academic_year_id)')
             .eq('id', id)
             .single()
         if (!subForAuth) {
@@ -135,14 +136,21 @@ export async function PUT(
             return NextResponse.json({ error: 'grades array required' }, { status: 400 })
         }
 
-        // BATCH UPDATE: Update all scores in parallel with submission_id safety filter
-        await Promise.all(grades.map((grade: any) =>
+        // BATCH UPDATE: parallel dengan filter submission_id (safety filter).
+        // Error TIDAK ditelan — kegagalan parsial membuat nilai hilang diam-diam
+        // sementara total_score & is_graded:true tetap ditulis.
+        const gradeResults = await Promise.all(grades.map((grade: any) =>
             supabase
                 .from('official_exam_answers')
                 .update({ points_earned: Math.round(grade.points_earned) })
                 .eq('id', grade.answer_id)
                 .eq('submission_id', id)
         ))
+        const failedGrade = gradeResults.find(r => r.error)
+        if (failedGrade?.error) {
+            console.error('Error grading official exam answers:', failedGrade.error)
+            return NextResponse.json({ error: 'Gagal menyimpan nilai: ' + failedGrade.error.message }, { status: 500 })
+        }
 
         // Recalculate total score
         const { data: allAnswers } = await supabase
@@ -164,6 +172,19 @@ export async function PUT(
             .single()
 
         if (error) throw error
+
+        // Audit trail koreksi manual (append-only) — best-effort, lihat gradeHistory.ts
+        await logGradeChange({
+            schoolId,
+            source: 'OFFICIAL_EXAM',
+            refId: authExam?.id || id,
+            refTitle: authExam?.title || null,
+            studentId: subForAuth.student_id,
+            oldScore: subForAuth.total_score ?? null,
+            newScore: totalScore,
+            maxScore: subForAuth.max_score ?? null,
+            changedBy: user.id,
+        })
 
         return NextResponse.json(updatedSubmission)
     } catch (error) {

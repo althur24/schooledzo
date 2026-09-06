@@ -207,7 +207,11 @@ export async function GET(request: NextRequest) {
             })
 
             if (expiredSubs.length > 0) {
-                for (const sub of expiredSubs) {
+                // Paralel per chunk 50 (pola monitor & scheduler closeExpired) —
+                // loop sekuensial membuat satu GET ini mengeksekusi ±4 query × N
+                // submission sekaligus (menit-an bila 1000 siswa browsernya mati
+                // tepat saat ujian serentak berakhir).
+                const closeOne = async (sub: any) => {
                     const examObj = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
                     const expiry = resolveWindowExpiry(
                         { start_time: examObj?.start_time ?? null, duration_minutes: examObj?.duration_minutes ?? null, window_end_time: examObj?.window_end_time ?? null },
@@ -224,6 +228,10 @@ export async function GET(request: NextRequest) {
                         sub.total_score = closed.totalScore
                         sub.is_graded = closed.isGraded
                     }
+                }
+                const CHUNK = 50
+                for (let i = 0; i < expiredSubs.length; i += CHUNK) {
+                    await Promise.all(expiredSubs.slice(i, i + CHUNK).map(closeOne))
                 }
             }
         }

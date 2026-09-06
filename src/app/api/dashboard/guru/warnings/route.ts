@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { mergeRemedialScores } from '@/lib/remedialScore'
 
 const DEFAULT_KKM = 75
 
@@ -116,7 +117,7 @@ export async function GET(request: NextRequest) {
         //   .in() polos bisa overflow limit URL)
         const quizzes = await batchedIn<any>(
             'teaching_assignment_id', allTaIds,
-            (chunk) => supabase.from('quizzes').select('id, title, teaching_assignment_id, is_remedial, remedial_for_id').in('teaching_assignment_id', chunk)
+            (chunk) => supabase.from('quizzes').select('id, title, teaching_assignment_id, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score').in('teaching_assignment_id', chunk)
         )
         const quizIds = quizzes.map(q => q.id)
         const allQuizSubs = await batchedFetchAll<{ quiz_id: string; student_id: string; total_score: number; max_score: number }>(
@@ -129,31 +130,38 @@ export async function GET(request: NextRequest) {
         )
         let quizSubs: { quiz_id: string; student_id: string; total_score: number; max_score: number }[] = allQuizSubs.filter(s => studentSet.has(s.student_id))
 
-        // Remedial merge — selaras rekap (api/grades): nilai remedial MENGGANTIKAN
-        // nilai kuis asli (skor tertinggi per siswa per kuis asli), bukan
-        // double-count yang membuat siswa lulus-remedial tetap muncul di warning.
-        const remedialOf = new Map(quizzes.map(q => [q.id, q.remedial_for_id || null]))
-        const quizScoreGroups = new Map<string, { quiz_id: string; student_id: string; pct: number }>()
+        // Remedial merge — pakai engine kebijakan (mergeRemedialScores) selaras
+        // rekap (api/grades): HIGHEST/AVERAGE/CAP dihitung sesuai kebijakan yang
+        // dipilih guru saat membuat remedial, bukan sekadar skor tertinggi mentah.
+        // Nilai remedial MENGGANTIKAN nilai asli (satu entri final per kuis asli),
+        // bukan double-count yang membuat siswa lulus-remedial tetap muncul di warning.
+        const quizMeta = new Map(quizzes.map(q => [q.id, q]))
+        const quizGroups = new Map<string, { quiz_id: string; student_id: string; entries: any[] }>()
         for (const s of quizSubs) {
-            const base = remedialOf.get(s.quiz_id) || s.quiz_id
+            const meta = quizMeta.get(s.quiz_id)
+            const base = meta?.remedial_for_id || s.quiz_id
             const key = `${s.student_id}:${base}`
-            const pct = s.max_score > 0 ? (s.total_score / s.max_score) * 100 : 0
-            const existing = quizScoreGroups.get(key)
-            if (!existing || pct > existing.pct) {
-                quizScoreGroups.set(key, { quiz_id: base, student_id: s.student_id, pct })
+            let g = quizGroups.get(key)
+            if (!g) {
+                g = { quiz_id: base, student_id: s.student_id, entries: [] }
+                quizGroups.set(key, g)
             }
+            g.entries.push({
+                score: s.max_score > 0 ? (s.total_score / s.max_score) * 100 : null,
+                isRemedial: !!meta?.is_remedial,
+                policy: meta?.remedial_score_policy,
+                cap: meta?.remedial_max_score,
+            })
         }
-        quizSubs = Array.from(quizScoreGroups.values()).map(g => ({
-            quiz_id: g.quiz_id,
-            student_id: g.student_id,
-            total_score: g.pct,
-            max_score: 100,
-        }))
+        quizSubs = Array.from(quizGroups.values())
+            .map(g => ({ quiz_id: g.quiz_id, student_id: g.student_id, final: mergeRemedialScores(g.entries) }))
+            .filter(g => g.final !== null)
+            .map(g => ({ quiz_id: g.quiz_id, student_id: g.student_id, total_score: g.final as number, max_score: 100 }))
 
         // - Exams (batched, alasan sama)
         const exams = await batchedIn<any>(
             'teaching_assignment_id', allTaIds,
-            (chunk) => supabase.from('exams').select('id, title, teaching_assignment_id').in('teaching_assignment_id', chunk)
+            (chunk) => supabase.from('exams').select('id, title, teaching_assignment_id, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score').in('teaching_assignment_id', chunk)
         )
         const examIds = exams.map(e => e.id)
         const allExamSubs = await batchedFetchAll<{ exam_id: string; student_id: string; total_score: number; max_score: number }>(
@@ -164,7 +172,32 @@ export async function GET(request: NextRequest) {
                 .in('exam_id', chunk)
                 .eq('is_submitted', true)
         )
-        const examSubs = allExamSubs.filter(s => studentSet.has(s.student_id))
+
+        // Remedial merge (ULANGAN) — sama seperti kuis di atas; tanpa ini skor
+        // remedial terhitung sebagai skor kedua (double-count) dan siswa yang
+        // sudah lulus remedial tetap muncul di warning "di bawah KKM".
+        const examMeta = new Map(exams.map(e => [e.id, e]))
+        const examGroups = new Map<string, { exam_id: string; student_id: string; entries: any[] }>()
+        for (const s of allExamSubs.filter(s => studentSet.has(s.student_id))) {
+            const meta = examMeta.get(s.exam_id)
+            const base = meta?.remedial_for_id || s.exam_id
+            const key = `${s.student_id}:${base}`
+            let g = examGroups.get(key)
+            if (!g) {
+                g = { exam_id: base, student_id: s.student_id, entries: [] }
+                examGroups.set(key, g)
+            }
+            g.entries.push({
+                score: s.max_score > 0 ? (s.total_score / s.max_score) * 100 : null,
+                isRemedial: !!meta?.is_remedial,
+                policy: meta?.remedial_score_policy,
+                cap: meta?.remedial_max_score,
+            })
+        }
+        const examSubs = Array.from(examGroups.values())
+            .map(g => ({ exam_id: g.exam_id, student_id: g.student_id, final: mergeRemedialScores(g.entries) }))
+            .filter(g => g.final !== null)
+            .map(g => ({ exam_id: g.exam_id, student_id: g.student_id, total_score: g.final as number, max_score: 100 }))
 
         // - Tugas (batched, alasan sama)
         const tasks = await batchedIn<any>(

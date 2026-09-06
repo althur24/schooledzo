@@ -57,12 +57,14 @@ interface Quiz {
     id: string
     title: string
     submission_mode?: string
+    is_remedial?: boolean
     teaching_assignment: { id: string }
 }
 
 interface Exam {
     id: string
     title: string
+    is_remedial?: boolean
     teaching_assignment: { id: string }
 }
 
@@ -240,10 +242,12 @@ export default function NilaiPage() {
             }
             setAllSubmissions(allSubs)
 
-            // Fetch quizzes
+            // Fetch quizzes — remedial dibuang: nilai final merge sudah ada di
+            // baris ujian aslinya (server merge di GET submissions), memasukkan
+            // baris remedial mentah membuat kolom & rata-rata terhitung dobel.
             const quizzesRes = await fetch('/api/quizzes')
             const quizzesData = await quizzesRes.json()
-            const myQuizzes = (quizzesData || []).filter((q: Quiz) => q.teaching_assignment?.id === selectedTA)
+            const myQuizzes = (quizzesData || []).filter((q: Quiz) => q.teaching_assignment?.id === selectedTA && !q.is_remedial)
             setQuizzes(myQuizzes)
 
             // Fetch quiz submissions
@@ -257,10 +261,10 @@ export default function NilaiPage() {
             }
             setQuizSubmissions(allQuizSubs)
 
-            // Fetch exams
+            // Fetch exams — remedial dibuang (lihat catatan quiz di atas)
             const examsRes = await fetch('/api/exams')
             const examsData = await examsRes.json()
-            const myExams = (examsData || []).filter((e: Exam) => e.teaching_assignment?.id === selectedTA)
+            const myExams = (examsData || []).filter((e: Exam) => e.teaching_assignment?.id === selectedTA && !e.is_remedial)
             setExams(myExams)
 
             // Fetch exam submissions
@@ -274,11 +278,12 @@ export default function NilaiPage() {
             }
             setExamSubmissions(allExamSubs)
 
-            // Fetch official exams (UTS/UAS) matching this subject + class
+            // Fetch official exams (UTS/UAS) matching this subject + class —
+            // remedial dibuang (lihat catatan quiz di atas)
             const officialRes = await fetch('/api/official-exams')
             const officialData = await officialRes.json()
             const myOfficialExams = (Array.isArray(officialData) ? officialData : []).filter(
-                (oe: any) => oe.subject?.id === ta.subject.id && oe.target_class_ids?.includes(ta.class.id)
+                (oe: any) => oe.subject?.id === ta.subject.id && oe.target_class_ids?.includes(ta.class.id) && !oe.is_remedial
             )
             setOfficialExams(myOfficialExams.map((oe: any) => ({
                 id: oe.id, title: oe.title, exam_type: oe.exam_type,

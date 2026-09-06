@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch, notFound } from '@/lib/tenantGuard'
+import { logGradeChange } from '@/lib/gradeHistory'
 
 // GET single exam submission with questions and answers
 export async function GET(
@@ -135,9 +136,10 @@ export async function PUT(
         // tertimpa autosave/submit siswa berikutnya (points_earned semua jawaban
         // di-upsert ulang saat autosave), dan is_graded:true pada attempt hidup
         // membuat state inkonsisten. Paritas guard di quiz-submissions/[id].
+        // total_score/exam ikut diambil untuk audit trail grade_history.
         const { data: subCheck } = await supabase
             .from('exam_submissions')
-            .select('is_submitted')
+            .select('is_submitted, student_id, total_score, exam:exams(id, title)')
             .eq('id', id)
             .single()
         if (!subCheck) {
@@ -224,6 +226,21 @@ export async function PUT(
             .single()
 
         if (error) throw error
+
+        // Audit trail koreksi manual (append-only) — kegagalan audit tidak
+        // boleh menggagalkan penilaian (best-effort, lihat gradeHistory.ts)
+        const examInfo = Array.isArray(subCheck.exam) ? subCheck.exam[0] : subCheck.exam
+        await logGradeChange({
+            schoolId,
+            source: 'EXAM',
+            refId: examInfo?.id || id,
+            refTitle: examInfo?.title || null,
+            studentId: subCheck.student_id,
+            oldScore: subCheck.total_score ?? null,
+            newScore: totalScore,
+            maxScore: data?.max_score ?? null,
+            changedBy: user.id,
+        })
 
         return NextResponse.json(data)
     } catch (error) {
