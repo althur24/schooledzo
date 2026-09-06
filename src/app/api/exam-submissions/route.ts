@@ -9,6 +9,7 @@ import { forceCloseExamSubmission } from '@/lib/autoCloseExpired'
 import { canManageExam } from '@/lib/teacherScope'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { bufferTeacherSubmissionNotification } from '@/lib/teacherNotifyBuffer'
+import { mergeViolations, IncomingViolation } from '@/lib/violationBatch'
 
 // GET exam submissions
 export async function GET(request: NextRequest) {
@@ -423,7 +424,7 @@ export async function PUT(request: NextRequest) {
         const { user, schoolId } = ctx
 
         const body = await request.json()
-        const { submission_id, answers, submit, violation, reset_attempt } = body
+        const { submission_id, answers, submit, violation, violations, reset_attempt } = body
 
         if (!submission_id) {
             return NextResponse.json({ error: 'submission_id required' }, { status: 400 })
@@ -583,39 +584,39 @@ export async function PUT(request: NextRequest) {
             }, { status: 409 })
         }
 
-        // Handle violation logging
-        if (violation) {
-            const currentViolations = currentSubmission.violations_log || []
-            
-            // Server-side deduplication (3 second gap)
-            if (currentViolations.length > 0) {
-                const lastViolation = currentViolations[currentViolations.length - 1]
-                const lastTime = new Date(lastViolation.timestamp).getTime()
-                const now = new Date().getTime()
-                if (now - lastTime < 3000) {
-                    return NextResponse.json({
-                        violation_count: currentSubmission.violation_count,
-                        max_violations: currentSubmission.exam?.max_violations || 3
-                    }) // Ignore duplicate
-                }
-            }
-
-            const newViolationCount = currentSubmission.violation_count + 1
+        // Handle violation logging — tunggal (legacy `violation`) atau batch
+        // (`violations` = queue pelanggaran dari client yang offline; timestamp
+        // kejadian asli client dipertahankan & di-clamp, lihat violationBatch.ts)
+        const incomingViolations: IncomingViolation[] = Array.isArray(violations) && violations.length > 0
+            ? violations
+            : (violation ? [violation] : [])
+        if (incomingViolations.length > 0) {
             const maxViolations = currentSubmission.exam?.max_violations || 3
+            const merged = mergeViolations(
+                currentSubmission.violations_log || [],
+                currentSubmission.violation_count,
+                incomingViolations,
+                currentSubmission.started_at
+            )
+
+            if (!merged) {
+                // Semua entri kena dedup 3 dtk — abaikan tanpa update (perilaku jalur lama)
+                return NextResponse.json({
+                    violation_count: currentSubmission.violation_count,
+                    max_violations: maxViolations
+                })
+            }
 
             await supabase
                 .from('exam_submissions')
                 .update({
-                    violation_count: newViolationCount,
-                    violations_log: [...currentViolations, {
-                        type: violation.type,
-                        timestamp: new Date().toISOString()
-                    }]
+                    violation_count: merged.count,
+                    violations_log: merged.log
                 })
                 .eq('id', submission_id)
 
             // Force submit if max violations exceeded
-            if (newViolationCount >= maxViolations) {
+            if (merged.count >= maxViolations) {
                 // Auto submit with current answers
                 const { data: existingAnswers } = await supabase
                     .from('exam_answers')
@@ -666,7 +667,7 @@ export async function PUT(request: NextRequest) {
             }
 
             return NextResponse.json({
-                violation_count: newViolationCount,
+                violation_count: merged.count,
                 max_violations: maxViolations
             })
         }

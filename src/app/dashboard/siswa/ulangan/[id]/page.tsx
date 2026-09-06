@@ -166,6 +166,73 @@ export default function TakeExamPage() {
     const loadFailedRef = useRef(false)
     useEffect(() => { loadFailedRef.current = !!loadError }, [loadError])
 
+    // === Queue pelanggaran yang gagal terkirim (offline) ===
+    // logViolation saat offline: warning tetap tampil, tapi PUT gagal → tanpa
+    // queue, pelanggaran HILANG dan tidak pernah tercatat walau online kembali
+    // (jawaban punya localStorage + retry; pelanggaran sebelumnya tidak).
+    // Queue di-persist (tahan refresh saat masih offline) dan di-flush SENYAP
+    // tanpa UI tambahan: event online / interval 15 dtk / saat mount.
+    const VIOLATION_QUEUE_KEY = `exam_${examId}_pending_violations`
+    const pendingViolationsRef = useRef<{ type: string; at: number }[]>([])
+    const persistViolationQueue = () => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem(VIOLATION_QUEUE_KEY, JSON.stringify(pendingViolationsRef.current))
+        }
+    }
+
+    // Muat queue sisa refresh-saat-offline
+    useEffect(() => {
+        try {
+            pendingViolationsRef.current = JSON.parse(localStorage.getItem(VIOLATION_QUEUE_KEY) || '[]')
+        } catch { pendingViolationsRef.current = [] }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    const flushPendingViolations = async () => {
+        const sub = submissionRef.current
+        if (!sub || sub.is_submitted) return
+        if (pendingViolationsRef.current.length === 0) return
+        try {
+            const res = await fetch('/api/exam-submissions', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    submission_id: sub.id,
+                    violations: pendingViolationsRef.current,
+                })
+            })
+            const data = await res.json().catch(() => null)
+            if (data?.force_submitted) {
+                pendingViolationsRef.current = []
+                persistViolationQueue()
+                setForceSubmitted(true)
+                alert('Ulangan otomatis dikumpulkan karena pelanggaran melebihi batas!')
+                router.push('/dashboard/siswa/ulangan')
+                return
+            }
+            if (res.ok || res.status === 400 || res.status === 409) {
+                // Sukses, atau state final di server (sudah submit / kedaluwarsa) —
+                // queue tidak akan pernah diterima, bersihkan supaya tidak dicoba selamanya.
+                pendingViolationsRef.current = []
+                persistViolationQueue()
+                if (typeof data?.violation_count === 'number') setViolationCount(data.violation_count)
+            }
+            // 5xx: biarkan queue untuk retry berikutnya
+        } catch {
+            // masih offline — retry berikutnya (interval 15 dtk / event online)
+        }
+    }
+
+    // Flush berkala pelanggaran tertunda — senyap, no-op saat queue kosong.
+    // (Interval aktif selama ujian berjalan; cek panjang queue = murah.)
+    useEffect(() => {
+        if (!submission) return
+        flushPendingViolations()
+        const iv = setInterval(() => { flushPendingViolations() }, 15000)
+        return () => clearInterval(iv)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [submission])
+
     // Sync local answers to server when reconnected
     useEffect(() => {
         const handleOnline = () => {
@@ -178,6 +245,7 @@ export default function TakeExamPage() {
                 return
             }
             syncLocalToServer()
+            flushPendingViolations()
         }
 
         if (typeof window !== 'undefined') {
@@ -569,6 +637,7 @@ export default function TakeExamPage() {
                 })
             })
 
+            if (res.status >= 500) throw new Error(`server ${res.status}`)
             const data = await res.json()
 
             if (data.force_submitted) {
@@ -579,10 +648,14 @@ export default function TakeExamPage() {
                 return
             }
 
-            setViolationCount(data.violation_count)
+            if (typeof data.violation_count === 'number') setViolationCount(data.violation_count)
             // Wait to show violation warning when they return (handled in visibility handler)
-        } catch (error) {
-            console.error('Error logging violation:', error)
+        } catch {
+            // Offline / server error: antre pelanggaran (persist ke localStorage)
+            // — dikirim ulang otomatis oleh flushPendingViolations saat koneksi
+            // pulih. Tanpa ini pelanggaran hilang diam-diam.
+            pendingViolationsRef.current.push({ type, at: Date.now() })
+            persistViolationQueue()
         }
     }
 

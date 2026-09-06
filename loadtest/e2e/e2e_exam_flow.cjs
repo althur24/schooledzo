@@ -13,6 +13,8 @@
  *  - [GRADE] koreksi manual essay → total_score & is_graded update
  *  - [K1] correct_answer disembunyikan dari siswa pra-submit, muncul pasca-submit
  *  - [CLASS] siswa kelas lain ditolak saat start
+ *  - [VIOL] batch violations (queue offline): timestamp client, dedup 3 dtk,
+ *           jalur tunggal lama, force-submit saat capai max_violations
  *  - [MON] guru bisa fetch monitor (service-role read exam_answers) tanpa error
  *
  * WAJIB staging: ENV_FILE=.env.staging node loadtest/e2e/e2e_exam_flow.cjs
@@ -174,6 +176,50 @@ async function main() {
     })
     check('Autosave sukses', saveRes.status === 200, `status ${saveRes.status}`)
 
+    // ---------- 7b. VIOLATION BATCH (queue offline) + DEDUP + LEGACY TUNGGAL ----------
+    // Skenario: siswa pindah tab saat offline → warning tampil, PUT gagal →
+    // client mengantre {type, at} lalu flush batch saat online. Server harus:
+    // (a) menerima batch & memakai timestamp kejadian client, (b) dedup 3 dtk
+    // antar kejadian, (c) jalur `violation` tunggal lama tetap jalan.
+    console.log('[7b] Violation: batch (queue offline) + dedup 3 dtk + jalur tunggal lama')
+    const stAt1 = new Date(startBody.started_at).getTime()
+    await new Promise(r => setTimeout(r, 2500)) // pastikan at ≤ server now (tidak kena clamp atas)
+
+    const vBatch = await api('/api/exam-submissions', siswaA.token, {
+        method: 'PUT',
+        body: JSON.stringify({
+            submission_id: sub1Id,
+            violations: [{ type: 'TAB_SWITCH', at: stAt1 + 1000 }],
+        }),
+    })
+    const vBatchBody = await vBatch.json().catch(() => null)
+    check('Batch violations (1 entri) → violation_count 1', vBatch.status === 200 && vBatchBody?.violation_count === 1, `count=${vBatchBody?.violation_count}`)
+
+    // Entri kedua hanya 2 dtk setelah yang diterima → kena dedup 3 dtk
+    const vDedup = await api('/api/exam-submissions', siswaA.token, {
+        method: 'PUT',
+        body: JSON.stringify({
+            submission_id: sub1Id,
+            violations: [{ type: 'TAB_SWITCH', at: stAt1 + 3000 }],
+        }),
+    })
+    const vDedupBody = await vDedup.json().catch(() => null)
+    check('Entri <3 dtk dari yang diterima → dedup (count tetap)', vDedup.status === 200 && vDedupBody?.violation_count === 1, `count=${vDedupBody?.violation_count}`)
+
+    // Timestamp kejadian client tersimpan apa adanya (bukan waktu tiba di server)
+    const { data: subV1 } = await supabase.from('exam_submissions').select('violations_log').eq('id', sub1Id).single()
+    const logTs = new Date(subV1?.violations_log?.[0]?.timestamp).getTime()
+    check('violations_log memakai timestamp kejadian client', Math.abs(logTs - (stAt1 + 1000)) < 1000, `ts=${subV1?.violations_log?.[0]?.timestamp}`)
+
+    // Jalur legacy `violation` tunggal (tanpa `at`) tetap jalan — gap >3 dtk dari entri terakhir
+    await new Promise(r => setTimeout(r, 3500))
+    const vSingle = await api('/api/exam-submissions', siswaA.token, {
+        method: 'PUT',
+        body: JSON.stringify({ submission_id: sub1Id, violation: { type: 'TAB_SWITCH' } }),
+    })
+    const vSingleBody = await vSingle.json().catch(() => null)
+    check('Legacy violation tunggal → count 2 (belum force, max 3)', vSingle.status === 200 && vSingleBody?.violation_count === 2 && !vSingleBody?.force_submitted, `count=${vSingleBody?.violation_count}`)
+
     // ---------- 8. SUBMIT + PENILAIAN OTOMATIS ----------
     console.log('[8] Submit — skor otomatis (MC benar 10 + SA benar 10 = 20, essay pending)')
     const submitRes = await api('/api/exam-submissions', siswaA.token, {
@@ -219,6 +265,58 @@ async function main() {
     const qBody2 = await qRes2.json().catch(() => null)
     const allHaveKey = Array.isArray(qBody2) && qBody2.length === 4 && qBody2.every(q => q.correct_answer !== undefined)
     check('correct_answer kembali setelah submit', allHaveKey, `n=${qBody2?.length}`)
+
+    // ---------- 10b. FORCE-SUBMIT VIA BATCH VIOLATIONS (ujian kedua) ----------
+    // Skenario puncak: siswa offline pindah tab 3x (spasi >3 dtk), lalu online
+    // → flush batch 3 entri → count mencapai max_violations → force submit.
+    console.log('[10b] Batch violations mencapai max → force submit otomatis')
+    const createRes2 = await api('/api/exams', guruTok, {
+        method: 'POST',
+        body: JSON.stringify({
+            title: `${U} Ulangan Violation`, description: 'e2e force submit', start_time: startTime,
+            duration_minutes: 30, teaching_assignment_id: taA.id, is_randomized: false,
+            max_violations: 3, show_results_immediately: true,
+        }),
+    })
+    const exam2 = await createRes2.json().catch(() => null)
+    created.exams.push(exam2?.id)
+    const { data: insertedQ2, error: q2Err } = await supabase.from('exam_questions').insert({
+        exam_id: exam2.id, question_text: 'MC force', question_type: 'MULTIPLE_CHOICE',
+        options: ['A1', 'B1'], correct_answer: 'A', points: 10, order_index: 0,
+        status: 'approved', difficulty: 'MEDIUM', text_direction: 'ltr', content_format: 'plain',
+    }).select()
+    if (q2Err) throw new Error('Insert soal exam2 gagal: ' + q2Err.message)
+    created.questions.push(insertedQ2[0].id)
+    await api(`/api/exams/${exam2.id}`, guruTok, { method: 'PUT', body: JSON.stringify({ is_active: true }) })
+
+    const start2 = await api('/api/exam-submissions', siswaA.token, { method: 'POST', body: JSON.stringify({ exam_id: exam2.id }) })
+    const start2Body = await start2.json().catch(() => null)
+    created.submissions.push(start2Body?.id)
+    const sub2Id = start2Body?.id
+    const stAt2 = new Date(start2Body.started_at).getTime()
+
+    // Tunggu supaya semua `at` ≤ server now (tidak kena clamp atas yang bisa
+    // membuat dua entri bertabrakan di titik clamp → saling dimakan dedup)
+    await new Promise(r => setTimeout(r, 7000))
+
+    const vForce = await api('/api/exam-submissions', siswaA.token, {
+        method: 'PUT',
+        body: JSON.stringify({
+            submission_id: sub2Id,
+            violations: [
+                { type: 'TAB_SWITCH', at: stAt2 + 100 },
+                { type: 'TAB_SWITCH', at: stAt2 + 3200 },
+                { type: 'TAB_SWITCH', at: stAt2 + 6300 },
+            ],
+        }),
+    })
+    const vForceBody = await vForce.json().catch(() => null)
+    check('Batch 3 pelanggaran (spasi >3 dtk) → force_submitted', vForce.status === 200 && vForceBody?.force_submitted === true, `force=${vForceBody?.force_submitted}`)
+    const { data: subV2 } = await supabase.from('exam_submissions')
+        .select('violation_count, is_submitted, violations_log, submitted_at')
+        .eq('id', sub2Id).single()
+    check('DB: count 3, is_submitted, 3 entri log', subV2?.violation_count === 3 && subV2?.is_submitted === true && (subV2?.violations_log || []).length === 3,
+        `count=${subV2?.violation_count} submitted=${subV2?.is_submitted} log=${subV2?.violations_log?.length}`)
 
     // ---------- 11. [MON] GURU FETCH MONITOR ----------
     console.log('[11] [MON] Guru fetch monitor (service-role read exam_answers)')
