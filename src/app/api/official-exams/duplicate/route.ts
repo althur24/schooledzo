@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch } from '@/lib/tenantGuard'
 import { canManageOfficialExam } from '@/lib/teacherScope'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { batchedIn } from '@/lib/batchedIn'
 
 export async function POST(request: NextRequest) {
     try {
@@ -158,22 +159,25 @@ export async function POST(request: NextRequest) {
         // 5. Send notifications if remedial
         if (is_remedial && allowed_student_ids && allowed_student_ids.length > 0) {
             try {
-                const { data: students } = await supabase
-                    .from('students')
-                    .select('user_id')
-                    .in('id', allowed_student_ids)
+                // batchedIn: ratusan siswa remedial melebihi batas URL 16KB
+                const students = await batchedIn<{ user_id: string }>(
+                    'id', allowed_student_ids,
+                    (chunk) => supabase.from('students').select('user_id').in('id', chunk)
+                )
 
                 if (students && students.length > 0) {
                     const startDate = new Date(start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })
                     const labels = await getMenuLabelsForSchool(schoolId)
                     const examLabel = sourceExam.exam_type === 'UTS' ? labels.uts : labels.uas
-                    
+                    // Remedial bisa dibuat ADMIN maupun GURU — teks menyesuaikan pembuat
+                    const creator = user.role === 'GURU' ? 'Guru' : 'Admin'
+
                     await supabase.from('notifications').insert(
-                        students.map((s: any) => ({
+                        students.map((s) => ({
                             user_id: s.user_id,
                             type: 'UJIAN_RESMI', // Using existing type for official exams
                             title: `Remedial ${examLabel}: ${title}`,
-                            message: `Admin telah membuat ujian remedial untuk Anda. Dimulai pada: ${startDate}`,
+                            message: `${creator} telah membuat ujian remedial untuk Anda. Dimulai pada: ${startDate}`,
                             link: '/dashboard/siswa/ulangan'
                         }))
                     )
