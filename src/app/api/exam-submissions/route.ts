@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findExamsOutsideSchool } from '@/lib/tenantGuard'
 import { gradeAnswer, needsManualGrading } from '@/lib/questionTypeUtils'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
+import { applyRemedialPolicy } from '@/lib/remedialScore'
 import { resolveWindowExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/examExpiry'
 import { forceCloseExamSubmission } from '@/lib/autoCloseExpired'
 import { canManageExam } from '@/lib/teacherScope'
@@ -143,15 +144,19 @@ export async function GET(request: NextRequest) {
 
         let finalData = data || []
 
-        // If filtering by examId and the user is a teacher/admin, fetch remedial submissions and merge by highest score
+        // If filtering by examId and the user is a teacher/admin, fetch remedial
+        // submissions and merge by score sesuai kebijakan (HIGHEST/AVERAGE/CAP).
         if (examId && (user.role === 'GURU' || user.role === 'ADMIN')) {
             const { data: remedials } = await supabase
                 .from('exams')
-                .select('id')
+                .select('id, remedial_score_policy, remedial_max_score')
                 .eq('remedial_for_id', examId)
 
             if (remedials && remedials.length > 0) {
                 const remedialIds = remedials.map(r => r.id)
+                // Kebijakan remedial diambil dari remedial pertama (pola helper)
+                const remedialPolicy = (remedials[0] as any).remedial_score_policy
+                const remedialCap = (remedials[0] as any).remedial_max_score
                 // fetchAllRows: remedial sekelas/sekolah bisa >1000 submissions
                 const remedialSubmissions = await fetchAllRows(supabase
                     .from('exam_submissions')
@@ -175,25 +180,50 @@ export async function GET(request: NextRequest) {
                     .order('id'))
 
                 if (remedialSubmissions && remedialSubmissions.length > 0) {
-                    const studentHighestSubmissions = new Map<string, any>()
+                    const studentMerged = new Map<string, any>()
 
                     // Add all original submissions first
                     finalData.forEach((sub: any) => {
-                        studentHighestSubmissions.set(sub.student.id, sub)
+                        studentMerged.set(sub.student.id, sub)
                     })
 
-                    // Overwrite if remedial score is higher or equal
+                    // Remedial terbaik per siswa → skor final via helper kebijakan,
+                    // ditulis ke baris asli (pola sama dengan official-exam-submissions).
+                    const bestRemedialByStudent = new Map<string, any>()
                     remedialSubmissions.forEach((sub: any) => {
-                        const existing = studentHighestSubmissions.get(sub.student.id)
-                        const currentScore = ((sub.total_score || 0) / (sub.max_score || 1))
-                        const existingScore = existing ? ((existing.total_score || 0) / (existing.max_score || 1)) : -1
-
-                        if (currentScore >= existingScore) {
-                            studentHighestSubmissions.set(sub.student.id, sub)
+                        const studentId = sub.student?.id
+                        if (!studentId) return
+                        const currentScore = (sub.total_score || 0) / (sub.max_score || 1)
+                        const prev = bestRemedialByStudent.get(studentId)
+                        if (!prev || currentScore >= (prev.total_score || 0) / (prev.max_score || 1)) {
+                            bestRemedialByStudent.set(studentId, sub)
                         }
                     })
 
-                    finalData = Array.from(studentHighestSubmissions.values())
+                    bestRemedialByStudent.forEach((remSub, studentId) => {
+                        const original = studentMerged.get(studentId)
+                        const remScore = (remSub.total_score || 0) / (remSub.max_score || 1) * 100
+                        if (!original) {
+                            studentMerged.set(studentId, remSub)
+                            return
+                        }
+                        const finalScore = applyRemedialPolicy(
+                            (original.total_score || 0) / (original.max_score || 1) * 100,
+                            remScore,
+                            remedialPolicy,
+                            remedialCap,
+                        )
+                        if (finalScore !== null) {
+                            const maxScore = original.max_score || 100
+                            studentMerged.set(studentId, {
+                                ...original,
+                                total_score: Math.round(finalScore / 100 * maxScore * 10) / 10,
+                                merged_from_remedial: true,
+                            })
+                        }
+                    })
+
+                    finalData = Array.from(studentMerged.values())
                     // Sort by submitted_at again just in case (using created_at as backup if needed)
                     finalData.sort((a: any, b: any) => {
                         const dateA = a.submitted_at ? new Date(a.submitted_at).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);

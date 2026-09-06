@@ -8,6 +8,7 @@ import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
+import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import { TimeCircle as Clock, Document as FileText, Graph as BarChart3, Game as Brain, Calendar, Plus, Game, Graph, Edit, Swap } from 'react-iconly'
 import { Loader2, CheckSquare, Square, RefreshCw, Copy, CalendarDays, Clock as LuClock, FileText as LuFileText, Shuffle, Layers } from 'lucide-react'
 
@@ -86,6 +87,7 @@ export default function GuruKuisPage() {
     const [remedialStudents, setRemedialStudents] = useState<any[]>([])
     const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
     const [remedialMethod, setRemedialMethod] = useState<'ASLI' | 'BARU'>('ASLI')
+    const [remedialPolicy, setRemedialPolicy] = useState<RemedialPolicyValue>({ policy: 'HIGHEST', cap: 75 })
     const [remedialLoading, setRemedialLoading] = useState(false)
     const [remedialKkm, setRemedialKkm] = useState(75)
 
@@ -370,6 +372,7 @@ export default function GuruKuisPage() {
         setRemedialLoading(true)
         setSelectedStudentIds([])
         setRemedialMethod('ASLI')
+        setRemedialPolicy({ policy: 'HIGHEST', cap: 75 })
 
         try {
             const classId = quiz.teaching_assignment?.class?.id
@@ -390,6 +393,7 @@ export default function GuruKuisPage() {
             }
             
             setRemedialKkm(kkm)
+            setRemedialPolicy(prev => ({ ...prev, cap: kkm }))
 
             if (!classId) throw new Error('Class ID missing')
 
@@ -445,7 +449,9 @@ export default function GuruKuisPage() {
                 is_remedial: true,
                 remedial_for_id: remedialQuiz.id,
                 allowed_student_ids: selectedStudentIds,
-                duplicate_questions: remedialMethod === 'ASLI' // Custom flag to trigger backend duplication API
+                duplicate_questions: remedialMethod === 'ASLI', // Custom flag to trigger backend duplication API
+                remedial_score_policy: remedialPolicy.policy,
+                ...(remedialPolicy.policy === 'CAP' ? { remedial_max_score: remedialPolicy.cap } : {})
             }
 
             const res = await fetch('/api/quizzes', {
@@ -941,6 +947,12 @@ export default function GuruKuisPage() {
                                 </label>
                             </div>
                         </div>
+
+                        <RemedialPolicyFields
+                            value={remedialPolicy}
+                            onChange={setRemedialPolicy}
+                            capPlaceholder={remedialKkm}
+                        />
 
                         {/* Pemilihan Siswa */}
                         <div className="space-y-3">

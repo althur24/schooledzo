@@ -7,6 +7,7 @@ import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
+import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import { Plus, ChevronDown } from 'react-iconly'
 import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BookOpen, BarChart3, Copy, RefreshCw } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
@@ -191,6 +192,7 @@ export default function AdminUtsUasPage() {
     const [remedialLoading, setRemedialLoading] = useState(false)
     // Ulangan remedial: pilihan soal ASLI (disalin) atau BARU (kosong) — ala halaman guru
     const [ulanganRemedialMethod, setUlanganRemedialMethod] = useState<'ASLI' | 'BARU'>('ASLI')
+    const [remedialPolicy, setRemedialPolicy] = useState<RemedialPolicyValue>({ policy: 'HIGHEST', cap: 75 })
     const [duplicateForm, setDuplicateForm] = useState({
         title: '',
         start_time: '',
@@ -386,6 +388,7 @@ export default function AdminUtsUasPage() {
         setRemedialStudents([])
         setSelectedStudentIds([])
         setUlanganRemedialMethod('ASLI')
+        setRemedialPolicy({ policy: 'HIGHEST', cap: exam.subject?.kkm || 75 })
 
         const pad = (n: number) => n.toString().padStart(2, '0')
         const now = new Date()
@@ -529,6 +532,8 @@ export default function AdminUtsUasPage() {
                     payload.is_remedial = true
                     payload.remedial_for_id = duplicateExam.id
                     payload.allowed_student_ids = selectedStudentIds
+                    payload.remedial_score_policy = remedialPolicy.policy
+                    if (remedialPolicy.policy === 'CAP') payload.remedial_max_score = remedialPolicy.cap
                 }
                 const res = await fetch('/api/exams', {
                     method: 'POST',
@@ -553,7 +558,11 @@ export default function AdminUtsUasPage() {
                         : null,
                     target_class_ids: duplicateForm.target_class_ids,
                     is_remedial: duplicateMode === 'REMEDIAL',
-                    allowed_student_ids: duplicateMode === 'REMEDIAL' ? selectedStudentIds : null
+                    allowed_student_ids: duplicateMode === 'REMEDIAL' ? selectedStudentIds : null,
+                    ...(duplicateMode === 'REMEDIAL' ? {
+                        remedial_score_policy: remedialPolicy.policy,
+                        ...(remedialPolicy.policy === 'CAP' ? { remedial_max_score: remedialPolicy.cap } : {}),
+                    } : {})
                 }
 
                 const res = await fetch('/api/official-exams/duplicate', {
@@ -1375,6 +1384,13 @@ export default function AdminUtsUasPage() {
                                         </div>
                                     </div>
                                 )}
+                                <div className="mb-4">
+                                    <RemedialPolicyFields
+                                        value={remedialPolicy}
+                                        onChange={setRemedialPolicy}
+                                        capPlaceholder={duplicateExam?.subject?.kkm || 75}
+                                    />
+                                </div>
                                 <div className="flex items-center justify-between mb-3">
                                     <label className="block text-sm font-bold text-text-main dark:text-white">Pilih Siswa Remedial</label>
                                     <div className="text-xs text-text-secondary">

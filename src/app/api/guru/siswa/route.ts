@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { resolveKkm } from '@/lib/resolveKkm'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { mergeRemedialScores } from '@/lib/remedialScore'
 
 // batchedIn per 100 id (batas URL) + fetchAllRows per chunk: satu chunk 100 id
 // bisa mengandung >1000 baris yang otherwise terpotong diam-diam.
@@ -179,10 +180,10 @@ export async function GET(request: NextRequest) {
             )
         }
 
-        // 2. Quiz submissions
+        // 2. Quiz submissions (policy/cap untuk merge remedial)
         const quizzes = await fetchAllRows(supabase
             .from('quizzes')
-            .select('id, title, teaching_assignment_id')
+            .select('id, title, teaching_assignment_id, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score')
             .in('teaching_assignment_id', taIds)
             .order('id'))
 
@@ -202,10 +203,10 @@ export async function GET(request: NextRequest) {
             )
         }
 
-        // 3. Exam submissions
+        // 3. Exam submissions (policy/cap untuk merge remedial)
         const exams = await fetchAllRows(supabase
             .from('exams')
-            .select('id, title, teaching_assignment_id')
+            .select('id, title, teaching_assignment_id, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score')
             .in('teaching_assignment_id', taIds)
             .order('id'))
 
@@ -236,7 +237,7 @@ export async function GET(request: NextRequest) {
         if (true) {
             const { data: oeData } = await supabase
                 .from('official_exams')
-                .select('id, title, exam_type, subject_id, target_class_ids, is_remedial, remedial_for_id')
+                .select('id, title, exam_type, subject_id, target_class_ids, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score')
                 .eq('school_id', schoolId)
                 .in('subject_id', uniqueSubjectIds)
 
@@ -301,53 +302,84 @@ export async function GET(request: NextRequest) {
                     }
                 })
 
-            // Quiz scores
+            // Quiz scores — remedial merge: nilai remedial MENGGANTIKAN nilai
+            // asli per kuis dasar sesuai kebijakan (HIGHEST/AVERAGE/CAP).
+            // GAP FIX: sebelumnya tidak pernah merge.
+            const quizGroups = new Map<string, { scores: any[]; quiz: any }>()
             quizSubmissions
                 .filter((qs: any) => qs.student_id === studentId)
                 .forEach((qs: any) => {
                     const quiz = (quizzes || []).find((q) => q.id === qs.quiz_id)
-                    if (quiz) {
-                        const ta = activeAssignments.find((a) => a.id === quiz.teaching_assignment_id)
-                        const subj = ta ? unwrap(ta.subject) : null
-                        if (subj && subjectScores[subj.id]) {
-                            const score = qs.max_score > 0
-                                ? Math.round((qs.total_score / qs.max_score) * 100)
-                                : 0
-                            subjectScores[subj.id].kuis_scores.push(score)
-                        }
-                    }
+                    if (!quiz) return
+                    const baseId = quiz.remedial_for_id || quiz.id
+                    const entry = quizGroups.get(baseId) || { scores: [] as any[], quiz }
+                    entry.scores.push({
+                        score: qs.max_score > 0 ? (qs.total_score / qs.max_score) * 100 : 0,
+                        isRemedial: !!quiz.is_remedial,
+                        policy: quiz.remedial_score_policy,
+                        cap: quiz.remedial_max_score,
+                    })
+                    quizGroups.set(baseId, entry)
                 })
+            quizGroups.forEach(({ scores, quiz }) => {
+                const ta = activeAssignments.find((a) => a.id === quiz.teaching_assignment_id)
+                const subj = ta ? unwrap(ta.subject) : null
+                if (subj && subjectScores[subj.id]) {
+                    const final = mergeRemedialScores(scores)
+                    if (final !== null) subjectScores[subj.id].kuis_scores.push(Math.round(final))
+                }
+            })
 
-            // Exam scores
+            // Exam scores — remedial merge, pola sama dengan kuis.
+            // GAP FIX: sebelumnya tidak pernah merge.
+            const examGroups = new Map<string, { scores: any[]; exam: any }>()
             examSubmissions
                 .filter((es: any) => es.student_id === studentId)
                 .forEach((es: any) => {
                     const exam = (exams || []).find((e) => e.id === es.exam_id)
-                    if (exam) {
-                        const ta = activeAssignments.find((a) => a.id === exam.teaching_assignment_id)
-                        const subj = ta ? unwrap(ta.subject) : null
-                        if (subj && subjectScores[subj.id]) {
-                            subjectScores[subj.id].ulangan_scores.push(es.total_score || 0)
-                        }
-                    }
+                    if (!exam) return
+                    const baseId = exam.remedial_for_id || exam.id
+                    const entry = examGroups.get(baseId) || { scores: [] as any[], exam }
+                    entry.scores.push({
+                        score: es.total_score || 0,
+                        isRemedial: !!exam.is_remedial,
+                        policy: exam.remedial_score_policy,
+                        cap: exam.remedial_max_score,
+                    })
+                    examGroups.set(baseId, entry)
                 })
+            examGroups.forEach(({ scores, exam }) => {
+                const ta = activeAssignments.find((a) => a.id === exam.teaching_assignment_id)
+                const subj = ta ? unwrap(ta.subject) : null
+                if (subj && subjectScores[subj.id]) {
+                    const final = mergeRemedialScores(scores)
+                    if (final !== null) subjectScores[subj.id].ulangan_scores.push(Math.round(final))
+                }
+            })
 
-            // Official exam scores (UTS/UAS) — dengan remedial merge: nilai
-            // remedial MENGGANTIKAN nilai asli per ujian dasar, diambil yang
-            // tertinggi (pola sama dengan /api/grades). Tanpa ini siswa
-            // remedial menyumbang 2 skor UTS/UAS per mata pelajaran.
-            const officialBest = new Map<string, { score: number, oe: any }>()
+            // Official exam scores (UTS/UAS) — remedial merge sesuai kebijakan
+            // (HIGHEST/AVERAGE/CAP — helper terpusat). Tanpa ini siswa remedial
+            // menyumbang 2 skor UTS/UAS per mata pelajaran.
+            const officialGroups = new Map<string, { scores: any[]; oe: any }>()
             officialExamSubs
                 .filter((os: any) => os.student_id === studentId && os.is_graded && os.max_score > 0)
                 .forEach((os: any) => {
                     const oe = officialExams.find((e: any) => e.id === os.exam_id)
                     if (!oe) return
                     const baseId = oe.remedial_for_id || oe.id
-                    const score = Math.round((os.total_score / os.max_score) * 100)
-                    const prev = officialBest.get(baseId)
-                    if (!prev || score > prev.score) officialBest.set(baseId, { score, oe })
+                    const entry = officialGroups.get(baseId) || { scores: [] as any[], oe }
+                    entry.scores.push({
+                        score: (os.total_score / os.max_score) * 100,
+                        isRemedial: !!oe.is_remedial,
+                        policy: oe.remedial_score_policy,
+                        cap: oe.remedial_max_score,
+                    })
+                    officialGroups.set(baseId, entry)
                 })
-            officialBest.forEach(({ score, oe }) => {
+            officialGroups.forEach(({ scores, oe }) => {
+                const final = mergeRemedialScores(scores)
+                if (final === null) return
+                const score = Math.round(final)
                 if (subjectScores[oe.subject_id]) {
                     if (oe.exam_type === 'UTS') {
                         subjectScores[oe.subject_id].uts_scores.push(score)

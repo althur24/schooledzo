@@ -5,6 +5,7 @@ import { findTeachingAssignmentsOutsideSchool, findQuizzesOutsideSchool } from '
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { getBatchSizes } from '@/lib/examBatch'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { sanitizePolicyInput } from '@/lib/remedialScore'
 
 // GET all quizzes (filtered by teacher)
 export async function GET(request: NextRequest) {
@@ -140,10 +141,23 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { title, description, start_time, deadline, duration_minutes, available_from, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, questions, batch_id, submission_mode } = body
+        const { title, description, start_time, deadline, duration_minutes, available_from, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, questions, batch_id, submission_mode, remedial_score_policy, remedial_max_score } = body
 
         if (!title || duration_minutes === undefined || !teaching_assignment_id) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+        }
+
+        // Validasi kebijakan nilai remedial (hanya relevan saat is_remedial)
+        let policyFields: { remedial_score_policy?: string; remedial_max_score?: number } = {}
+        if (is_remedial) {
+            const sanitized = sanitizePolicyInput(remedial_score_policy, remedial_max_score)
+            if ('error' in sanitized) {
+                return NextResponse.json({ error: sanitized.error }, { status: 400 })
+            }
+            policyFields = {
+                remedial_score_policy: sanitized.policy,
+                ...(sanitized.policy === 'CAP' && sanitized.cap !== null ? { remedial_max_score: sanitized.cap } : {}),
+            }
         }
 
         // Kuis offline: tanpa soal & tanpa alur publish — langsung aktif,
@@ -199,6 +213,7 @@ export async function POST(request: NextRequest) {
                 is_remedial: is_remedial || false,
                 remedial_for_id: remedial_for_id || null,
                 allowed_student_ids: allowed_student_ids || null,
+                ...(is_remedial ? policyFields : {}),
                 batch_id: batch_id || null,
                 submission_mode: isOffline ? 'OFFLINE' : 'ONLINE'
             })

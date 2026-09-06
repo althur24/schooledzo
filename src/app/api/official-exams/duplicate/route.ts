@@ -5,6 +5,7 @@ import { tenantMismatch } from '@/lib/tenantGuard'
 import { canManageOfficialExam } from '@/lib/teacherScope'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { batchedIn } from '@/lib/batchedIn'
+import { sanitizePolicyInput } from '@/lib/remedialScore'
 
 export async function POST(request: NextRequest) {
     try {
@@ -25,11 +26,26 @@ export async function POST(request: NextRequest) {
             window_end_time,
             target_class_ids,
             is_remedial,
-            allowed_student_ids
+            allowed_student_ids,
+            remedial_score_policy,
+            remedial_max_score
         } = body
 
         if (!source_exam_id || !title || !start_time) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+        }
+
+        // Validasi kebijakan nilai remedial (hanya relevan saat is_remedial)
+        let policyFields: { remedial_score_policy?: string; remedial_max_score?: number } = {}
+        if (is_remedial) {
+            const sanitized = sanitizePolicyInput(remedial_score_policy, remedial_max_score)
+            if ('error' in sanitized) {
+                return NextResponse.json({ error: sanitized.error }, { status: 400 })
+            }
+            policyFields = {
+                remedial_score_policy: sanitized.policy,
+                ...(sanitized.policy === 'CAP' && sanitized.cap !== null ? { remedial_max_score: sanitized.cap } : {}),
+            }
         }
 
         // Validasi jendela waktu: jam tutup harus setelah jam buka
@@ -103,6 +119,7 @@ export async function POST(request: NextRequest) {
             newExamData.is_remedial = true
             newExamData.remedial_for_id = source_exam_id
             newExamData.allowed_student_ids = allowed_student_ids || null
+            Object.assign(newExamData, policyFields)
         }
 
         const { data: newExam, error: insertExamError } = await supabase

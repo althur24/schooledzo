@@ -5,6 +5,7 @@ import { tenantMismatch } from '@/lib/tenantGuard'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { logGradeChange } from '@/lib/gradeHistory'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { mergeRemedialScores } from '@/lib/remedialScore'
 
 // Create admin client to bypass RLS
 const supabase = createClient(
@@ -110,6 +111,8 @@ export async function GET(request: NextRequest) {
                         title,
                         is_remedial,
                         remedial_for_id,
+                        remedial_score_policy,
+                        remedial_max_score,
                         teaching_assignment_id,
                         teaching_assignment:teaching_assignments!inner(
                             subject:subjects(id, name)
@@ -134,6 +137,10 @@ export async function GET(request: NextRequest) {
                     exam:exams!inner(
                         id,
                         title,
+                        is_remedial,
+                        remedial_for_id,
+                        remedial_score_policy,
+                        remedial_max_score,
                         teaching_assignment_id,
                         teaching_assignment:teaching_assignments!inner(
                             subject:subjects(id, name)
@@ -189,6 +196,9 @@ export async function GET(request: NextRequest) {
                         subject_id: subject?.id,
                         quiz_id: quiz?.id,
                         remedial_for_id: quiz?.remedial_for_id || null,
+                        is_remedial: quiz?.is_remedial || false,
+                        policy: quiz?.remedial_score_policy,
+                        cap: quiz?.remedial_max_score,
                         grade_type: 'KUIS',
                         score: Math.round(score * 10) / 10,
                         subject: { name: subject?.name || '-' },
@@ -197,9 +207,9 @@ export async function GET(request: NextRequest) {
                 })
 
             // Remedial merge: nilai remedial MENGGANTIKAN (bukan menambah) nilai
-            // kuis asli — per (siswa, kuis asli) ambil skor tertinggi. Tanpa ini
-            // siswa yang lulus remedial tercatat 2 nilai KUIS di rekap/rapor
-            // (nilai gagal ikut menyeret rata-rata).
+            // kuis asli — sesuai kebijakan remedial (HIGHEST/AVERAGE/CAP, lihat
+            // src/lib/remedialScore.ts). Tanpa ini siswa yang lulus remedial
+            // tercatat 2 nilai KUIS di rekap/rapor.
             const quizGroups = new Map<string, any[]>()
             for (const m of mappedQuizzes) {
                 const base = m.remedial_for_id || m.quiz_id
@@ -208,9 +218,9 @@ export async function GET(request: NextRequest) {
                 quizGroups.get(key)!.push(m)
             }
             const mergedQuizzes = Array.from(quizGroups.values()).map(group => {
-                const original = group.find(m => !m.remedial_for_id) || group[0]
-                const best = group.reduce((a, b) => (b.score > a.score ? b : a))
-                return { ...original, score: best.score, graded_at: best.graded_at }
+                const original = group.find(m => !m.is_remedial) || group[0]
+                const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
+                return { ...original, score: final !== null ? Math.round(final * 10) / 10 : original.score }
             })
             allGrades.push(...mergedQuizzes)
 
@@ -223,13 +233,34 @@ export async function GET(request: NextRequest) {
                         id: es.id,
                         student_id: es.student_id,
                         subject_id: subject?.id,
+                        exam_id: exam?.id,
+                        remedial_for_id: exam?.remedial_for_id || null,
+                        is_remedial: exam?.is_remedial || false,
+                        policy: exam?.remedial_score_policy,
+                        cap: exam?.remedial_max_score,
                         grade_type: 'ULANGAN',
                         score: Math.round(score * 10) / 10,
                         subject: { name: subject?.name || '-' },
                         graded_at: es.submitted_at
                     }
                 })
-            allGrades.push(...mappedExams)
+
+            // Remedial merge (ULANGAN) — GAP FIX: section ini sebelumnya tidak
+            // pernah merge, siswa remedial tercatat 2 nilai di rekap/rapor.
+            // Kebijakan mengikuti ujian remedial (HIGHEST/AVERAGE/CAP).
+            const examGroups = new Map<string, any[]>()
+            for (const m of mappedExams) {
+                const base = m.remedial_for_id || m.exam_id
+                const key = `${m.student_id}:${base}`
+                if (!examGroups.has(key)) examGroups.set(key, [])
+                examGroups.get(key)!.push(m)
+            }
+            const mergedExams = Array.from(examGroups.values()).map(group => {
+                const original = group.find(m => !m.is_remedial) || group[0]
+                const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
+                return { ...original, score: final !== null ? Math.round(final * 10) / 10 : original.score }
+            })
+            allGrades.push(...mergedExams)
 
             // 4. Fetch Official Exam Grades (UTS / UAS) — scoped to this school only.
             //    Year filter is intentionally NOT applied here (same as before).
@@ -248,6 +279,8 @@ export async function GET(request: NextRequest) {
                         exam_type,
                         is_remedial,
                         remedial_for_id,
+                        remedial_score_policy,
+                        remedial_max_score,
                         subject_id,
                         subject:subjects(id, name),
                         school_id,
@@ -277,6 +310,9 @@ export async function GET(request: NextRequest) {
                         subject_id: subject?.id,
                         exam_id: exam?.id,
                         remedial_for_id: exam?.remedial_for_id || null,
+                        is_remedial: exam?.is_remedial || false,
+                        policy: exam?.remedial_score_policy,
+                        cap: exam?.remedial_max_score,
                         grade_type: exam?.exam_type || 'UTS', // 'UTS' or 'UAS'
                         score: Math.round(score * 10) / 10,
                         subject: { name: subject?.name || '-' },
@@ -284,10 +320,8 @@ export async function GET(request: NextRequest) {
                     }
                 })
 
-            // Remedial merge (UTS/UAS) — identik pola merge kuis di atas: nilai
-            // remedial MENGGANTIKAN nilai asli (bukan menambah) per (siswa,
-            // ujian dasar), diambil yang tertinggi. Tanpa ini siswa remedial
-            // tercatat 2 nilai UTS/UAS di rekap/rapor dan rata-ratanya terseret.
+            // Remedial merge (UTS/UAS): nilai remedial MENGGANTIKAN nilai asli
+            // per (siswa, ujian dasar) sesuai kebijakan (HIGHEST/AVERAGE/CAP).
             const officialGroups = new Map<string, any[]>()
             for (const m of mappedOfficial) {
                 const base = m.remedial_for_id || m.exam_id
@@ -296,9 +330,9 @@ export async function GET(request: NextRequest) {
                 officialGroups.get(key)!.push(m)
             }
             const mergedOfficial = Array.from(officialGroups.values()).map(group => {
-                const original = group.find(m => !m.remedial_for_id) || group[0]
-                const best = group.reduce((a, b) => (b.score > a.score ? b : a))
-                return { ...original, score: best.score, graded_at: best.graded_at }
+                const original = group.find(m => !m.is_remedial) || group[0]
+                const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
+                return { ...original, score: final !== null ? Math.round(final * 10) / 10 : original.score }
             })
             allGrades.push(...mergedOfficial)
 

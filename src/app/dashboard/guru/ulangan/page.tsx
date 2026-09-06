@@ -9,6 +9,7 @@ import Card from '@/components/ui/Card'
 import ExamCard from '@/components/exam/ExamCard'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import TimeWindowFields from '@/components/TimeWindowFields'
+import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
@@ -126,6 +127,7 @@ export default function GuruUlanganPage() {
     const [remedialStudents, setRemedialStudents] = useState<any[]>([])
     const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
     const [remedialMethod, setRemedialMethod] = useState<'ASLI' | 'BARU'>('ASLI')
+    const [remedialPolicy, setRemedialPolicy] = useState<RemedialPolicyValue>({ policy: 'HIGHEST', cap: 75 })
     const [remedialLoading, setRemedialLoading] = useState(false)
     const [remedialStartTime, setRemedialStartTime] = useState('')
     const [remedialKkm, setRemedialKkm] = useState(75)
@@ -138,6 +140,7 @@ export default function GuruUlanganPage() {
     const [officialRemedialLoading, setOfficialRemedialLoading] = useState(false)
     const [officialRemedialCreating, setOfficialRemedialCreating] = useState(false)
     const [officialRemedialKkm, setOfficialRemedialKkm] = useState(75)
+    const [officialRemedialPolicy, setOfficialRemedialPolicy] = useState<RemedialPolicyValue>({ policy: 'HIGHEST', cap: 75 })
     const [officialRemedialForm, setOfficialRemedialForm] = useState({
         title: '',
         start_time: '',
@@ -558,6 +561,7 @@ export default function GuruUlanganPage() {
         setShowOfficialRemedial(true)
         setOfficialRemedialLoading(true)
         setOfficialRemedialSelectedIds([])
+        setOfficialRemedialPolicy({ policy: 'HIGHEST', cap: 75 })
         setOfficialRemedialForm({
             title: `Remedial ${exam.title}`,
             start_time: '',
@@ -587,6 +591,7 @@ export default function GuruUlanganPage() {
                 console.error('Failed to fetch granular KKM', e)
             }
             setOfficialRemedialKkm(kkm)
+            setOfficialRemedialPolicy(prev => ({ ...prev, cap: kkm }))
 
             // Submissions guru-scoped (endpoint sudah filter mapel+kelas diajar,
             // termasuk merge nilai remedial terbaik bila sudah pernah remedial)
@@ -648,6 +653,8 @@ export default function GuruUlanganPage() {
                     target_class_ids: targetClassIds,
                     is_remedial: true,
                     allowed_student_ids: officialRemedialSelectedIds,
+                    remedial_score_policy: officialRemedialPolicy.policy,
+                    ...(officialRemedialPolicy.policy === 'CAP' ? { remedial_max_score: officialRemedialPolicy.cap } : {}),
                 })
             })
             const data = await res.json().catch(() => null)
@@ -672,6 +679,7 @@ export default function GuruUlanganPage() {
         setRemedialLoading(true)
         setSelectedStudentIds([])
         setRemedialMethod('ASLI')
+        setRemedialPolicy({ policy: 'HIGHEST', cap: 75 })
         setRemedialStartTime('')
 
         try {
@@ -691,8 +699,9 @@ export default function GuruUlanganPage() {
             } catch (e) {
                 console.error('Failed to fetch granular KKM', e)
             }
-            
+
             setRemedialKkm(kkm)
+            setRemedialPolicy(prev => ({ ...prev, cap: kkm }))
 
             if (!classId) throw new Error('Class ID missing')
 
@@ -750,7 +759,9 @@ export default function GuruUlanganPage() {
                 is_remedial: true,
                 remedial_for_id: remedialExam.id,
                 allowed_student_ids: selectedStudentIds,
-                duplicate_questions: remedialMethod === 'ASLI'
+                duplicate_questions: remedialMethod === 'ASLI',
+                remedial_score_policy: remedialPolicy.policy,
+                ...(remedialPolicy.policy === 'CAP' ? { remedial_max_score: remedialPolicy.cap } : {})
             }
 
             const res = await fetch('/api/exams', {
@@ -1315,6 +1326,11 @@ export default function GuruUlanganPage() {
                             }))}
                             durationRequired
                         />
+                        <RemedialPolicyFields
+                            value={officialRemedialPolicy}
+                            onChange={setOfficialRemedialPolicy}
+                            capPlaceholder={officialRemedialKkm}
+                        />
                         <div className="space-y-3">
                             <div className="flex items-center justify-between">
                                 <label className="block text-sm font-bold text-text-main dark:text-white">
@@ -1547,6 +1563,12 @@ export default function GuruUlanganPage() {
                                 </label>
                             </div>
                         </div>
+
+                        <RemedialPolicyFields
+                            value={remedialPolicy}
+                            onChange={setRemedialPolicy}
+                            capPlaceholder={remedialKkm}
+                        />
 
                         <div className="space-y-3">
                             <div className="flex items-center justify-between">

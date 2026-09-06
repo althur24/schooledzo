@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { mergeRemedialScores } from '@/lib/remedialScore'
 
 // M2: Service Role Key required — analytics needs cross-table reads that RLS blocks for anon role.
 // Access restricted to ADMIN only.
@@ -124,9 +125,10 @@ export async function GET(request: NextRequest) {
 
         // Get quizzes (scoped by year's TAs) — inner join instead of .in(taIds):
         // ratusan TA id overflow limit 16KB header (pola Fase 1)
+        // (is_remedial/remedial_for_id/policy/cap untuk merge nilai remedial)
         const { data: quizzes } = await supabase
             .from('quizzes')
-            .select('id, teaching_assignment_id, teaching_assignment:teaching_assignments!inner(academic_year_id)')
+            .select('id, teaching_assignment_id, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score, teaching_assignment:teaching_assignments!inner(academic_year_id)')
             .eq('teaching_assignment.academic_year_id', academicYearId)
 
         const quizIds = (quizzes || []).map(q => q.id)
@@ -142,9 +144,10 @@ export async function GET(request: NextRequest) {
         )
 
         // Get exams (scoped by year's TAs) — inner join, pola sama seperti quizzes
+        // (is_remedial/remedial_for_id/policy/cap untuk merge nilai remedial)
         const { data: exams } = await supabase
             .from('exams')
-            .select('id, teaching_assignment_id, teaching_assignment:teaching_assignments!inner(academic_year_id)')
+            .select('id, teaching_assignment_id, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score, teaching_assignment:teaching_assignments!inner(academic_year_id)')
             .eq('teaching_assignment.academic_year_id', academicYearId)
 
         const examIds = (exams || []).map(e => e.id)
@@ -160,10 +163,10 @@ export async function GET(request: NextRequest) {
         )
 
         // Get official exams (UTS/UAS) for this academic year
-        // (is_remedial + remedial_for_id dibutuhkan untuk merge nilai remedial)
+        // (is_remedial + remedial_for_id + policy/cap dibutuhkan untuk merge nilai remedial)
         const { data: officialExams } = await supabase
             .from('official_exams')
-            .select('id, subject_id, target_class_ids, is_remedial, remedial_for_id')
+            .select('id, subject_id, target_class_ids, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score')
             .eq('school_id', schoolId)
             .eq('academic_year_id', academicYearId)
 
@@ -244,53 +247,90 @@ export async function GET(request: NextRequest) {
             addGrade(ta.class_id, ta.subject_id, sub.student_id, grade.score)
         })
 
-        // Process quiz submissions
+        // Process quiz submissions — remedial merge: nilai remedial MENGGANTIKAN
+        // nilai asli per (siswa, kuis dasar) sesuai kebijakan (HIGHEST/AVERAGE/CAP).
+        // GAP FIX: sebelumnya tidak pernah merge → siswa remedial menyumbang 2 skor.
+        const quizBest = new Map<string, { scores: any[] }>()
         quizSubmissions?.forEach(qs => {
-            // Calculate percentage score (total_score / max_score * 100)
+            const quiz = quizzes?.find(q => q.id === qs.quiz_id)
+            if (!quiz) return
+
             const quizScore = qs.max_score > 0
                 ? (qs.total_score / qs.max_score) * 100
                 : qs.total_score
-
             if (quizScore === null || quizScore === undefined) return
 
-            const quiz = quizzes?.find(q => q.id === qs.quiz_id)
+            const baseQuizId = (quiz as any).remedial_for_id || quiz.id
+            const key = `${qs.student_id}:${baseQuizId}`
+            const entry = quizBest.get(key) || { scores: [] as any[] }
+            entry.scores.push({
+                score: quizScore,
+                isRemedial: !!(quiz as any).is_remedial,
+                policy: (quiz as any).remedial_score_policy,
+                cap: (quiz as any).remedial_max_score,
+            })
+            quizBest.set(key, entry)
+        })
+        quizBest.forEach((entry, key) => {
+            const [studentId, baseQuizId] = key.split(':')
+            const quiz = quizzes?.find(q => q.id === baseQuizId)
             if (!quiz) return
 
             const ta = teachingAssignments?.find(t => t.id === quiz.teaching_assignment_id)
             if (!ta) return
 
             // Year-aware membership: was this student enrolled in this class this year?
-            if (!classRoster.get(ta.class_id)?.has(qs.student_id)) return
+            if (!classRoster.get(ta.class_id)?.has(studentId)) return
 
-            addGrade(ta.class_id, ta.subject_id, qs.student_id, quizScore)
+            const final = mergeRemedialScores(entry.scores)
+            if (final === null) return
+            addGrade(ta.class_id, ta.subject_id, studentId, final)
         })
 
-        // Process exam submissions
+        // Process exam submissions — remedial merge, pola sama dengan kuis di atas.
+        // GAP FIX: sebelumnya tidak pernah merge.
+        const examBest = new Map<string, { scores: any[] }>()
         examSubmissions?.forEach(es => {
-            // Calculate percentage score (total_score / max_score * 100)
+            const exam = exams?.find(e => e.id === es.exam_id)
+            if (!exam) return
+
             const examScore = es.max_score > 0
                 ? (es.total_score / es.max_score) * 100
                 : es.total_score
-
             if (examScore === null || examScore === undefined) return
 
-            const exam = exams?.find(e => e.id === es.exam_id)
+            const baseExamId = (exam as any).remedial_for_id || exam.id
+            const key = `${es.student_id}:${baseExamId}`
+            const entry = examBest.get(key) || { scores: [] as any[] }
+            entry.scores.push({
+                score: examScore,
+                isRemedial: !!(exam as any).is_remedial,
+                policy: (exam as any).remedial_score_policy,
+                cap: (exam as any).remedial_max_score,
+            })
+            examBest.set(key, entry)
+        })
+        examBest.forEach((entry, key) => {
+            const [studentId, baseExamId] = key.split(':')
+            const exam = exams?.find(e => e.id === baseExamId)
             if (!exam) return
 
             const ta = teachingAssignments?.find(t => t.id === exam.teaching_assignment_id)
             if (!ta) return
 
             // Year-aware membership: was this student enrolled in this class this year?
-            if (!classRoster.get(ta.class_id)?.has(es.student_id)) return
+            if (!classRoster.get(ta.class_id)?.has(studentId)) return
 
-            addGrade(ta.class_id, ta.subject_id, es.student_id, examScore)
+            const final = mergeRemedialScores(entry.scores)
+            if (final === null) return
+            addGrade(ta.class_id, ta.subject_id, studentId, final)
         })
 
         // Process official exam (UTS/UAS) submissions.
         // Remedial merge: nilai remedial MENGGANTIKAN nilai asli per (siswa,
-        // ujian dasar) — diambil yang tertinggi (pola sama dengan /api/grades).
+        // ujian dasar) sesuai kebijakan (HIGHEST/AVERAGE/CAP — helper terpusat).
         // Tanpa ini siswa remedial menyumbang 2 skor UTS/UAS ke rata-rata kelas.
-        const officialBest = new Map<string, { studentId: string, baseExamId: string, score: number }>()
+        const officialGroups = new Map<string, { scores: any[] }>()
         officialExamSubmissions?.forEach(os => {
             const officialExam = officialExams?.find(oe => oe.id === os.exam_id)
             if (!officialExam) return
@@ -302,12 +342,17 @@ export async function GET(request: NextRequest) {
 
             const baseExamId = (officialExam as any).remedial_for_id || officialExam.id
             const key = `${os.student_id}:${baseExamId}`
-            const prev = officialBest.get(key)
-            if (!prev || score > prev.score) {
-                officialBest.set(key, { studentId: os.student_id, baseExamId, score })
-            }
+            const entry = officialGroups.get(key) || { scores: [] as any[] }
+            entry.scores.push({
+                score,
+                isRemedial: !!(officialExam as any).is_remedial,
+                policy: (officialExam as any).remedial_score_policy,
+                cap: (officialExam as any).remedial_max_score,
+            })
+            officialGroups.set(key, entry)
         })
-        officialBest.forEach(({ studentId, baseExamId, score }) => {
+        officialGroups.forEach((entry, key) => {
+            const [studentId, baseExamId] = key.split(':')
             const baseExam = officialExams?.find(oe => oe.id === baseExamId)
             if (!baseExam) return
 
@@ -319,8 +364,11 @@ export async function GET(request: NextRequest) {
             // Only process if the student's class that year is among the exam's target classes
             if (!baseExam.target_class_ids?.includes(studentClass)) return
 
+            const final = mergeRemedialScores(entry.scores)
+            if (final === null) return
+
             // Attribute the grade to that class + the exam's subject
-            addGrade(studentClass, baseExam.subject_id, studentId, score)
+            addGrade(studentClass, baseExam.subject_id, studentId, final)
         })
 
         // Build result
