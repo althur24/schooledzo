@@ -10,6 +10,8 @@ import { sanitizePolicyInput } from '@/lib/remedialScore'
 
 // GET all exams
 export async function GET(request: NextRequest) {
+    // SISWA: id siswa untuk filter remedial (null = bukan siswa → tanpa filter)
+    let remedialStudentId: string | null = null
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
@@ -63,12 +65,15 @@ export async function GET(request: NextRequest) {
                 if (user.role === 'SISWA') {
                     const { data: student } = await supabase
                         .from('students')
-                        .select('class_id')
+                        .select('id, class_id')
                         .eq('user_id', user.id)
                         .single()
 
                     if (student?.class_id) {
                         query = query.eq('teaching_assignment.class_id', student.class_id)
+                        // Remedial: siswa hanya melihat remedial miliknya
+                        // (mirror /api/official-exams) — post-fetch di bawah.
+                        remedialStudentId = (student as any).id
                     } else {
                         // Student has no valid class -> returns empty list
                         return NextResponse.json([])
@@ -98,26 +103,38 @@ export async function GET(request: NextRequest) {
 
         if (error) throw error
 
+        // SISWA: buang remedial yang bukan miliknya (ulangan remedial hanya
+        // terlihat oleh siswa terdaftar — guard attempt sudah menolak siswa
+        // lain, ini mencegah item tak bisa dikerjakan tampil di daftar).
+        const visibleData = remedialStudentId
+            ? (data || []).filter((e: any) => !(e.is_remedial && Array.isArray(e.allowed_student_ids) && e.allowed_student_ids.length > 0 && !e.allowed_student_ids.includes(remedialStudentId)))
+            : (data || [])
+
         // Label pembuat (untuk badge "Dibuatkan Admin" di daftar guru)
         let roleMap = new Map<string, string>()
-        const creatorIds = [...new Set((data || []).map((e: any) => e.created_by).filter(Boolean))] as string[]
+        const creatorIds = [...new Set(visibleData.map((e: any) => e.created_by).filter(Boolean))] as string[]
         if (creatorIds.length > 0) {
             const { data: creators } = await supabase.from('users').select('id, role').in('id', creatorIds)
             roleMap = new Map((creators || []).map((c: any) => [c.id, c.role]))
         }
 
         // Ukuran batch (untuk badge "N Kelas Paralel" di daftar guru)
-        const batchIds = [...new Set((data || []).map((e: any) => e.batch_id).filter(Boolean))] as string[]
+        const batchIds = [...new Set(visibleData.map((e: any) => e.batch_id).filter(Boolean))] as string[]
         const batchSizes = await getBatchSizes('exams', batchIds)
 
         // Add question count
-        const examsWithCount = data?.map(exam => ({
+        const examsWithCount = visibleData.map(exam => ({
             ...exam,
             question_count: exam.exam_questions?.length || 0,
             exam_questions: undefined,
             creator_role: exam.created_by ? roleMap.get(exam.created_by) || null : null,
             batch_size: exam.batch_id ? batchSizes.get(exam.batch_id) || 1 : 1
         }))
+
+        // SISWA: jangan bocorkan allowed_student_ids (daftar "siapa yang remedial")
+        if (user.role === 'SISWA') {
+            examsWithCount.forEach((e: any) => { delete (e as any).allowed_student_ids })
+        }
 
         return NextResponse.json(examsWithCount)
     } catch (error) {

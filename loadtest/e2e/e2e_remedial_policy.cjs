@@ -12,6 +12,10 @@
  *  [8] Analytics class-grades: skor merge (grade_count=1) untuk ketiga jenis
  *  [9] guru/siswa: skor merge di kuis_scores/ulangan_scores/uts_scores
  *  [10] Halaman hasil guru (teacher_view): skor final sesuai policy
+ *  [11] Visibilitas: siswa non-peserta TIDAK melihat remedial kuis/ulangan
+ *       di daftar (GET /api/quizzes & /api/exams); allowed_student_ids tidak
+ *       bocor; dashboard wali: recentQuizzes/recentExams ter-merge sesuai
+ *       kebijakan (1 entri per ujian, skor final — bukan dobel hitung).
  *
  * Jalankan: ENV_FILE=.env.staging node loadtest/e2e/e2e_remedial_policy.cjs
  */
@@ -77,6 +81,11 @@ async function main() {
     const s1 = await mkStudent('s1')
     const s2 = await mkStudent('s2')
     const s3 = await mkStudent('s3')
+
+    // Wali terhubung ke s1 (untuk verifikasi merge di parent dashboard)
+    const waliUser = await mustInsert(supabase, 'users', { username: `${U}_wali`, full_name: `${U} Wali`, password_hash: passHash, role: 'WALI', school_id: school.id, must_change_password: false, is_locked: false }, 'user wali')
+    created.users.push(waliUser.id)
+    await supabase.from('students').update({ parent_user_id: waliUser.id }).eq('id', s1.id)
 
     const pastStart = new Date(Date.now() - 3 * 3600000).toISOString()
     const pastSubmit = new Date(Date.now() - 2 * 3600000).toISOString()
@@ -269,6 +278,47 @@ async function main() {
     const hasilOfficial = hasilOfficialRes.ok ? await hasilOfficialRes.json() : []
     const s1OffHasil = (Array.isArray(hasilOfficial) ? hasilOfficial : []).find(s => s.student?.id === s1.id)
     check('hasil UTS guru: s1 total_score = 70 (CAP)', s1OffHasil?.total_score === 70, `score=${s1OffHasil?.total_score}`)
+
+    // ════════ [11] VISIBILITAS & WALI ════════
+    console.log('\n[11] Visibilitas remedial di daftar siswa + merge di dashboard wali')
+    // Siswa non-peserta (s3) tidak melihat remedial kuis/ulangan di daftarnya
+    const tokS3 = await doLogin(`${U}_s3`)
+    const tokS1 = await doLogin(`${U}_s1`)
+    check('login siswa s1 & s3', !!(tokS3 && tokS1))
+
+    const s3QuizzesRes = await api('/api/quizzes', tokS3)
+    const s3Quizzes = s3QuizzesRes.ok ? await s3QuizzesRes.json() : []
+    const s3SeesRemQuiz = (Array.isArray(s3Quizzes) ? s3Quizzes : []).some(q => q.id === remQuiz.id)
+    check('s3 (non-peserta) TIDAK melihat remedial kuis di daftar', !s3SeesRemQuiz)
+
+    const s3ExamsRes = await api('/api/exams', tokS3)
+    const s3Exams = s3ExamsRes.ok ? await s3ExamsRes.json() : []
+    const s3SeesRemExam = (Array.isArray(s3Exams) ? s3Exams : []).some(e => e.id === remExam.id)
+    check('s3 (non-peserta) TIDAK melihat remedial ulangan di daftar', !s3SeesRemExam)
+
+    const s1ExamsRes = await api('/api/exams', tokS1)
+    const s1Exams = s1ExamsRes.ok ? await s1ExamsRes.json() : []
+    const s1SeesRemExam = (Array.isArray(s1Exams) ? s1Exams : []).some(e => e.id === remExam.id)
+    check('s1 (peserta) melihat remedial ulangannya', s1SeesRemExam)
+
+    // Privacy: allowed_student_ids tidak bocor ke siswa
+    const s3QuizLeak = (Array.isArray(s3Quizzes) ? s3Quizzes : []).some(q => 'allowed_student_ids' in q)
+    check('allowed_student_ids tidak bocor di respons siswa', !s3QuizLeak)
+
+    // Dashboard wali: recentQuizzes/recentExams ter-merge sesuai kebijakan
+    const tokWali = await doLogin(waliUser.username)
+    check('login wali', !!tokWali)
+    const parentRes = await api('/api/parent/dashboard', tokWali)
+    const parentData = parentRes.ok ? await parentRes.json() : null
+    const waliQuizzes = parentData?.child?.recentQuizzes || parentData?.recentQuizzes || []
+    const waliExams = parentData?.child?.recentExams || parentData?.recentExams || []
+    // s1: kuis asli + remedial AVERAGE → 1 entri skor 60 (bukan 2 entri 40+80)
+    const waliKuisAsli = waliQuizzes.filter(q => q.title === `${U} Kuis Asli`)
+    check('wali: kuis asli = 1 entri (merge, bukan 2)', waliKuisAsli.length === 1, `n=${waliKuisAsli.length}`)
+    check('wali: skor kuis = 60 (AVERAGE, bukan rata 40&80=60 dobel-entri)', waliKuisAsli[0]?.score === 60, `score=${waliKuisAsli[0]?.score}`)
+    // s1: ulangan asli + remedial HIGHEST → 1 entri skor 80
+    const waliUlanganAsli = waliExams.filter(e => e.title === `${U} Ulangan Asli`)
+    check('wali: ulangan asli = 1 entri, skor 80 (HIGHEST)', waliUlanganAsli.length === 1 && waliUlanganAsli[0]?.score === 80, `n=${waliUlanganAsli.length} score=${waliUlanganAsli[0]?.score}`)
 
     // ---------- RINGKASAN ----------
     console.log('\n════ RINGKASAN ════')

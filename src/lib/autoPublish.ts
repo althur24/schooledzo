@@ -164,11 +164,38 @@ async function sendPublishNotifications(source: 'quiz' | 'exam', parent: any) {
             const classData = parent.teaching_assignment.class as any
             const schoolId = Array.isArray(classData) ? classData[0]?.school_id : classData?.school_id
 
+            // Remedial: notifikasi HANYA ke siswa terdaftar (allowed_student_ids) —
+            // bukan seluruh kelas. Tanpa ini judul "[Remedial] ..." bocor ke
+            // seluruh kelas dan non-peserta dapat spam untuk kuis yang tidak
+            // bisa mereka kerjakan.
+            if ((parent as any).is_remedial && Array.isArray((parent as any).allowed_student_ids) && (parent as any).allowed_student_ids.length > 0) {
+                const { data: remedialStudents } = await supabase
+                    .from('students')
+                    .select('user_id')
+                    .in('id', (parent as any).allowed_student_ids)
+
+                if (remedialStudents && remedialStudents.length > 0) {
+                    const subjectName = parent.teaching_assignment.subject?.name || ''
+                    const startDate = parent.start_time ? ` Mulai: ${new Date(parent.start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}` : ''
+
+                    await supabase.from('notifications').insert(
+                        remedialStudents.map((s: any) => ({
+                            user_id: s.user_id || '',
+                            type: typeEnum,
+                            title: `${titleType} Remedial: ${parent.title}`,
+                            message: `${subjectName} - ${parent.duration_minutes || 0} menit.${startDate}`,
+                            link
+                        }))
+                    )
+                }
+                return
+            }
+
             let yearQuery = supabase
                 .from('academic_years')
                 .select('id')
                 .eq('is_active', true)
-            
+
             if (schoolId) {
                 yearQuery = yearQuery.eq('school_id', schoolId)
             }

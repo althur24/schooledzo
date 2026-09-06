@@ -127,7 +127,7 @@ async function sendDeadlineReminders(user: AuthUser, counter: Counter) {
                 // (kecuali kuis offline — tidak ada yang harus dikerjakan siswa)
                 const { data: urgentQuizzes } = await supabase
                     .from('quizzes')
-                    .select('id, title, deadline')
+                    .select('id, title, deadline, is_remedial, allowed_student_ids')
                     .in('teaching_assignment_id', taIds)
                     .eq('is_active', true)
                     .neq('submission_mode', 'OFFLINE')
@@ -138,6 +138,12 @@ async function sendDeadlineReminders(user: AuthUser, counter: Counter) {
                 if (urgentQuizzes && urgentQuizzes.length > 0) {
                     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
                     for (const quiz of urgentQuizzes) {
+                        // Remedial: hanya siswa terdaftar yang diingatkan — siswa
+                        // lain di kelas tidak melihat (dan tidak bisa mengerjakan)
+                        // kuis remedial ini.
+                        if ((quiz as any).is_remedial && Array.isArray((quiz as any).allowed_student_ids) && (quiz as any).allowed_student_ids.length > 0) {
+                            if (!(quiz as any).allowed_student_ids.includes((student as any).id)) continue
+                        }
                         // Skip jika siswa sudah MENGUMPULKAN — cukup membuka kuis
                         // (attempt berjalan) TIDAK boleh meniadakan reminder:
                         // siswa yang buka lalu pergi justru yang paling perlu diingatkan.

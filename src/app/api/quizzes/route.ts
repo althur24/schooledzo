@@ -9,6 +9,8 @@ import { sanitizePolicyInput } from '@/lib/remedialScore'
 
 // GET all quizzes (filtered by teacher)
 export async function GET(request: NextRequest) {
+    // SISWA: id siswa untuk filter remedial (null = bukan siswa → tanpa filter)
+    let remedialStudentId: string | null = null
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
@@ -78,12 +80,16 @@ export async function GET(request: NextRequest) {
                 // STRICT FILTERING FOR SISWA: hanya kuis kelasnya sendiri
                 const { data: student } = await supabase
                     .from('students')
-                    .select('class_id')
+                    .select('id, class_id')
                     .eq('user_id', user.id)
                     .single()
 
                 if (student?.class_id) {
                     query = query.eq('teaching_assignment.class_id', student.class_id)
+                    // Remedial: siswa hanya melihat remedial yang memang
+                    // ditugaskan padanya (mirror /api/official-exams) —
+                    // post-fetch karena kombinasi filter array PostgREST rumit.
+                    remedialStudentId = (student as any).id
                 } else {
                     // Student has no valid class -> returns empty list
                     return NextResponse.json([])
@@ -109,10 +115,17 @@ export async function GET(request: NextRequest) {
 
         if (error) throw error
 
+        // SISWA: buang remedial yang bukan miliknya (kuis remedial hanya
+        // terlihat oleh siswa terdaftar — guard attempt sudah menolak siswa
+        // lain, ini mencegah item tak bisa dikerjakan tampil di daftar).
+        const visibleData = remedialStudentId
+            ? (data || []).filter((q: any) => !(q.is_remedial && Array.isArray(q.allowed_student_ids) && q.allowed_student_ids.length > 0 && !q.allowed_student_ids.includes(remedialStudentId)))
+            : (data || [])
+
         // Ukuran batch (untuk badge "N Kelas Paralel" di daftar guru)
-        const batchIds = [...new Set((data || []).map((q: any) => q.batch_id).filter(Boolean))] as string[]
+        const batchIds = [...new Set(visibleData.map((q: any) => q.batch_id).filter(Boolean))] as string[]
         const batchSizes = await getBatchSizes('quizzes', batchIds)
-        const quizzesWithBatch = (data || []).map(quiz => ({
+        const quizzesWithBatch = visibleData.map(quiz => ({
             ...quiz,
             batch_size: quiz.batch_id ? batchSizes.get(quiz.batch_id) || 1 : 1
         }))
