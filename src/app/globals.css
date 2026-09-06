@@ -41,19 +41,18 @@
 }
 
 /*
- * Scrollbar tipis global — hanya di desktop (mouse/trackpad).
+ * Scrollbar klasik global (selalu terlihat & bisa diseret) — hanya di desktop.
+ *
+ * PENTING: JANGAN set `scrollbar-width`/`scrollbar-color` pada elemen yang
+ * ingin pakai styling `::-webkit-scrollbar` di bawah — di Chrome/Edge 121+
+ * property tersebut mengaktifkan scrollbar overlay gaya-Firefox yang
+ * AUTO-HIDE saat diam, dan membuat aturan ::-webkit-scrollbar diabaikan.
+ * Styling ::-webkit-scrollbar custom memaksa scrollbar klasik (non-overlay)
+ * yang selalu tampil — penting untuk pengguna dengan roda mouse rusak.
  * `pointer: fine` hanya match pada pointer presisi, jadi mobile tetap
- * tanpa scrollbar (overlay bawaan OS). `:where(*)` ber-spec 0, sehingga
- * override yang ada (inline scrollbar-width, .hide-scrollbar) tetap menang.
- * Penting untuk pengguna dengan roda mouse rusak: scrollbar selalu
- * terlihat & bisa diseret di semua area scrollable desktop.
+ * memakai scrollbar overlay bawaan OS.
  */
 @media (pointer: fine) {
-  :where(*) {
-    scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 transparent;
-  }
-
   :where(*)::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -73,6 +72,18 @@
 
   :where(*)::-webkit-scrollbar-track {
     background: transparent;
+  }
+}
+
+/*
+ * Fallback Firefox (tidak mendukung ::-webkit-scrollbar).
+ * Firefox macOS tetap overlay — keterbatasan browser, tidak bisa dipaksa
+ * via CSS. scrollbar-color memberi warna thumb yang serupa.
+ */
+@supports not selector(::-webkit-scrollbar) {
+  :where(*) {
+    scrollbar-width: auto;
+    scrollbar-color: #cbd5e1 #f1f5f9;
   }
 }
 

@@ -504,7 +504,7 @@ export default function TutorialFAB() {
                     </div>
 
                     {/* Tutorial List */}
-                    <div className="max-h-[50vh] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                    <div className="max-h-[50vh] overflow-y-auto">
                         {tutorialDefinitions.map((tutorial) => {
                             const isCompleted = completedIds.has(tutorial.id)
                             const isDetailOnly = tutorial.requiresDetailPage && !(

@@ -281,7 +281,7 @@ function SiswaPageContent() {
             {data.classes.length > 1 && (
                 <div
                     className="flex gap-2 pb-1 -mx-1 px-1"
-                    style={{ overflowX: 'auto', scrollbarWidth: 'thin' }}
+                    style={{ overflowX: 'auto' }}
                 >
                     {data.classes.map((cls: any) => {
                         const active = cls.id === data.current_class_id

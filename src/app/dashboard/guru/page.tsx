@@ -466,7 +466,7 @@ export default function GuruDashboard() {
                     </div>
                     <div
                         className="flex gap-4 pb-3 -mx-1 px-1"
-                        style={{ overflowX: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#a1a1aa transparent' }}
+                        style={{ overflowX: 'auto' }}
                     >
                         {myClasses.map((cls) => (
                             <Link
