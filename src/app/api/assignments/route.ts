@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
-import { findTeachingAssignmentsOutsideSchool } from '@/lib/tenantGuard'
+import { findTeachingAssignmentsOutsideSchool, notFound } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { validateAttachments } from '@/lib/validateAttachments'
 
 // batchedIn per 100 id (batas URL) + fetchAllRows per chunk: satu chunk 100 id
 // bisa mengandung >1000 baris submissions yang otherwise terpotong diam-diam.
@@ -161,6 +162,40 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
         }
 
+        // Lampiran harus array berbentuk valid (anti-XSS: url wajib http/https)
+        const checkedAttachments = validateAttachments(attachments, 5)
+        if (!checkedAttachments.ok) {
+            return NextResponse.json({ error: 'Format lampiran tidak valid' }, { status: 400 })
+        }
+
+        // H2 Security Fix: guru hanya boleh membuat tugas di TA miliknya sendiri
+        // (fail-closed: guru tanpa row teachers ditolak, selaras PUT/DELETE)
+        const { data: teacher } = await supabase
+            .from('teachers')
+            .select('id')
+            .eq('user_id', user.id)
+            .single()
+
+        if (!teacher) {
+            return NextResponse.json({ error: 'Data guru tidak ditemukan' }, { status: 403 })
+        }
+
+        // Tenant guard: TA harus milik sekolah caller
+        if ((await findTeachingAssignmentsOutsideSchool([teaching_assignment_id], schoolId)).length > 0) {
+            return notFound()
+        }
+
+        // Ownership: TA harus diampu guru caller
+        const { data: ta } = await supabase
+            .from('teaching_assignments')
+            .select('teacher_id')
+            .eq('id', teaching_assignment_id)
+            .single()
+
+        if (ta?.teacher_id && ta.teacher_id !== teacher.id) {
+            return NextResponse.json({ error: 'Anda tidak memiliki akses untuk membuat tugas di kelas ini' }, { status: 403 })
+        }
+
         const submissionMode = submission_mode === 'OFFLINE' ? 'OFFLINE' : 'ONLINE'
 
         // Block writes to archived (COMPLETED) academic years
@@ -169,7 +204,7 @@ export async function POST(request: NextRequest) {
 
         const { data, error } = await supabase
             .from('assignments')
-            .insert({ teaching_assignment_id, title, description, type, due_date, submission_mode: submissionMode, attachments: attachments ?? null })
+            .insert({ teaching_assignment_id, title, description, type, due_date, submission_mode: submissionMode, attachments: checkedAttachments.value })
             .select()
             .single()
 

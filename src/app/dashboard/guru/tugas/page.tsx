@@ -575,6 +575,7 @@ export default function TugasPage() {
                             maxFiles={5}
                             maxSizeMB={10}
                             uploadUrl="/api/assignments/upload"
+                            videoHint="🎬 Video? Tempel link YouTube/Drive di kolom deskripsi"
                         />
                         <p className="mt-2 text-xs text-text-secondary">
                             Lampirkan gambar soal, PDF lembar kerja, atau dokumen lain — tampil di detail {labels.tugas.toLowerCase()} siswa.

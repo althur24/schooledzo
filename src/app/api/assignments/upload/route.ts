@@ -67,9 +67,12 @@ export async function POST(request: NextRequest) {
             .eq('user_id', user.id)
             .single()
 
-        const teacherFolder = teacher?.id || 'unknown'
+        // Fail-closed (pola H2): GURU tanpa row teachers tidak boleh upload
+        if (!teacher) {
+            return NextResponse.json({ error: 'Data guru tidak ditemukan' }, { status: 403 })
+        }
 
-        const storagePath = `${schoolPrefix}/tugas-instruksi/${teacherFolder}/${timestamp}-${uniqueId}.${fileExt}`
+        const storagePath = `${schoolPrefix}/tugas-instruksi/${teacher.id}/${timestamp}-${uniqueId}.${fileExt}`
 
         // Convert File to Buffer for server-side upload
         const arrayBuffer = await file.arrayBuffer()

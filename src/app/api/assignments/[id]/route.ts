@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
+import { resolveAssignmentSchoolId, tenantMismatch, notFound } from '@/lib/tenantGuard'
+import { validateAttachments } from '@/lib/validateAttachments'
 
 // GET single assignment
 export async function GET(
@@ -13,6 +15,11 @@ export async function GET(
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
+
+        // Tenant guard: tugas sekolah lain tidak boleh di-fetch by id
+        if (tenantMismatch(await resolveAssignmentSchoolId(id), schoolId)) {
+            return notFound()
+        }
 
         const { data, error } = await supabase
             .from('assignments')
@@ -116,14 +123,19 @@ export async function PUT(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // H2 Security Fix: Verify ownership
+        // H2 Security Fix: Verify ownership (fail-closed — selaras DELETE:
+        // guru tanpa row teachers tidak boleh mengubah tugas apa pun)
         const { data: teacher } = await supabase
             .from('teachers')
             .select('id')
             .eq('user_id', user.id)
             .single()
 
-        if (teacher) {
+        if (!teacher) {
+            return NextResponse.json({ error: 'Data guru tidak ditemukan' }, { status: 403 })
+        }
+
+        {
             const { data: assignment } = await supabase
                 .from('assignments')
                 .select('teaching_assignment:teaching_assignments(teacher_id)')
@@ -161,8 +173,13 @@ export async function PUT(
         }
         // attachments hanya diupdate bila dikirim eksplisit (array atau null) —
         // caller lama yang tidak mengirim field ini tidak menghapus lampiran.
+        // Bentuknya divalidasi (anti-XSS: url wajib http/https).
         if (attachments !== undefined) {
-            updatePayload.attachments = attachments
+            const checked = validateAttachments(attachments, 5)
+            if (!checked.ok) {
+                return NextResponse.json({ error: 'Format lampiran tidak valid' }, { status: 400 })
+            }
+            updatePayload.attachments = checked.value
         }
 
         const { data, error } = await supabase

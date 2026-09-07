@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { resolveAssignmentSchoolId, tenantMismatch } from '@/lib/tenantGuard'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { validateAttachments } from '@/lib/validateAttachments'
 
 // GET submissions for an assignment
 export async function GET(request: NextRequest) {
@@ -163,6 +164,12 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Assignment ID diperlukan' }, { status: 400 })
         }
 
+        // Lampiran dirender guru sebagai <a href> — url wajib http/https (anti-XSS)
+        const checkedAttachments = validateAttachments(attachments, 10)
+        if (!checkedAttachments.ok) {
+            return NextResponse.json({ error: 'Format lampiran tidak valid' }, { status: 400 })
+        }
+
         // Auto-detect late submission
         let isLate = false
         if (assignment_id) {
@@ -236,7 +243,7 @@ export async function POST(request: NextRequest) {
                 .from('student_submissions')
                 .update({ 
                     answers, 
-                    attachments,
+                    attachments: checkedAttachments.value,
                     is_late: isLate,
                     submitted_at: new Date().toISOString() 
                 })
@@ -285,7 +292,7 @@ export async function POST(request: NextRequest) {
                 assignment_id, 
                 student_id: student.id, 
                 answers,
-                attachments,
+                attachments: checkedAttachments.value,
                 is_late: isLate
             })
             .select()

@@ -12,6 +12,7 @@ interface FileUploadProps {
     accept?: string          // default: gambar + PDF + Office docs
     disabled?: boolean
     uploadUrl?: string       // default: /api/submissions/upload (endpoint siswa)
+    videoHint?: string | null // teks hint video di bawah zona upload (null = sembunyikan)
 }
 
 export default function FileUpload({
@@ -21,7 +22,8 @@ export default function FileUpload({
     maxSizeMB = 10,
     accept = 'image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx',
     disabled = false,
-    uploadUrl = '/api/submissions/upload'
+    uploadUrl = '/api/submissions/upload',
+    videoHint = '🎬 Video? Gunakan tab Link YouTube/Drive'
 }: FileUploadProps) {
     const [isDragging, setIsDragging] = useState(false)
     const [uploading, setUploading] = useState(false)
@@ -196,9 +198,11 @@ export default function FileUpload({
                             <p className="text-xs text-text-secondary mt-1">
                                 PDF, Gambar, Office (maks {maxSizeMB}MB)
                             </p>
-                            <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mt-1">
-                                🎬 Video? Gunakan tab Link YouTube/Drive
-                            </p>
+                            {videoHint && (
+                                <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mt-1">
+                                    {videoHint}
+                                </p>
+                            )}
                         </div>
                     </div>
                 </div>
