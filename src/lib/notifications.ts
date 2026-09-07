@@ -7,6 +7,7 @@ type NotificationType =
     | 'MATERI_BARU'
     | 'NILAI_KELUAR'
     | 'SUBMISSION_BARU'
+    | 'SUBMISSION_REVISI'
     | 'SUBMISSION_KUIS'
     | 'SUBMISSION_ULANGAN'
     | 'DEADLINE_REMINDER'
@@ -61,6 +62,8 @@ export function getNotificationIcon(type: NotificationType): string {
             return '📊'
         case 'SUBMISSION_BARU':
             return '📨'
+        case 'SUBMISSION_REVISI':
+            return '🔄'
         case 'SUBMISSION_KUIS':
             return '✅'
         case 'SUBMISSION_ULANGAN':

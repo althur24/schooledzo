@@ -4,9 +4,20 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { Modal, PageHeader, Button } from '@/components/ui'
 import Card from '@/components/ui/Card'
-import { Graph, Edit, Paper, Document, Discovery } from 'react-iconly'
+import { Graph, Edit, Paper, Document, Discovery, TimeCircle } from 'react-iconly'
 import { Loader2 } from 'lucide-react'
 import { SubmissionAttachment } from '@/lib/types'
+
+interface Revision {
+    id: string
+    answers: any[] | null
+    attachments: SubmissionAttachment[] | null
+    is_late: boolean | null
+    submitted_at: string | null
+    grade_score: number | null
+    grade_feedback: string | null
+    created_at: string
+}
 
 interface Submission {
     id: string
@@ -25,6 +36,7 @@ interface Submission {
         feedback: string | null
         graded_at?: string
     }>
+    revisions?: Revision[] | null
 }
 
 interface MissingStudent {
@@ -64,12 +76,25 @@ export default function TugasHasilPage() {
         attachments: SubmissionAttachment[] | null
         isLate: boolean
         studentName: string
+        revisions: Revision[]
     } | null>(null)
     const [saving, setSaving] = useState(false)
 
     // Grid roster untuk tugas offline (input nilai tanpa submission)
     const [offlineScores, setOfflineScores] = useState<Record<string, string>>({})
     const [savingOffline, setSavingOffline] = useState(false)
+
+    // Riwayat revisi yang dibuka (submissionId:index) — default collapsed
+    const [expandedRevisions, setExpandedRevisions] = useState<Set<string>>(new Set())
+
+    const toggleRevision = (key: string) => {
+        setExpandedRevisions(prev => {
+            const next = new Set(prev)
+            if (next.has(key)) next.delete(key)
+            else next.add(key)
+            return next
+        })
+    }
 
     const fetchData = useCallback(async () => {
         try {
@@ -336,11 +361,19 @@ export default function TugasHasilPage() {
                                     {submissions.map((sub) => (
                                         <tr key={sub.id} className="hover:bg-secondary/5 transition-colors">
                                             <td className="px-6 py-4">
-                                                <p className="text-text-main dark:text-white font-bold flex items-center gap-2">
+                                                <p className="text-text-main dark:text-white font-bold flex items-center gap-2 flex-wrap">
                                                     {sub.student?.user?.full_name}
                                                     {sub.is_late && (
                                                         <span className="px-2 py-0.5 bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400 text-[10px] font-bold rounded-full">
                                                             Terlambat
+                                                        </span>
+                                                    )}
+                                                    {(sub.revisions?.length || 0) > 0 && (
+                                                        <span
+                                                            title={`Siswa telah merevisi ${sub.revisions!.length} kali — nilai & komentar sebelumnya tersimpan di riwayat`}
+                                                            className="px-2 py-0.5 bg-indigo-100 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 text-[10px] font-bold rounded-full cursor-help"
+                                                        >
+                                                            🔄 Revisi ×{sub.revisions!.length}
                                                         </span>
                                                     )}
                                                 </p>
@@ -383,7 +416,8 @@ export default function TugasHasilPage() {
                                                         answers: getAnswersText(sub.answers),
                                                         attachments: sub.attachments || null,
                                                         isLate: sub.is_late || false,
-                                                        studentName: sub.student?.user?.full_name || 'Siswa'
+                                                        studentName: sub.student?.user?.full_name || 'Siswa',
+                                                        revisions: sub.revisions || []
                                                     })}
                                                     className="w-full justify-center"
                                                 >
@@ -478,6 +512,88 @@ export default function TugasHasilPage() {
                             )}
                         </div>
 
+                        {/* Riwayat Revisi */}
+                        {grading.revisions.length > 0 && (
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2 flex items-center gap-2">
+                                    <TimeCircle set="bold" primaryColor="currentColor" size={16} />
+                                    Riwayat Revisi ({grading.revisions.length})
+                                </label>
+                                <div className="space-y-2">
+                                    {grading.revisions.map((rev, idx) => {
+                                        const revKey = `${grading.submissionId}:${idx}`
+                                        const isExpanded = expandedRevisions.has(revKey)
+                                        return (
+                                            <div key={rev.id} className="border border-secondary/20 rounded-xl overflow-hidden">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => toggleRevision(revKey)}
+                                                    className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-indigo-50/50 dark:bg-indigo-900/10 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors text-left"
+                                                >
+                                                    <div className="flex items-center gap-2 flex-wrap text-sm">
+                                                        <span className="font-bold text-indigo-600 dark:text-indigo-400">Revisi ke-{idx + 1}</span>
+                                                        {rev.submitted_at && (
+                                                            <span className="text-xs text-text-secondary">
+                                                                {new Date(rev.submitted_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                            </span>
+                                                        )}
+                                                        {rev.grade_score !== null ? (
+                                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${rev.grade_score >= resolvedKkm
+                                                                ? 'bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400'
+                                                                : 'bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400'}`}>
+                                                                Nilai: {rev.grade_score}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="px-2 py-0.5 bg-secondary/10 text-text-secondary text-[10px] font-bold rounded-full">
+                                                                Belum dinilai saat revisi
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <span className={`text-text-secondary transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                        </svg>
+                                                    </span>
+                                                </button>
+                                                {isExpanded && (
+                                                    <div className="px-4 py-3 space-y-3 bg-white dark:bg-surface-dark">
+                                                        {rev.grade_feedback && (
+                                                            <div className="bg-secondary/5 border border-secondary/10 rounded-lg p-3">
+                                                                <p className="text-xs font-bold text-text-secondary dark:text-zinc-400 mb-1">Komentar guru saat itu:</p>
+                                                                <p className="text-sm text-text-main dark:text-zinc-300 italic whitespace-pre-wrap break-words">"{rev.grade_feedback}"</p>
+                                                            </div>
+                                                        )}
+                                                        <div>
+                                                            <p className="text-xs font-bold text-text-secondary dark:text-zinc-400 mb-1">Jawaban lama:</p>
+                                                            <div className="bg-secondary/5 border border-secondary/20 rounded-lg p-3 max-h-[20vh] overflow-y-auto custom-scrollbar">
+                                                                <pre className="text-text-main dark:text-slate-200 whitespace-pre-wrap font-mono text-sm leading-relaxed">{getAnswersText(rev.answers) || '-'}</pre>
+                                                            </div>
+                                                        </div>
+                                                        {rev.attachments && rev.attachments.length > 0 && (
+                                                            <div>
+                                                                <p className="text-xs font-bold text-text-secondary dark:text-zinc-400 mb-1">Lampiran lama:</p>
+                                                                <div className="grid gap-2">
+                                                                    {rev.attachments.map((file, fIdx) => (
+                                                                        <a key={fIdx} href={file.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 p-2.5 bg-white dark:bg-surface-dark border border-secondary/20 rounded-lg hover:border-primary transition-colors group">
+                                                                            <div className="p-1.5 bg-primary/10 text-primary rounded-lg">
+                                                                                <Document set="bold" primaryColor="currentColor" size={16} />
+                                                                            </div>
+                                                                            <p className="text-sm font-bold text-text-main dark:text-white group-hover:text-primary transition-colors truncate flex-1">{file.name}</p>
+                                                                            <span className="text-xs text-text-secondary shrink-0">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
+                                                                        </a>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-secondary/10 pt-4">
                             {/* Score Input */}
                             <div className="md:col-span-1">
@@ -500,7 +616,7 @@ export default function TugasHasilPage() {
                                 <textarea
                                     value={grading.feedback}
                                     onChange={(e) => setGrading({ ...grading, feedback: e.target.value })}
-                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary h-[88px] resize-none"
+                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary min-h-[120px] resize-y whitespace-pre-wrap"
                                     placeholder="Berikan komentar atau masukan untuk siswa..."
                                 />
                             </div>

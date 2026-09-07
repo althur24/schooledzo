@@ -42,6 +42,7 @@ export default function SiswaTugasPage() {
     const [studentId, setStudentId] = useState<string | null>(null)
     const [loading, setLoading] = useState(true)
     const [submitting, setSubmitting] = useState<{ assignmentId: string; answer: string; type: 'text' | 'link'; files: SubmissionAttachment[] } | null>(null)
+    const [detailing, setDetailing] = useState<Assignment | null>(null)
     const [saving, setSaving] = useState(false)
     const [submitError, setSubmitError] = useState<string | null>(null)
 
@@ -170,11 +171,17 @@ export default function SiswaTugasPage() {
                         const overdue = isOverdue(assignment.due_date)
                         const isLate = submission?.is_late || false
                         const grade = submission?.grade?.[0]
-                        const canEdit = submission && !overdue && !grade
+                        // Revisi diizinkan selama belum deadline — termasuk setelah
+                        // dinilai (guru sering meminta revisi lewat komentar).
+                        const canEdit = submission && !overdue
                         const isOffline = assignment.submission_mode === 'OFFLINE'
 
                         return (
-                            <div key={assignment.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-4 md:p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all group cursor-pointer">
+                            <div
+                                key={assignment.id}
+                                onClick={() => setDetailing(assignment)}
+                                className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-4 md:p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all group cursor-pointer"
+                            >
                                 <div className="flex flex-col h-full gap-4">
                                     <div className="flex items-start justify-between">
                                         <div className="flex-1">
@@ -193,6 +200,14 @@ export default function SiswaTugasPage() {
                                                 {isLate && (
                                                     <span className="px-2.5 py-1 bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400 text-xs font-bold rounded-full">
                                                         Terlambat
+                                                    </span>
+                                                )}
+                                                {submission && grade && !overdue && (
+                                                    <span
+                                                        title="Kamu masih bisa merevisi tugas ini sampai deadline — nilai & komentar guru akan direset dan menunggu dinilai ulang"
+                                                        className="px-2.5 py-1 bg-indigo-100 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 text-xs font-bold rounded-full cursor-help"
+                                                    >
+                                                        Bisa Direvisi
                                                     </span>
                                                 )}
                                             </div>
@@ -232,7 +247,7 @@ export default function SiswaTugasPage() {
                                                     <span className="text-lg font-black text-amber-600 dark:text-amber-400">{grade.score}/100</span>
                                                 </div>
                                                 {grade.feedback && (
-                                                    <p className="text-xs text-text-secondary dark:text-zinc-400 italic">"{grade.feedback}"</p>
+                                                    <p className="text-xs text-text-secondary dark:text-zinc-400 italic whitespace-pre-wrap break-words">"{grade.feedback}"</p>
                                                 )}
                                             </div>
                                         </div>
@@ -283,7 +298,7 @@ export default function SiswaTugasPage() {
                                                         }}
                                                         className="shadow-soft"
                                                     >
-                                                        Edit Jawaban
+                                                        {grade ? 'Revisi Jawaban' : 'Edit Jawaban'}
                                                     </Button>
                                                 ) : !submission && !overdue ? (
                                                     <Button
@@ -310,6 +325,20 @@ export default function SiswaTugasPage() {
                     <Modal open={!!submitting} onClose={() => setSubmitting(null)} title={`Kumpulkan ${labels.tugas}`}>
                         {submitting && (
                             <div className="space-y-5">
+                                {/* Warning Revisi */}
+                                {(() => {
+                                    const editingSub = getSubmission(submitting.assignmentId)
+                                    const isRevision = !!editingSub?.grade?.[0]
+                                    return isRevision ? (
+                                        <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-500/20 rounded-xl p-3 flex items-start gap-3">
+                                            <span className="text-indigo-500 dark:text-indigo-400 mt-0.5"><TimeCircle set="bold" primaryColor="currentColor" size={18} /></span>
+                                            <p className="text-xs text-indigo-700 dark:text-indigo-300 leading-relaxed">
+                                                Kamu merevisi {labels.tugas.toLowerCase()} yang sudah dinilai. Setelah dikirim: <strong>nilai &amp; komentar guru akan direset</strong> dan {labels.tugas.toLowerCase()} ini menunggu dinilai ulang oleh guru.
+                                            </p>
+                                        </div>
+                                    ) : null
+                                })()}
+
                                 {/* Tab Toggle */}
                                 <div className="flex bg-secondary/10 p-1 rounded-xl">
                                     <button
@@ -383,6 +412,147 @@ export default function SiswaTugasPage() {
                                 </div>
                             </div>
                         )}
+                    </Modal>
+
+                    {/* Detail Modal */}
+                    <Modal
+                        open={!!detailing}
+                        onClose={() => setDetailing(null)}
+                        title={detailing?.title}
+                        subtitle={`${detailing?.teaching_assignment?.subject?.name} • ${detailing?.teaching_assignment?.class?.name}`}
+                        maxWidth="lg"
+                    >
+                        {detailing && (() => {
+                            const submission = getSubmission(detailing.id)
+                            const overdue = isOverdue(detailing.due_date)
+                            const grade = submission?.grade?.[0]
+                            const isLate = submission?.is_late || false
+                            const isOffline = detailing.submission_mode === 'OFFLINE'
+                            const canEdit = submission && !overdue
+                            return (
+                                <div className="space-y-5">
+                                    {/* Badges */}
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="px-2.5 py-1 bg-amber-100 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400 text-xs font-bold rounded-full">
+                                            {labelForGradeType(detailing.type, labels)}
+                                        </span>
+                                        {isOffline && (
+                                            <span className="px-2.5 py-1 bg-teal-100 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400 text-xs font-bold rounded-full">
+                                                Offline
+                                            </span>
+                                        )}
+                                        {isLate && (
+                                            <span className="px-2.5 py-1 bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400 text-xs font-bold rounded-full">
+                                                Terlambat
+                                            </span>
+                                        )}
+                                        {submission && !isOffline && !overdue && (
+                                            <span className="px-2.5 py-1 bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400 text-xs font-bold rounded-full">
+                                                Selesai
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    {/* Instruksi lengkap */}
+                                    <div>
+                                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Instruksi {labels.tugas}</label>
+                                        <div className="bg-secondary/5 border border-secondary/20 rounded-xl p-4 max-h-[35vh] overflow-y-auto custom-scrollbar">
+                                            <p className="text-sm text-text-main dark:text-zinc-300 whitespace-pre-wrap break-words leading-relaxed">{detailing.description || 'Tidak ada deskripsi'}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Deadline */}
+                                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-medium text-text-secondary dark:text-zinc-500">
+                                        <div className="flex items-center gap-1.5">
+                                            <Calendar set="bold" primaryColor="currentColor" size={14} />
+                                            Dibuat: {new Date(detailing.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                        </div>
+                                        {detailing.due_date && (
+                                            <div className={`flex items-center gap-1.5 ${overdue && !submission ? 'text-red-500' : ''}`}>
+                                                <TimeCircle set="bold" primaryColor="currentColor" size={14} />
+                                                Deadline: {new Date(detailing.due_date).toLocaleString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Submission info */}
+                                    {submission && !isOffline && (
+                                        <div className="bg-secondary/5 rounded-xl p-3 text-sm flex flex-col gap-2">
+                                            <div className="flex items-center gap-2 text-text-main dark:text-white">
+                                                <span className="text-primary"><TickSquare set="bold" primaryColor="currentColor" size={16} /></span>
+                                                <span className="font-medium">Dikumpulkan: {new Date(submission.submitted_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                                            </div>
+                                            {submission.attachments && submission.attachments.length > 0 && (
+                                                <div className="flex items-center gap-2 text-text-main dark:text-white">
+                                                    <span className="text-primary"><Document set="bold" primaryColor="currentColor" size={16} /></span>
+                                                    <span className="font-medium">{submission.attachments.length} Lampiran Terkirim</span>
+                                                </div>
+                                            )}
+                                            {submission.answers && submission.answers[0]?.type === 'link' && (
+                                                <a href={submission.answers[0]?.answer} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-primary font-medium break-all hover:underline">
+                                                    <span className="text-primary"><Discovery set="bold" primaryColor="currentColor" size={16} /></span>
+                                                    {submission.answers[0]?.answer}
+                                                </a>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Nilai & feedback guru */}
+                                    {grade && (
+                                        <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/10 dark:to-orange-900/10 border border-amber-200 dark:border-amber-800 rounded-xl p-4 flex items-start gap-3">
+                                            <div className="p-2 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-full shrink-0">
+                                                <Star set="bold" primaryColor="currentColor" size={20} />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-sm font-bold text-text-main dark:text-white">Nilai:</span>
+                                                    <span className="text-lg font-black text-amber-600 dark:text-amber-400">{grade.score}/100</span>
+                                                </div>
+                                                {grade.feedback && (
+                                                    <p className="text-sm text-text-secondary dark:text-zinc-400 italic whitespace-pre-wrap break-words">"{grade.feedback}"</p>
+                                                )}
+                                                {canEdit && (
+                                                    <p className="text-xs text-indigo-500 dark:text-indigo-400 mt-2">
+                                                        Ingin memperbaiki? Kamu masih bisa merevisi sampai deadline — nilai akan direset dan dinilai ulang.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Aksi */}
+                                    {!isOffline && (
+                                        <div className="flex gap-3 pt-2 border-t border-secondary/10">
+                                            {canEdit ? (
+                                                <Button
+                                                    className="flex-1"
+                                                    onClick={() => {
+                                                        handleEditSubmission(detailing.id, submission!)
+                                                        setDetailing(null)
+                                                    }}
+                                                >
+                                                    {grade ? 'Revisi Jawaban' : 'Edit Jawaban'}
+                                                </Button>
+                                            ) : !submission && !overdue ? (
+                                                <Button
+                                                    className="flex-1"
+                                                    onClick={() => {
+                                                        setSubmitting({ assignmentId: detailing.id, answer: '', type: 'text', files: [] })
+                                                        setDetailing(null)
+                                                    }}
+                                                >
+                                                    Kerjakan
+                                                </Button>
+                                            ) : (
+                                                <p className="text-xs text-text-secondary dark:text-zinc-400 italic text-center w-full py-2">
+                                                    {overdue ? 'Deadline sudah lewat — pengumpulan/edit tidak tersedia lagi.' : 'Dikumpulkan langsung ke guru.'}
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )
+                        })()}
                     </Modal>
                 </div>
             )}

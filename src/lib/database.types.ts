@@ -1798,6 +1798,50 @@ export type Database = {
           },
         ]
       }
+      submission_revisions: {
+        Row: {
+          answers: Json | null
+          attachments: Json | null
+          created_at: string
+          grade_feedback: string | null
+          grade_score: number | null
+          id: string
+          is_late: boolean | null
+          submission_id: string
+          submitted_at: string | null
+        }
+        Insert: {
+          answers?: Json | null
+          attachments?: Json | null
+          created_at?: string
+          grade_feedback?: string | null
+          grade_score?: number | null
+          id?: string
+          is_late?: boolean | null
+          submission_id: string
+          submitted_at?: string | null
+        }
+        Update: {
+          answers?: Json | null
+          attachments?: Json | null
+          created_at?: string
+          grade_feedback?: string | null
+          grade_score?: number | null
+          id?: string
+          is_late?: boolean | null
+          submission_id?: string
+          submitted_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "submission_revisions_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "student_submissions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       students: {
         Row: {
           angkatan: string | null

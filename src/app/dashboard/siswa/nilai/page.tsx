@@ -321,7 +321,7 @@ export default function SiswaNilaiPage() {
                             <p className="text-text-main dark:text-white font-bold">{sub.assignment?.title}</p>
                             <p className="text-xs text-text-secondary dark:text-zinc-400">{new Date(sub.submitted_at).toLocaleDateString('id-ID')}</p>
                             {sub.grade?.[0]?.feedback && (
-                                <p className="text-sm text-text-secondary dark:text-zinc-400 mt-2 italic bg-secondary/5 p-2 rounded-lg inline-block border border-secondary/10">" {sub.grade[0].feedback} "</p>
+                                <p className="text-sm text-text-secondary dark:text-zinc-400 mt-2 italic bg-secondary/5 p-2 rounded-lg inline-block border border-secondary/10 whitespace-pre-wrap break-words max-w-full">" {sub.grade[0].feedback} "</p>
                             )}
                         </div>
                         {sub.grade && sub.grade.length > 0 ? (
@@ -380,7 +380,7 @@ export default function SiswaNilaiPage() {
                                     <p className="text-text-main dark:text-white font-bold">{item.assignment?.title}</p>
                                     <p className="text-xs text-text-secondary dark:text-zinc-400">{new Date(item.submitted_at).toLocaleDateString('id-ID')}</p>
                                     {item.grade?.[0]?.feedback && (
-                                        <p className="text-sm text-text-secondary dark:text-zinc-400 mt-2 italic bg-secondary/5 p-2 rounded-lg inline-block border border-secondary/10">" {item.grade[0].feedback} "</p>
+                                        <p className="text-sm text-text-secondary dark:text-zinc-400 mt-2 italic bg-secondary/5 p-2 rounded-lg inline-block border border-secondary/10 whitespace-pre-wrap break-words max-w-full">" {item.grade[0].feedback} "</p>
                                     )}
                                 </div>
                                 {item.grade && item.grade.length > 0 ? (

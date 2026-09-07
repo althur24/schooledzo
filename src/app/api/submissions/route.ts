@@ -35,7 +35,8 @@ export async function GET(request: NextRequest) {
             subject:subjects(name)
           )
         ),
-        grade:grades(*)
+        grade:grades(*),
+        revisions:submission_revisions(*)
       `)
             .order('submitted_at', { ascending: false })
             // Tiebreaker stabil untuk paginasi fetchAllRows (submitted_at banyak duplikat/NULL)
@@ -196,12 +197,40 @@ export async function POST(request: NextRequest) {
         // Check for existing submission
         const { data: existing } = await supabase
             .from('student_submissions')
-            .select('id')
+            .select('id, answers, attachments, is_late, submitted_at, grade:grades(score, feedback)')
             .eq('assignment_id', assignment_id)
             .eq('student_id', student.id)
             .single()
 
         if (existing) {
+            const oldGrade = (existing as any).grade?.[0] as { score: number; feedback: string | null } | undefined
+
+            // Revisi: snapshot jawaban + nilai/komentar lama ke submission_revisions
+            // (history untuk guru), lalu hapus grade → status kembali "Belum Dinilai".
+            try {
+                await supabase.from('submission_revisions').insert({
+                    submission_id: existing.id,
+                    answers: (existing as any).answers ?? null,
+                    attachments: (existing as any).attachments ?? null,
+                    is_late: (existing as any).is_late ?? null,
+                    submitted_at: (existing as any).submitted_at ?? null,
+                    grade_score: oldGrade?.score ?? null,
+                    grade_feedback: oldGrade?.feedback ?? null
+                })
+            } catch (revError) {
+                // Gagal mencatat history tidak boleh menggagalkan revisi
+                console.error('Error saving revision history:', revError)
+            }
+
+            if (oldGrade) {
+                const { error: gradeDelError } = await supabase
+                    .from('grades')
+                    .delete()
+                    .eq('submission_id', existing.id)
+
+                if (gradeDelError) throw gradeDelError
+            }
+
             // Update existing
             const { data, error } = await supabase
                 .from('student_submissions')
@@ -216,6 +245,36 @@ export async function POST(request: NextRequest) {
                 .single()
 
             if (error) throw error
+
+            // Notifikasi guru: siswa merevisi — nilai ter-reset, perlu dinilai ulang
+            try {
+                const { data: assignment } = await supabase
+                    .from('assignments')
+                    .select(`
+                        id,
+                        title,
+                        teaching_assignment:teaching_assignments(
+                            teacher:teachers(user_id)
+                        )
+                    `)
+                    .eq('id', assignment_id)
+                    .single()
+
+                const teacherUserId = (assignment?.teaching_assignment as any)?.teacher?.user_id
+                if (teacherUserId) {
+                    const labels = await getMenuLabelsForSchool(schoolId)
+                    await supabase.from('notifications').insert({
+                        user_id: teacherUserId,
+                        type: 'SUBMISSION_REVISI',
+                        title: `Revisi: ${assignment?.title}`,
+                        message: `${user.full_name} merevisi ${labels.tugas} — nilai lama direset, menunggu dinilai ulang`,
+                        link: `/dashboard/guru/tugas/${assignment_id}/hasil`
+                    })
+                }
+            } catch (notifError) {
+                console.error('Error sending revision notification:', notifError)
+            }
+
             return NextResponse.json(data)
         }
 
