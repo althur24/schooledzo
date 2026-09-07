@@ -18,6 +18,7 @@ interface Class {
     name: string
     school_level?: string
     grade_level?: number
+    academic_year_id?: string
 }
 
 interface Student {
@@ -277,7 +278,12 @@ export default function RekapNilaiPage() {
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tahun Ajaran</label>
                         <select
                             value={selectedYear}
-                            onChange={(e) => setSelectedYear(e.target.value)}
+                            onChange={(e) => {
+                                setSelectedYear(e.target.value)
+                                // Kelas terpilih bisa milik tahun lama — reset agar
+                                // tidak memicu query kelas/tahun yang tidak cocok
+                                setSelectedClass('')
+                            }}
                             className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         >
                             <option value="">Pilih Tahun Ajaran</option>
@@ -297,7 +303,7 @@ export default function RekapNilaiPage() {
                             disabled={!selectedYear}
                         >
                             <option value="">Pilih Kelas</option>
-                            {classes.map(c => (
+                            {classes.filter(c => !selectedYear || c.academic_year_id === selectedYear).map(c => (
                                 <option key={c.id} value={c.id}>{c.name}</option>
                             ))}
                         </select>

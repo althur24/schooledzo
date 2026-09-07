@@ -10,6 +10,7 @@ import { Loader2 } from 'lucide-react'
 interface Class {
     id: string
     name: string
+    academic_year?: { id: string; name: string; is_active: boolean | null; status: string | null } | { id: string; name: string; is_active: boolean | null; status: string | null }[]
 }
 
 interface Announcement {
@@ -59,7 +60,13 @@ export default function AdminPengumumanPage() {
 
             if (classesRes.ok) {
                 const data = await classesRes.json()
-                setClasses(Array.isArray(data) ? data : [])
+                // Hanya kelas tahun ajaran AKTIF — tanpa ini kelas senama dari
+                // tahun lama (hasil Salin Kelas) tampil dobel di pemilih kelas
+                const list = (Array.isArray(data) ? data : []).filter((c: Class) => {
+                    const ay = Array.isArray(c.academic_year) ? c.academic_year[0] : c.academic_year
+                    return ay?.is_active === true || ay?.status === 'ACTIVE'
+                })
+                setClasses(list)
             }
         } catch (error) {
             console.error('Error:', error)

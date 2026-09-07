@@ -262,11 +262,26 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     useEffect(() => {
         fetchExam()
         fetchQuestions()
-        fetch('/api/classes').then(r => r.json()).then(d => setAllClasses(Array.isArray(d) ? d : [])).catch(() => {})
         fetch('/api/school-settings').then(r => r.ok ? r.json() : null).then(d => {
             if (d) setAiReviewEnabled(d.ai_review_enabled !== false)
         }).catch(() => {})
     }, [fetchExam, fetchQuestions])
+
+    // Kelas di-scope ke tahun ajaran exam — tanpa ini, kelas senama dari tahun
+    // ajaran lain (hasil fitur Salin Kelas saat pergantian tahun) tampil dobel
+    // di picker Kelas Target & filter Hasil. Menunggu exam termuat karena tahun
+    // ajaran hanya diketahui dari data exam; mode ulangan tidak memakai
+    // allClasses (kelas dari teaching_assignment), jadi tidak terdampak.
+    useEffect(() => {
+        const examYear = isUlangan
+            ? (exam as any)?.teaching_assignment?.academic_year?.id
+            : (exam as any)?.academic_year?.id
+        if (!examYear) return
+        fetch(`/api/classes?academic_year_id=${examYear}`)
+            .then(r => r.json())
+            .then(d => setAllClasses(Array.isArray(d) ? d : []))
+            .catch(() => {})
+    }, [exam, isUlangan])
 
     // Deep-link #hasil (dari kartu list / redirect setelah koreksi) — setelah mount,
     // hash sudah pasti terbaca (initializer state berisiko race saat client-side nav)

@@ -63,10 +63,18 @@ export default function AdminDashboard() {
                     classesRes.json(),
                     subjectsRes.json()
                 ])
+                // Hanya kelas tahun ajaran AKTIF — tanpa ini angka membengkak
+                // karena menghitung kelas dari tahun ajaran lama (COMPLETED)
+                // hasil fitur Salin Kelas saat pergantian tahun
+                const allClasses = Array.isArray(classes) ? classes : []
+                const activeClasses = allClasses.filter((c: any) => {
+                    const ay = Array.isArray(c.academic_year) ? c.academic_year[0] : c.academic_year
+                    return ay?.is_active === true || ay?.status === 'ACTIVE'
+                })
                 setStats({
                     totalTeachers: Array.isArray(teachers) ? teachers.length : 0,
                     totalStudents: Array.isArray(students) ? students.length : 0,
-                    totalClasses: Array.isArray(classes) ? classes.length : 0,
+                    totalClasses: activeClasses.length,
                     totalSubjects: Array.isArray(subjects) ? subjects.length : 0
                 })
             } catch (error) {
