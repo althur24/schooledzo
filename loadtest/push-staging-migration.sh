@@ -20,10 +20,15 @@ if [ -z "$PW" ]; then
 fi
 
 STAGING_REF="vkkgnredrfqqraonynte"
+# Koneksi via pooler ap-southeast-1 (region staging = Singapore).
+# Hostname db.<ref> hanya resolve AAAA/IPv6 dan ditolak banyak jaringan;
+# pooler ap-south-1 TIDAK mengenal tenant staging (ENOTFOUND) —
+# hanya aws-0-ap-southeast-1 yang mengenal. User pooler: postgres.<ref>.
+POOLER_HOST="aws-0-ap-southeast-1.pooler.supabase.com"
 # Percent-encode password (karakter seperti # @ : / bisa merusak URL koneksi)
 PW_ENC=$(node -e "console.log(encodeURIComponent(process.argv[1]))" "$PW")
-DB_URL="postgres://postgres:${PW_ENC}@db.${STAGING_REF}.supabase.co:5432/postgres"
+DB_URL="postgres://postgres.${STAGING_REF}:${PW_ENC}@${POOLER_HOST}:5432/postgres"
 
-echo "==> Push migrasi ke STAGING (${STAGING_REF})..."
+echo "==> Push migrasi ke STAGING (${STAGING_REF}, via ${POOLER_HOST})..."
 supabase db push --db-url "$DB_URL"
 echo "==> Selesai. Verifikasi: supabase migration list --db-url (staging) atau cek kolom baru via REST."
