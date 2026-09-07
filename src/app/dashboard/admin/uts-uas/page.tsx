@@ -6,11 +6,11 @@ import { useRouter } from 'next/navigation'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import TimeWindowFields from '@/components/TimeWindowFields'
-import ClassChipsSelector from '@/components/ClassChipsSelector'
 import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import { Plus, ChevronDown } from 'react-iconly'
-import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BookOpen, BarChart3, Copy, RefreshCw } from 'lucide-react'
+import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BarChart3, Copy, RefreshCw } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { labelForGradeType } from '@/lib/labels'
 
 interface OfficialExam {
     id: string
@@ -65,121 +65,23 @@ export default function AdminUtsUasPage() {
     // Duplicate & Remedial states (dipakai UTS/UAS & Ulangan — source membedakan endpoint)
     const [showDuplicate, setShowDuplicate] = useState(false)
 
-    // === Buat Ulangan untuk Guru (admin) — form senanda form ulangan guru ===
-    const [showCreateTeacherExam, setShowCreateTeacherExam] = useState(false)
-    const [teacherOptions, setTeacherOptions] = useState<{ id: string; name: string }[]>([])
-    const [teacherTAs, setTeacherTAs] = useState<{ id: string; subject: { id: string; name: string }; class: { id: string; name: string } }[]>([])
-    const [teacherExamForm, setTeacherExamForm] = useState({
-        teacher_id: '',
-        teaching_assignment_ids: [] as string[],
-        title: '',
-        description: '',
-        start_time: '',
-        duration_minutes: 60,
-        schedule_mode: 'sync' as 'sync' | 'window',
-        window_end_time: '',
-        is_randomized: true,
-        max_violations: 3,
-        show_results_immediately: true
-    })
-    const [creatingTeacherExam, setCreatingTeacherExam] = useState(false)
+    // === Pencocokan guru pengampu untuk mode Ulangan di modal Buat Ujian ===
+    // TA semua guru di tahun ajaran aktif — dipakai mencocokkan guru pengampu
+    // mapel×kelas secara otomatis saat admin membuat ulangan.
+    const [teachingAssignments, setTeachingAssignments] = useState<any[]>([])
+    const [taLoading, setTaLoading] = useState(false)
 
-    const openCreateTeacherExam = async () => {
-        setShowCreateTeacherExam(true)
-        setTeacherExamForm({
-            teacher_id: '',
-            teaching_assignment_ids: [],
-            title: '',
-            description: '',
-            start_time: '',
-            duration_minutes: 60,
-            schedule_mode: 'sync',
-            window_end_time: '',
-            is_randomized: true,
-            max_violations: 3,
-            show_results_immediately: true
-        })
-        setTeacherTAs([])
-        if (teacherOptions.length === 0) {
-            try {
-                const res = await fetch('/api/teachers')
-                const data = await res.json()
-                const list = Array.isArray(data) ? data : []
-                setTeacherOptions(list.map((t: any) => ({ id: t.id, name: t.user?.full_name || t.nip || 'Tanpa Nama' })))
-            } catch (e) {
-                console.error('Error fetching teachers:', e)
-            }
-        }
-    }
-
-    const handleTeacherExamTeacherChange = async (teacherId: string) => {
-        setTeacherExamForm(prev => ({ ...prev, teacher_id: teacherId, teaching_assignment_ids: [] }))
-        setTeacherTAs([])
-        if (!teacherId) return
+    const fetchTeachingAssignmentsIfNeeded = async () => {
+        if (teachingAssignments.length > 0 || taLoading) return
+        setTaLoading(true)
         try {
             const res = await fetch('/api/teaching-assignments')
             const data = await res.json()
-            const list = Array.isArray(data) ? data : []
-            setTeacherTAs(list
-                .filter((ta: any) => ta.teacher_id === teacherId || (Array.isArray(ta.teacher) ? ta.teacher[0]?.id === teacherId : ta.teacher?.id === teacherId))
-                .map((ta: any) => ({
-                    id: ta.id,
-                    subject: Array.isArray(ta.subject) ? ta.subject[0] : ta.subject,
-                    class: Array.isArray(ta.class) ? ta.class[0] : ta.class
-                }))
-                .filter((ta: any) => ta.subject?.id && ta.class?.id))
+            setTeachingAssignments(Array.isArray(data) ? data : [])
         } catch (e) {
-            console.error('Error fetching teacher assignments:', e)
-        }
-    }
-
-    const handleCreateTeacherExam = async () => {
-        const f = teacherExamForm
-        if (!f.teacher_id || f.teaching_assignment_ids.length === 0 || !f.title || !f.start_time || f.duration_minutes < 5 || (f.schedule_mode === 'window' && !f.window_end_time)) return
-        setCreatingTeacherExam(true)
-        try {
-            const batchId = f.teaching_assignment_ids.length > 1 ? crypto.randomUUID() : null
-            const basePayload = {
-                title: f.title,
-                description: f.description,
-                start_time: new Date(f.start_time).toISOString(),
-                duration_minutes: f.duration_minutes,
-                window_end_time: f.schedule_mode === 'window' && f.window_end_time ? new Date(f.window_end_time).toISOString() : null,
-                is_randomized: f.is_randomized,
-                max_violations: f.max_violations,
-                show_results_immediately: f.show_results_immediately,
-                batch_id: batchId
-            }
-
-            const results = await Promise.allSettled(
-                f.teaching_assignment_ids.map(taId =>
-                    fetch('/api/exams', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ...basePayload, teaching_assignment_id: taId })
-                    }).then(r => {
-                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-                        return r.json()
-                    })
-                )
-            )
-            const okCount = results.filter(r => r.status === 'fulfilled').length
-            if (okCount === 0) {
-                showToast(`Gagal membuat ${labels.ulangan}. Silakan coba lagi.`, 'error')
-                return
-            }
-            setShowCreateTeacherExam(false)
-            const firstCreated = results.find(r => r.status === 'fulfilled')?.value
-            if (firstCreated?.id) {
-                router.push(`/dashboard/admin/uts-uas/${firstCreated.id}?type=ulangan`)
-            } else {
-                fetchUlangan()
-            }
-            if (okCount < f.teaching_assignment_ids.length) {
-                showToast(`${okCount} dari ${f.teaching_assignment_ids.length} kelas berhasil dibuat. Sisanya gagal — buat ulang untuk kelas tersebut.`, 'error')
-            }
+            console.error('Error fetching teaching assignments:', e)
         } finally {
-            setCreatingTeacherExam(false)
+            setTaLoading(false)
         }
     }
 
@@ -211,7 +113,7 @@ export default function AdminUtsUasPage() {
     }
 
     const [form, setForm] = useState({
-        exam_type: 'UTS' as 'UTS' | 'UAS',
+        exam_type: 'UTS' as 'ULANGAN' | 'UTS' | 'UAS',
         title: '',
         description: '',
         subject_id: '',
@@ -224,6 +126,14 @@ export default function AdminUtsUasPage() {
         show_results_immediately: true,
         target_class_ids: [] as string[]
     })
+
+    // Buka modal buat ujian — jenis default mengikuti tab aktif,
+    // TA dimuat untuk pencocokan guru pengampu mode Ulangan
+    const openCreateModal = () => {
+        setForm(prev => ({ ...prev, exam_type: tab === 'ulangan' ? 'ULANGAN' : 'UTS' }))
+        setShowCreate(true)
+        fetchTeachingAssignmentsIfNeeded()
+    }
 
     useEffect(() => {
         fetchData()
@@ -303,20 +213,121 @@ export default function AdminUtsUasPage() {
         }
     }
 
+    // Pencocokan guru pengampu per kelas terpilih untuk mode Ulangan —
+    // ulangan wajib terikat teaching_assignment, jadi sistem mencocokkan
+    // guru pengampu mapel×kelas dari data penugasan (bisa >1 guru per kelas).
+    const computeUlanganMatches = () => {
+        if (form.exam_type !== 'ULANGAN' || !form.subject_id) return []
+        return form.target_class_ids.map(classId => {
+            const cls = classes.find(c => c.id === classId)
+            const teachers = teachingAssignments
+                .filter((ta: any) => {
+                    const subj = Array.isArray(ta.subject) ? ta.subject[0] : ta.subject
+                    const cl = Array.isArray(ta.class) ? ta.class[0] : ta.class
+                    return subj?.id === form.subject_id && cl?.id === classId
+                })
+                .map((ta: any) => ({
+                    id: ta.id,
+                    teacherName: (Array.isArray(ta.teacher?.user) ? ta.teacher.user[0]?.full_name : ta.teacher?.user?.full_name) || 'Tanpa Nama'
+                }))
+            return { classId, className: cls?.name || '-', teachers }
+        })
+    }
+
     const handleCreate = async () => {
         if (!form.subject_id || !form.title || !form.start_time || form.target_class_ids.length === 0) return
         setCreating(true)
         try {
-            const localDate = new Date(form.start_time)
+            const startTimeIso = new Date(form.start_time).toISOString()
+            const windowEndIso = form.schedule_mode === 'window' && form.window_end_time
+                ? new Date(form.window_end_time).toISOString()
+                : null
+
+            if (form.exam_type === 'ULANGAN') {
+                // Ulangan: draft dibuat per guru pengampu (mapel×kelas terpilih),
+                // kelas tanpa guru pengampu di-skip dengan peringatan.
+                const matches = computeUlanganMatches()
+                const withTeachers = matches.filter(m => m.teachers.length > 0)
+                const skipped = matches.filter(m => m.teachers.length === 0)
+                if (withTeachers.length === 0) {
+                    showToast('Tidak ada kelas terpilih yang memiliki guru pengampu untuk mapel ini.', 'error')
+                    return
+                }
+
+                const allTAs = withTeachers.flatMap(m => m.teachers)
+                const batchId = allTAs.length > 1 ? crypto.randomUUID() : null
+                const basePayload = {
+                    title: form.title,
+                    description: form.description,
+                    start_time: startTimeIso,
+                    duration_minutes: form.duration_minutes,
+                    window_end_time: windowEndIso,
+                    is_randomized: form.is_randomized,
+                    max_violations: form.max_violations,
+                    show_results_immediately: form.show_results_immediately,
+                    batch_id: batchId
+                }
+
+                const results = await Promise.allSettled(
+                    allTAs.map(ta =>
+                        fetch('/api/exams', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ...basePayload, teaching_assignment_id: ta.id })
+                        }).then(r => {
+                            if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                            return r.json()
+                        })
+                    )
+                )
+                const okCount = results.filter(r => r.status === 'fulfilled').length
+                if (okCount === 0) {
+                    showToast(`Gagal membuat ${labels.ulangan}. Silakan coba lagi.`, 'error')
+                    return
+                }
+
+                setShowCreate(false)
+                setForm({
+                    exam_type: 'UTS',
+                    title: '',
+                    description: '',
+                    subject_id: '',
+                    start_time: '',
+                    duration_minutes: 90,
+                    schedule_mode: 'sync',
+                    window_end_time: '',
+                    is_randomized: true,
+                    max_violations: 3,
+                    show_results_immediately: true,
+                    target_class_ids: []
+                })
+
+                const parts: string[] = [`${okCount} ${labels.ulangan} berhasil dibuat (draft)`]
+                if (skipped.length > 0) {
+                    parts.push(`${skipped.length} kelas di-skip karena belum ada guru pengampu mapel ini: ${skipped.map(s => s.className).join(', ')}`)
+                }
+                if (okCount < allTAs.length) {
+                    parts.push(`${allTAs.length - okCount} gagal dibuat — buat ulang untuk kelas tersebut`)
+                }
+                showToast(parts.join('. ') + '.', okCount < allTAs.length ? 'error' : 'success')
+
+                const firstCreated = results.find(r => r.status === 'fulfilled')?.value
+                if (firstCreated?.id) {
+                    router.push(`/dashboard/admin/uts-uas/${firstCreated.id}?type=ulangan`)
+                } else {
+                    fetchUlangan()
+                }
+                return
+            }
+
+            // UTS/UAS: ujian resmi sekolah
             const res = await fetch('/api/official-exams', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ...form,
-                    start_time: localDate.toISOString(),
-                    window_end_time: form.schedule_mode === 'window' && form.window_end_time
-                        ? new Date(form.window_end_time).toISOString()
-                        : null
+                    start_time: startTimeIso,
+                    window_end_time: windowEndIso
                 })
             })
             if (res.ok) {
@@ -659,6 +670,9 @@ export default function AdminUtsUasPage() {
         return acc
     }, {} as Record<string, ClassItem[]>)
 
+    // Ringkasan pencocokan guru pengampu per kelas terpilih (mode Ulangan)
+    const ulanganMatches = computeUlanganMatches()
+
     return (
         <div className="space-y-6">
             <PageHeader
@@ -668,12 +682,7 @@ export default function AdminUtsUasPage() {
                 backHref="/dashboard/admin"
                 action={
                     <div className="flex gap-2">
-                        {tab === 'ulangan' && (
-                            <Button variant="secondary" onClick={() => setShowCreateTeacherExam(true)}>
-                                Buat {labels.ulangan} untuk Guru
-                            </Button>
-                        )}
-                        <Button onClick={() => setShowCreate(true)} icon={
+                        <Button onClick={openCreateModal} icon={
                             <div className="text-white"><Plus set="bold" primaryColor="currentColor" size={20} /></div>
                         }>
                             Buat Ujian
@@ -734,7 +743,7 @@ export default function AdminUtsUasPage() {
                     icon={<div className="text-indigo-400"><GraduationCap className="w-12 h-12" /></div>}
                     title="Belum Ada Ujian"
                     description={`Buat ujian ${labels.uts} atau ${labels.uas} baru untuk kelas-kelas Anda.`}
-                    action={<Button onClick={() => setShowCreate(true)}>Buat Ujian Sekarang</Button>}
+                    action={<Button onClick={openCreateModal}>Buat Ujian Sekarang</Button>}
                 />
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -879,7 +888,8 @@ export default function AdminUtsUasPage() {
                     <EmptyState
                         icon={<div className="text-indigo-400"><GraduationCap className="w-12 h-12" /></div>}
                         title={`Belum Ada ${labels.ulangan}`}
-                        description={`${labels.ulangan} yang dibuat guru akan muncul di sini untuk dikelola, dimonitor, dan dikoreksi.`}
+                        description={`${labels.ulangan} yang dibuat Anda atau guru akan muncul di sini untuk dikelola, dimonitor, dan dikoreksi.`}
+                        action={<Button onClick={openCreateModal}>Buat {labels.ulangan} Sekarang</Button>}
                     />
                 ) : (
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -1006,20 +1016,39 @@ export default function AdminUtsUasPage() {
             </div>
 
             {/* Create Modal */}
-            <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Buat Ujian Baru">
+            <Modal
+                open={showCreate}
+                onClose={() => setShowCreate(false)}
+                title={form.exam_type === 'ULANGAN' ? `Buat ${labels.ulangan} Baru` : `Buat ${labelForGradeType(form.exam_type, labels)} Baru`}
+            >
                 <div className="space-y-4">
-                    {/* Exam Type */}
+                    {/* Pilihan jenis: ulangan harian atau UTS/UAS resmi — satu pintu form */}
                     <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Ujian</label>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {(['UTS', 'UAS'] as const).map(type => (
-                                <label key={type} className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all font-bold ${form.exam_type === type ? 'border-primary bg-primary/5 text-primary' : 'border-secondary/20 hover:border-primary/50 text-text-main dark:text-white'}`}>
-                                    <input type="radio" name="exam_type" checked={form.exam_type === type} onChange={() => setForm({ ...form, exam_type: type })} className="hidden" />
-                                    {type === 'UTS' ? <BookOpen className="w-5 h-5" /> : <GraduationCap className="w-5 h-5" />}
-                                    {type === 'UTS' ? labels.uts : labels.uas}
-                                </label>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jenis Ujian</label>
+                        <div className="grid grid-cols-3 gap-2">
+                            {(['ULANGAN', 'UTS', 'UAS'] as const).map(k => (
+                                <button
+                                    key={k}
+                                    type="button"
+                                    onClick={() => setForm({ ...form, exam_type: k })}
+                                    className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${form.exam_type === k
+                                        ? 'border-primary bg-primary/10 text-primary'
+                                        : 'border-secondary/20 text-text-secondary hover:border-primary/40'}`}
+                                >
+                                    {labelForGradeType(k, labels)}
+                                </button>
                             ))}
                         </div>
+                        {form.exam_type !== 'ULANGAN' && (
+                            <p className="text-xs text-text-secondary mt-2">
+                                {labelForGradeType(form.exam_type, labels)} adalah ujian resmi sekolah — semua kelas terpilih mengerjakan pada jadwal yang sama (bisa mode serentak atau jendela waktu).
+                            </p>
+                        )}
+                        {form.exam_type === 'ULANGAN' && (
+                            <p className="text-xs text-text-secondary mt-2">
+                                {labels.ulangan} dibuat sebagai draft atas nama guru pengampu mapel ini di setiap kelas terpilih — sistem mencocokkan gurunya otomatis.
+                            </p>
+                        )}
                     </div>
 
                     {/* Subject */}
@@ -1048,7 +1077,7 @@ export default function AdminUtsUasPage() {
                             value={form.title}
                             onChange={(e) => setForm({ ...form, title: e.target.value })}
                             className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary/50"
-                            placeholder={`Contoh: ${form.exam_type === 'UTS' ? labels.uts : labels.uas} Matematika Semester 1`}
+                            placeholder={`Contoh: ${labelForGradeType(form.exam_type, labels)} Matematika Semester 1`}
                         />
                     </div>
 
@@ -1107,6 +1136,36 @@ export default function AdminUtsUasPage() {
                             ))}
                         </div>
                     </div>
+
+                    {/* Pencocokan guru pengampu (mode Ulangan) */}
+                    {form.exam_type === 'ULANGAN' && form.subject_id && form.target_class_ids.length > 0 && (
+                        <div className="p-3 rounded-xl border border-secondary/20 bg-secondary/5 space-y-2">
+                            <p className="text-sm font-bold text-text-main dark:text-white">Pencocokan Guru Pengampu</p>
+                            {taLoading ? (
+                                <div className="flex items-center gap-2 text-sm text-text-secondary py-1">
+                                    <Loader2 className="w-4 h-4 animate-spin" /> Memuat data penugasan mengajar...
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="space-y-1.5">
+                                        {ulanganMatches.map(m => (
+                                            <div key={m.classId} className="flex items-start justify-between gap-3 text-sm">
+                                                <span className="font-bold text-text-main dark:text-white flex-shrink-0">{m.className}</span>
+                                                {m.teachers.length > 0 ? (
+                                                    <span className="text-emerald-600 dark:text-emerald-400 text-right">✓ {m.teachers.map(t => t.teacherName).join(', ')}</span>
+                                                ) : (
+                                                    <span className="text-red-500 text-right">✗ Tidak ada guru pengampu — di-skip</span>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p className="text-xs text-text-secondary">
+                                        {ulanganMatches.filter(m => m.teachers.length > 0).length} dari {ulanganMatches.length} kelas siap — draft {labels.ulangan} akan muncul di daftar guru terkait dan bisa dilengkapi atau dipublikasikan baik oleh guru maupun Anda.
+                                    </p>
+                                </>
+                            )}
+                        </div>
+                    )}
 
                     {/* Schedule */}
                     <div>
@@ -1170,142 +1229,10 @@ export default function AdminUtsUasPage() {
                         <Button
                             onClick={handleCreate}
                             loading={creating}
-                            disabled={!form.subject_id || !form.title || !form.start_time || form.target_class_ids.length === 0 || form.duration_minutes < 5 || (form.schedule_mode === 'window' && !form.window_end_time)}
+                            disabled={!form.subject_id || !form.title || !form.start_time || form.target_class_ids.length === 0 || form.duration_minutes < 5 || (form.schedule_mode === 'window' && !form.window_end_time) || (form.exam_type === 'ULANGAN' && !taLoading && ulanganMatches.every(m => m.teachers.length === 0))}
                             className="flex-1"
                         >
                             Buat & Tambah Soal
-                        </Button>
-                    </div>
-                </div>
-            </Modal>
-
-            {/* Buat Ulangan untuk Guru (admin) — form senanda form ulangan guru */}
-            <Modal
-                open={showCreateTeacherExam}
-                onClose={() => setShowCreateTeacherExam(false)}
-                title={`Buat ${labels.ulangan} untuk Guru`}
-            >
-                <div className="space-y-4">
-                    <div className="flex items-start gap-3 p-3 bg-teal-500/10 text-teal-700 dark:text-teal-300 rounded-xl text-sm">
-                        <BookOpen className="w-5 h-5 flex-shrink-0" />
-                        <div>
-                            {labels.ulangan} dibuat sebagai <span className="font-bold">DRAFT atas nama guru</span> yang dipilih — langsung muncul di daftar {labels.ulangan} guru terkait. Guru melengkapi soal dan mempublikasikannya.
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Guru <span className="text-red-500">*</span></label>
-                        <select
-                            value={teacherExamForm.teacher_id}
-                            onChange={(e) => handleTeacherExamTeacherChange(e.target.value)}
-                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                            <option value="">-- Pilih Guru --</option>
-                            {teacherOptions.map(t => (
-                                <option key={t.id} value={t.id}>{t.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                    {teacherExamForm.teacher_id && (
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas & Mata Pelajaran <span className="text-red-500">*</span></label>
-                            {teacherTAs.length === 0 ? (
-                                <p className="text-sm text-text-secondary p-3 bg-secondary/5 border border-secondary/20 rounded-xl">
-                                    Guru ini belum memiliki penugasan mengajar di tahun ajaran aktif.
-                                </p>
-                            ) : (
-                                <ClassChipsSelector
-                                    assignments={teacherTAs.map(ta => ({ id: ta.id, subject: ta.subject, class: ta.class }))}
-                                    selectedIds={teacherExamForm.teaching_assignment_ids}
-                                    onChange={(ids) => setTeacherExamForm({ ...teacherExamForm, teaching_assignment_ids: ids })}
-                                    disabled={teacherTAs.length === 0}
-                                />
-                            )}
-                        </div>
-                    )}
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul {labels.ulangan} <span className="text-red-500">*</span></label>
-                        <input
-                            type="text"
-                            value={teacherExamForm.title}
-                            onChange={(e) => setTeacherExamForm({ ...teacherExamForm, title: e.target.value })}
-                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder={`Contoh: ${labels.ulangan} Harian Bab 2`}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Deskripsi (Opsional)</label>
-                        <textarea
-                            value={teacherExamForm.description}
-                            onChange={(e) => setTeacherExamForm({ ...teacherExamForm, description: e.target.value })}
-                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            rows={2}
-                            placeholder="Materi yang diujikan..."
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jadwal Pengerjaan</label>
-                        <TimeWindowFields
-                            value={{
-                                mode: teacherExamForm.schedule_mode,
-                                start_time: teacherExamForm.start_time,
-                                window_end_time: teacherExamForm.window_end_time,
-                                duration_minutes: String(teacherExamForm.duration_minutes)
-                            }}
-                            onChange={(v) => setTeacherExamForm({
-                                ...teacherExamForm,
-                                schedule_mode: v.mode,
-                                start_time: v.start_time,
-                                duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || 0 : 0,
-                                window_end_time: v.mode === 'window' ? v.window_end_time : ''
-                            })}
-                            durationRequired
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran (auto-submit)</label>
-                        <input
-                            type="number"
-                            value={teacherExamForm.max_violations}
-                            onChange={(e) => setTeacherExamForm({ ...teacherExamForm, max_violations: parseInt(e.target.value) || 3 })}
-                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            min={1}
-                            max={10}
-                        />
-                    </div>
-                    <div className="flex flex-col gap-2">
-                        <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
-                            <input
-                                type="checkbox"
-                                id="teacherExamRandomize"
-                                checked={teacherExamForm.is_randomized}
-                                onChange={(e) => setTeacherExamForm({ ...teacherExamForm, is_randomized: e.target.checked })}
-                                className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
-                            />
-                            <label htmlFor="teacherExamRandomize" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none">Acak urutan soal per siswa</label>
-                        </div>
-                        <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
-                            <input
-                                type="checkbox"
-                                id="teacherExamShowResults"
-                                checked={teacherExamForm.show_results_immediately}
-                                onChange={(e) => setTeacherExamForm({ ...teacherExamForm, show_results_immediately: e.target.checked })}
-                                className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
-                            />
-                            <label htmlFor="teacherExamShowResults" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none flex flex-col">
-                                <span>Tampilkan Hasil Langsung</span>
-                                <span className="text-xs text-text-secondary font-normal mt-0.5">Jika dimatikan, siswa baru bisa melihat nilai setelah guru klik "Bagikan Hasil"</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div className="flex gap-3 pt-4 border-t border-secondary/10">
-                        <Button variant="secondary" onClick={() => setShowCreateTeacherExam(false)} className="flex-1">Batal</Button>
-                        <Button
-                            onClick={handleCreateTeacherExam}
-                            loading={creatingTeacherExam}
-                            disabled={creatingTeacherExam || !teacherExamForm.teacher_id || teacherExamForm.teaching_assignment_ids.length === 0 || !teacherExamForm.title || !teacherExamForm.start_time || teacherExamForm.duration_minutes < 5 || (teacherExamForm.schedule_mode === 'window' && !teacherExamForm.window_end_time)}
-                            className="flex-1"
-                        >
-                            Buat {labels.ulangan} (Draft)
                         </Button>
                     </div>
                 </div>
