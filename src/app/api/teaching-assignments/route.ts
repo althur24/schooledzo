@@ -107,6 +107,24 @@ export async function POST(request: NextRequest) {
         const yearStatus = await getYearStatusById(academic_year_id)
         if (yearStatus === 'COMPLETED') return archivedYearResponse()
 
+        // Guard: kelas harus benar-benar milik tahun ajaran penugasan — tanpa ini
+        // admin bisa memilih kelas tahun lama yang bernama sama (insiden CIS
+        // 8 Jul 2026: 17 TA tahun baru menunjuk kelas tahun lama → semua materi/
+        // tugas/kuis guru kelas itu tidak pernah muncul di siswa). Paritas dengan
+        // guard di route bulk.
+        const { data: validClass } = await supabase
+            .from('classes')
+            .select('id, school_id')
+            .eq('id', class_id)
+            .eq('academic_year_id', academic_year_id)
+            .maybeSingle()
+        if (!validClass) {
+            return NextResponse.json({ error: 'Kelas tidak ditemukan pada tahun ajaran yang dipilih' }, { status: 400 })
+        }
+        if (tenantMismatch(validClass.school_id, schoolId)) {
+            return NextResponse.json({ error: 'Kelas bukan milik sekolah Anda' }, { status: 403 })
+        }
+
         // Check for duplicate
         const { data: existing } = await supabase
             .from('teaching_assignments')

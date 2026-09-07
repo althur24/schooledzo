@@ -57,8 +57,18 @@ function nStudents(defaultN) {
 async function assertServerDb(baseUrl, expectStaging) {
     const r = await fetch(baseUrl + '/api/schools/public', { signal: AbortSignal.timeout(10000) })
         .catch(() => null)
-    const body = r ? await r.json().catch(() => null) : null
+    // Gagal keras kalau endpoint sendiri error: respons gagal/kosong DULU lolos
+    // palsu sebagai "production" (build staging + key prod = semua query 401,
+    // /api/schools/public error → codes kosong → guard bypass). Guard harus
+    // membuktikan DB-nya benar, bukan sekadar tidak menemukan STG01.
+    if (!r || !r.ok) {
+        throw new Error(`[SERVER GUARD] /api/schools/public tidak sehat (status ${r ? r.status : 'fetch gagal'}) — server kemungkinan build env campur (URL build-time vs key runtime beda project). ABORT.`)
+    }
+    const body = await r.json().catch(() => null)
     const list = Array.isArray(body) ? body : (body?.schools || body?.data || [])
+    if (!Array.isArray(list) || list.length === 0) {
+        throw new Error(`[SERVER GUARD] /api/schools/public balas bukan array sekolah (body: ${JSON.stringify(body).slice(0, 120)}) — tidak bisa membuktikan DB yang benar. ABORT.`)
+    }
     const codes = list.map((s) => s?.code).filter(Boolean)
     const isStagingDb = codes.includes('STG01')
     if (expectStaging && !isStagingDb) {
