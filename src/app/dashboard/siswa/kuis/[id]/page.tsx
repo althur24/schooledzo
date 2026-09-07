@@ -785,6 +785,11 @@ export default function KerjakanKuisPage() {
             <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 space-y-5 max-w-md mx-auto">
                 <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center text-3xl">📝</div>
                 <h2 className="text-xl font-bold text-text-main dark:text-white text-center">{quiz.title}</h2>
+                {quiz.description && (
+                    <div className="w-full bg-secondary/5 border border-secondary/20 rounded-xl p-4 max-h-[30vh] overflow-y-auto custom-scrollbar">
+                        <p className="text-sm text-text-secondary dark:text-zinc-400 whitespace-pre-wrap break-words leading-relaxed">{quiz.description}</p>
+                    </div>
+                )}
                 <div className="w-full space-y-2 text-sm">
                     <div className="flex justify-between px-4 py-2.5 rounded-xl bg-secondary/10">
                         <span className="text-text-secondary">Jumlah soal</span>

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { PageHeader, EmptyState } from '@/components/ui'
+import ExpandableText from '@/components/ExpandableText'
 import { Loader2 } from 'lucide-react'
 import { Game, Calendar, TimeCircle, Document, TickSquare } from 'react-iconly'
 
@@ -143,7 +144,10 @@ export default function SiswaKuisPage() {
                                         </div>
                                     </div>
 
-                                    <p className="text-sm text-text-secondary dark:text-zinc-400 line-clamp-2">{quiz.description || 'Tidak ada deskripsi'}</p>
+                                    <ExpandableText
+                                        text={quiz.description || 'Tidak ada deskripsi'}
+                                        className="text-sm text-text-secondary dark:text-zinc-400"
+                                    />
 
                                     <div className="space-y-2 pt-3 border-t border-secondary/10">
                                         <div className="flex items-center text-xs text-text-secondary dark:text-zinc-500 mb-2">

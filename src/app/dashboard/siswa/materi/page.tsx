@@ -535,7 +535,7 @@ export default function SiswaMateriPage() {
             >
                 <div className="space-y-4">
                     <div className="bg-secondary/5 p-4 rounded-xl border border-secondary/20">
-                        <p className="text-sm text-text-secondary dark:text-[#A8BC9F] italic">
+                        <p className="text-sm text-text-secondary dark:text-[#A8BC9F] italic whitespace-pre-wrap break-words">
                             {viewingMaterial?.description || 'Tidak ada deskripsi tambahan.'}
                         </p>
                     </div>

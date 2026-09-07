@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
 import { PageHeader, EmptyState } from '@/components/ui'
+import ExpandableText from '@/components/ExpandableText'
 import { Loader2, GraduationCap, BookOpen } from 'lucide-react'
 import { Document, TimeCircle, Danger, Play, TickSquare, Chart, Calendar } from 'react-iconly'
 
@@ -292,7 +293,10 @@ export default function SiswaUlanganPage() {
                                                     </div>
                                                 </div>
 
-                                                <p className="text-sm text-text-secondary dark:text-zinc-400 line-clamp-2">{exam.description || 'Tidak ada deskripsi'}</p>
+                                                <ExpandableText
+                                                    text={exam.description || 'Tidak ada deskripsi'}
+                                                    className="text-sm text-text-secondary dark:text-zinc-400"
+                                                />
 
                                                 <div className="space-y-2 pt-3 border-t border-secondary/10">
                                                     <div className="flex items-center justify-between text-xs text-text-secondary">
@@ -400,7 +404,10 @@ export default function SiswaUlanganPage() {
                                                     </div>
                                                 </div>
 
-                                                <p className="text-sm text-text-secondary dark:text-zinc-400 line-clamp-2">{exam.description || 'Tidak ada deskripsi'}</p>
+                                                <ExpandableText
+                                                    text={exam.description || 'Tidak ada deskripsi'}
+                                                    className="text-sm text-text-secondary dark:text-zinc-400"
+                                                />
 
                                                 <div className="space-y-2 pt-3 border-t border-secondary/10">
                                                     <div className="flex items-center text-xs text-text-secondary dark:text-zinc-500 mb-2">
