@@ -226,24 +226,27 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json({ error: `${labels.tugas} ini sudah dinilai dan tidak dapat direvisi` }, { status: 400 })
             }
 
-            // Revisi: snapshot jawaban + nilai/komentar lama ke submission_revisions
-            // (history untuk guru), lalu hapus grade → status kembali "Belum Dinilai".
-            try {
-                await supabase.from('submission_revisions').insert({
-                    submission_id: existing.id,
-                    answers: (existing as any).answers ?? null,
-                    attachments: (existing as any).attachments ?? null,
-                    is_late: (existing as any).is_late ?? null,
-                    submitted_at: (existing as any).submitted_at ?? null,
-                    grade_score: oldGrade?.score ?? null,
-                    grade_feedback: oldGrade?.feedback ?? null
-                })
-            } catch (revError) {
-                // Gagal mencatat history tidak boleh menggagalkan revisi
-                console.error('Error saving revision history:', revError)
-            }
-
+            // Revisi (grade ada): snapshot jawaban + nilai/komentar lama ke
+            // submission_revisions (history untuk guru), lalu hapus grade →
+            // status kembali "Belum Dinilai".
+            // Edit SEBELUM dinilai: TANPA snapshot & notifikasi — siswa masih
+            // mengubah kerjaannya sendiri, bukan revisi atas penilaian guru.
             if (oldGrade) {
+                try {
+                    await supabase.from('submission_revisions').insert({
+                        submission_id: existing.id,
+                        answers: (existing as any).answers ?? null,
+                        attachments: (existing as any).attachments ?? null,
+                        is_late: (existing as any).is_late ?? null,
+                        submitted_at: (existing as any).submitted_at ?? null,
+                        grade_score: oldGrade.score,
+                        grade_feedback: oldGrade.feedback
+                    })
+                } catch (revError) {
+                    // Gagal mencatat history tidak boleh menggagalkan revisi
+                    console.error('Error saving revision history:', revError)
+                }
+
                 const { error: gradeDelError } = await supabase
                     .from('grades')
                     .delete()
@@ -255,11 +258,11 @@ export async function POST(request: NextRequest) {
             // Update existing
             const { data, error } = await supabase
                 .from('student_submissions')
-                .update({ 
-                    answers, 
+                .update({
+                    answers,
                     attachments: checkedAttachments.value,
                     is_late: isLate,
-                    submitted_at: new Date().toISOString() 
+                    submitted_at: new Date().toISOString()
                 })
                 .eq('id', existing.id)
                 .select()
@@ -267,33 +270,37 @@ export async function POST(request: NextRequest) {
 
             if (error) throw error
 
-            // Notifikasi guru: siswa merevisi — nilai ter-reset, perlu dinilai ulang
-            try {
-                const { data: assignment } = await supabase
-                    .from('assignments')
-                    .select(`
-                        id,
-                        title,
-                        teaching_assignment:teaching_assignments(
-                            teacher:teachers(user_id)
-                        )
-                    `)
-                    .eq('id', assignment_id)
-                    .single()
+            // Notifikasi guru HANYA untuk revisi sesungguhnya (grade ter-reset,
+            // menunggu dinilai ulang) — edit sebelum dinilai tidak memberi tahu
+            // guru (perilaku asli sebelum fitur revisi).
+            if (oldGrade) {
+                try {
+                    const { data: assignment } = await supabase
+                        .from('assignments')
+                        .select(`
+                            id,
+                            title,
+                            teaching_assignment:teaching_assignments(
+                                teacher:teachers(user_id)
+                            )
+                        `)
+                        .eq('id', assignment_id)
+                        .single()
 
-                const teacherUserId = (assignment?.teaching_assignment as any)?.teacher?.user_id
-                if (teacherUserId) {
-                    const labels = await getMenuLabelsForSchool(schoolId)
-                    await supabase.from('notifications').insert({
-                        user_id: teacherUserId,
-                        type: 'SUBMISSION_REVISI',
-                        title: `Revisi: ${assignment?.title}`,
-                        message: `${user.full_name} merevisi ${labels.tugas} — nilai lama direset, menunggu dinilai ulang`,
-                        link: `/dashboard/guru/tugas/${assignment_id}/hasil`
-                    })
+                    const teacherUserId = (assignment?.teaching_assignment as any)?.teacher?.user_id
+                    if (teacherUserId) {
+                        const labels = await getMenuLabelsForSchool(schoolId)
+                        await supabase.from('notifications').insert({
+                            user_id: teacherUserId,
+                            type: 'SUBMISSION_REVISI',
+                            title: `Revisi: ${assignment?.title}`,
+                            message: `${user.full_name} merevisi ${labels.tugas} — nilai lama direset, menunggu dinilai ulang`,
+                            link: `/dashboard/guru/tugas/${assignment_id}/hasil`
+                        })
+                    }
+                } catch (notifError) {
+                    console.error('Error sending revision notification:', notifError)
                 }
-            } catch (notifError) {
-                console.error('Error sending revision notification:', notifError)
             }
 
             return NextResponse.json(data)
