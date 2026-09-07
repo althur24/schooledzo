@@ -11,6 +11,7 @@ interface FileUploadProps {
     maxSizeMB?: number       // default 10
     accept?: string          // default: gambar + PDF + Office docs
     disabled?: boolean
+    uploadUrl?: string       // default: /api/submissions/upload (endpoint siswa)
 }
 
 export default function FileUpload({
@@ -19,7 +20,8 @@ export default function FileUpload({
     maxFiles = 3,
     maxSizeMB = 10,
     accept = 'image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx',
-    disabled = false
+    disabled = false,
+    uploadUrl = '/api/submissions/upload'
 }: FileUploadProps) {
     const [isDragging, setIsDragging] = useState(false)
     const [uploading, setUploading] = useState(false)
@@ -50,7 +52,7 @@ export default function FileUpload({
 
         return new Promise<SubmissionAttachment>((resolve, reject) => {
             const xhr = new XMLHttpRequest()
-            xhr.open('POST', '/api/submissions/upload')
+            xhr.open('POST', uploadUrl)
             
             xhr.upload.onprogress = (event) => {
                 if (event.lengthComputable) {

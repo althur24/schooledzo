@@ -147,7 +147,7 @@ export async function PUT(
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
-        const { title, description, type, due_date, submission_mode } = await request.json()
+        const { title, description, type, due_date, submission_mode, attachments } = await request.json()
 
         if (!title || !type) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
@@ -158,6 +158,11 @@ export async function PUT(
         const updatePayload: Record<string, any> = { title, description, type, due_date }
         if (submission_mode === 'OFFLINE' || submission_mode === 'ONLINE') {
             updatePayload.submission_mode = submission_mode
+        }
+        // attachments hanya diupdate bila dikirim eksplisit (array atau null) —
+        // caller lama yang tidak mengirim field ini tidak menghapus lampiran.
+        if (attachments !== undefined) {
+            updatePayload.attachments = attachments
         }
 
         const { data, error } = await supabase

@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { teaching_assignment_id, title, description, type, due_date, submission_mode } = await request.json()
+        const { teaching_assignment_id, title, description, type, due_date, submission_mode, attachments } = await request.json()
 
         if (!teaching_assignment_id || !title || !type) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
 
         const { data, error } = await supabase
             .from('assignments')
-            .insert({ teaching_assignment_id, title, description, type, due_date, submission_mode: submissionMode })
+            .insert({ teaching_assignment_id, title, description, type, due_date, submission_mode: submissionMode, attachments: attachments ?? null })
             .select()
             .single()
 

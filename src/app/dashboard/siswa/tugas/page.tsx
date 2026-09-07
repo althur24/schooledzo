@@ -18,6 +18,7 @@ interface Assignment {
     due_date: string | null
     created_at: string
     submission_mode?: string
+    attachments?: SubmissionAttachment[] | null
     teaching_assignment: {
         subject: { name: string }
         class: { id?: string; name: string }
@@ -212,6 +213,11 @@ export default function SiswaTugasPage() {
                                                 )}
                                             </div>
                                             <h3 className="font-bold text-text-main dark:text-white text-base md:text-lg group-hover:text-primary transition-colors">{assignment.title}</h3>
+                                            {(assignment.attachments?.length || 0) > 0 && (
+                                                <span className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 bg-indigo-100 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 text-xs font-bold rounded-full">
+                                                    <Paper set="bold" primaryColor="currentColor" size={12} /> {assignment.attachments!.length} Lampiran
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
 
@@ -460,6 +466,51 @@ export default function SiswaTugasPage() {
                                             <p className="text-sm text-text-main dark:text-zinc-300 whitespace-pre-wrap break-words leading-relaxed">{detailing.description || 'Tidak ada deskripsi'}</p>
                                         </div>
                                     </div>
+
+                                    {/* Lampiran instruksi guru */}
+                                    {(detailing.attachments?.length || 0) > 0 && (
+                                        <div>
+                                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Lampiran dari Guru</label>
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                                {detailing.attachments!.map((file, idx) => {
+                                                    const isImage = file.type?.startsWith('image/')
+                                                    if (isImage) {
+                                                        return (
+                                                            <a
+                                                                key={idx}
+                                                                href={file.url}
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="block rounded-xl overflow-hidden border-2 border-secondary/20 hover:border-primary transition-colors group"
+                                                                title={file.name}
+                                                            >
+                                                                <div className="aspect-square bg-secondary/10 overflow-hidden">
+                                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                                    <img src={file.url} alt={file.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+                                                                </div>
+                                                                <p className="px-2 py-1.5 text-xs font-medium text-text-main dark:text-white truncate bg-white dark:bg-surface-dark">{file.name}</p>
+                                                            </a>
+                                                        )
+                                                    }
+                                                    return (
+                                                        <a
+                                                            key={idx}
+                                                            href={file.url}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-secondary/20 hover:border-primary transition-colors p-4 bg-white dark:bg-surface-dark text-center group"
+                                                        >
+                                                            <div className="p-2.5 bg-primary/10 text-primary rounded-xl group-hover:scale-110 transition-transform">
+                                                                <Document set="bold" primaryColor="currentColor" size={24} />
+                                                            </div>
+                                                            <p className="text-xs font-bold text-text-main dark:text-white break-all line-clamp-2">{file.name}</p>
+                                                            <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">Buka File</span>
+                                                        </a>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
 
                                     {/* Deadline */}
                                     <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-medium text-text-secondary dark:text-zinc-500">

@@ -251,6 +251,7 @@ export type Database = {
       }
       assignments: {
         Row: {
+          attachments: Json | null
           created_at: string | null
           description: string | null
           due_date: string | null
@@ -261,6 +262,7 @@ export type Database = {
           type: string
         }
         Insert: {
+          attachments?: Json | null
           created_at?: string | null
           description?: string | null
           due_date?: string | null
@@ -271,6 +273,7 @@ export type Database = {
           type: string
         }
         Update: {
+          attachments?: Json | null
           created_at?: string | null
           description?: string | null
           due_date?: string | null

@@ -10,6 +10,8 @@ import { Loader2, Copy } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
+import FileUpload from '@/components/FileUpload'
+import { SubmissionAttachment } from '@/lib/types'
 
 interface TeachingAssignment {
     id: string
@@ -25,6 +27,7 @@ interface Assignment {
     due_date: string | null
     created_at: string
     submission_mode?: string
+    attachments?: SubmissionAttachment[] | null
     teaching_assignment: TeachingAssignment
     submissions?: { count: number }[]
     need_grading_count?: number
@@ -45,7 +48,8 @@ export default function TugasPage() {
         title: '',
         description: '',
         type: 'TUGAS',
-        due_date: ''
+        due_date: '',
+        attachments: [] as SubmissionAttachment[]
     })
     const [saving, setSaving] = useState(false)
 
@@ -119,7 +123,7 @@ export default function TugasPage() {
         const closeHandler = () => {
             setShowModal(false)
             setEditingId(null)
-            setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '' })
+            setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [] })
         }
         window.addEventListener('tutorial:open-task-modal', openHandler)
         window.addEventListener('tutorial:close-task-modal', closeHandler)
@@ -150,7 +154,8 @@ export default function TugasPage() {
                         title: formData.title,
                         description: formData.description,
                         type: formData.type,
-                        due_date: formattedDueDate
+                        due_date: formattedDueDate,
+                        attachments: formData.attachments
                     })
                 })
                 if (!res.ok) {
@@ -169,7 +174,8 @@ export default function TugasPage() {
                                 title: formData.title,
                                 description: formData.description,
                                 type: formData.type,
-                                due_date: formattedDueDate
+                                due_date: formattedDueDate,
+                                attachments: formData.attachments
                             })
                         }).then(r => {
                             if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -185,7 +191,7 @@ export default function TugasPage() {
             
             setShowModal(false)
             setEditingId(null)
-            setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '' })
+            setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [] })
             fetchData()
         } finally {
             setSaving(false)
@@ -226,7 +232,8 @@ export default function TugasPage() {
                             description: copyForm.description,
                             type: copyForm.type,
                             due_date: formattedDueDate,
-                            submission_mode: copySourceAssignment.submission_mode || 'ONLINE'
+                            submission_mode: copySourceAssignment.submission_mode || 'ONLINE',
+                            attachments: copySourceAssignment.attachments || []
                         })
                     }).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -264,7 +271,8 @@ export default function TugasPage() {
             title: assignment.title,
             description: assignment.description || '',
             type: assignment.type,
-            due_date: localDueStr
+            due_date: localDueStr,
+            attachments: assignment.attachments || []
         })
         setShowModal(true)
     }
@@ -418,6 +426,11 @@ export default function TugasPage() {
                                             <p className="text-sm text-text-secondary dark:text-zinc-400 mb-3 line-clamp-2">
                                                 {assignment.description || 'Tidak ada deskripsi'}
                                             </p>
+                                            {(assignment.attachments?.length || 0) > 0 && (
+                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 mb-3 bg-indigo-100 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 text-xs font-bold rounded-full">
+                                                    <Paper set="bold" primaryColor="currentColor" size={14} /> {assignment.attachments!.length} Lampiran Instruksi
+                                                </span>
+                                            )}
                                             <div className="flex items-center flex-wrap gap-4 text-xs text-text-secondary dark:text-zinc-500">
                                                 <div className="flex items-center gap-1.5">
                                                     <Calendar set="bold" primaryColor="currentColor" size={16} />
@@ -520,7 +533,7 @@ export default function TugasPage() {
 
             <Modal
                 open={showModal}
-                onClose={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '' }) }}
+                onClose={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [] }) }}
                 title={editingId ? `Edit ${labels.tugas}` : `Buat ${labels.tugas} Baru`}
             >
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -554,6 +567,19 @@ export default function TugasPage() {
                             placeholder={`Jelaskan detail ${labels.tugas.toLowerCase()} di sini...`}
                         />
                     </div>
+                    <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Lampiran Instruksi (Opsional)</label>
+                        <FileUpload
+                            files={formData.attachments}
+                            onFilesChange={(files) => setFormData({ ...formData, attachments: files })}
+                            maxFiles={5}
+                            maxSizeMB={10}
+                            uploadUrl="/api/assignments/upload"
+                        />
+                        <p className="mt-2 text-xs text-text-secondary">
+                            Lampirkan gambar soal, PDF lembar kerja, atau dokumen lain — tampil di detail {labels.tugas.toLowerCase()} siswa.
+                        </p>
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div data-tutorial="task-form-type">
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe</label>
@@ -584,7 +610,7 @@ export default function TugasPage() {
                     </div>
 
                     <div className="flex gap-3 pt-4 border-t border-secondary/10 mt-4" data-tutorial="task-form-submit">
-                        <Button type="button" variant="secondary" onClick={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '' }) }} className="flex-1">
+                        <Button type="button" variant="secondary" onClick={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [] }) }} className="flex-1">
                             Batal
                         </Button>
                         <Button type="submit" loading={saving} disabled={formData.teaching_assignment_ids.length === 0 || !formData.title} className="flex-1">
