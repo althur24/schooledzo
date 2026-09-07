@@ -421,6 +421,17 @@ function EditExamPageInner() {
             })
             const syncData = await syncRes.json().catch(() => null)
             const failedTargets: string[] = syncData?.failed_targets || []
+            const publishBlocked: string[] = syncData?.publish_blocked || []
+            if (publishBlocked.length > 0) {
+                // Soal tersalin, tapi publish sibling ditahan — ada soal belum
+                // selesai review (paritas gate PUT /api/exams/[id])
+                setAlertInfo({
+                    type: 'warning',
+                    title: 'Publish Ditahan',
+                    message: `Soal tersalin ke ${publishBlocked.length} kelas, namun penerbitannya ditahan karena masih ada soal yang belum selesai review. Selesaikan review soal lalu publish ulang dari kelas ini.`
+                })
+                return false
+            }
             if (!syncRes.ok || failedTargets.length > 0) {
                 setSyncFailedCount(failedTargets.length || siblingIds.length)
                 return false

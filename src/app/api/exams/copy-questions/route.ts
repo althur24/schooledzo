@@ -141,17 +141,46 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // 3. Update also_publish for successfully copied targets
+        // 3. also_publish untuk target yang berhasil disalin — WAJIB mengikuti
+        // publish gate yang sama dengan PUT /api/exams/[id]. Tanpa ini guru bisa
+        // menerbitkan exam berisi soal draft/returned via copy-questions
+        // (termasuk self-target: source sekaligus target), bypass total gate.
+        // Soal target = salinan persis sumber, jadi status sumber mewakili semua.
+        let publishBlockedTargets: string[] = []
+        let publishPendingTargets: string[] = []
         if (also_publish) {
+            const counts = {
+                draft: sourceQuestions.filter(q => q.status === 'draft').length,
+                ai_reviewing: sourceQuestions.filter(q => q.status === 'ai_reviewing').length,
+                admin_review: sourceQuestions.filter(q => q.status === 'admin_review').length,
+                returned: sourceQuestions.filter(q => q.status === 'returned').length,
+            }
             const successTargets = target_exam_ids.filter(id => !failedTargets.includes(id))
             if (successTargets.length > 0) {
-                const { error: updateError } = await supabase
-                    .from('exams')
-                    .update({ is_active: true })
-                    .in('id', successTargets)
+                if (counts.draft + counts.ai_reviewing + counts.returned > 0) {
+                    // Ada soal belum selesai review — jangan aktifkan (paritas gate
+                    // PUT yang menolak 400). Copy tetap sah, hanya publish ditahan.
+                    publishBlockedTargets = successTargets
+                } else if (counts.admin_review > 0) {
+                    // Menunggu approve admin — tandai pending_publish; autoPublish
+                    // akan menerbitkan otomatis saat semua soal approved.
+                    publishPendingTargets = successTargets
+                    const { error: updateError } = await supabase
+                        .from('exams')
+                        .update({ is_active: false, pending_publish: true })
+                        .in('id', successTargets)
+                    if (updateError) {
+                        console.error('Error marking targets pending_publish:', updateError)
+                    }
+                } else {
+                    const { error: updateError } = await supabase
+                        .from('exams')
+                        .update({ is_active: true })
+                        .in('id', successTargets)
 
-                if (updateError) {
-                    console.error('Error updating target exams publish state:', updateError)
+                    if (updateError) {
+                        console.error('Error updating target exams publish state:', updateError)
+                    }
                 }
             }
         }
@@ -160,7 +189,9 @@ export async function POST(req: NextRequest) {
             success: true,
             copied_count: totalCopied,
             failed_targets: failedTargets.length > 0 ? failedTargets : undefined,
-            cleanup_warnings: cleanupWarnings.length > 0 ? cleanupWarnings : undefined
+            cleanup_warnings: cleanupWarnings.length > 0 ? cleanupWarnings : undefined,
+            publish_blocked: publishBlockedTargets.length > 0 ? publishBlockedTargets : undefined,
+            publish_pending: publishPendingTargets.length > 0 ? publishPendingTargets : undefined,
         })
 
     } catch (error: any) {

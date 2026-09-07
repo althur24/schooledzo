@@ -4,13 +4,14 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { analyzeQuestion, type HOTSAnalysisInput } from '@/lib/hotsQC'
 import { determineRouting, type RoutingInput } from '@/lib/routingRules'
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
+import { canManageExam, getTeacherScope } from '@/lib/teacherScope'
 
 /**
  * POST /api/ai/hots-analyze
- * 
+ *
  * Analyze a question for HOTS/Bloom's Taxonomy quality.
  * Can be called standalone or automatically after question save.
- * 
+ *
  * Body:
  * {
  *   question_id: string,         // UUID of the question
@@ -57,6 +58,78 @@ export async function POST(request: NextRequest) {
                 { error: 'question_source harus bank, quiz, atau exam' },
                 { status: 400 }
             )
+        }
+
+        // Role guard: route ini mengubah status soal orang lain dan memicu
+        // biaya AI — sebelumnya terbuka untuk semua role (termasuk SISWA).
+        if (user.role !== 'GURU' && user.role !== 'ADMIN') {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Ownership guard: soal harus milik guru pemilik (atau admin sekolah
+        // yang sama). Tanpa ini, user sekolah mana pun bisa memicu analisis
+        // (dan mengubah status) soal milik guru lain.
+        if (question_source === 'exam') {
+            const { data: q } = await supabase
+                .from('exam_questions')
+                .select('exam:exams(teaching_assignment:teaching_assignments(teacher_id))')
+                .eq('id', question_id)
+                .single()
+            const examRow = Array.isArray(q?.exam) ? q.exam[0] : q?.exam
+            const ta = Array.isArray(examRow?.teaching_assignment) ? examRow.teaching_assignment[0] : examRow?.teaching_assignment
+            const taTeacherId = (ta as any)?.teacher_id ?? null
+            if (!q || !taTeacherId) {
+                return NextResponse.json({ error: 'Soal tidak ditemukan' }, { status: 404 })
+            }
+            if (!(await canManageExam(user, taTeacherId))) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke soal ini' }, { status: 403 })
+            }
+        } else if (question_source === 'quiz') {
+            const { data: q } = await supabase
+                .from('quiz_questions')
+                .select('quiz:quizzes(teaching_assignment:teaching_assignments(teacher_id))')
+                .eq('id', question_id)
+                .single()
+            const quizRow = Array.isArray(q?.quiz) ? q.quiz[0] : q?.quiz
+            const ta = Array.isArray(quizRow?.teaching_assignment) ? quizRow.teaching_assignment[0] : quizRow?.teaching_assignment
+            const taTeacherId = (ta as any)?.teacher_id ?? null
+            if (!q || !taTeacherId) {
+                return NextResponse.json({ error: 'Soal tidak ditemukan' }, { status: 404 })
+            }
+            if (!(await canManageExam(user, taTeacherId))) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke soal ini' }, { status: 403 })
+            }
+        } else {
+            // bank: ownership via question_bank.teacher_id (guru) atau
+            // sekolah terverifikasi via teacher/subject (admin). Bank tanpa
+            // keduanya tidak bisa diverifikasi → tolak (konservatif).
+            const { data: q } = await supabase
+                .from('question_bank')
+                .select('teacher_id, subject:subjects(school_id)')
+                .eq('id', question_id)
+                .single()
+            if (!q) {
+                return NextResponse.json({ error: 'Soal tidak ditemukan' }, { status: 404 })
+            }
+            if (user.role === 'GURU') {
+                const scope = await getTeacherScope(user.id)
+                if (!scope || q.teacher_id !== scope.teacherId) {
+                    return NextResponse.json({ error: 'Anda tidak memiliki akses ke soal ini' }, { status: 403 })
+                }
+            } else {
+                let ownerSchoolId: string | null = null
+                if (q.teacher_id) {
+                    const { data: t } = await supabase.from('teachers').select('school_id').eq('id', q.teacher_id).single()
+                    ownerSchoolId = (t as any)?.school_id ?? null
+                }
+                if (!ownerSchoolId) {
+                    const subj = Array.isArray(q.subject) ? q.subject[0] : q.subject
+                    ownerSchoolId = (subj as any)?.school_id ?? null
+                }
+                if (!ownerSchoolId || ownerSchoolId !== schoolId) {
+                    return NextResponse.json({ error: 'Anda tidak memiliki akses ke soal ini' }, { status: 403 })
+                }
+            }
         }
 
         // Check if AI review is enabled for this school

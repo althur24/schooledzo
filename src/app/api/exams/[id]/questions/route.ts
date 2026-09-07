@@ -6,7 +6,7 @@ import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type T
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncQuestionsToBank } from '@/lib/questionBankSync'
-import { canManageExam } from '@/lib/teacherScope'
+import { canManageExam, getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
 import { syncDraftExamQuestions } from '@/lib/examBatch'
 import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
 
@@ -76,6 +76,23 @@ export async function GET(
             const started = examTa?.start_time ? new Date(examTa.start_time).getTime() <= Date.now() : true
             if (!hasAttempt && (!examTa?.is_active || !started)) {
                 return NextResponse.json({ error: 'Ulangan belum tersedia' }, { status: 403 })
+            }
+        }
+
+        // GURU non-pemilik TA tidak boleh membaca soal ulangan guru lain
+        // (bocor soal + kunci jawaban antar guru satu sekolah) — paritas
+        // dengan guard mutasi POST/PUT/DELETE di route ini. ADMIN tetap boleh
+        // (review queue, monitor, editor bersama ?type=ulangan).
+        if (user.role === 'GURU') {
+            const { data: examTa } = await supabase
+                .from('exams')
+                .select('teaching_assignment:teaching_assignments(teacher_id)')
+                .eq('id', id)
+                .single()
+            const taTeacherId = (examTa?.teaching_assignment as any)?.teacher_id
+            const scope = await getTeacherScope(user.id)
+            if (!ownsTeachingAssignment(scope, taTeacherId)) {
+                return notFound()
             }
         }
 
