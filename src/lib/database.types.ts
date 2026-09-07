@@ -251,6 +251,7 @@ export type Database = {
       }
       assignments: {
         Row: {
+          allow_revision: boolean
           attachments: Json | null
           created_at: string | null
           description: string | null
@@ -262,6 +263,7 @@ export type Database = {
           type: string
         }
         Insert: {
+          allow_revision?: boolean
           attachments?: Json | null
           created_at?: string | null
           description?: string | null
@@ -273,6 +275,7 @@ export type Database = {
           type: string
         }
         Update: {
+          allow_revision?: boolean
           attachments?: Json | null
           created_at?: string | null
           description?: string | null

@@ -172,10 +172,11 @@ export async function POST(request: NextRequest) {
 
         // Auto-detect late submission
         let isLate = false
+        let allowRevision = true // default: revisi diizinkan (konsisten DB default)
         if (assignment_id) {
             const { data: assignment } = await supabase
                 .from('assignments')
-                .select('due_date, submission_mode')
+                .select('due_date, submission_mode, allow_revision')
                 .eq('id', assignment_id)
                 .single()
 
@@ -183,6 +184,10 @@ export async function POST(request: NextRequest) {
             if (assignment?.submission_mode === 'OFFLINE') {
                 const labels = await getMenuLabelsForSchool(schoolId)
                 return NextResponse.json({ error: `${labels.tugas} ini dinilai langsung oleh guru, tidak perlu dikumpulkan di sini` }, { status: 400 })
+            }
+
+            if (assignment?.allow_revision === false) {
+                allowRevision = false
             }
 
             if (assignment?.due_date && new Date() > new Date(assignment.due_date)) {
@@ -211,6 +216,15 @@ export async function POST(request: NextRequest) {
 
         if (existing) {
             const oldGrade = (existing as any).grade?.[0] as { score: number; feedback: string | null } | undefined
+
+            // Enforcement server-side: revisi SETELAH dinilai hanya boleh bila
+            // guru mengizinkan (assignments.allow_revision). Edit sebelum dinilai
+            // tetap bebas — UI siswa menyembunyikan tombolnya, tapi server
+            // yang menjamin (UI bisa dimanipulasi).
+            if (oldGrade && allowRevision === false) {
+                const labels = await getMenuLabelsForSchool(schoolId)
+                return NextResponse.json({ error: `${labels.tugas} ini sudah dinilai dan tidak dapat direvisi` }, { status: 400 })
+            }
 
             // Revisi: snapshot jawaban + nilai/komentar lama ke submission_revisions
             // (history untuk guru), lalu hapus grade → status kembali "Belum Dinilai".

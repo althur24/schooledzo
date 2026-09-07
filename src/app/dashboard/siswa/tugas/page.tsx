@@ -18,6 +18,7 @@ interface Assignment {
     due_date: string | null
     created_at: string
     submission_mode?: string
+    allow_revision?: boolean
     attachments?: SubmissionAttachment[] | null
     teaching_assignment: {
         subject: { name: string }
@@ -172,9 +173,10 @@ export default function SiswaTugasPage() {
                         const overdue = isOverdue(assignment.due_date)
                         const isLate = submission?.is_late || false
                         const grade = submission?.grade?.[0]
-                        // Revisi diizinkan selama belum deadline — termasuk setelah
-                        // dinilai (guru sering meminta revisi lewat komentar).
-                        const canEdit = submission && !overdue
+                        // Revisi SETELAH dinilai hanya bila guru mengizinkan
+                        // (allow_revision, default true). Edit sebelum dinilai
+                        // tetap bebas selama belum deadline.
+                        const canEdit = submission && !overdue && (!grade || assignment.allow_revision !== false)
                         const isOffline = assignment.submission_mode === 'OFFLINE'
 
                         return (
@@ -203,7 +205,7 @@ export default function SiswaTugasPage() {
                                                         Terlambat
                                                     </span>
                                                 )}
-                                                {submission && grade && !overdue && (
+                                                {submission && grade && !overdue && assignment.allow_revision !== false && (
                                                     <span
                                                         title="Kamu masih bisa merevisi tugas ini sampai deadline — nilai & komentar guru akan direset dan menunggu dinilai ulang"
                                                         className="px-2.5 py-1 bg-indigo-100 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 text-xs font-bold rounded-full cursor-help"
@@ -434,7 +436,8 @@ export default function SiswaTugasPage() {
                             const grade = submission?.grade?.[0]
                             const isLate = submission?.is_late || false
                             const isOffline = detailing.submission_mode === 'OFFLINE'
-                            const canEdit = submission && !overdue
+                            // Sama seperti kartu: revisi setelah dinilai butuh izin guru
+                            const canEdit = submission && !overdue && (!grade || detailing.allow_revision !== false)
                             return (
                                 <div className="space-y-5">
                                     {/* Badges */}
@@ -596,7 +599,11 @@ export default function SiswaTugasPage() {
                                                 </Button>
                                             ) : (
                                                 <p className="text-xs text-text-secondary dark:text-zinc-400 italic text-center w-full py-2">
-                                                    {overdue ? 'Deadline sudah lewat — pengumpulan/edit tidak tersedia lagi.' : 'Dikumpulkan langsung ke guru.'}
+                                                    {overdue
+                                                        ? 'Deadline sudah lewat — pengumpulan/edit tidak tersedia lagi.'
+                                                        : grade && detailing.allow_revision === false
+                                                            ? `${labels.tugas} ini sudah dinilai dan tidak dapat direvisi.`
+                                                            : 'Dikumpulkan langsung ke guru.'}
                                                 </p>
                                             )}
                                         </div>

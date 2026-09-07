@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { teaching_assignment_id, title, description, type, due_date, submission_mode, attachments } = await request.json()
+        const { teaching_assignment_id, title, description, type, due_date, submission_mode, attachments, allow_revision } = await request.json()
 
         if (!teaching_assignment_id || !title || !type) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
@@ -197,6 +197,8 @@ export async function POST(request: NextRequest) {
         }
 
         const submissionMode = submission_mode === 'OFFLINE' ? 'OFFLINE' : 'ONLINE'
+        // allow_revision default true — konsisten DB default, caller lama aman
+        const allowRevision = allow_revision === false ? false : true
 
         // Block writes to archived (COMPLETED) academic years
         const yearStatus = await getYearStatusByTA(teaching_assignment_id)
@@ -204,7 +206,7 @@ export async function POST(request: NextRequest) {
 
         const { data, error } = await supabase
             .from('assignments')
-            .insert({ teaching_assignment_id, title, description, type, due_date, submission_mode: submissionMode, attachments: checkedAttachments.value })
+            .insert({ teaching_assignment_id, title, description, type, due_date, submission_mode: submissionMode, attachments: checkedAttachments.value, allow_revision: allowRevision })
             .select()
             .single()
 

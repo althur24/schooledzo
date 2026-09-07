@@ -27,6 +27,7 @@ interface Assignment {
     due_date: string | null
     created_at: string
     submission_mode?: string
+    allow_revision?: boolean
     attachments?: SubmissionAttachment[] | null
     teaching_assignment: TeachingAssignment
     submissions?: { count: number }[]
@@ -49,7 +50,8 @@ export default function TugasPage() {
         description: '',
         type: 'TUGAS',
         due_date: '',
-        attachments: [] as SubmissionAttachment[]
+        attachments: [] as SubmissionAttachment[],
+        allow_revision: true
     })
     const [saving, setSaving] = useState(false)
 
@@ -123,7 +125,7 @@ export default function TugasPage() {
         const closeHandler = () => {
             setShowModal(false)
             setEditingId(null)
-            setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [] })
+            setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [], allow_revision: true })
         }
         window.addEventListener('tutorial:open-task-modal', openHandler)
         window.addEventListener('tutorial:close-task-modal', closeHandler)
@@ -155,7 +157,8 @@ export default function TugasPage() {
                         description: formData.description,
                         type: formData.type,
                         due_date: formattedDueDate,
-                        attachments: formData.attachments
+                        attachments: formData.attachments,
+                        allow_revision: formData.allow_revision
                     })
                 })
                 if (!res.ok) {
@@ -175,7 +178,8 @@ export default function TugasPage() {
                                 description: formData.description,
                                 type: formData.type,
                                 due_date: formattedDueDate,
-                                attachments: formData.attachments
+                                attachments: formData.attachments,
+                                allow_revision: formData.allow_revision
                             })
                         }).then(r => {
                             if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -191,7 +195,7 @@ export default function TugasPage() {
             
             setShowModal(false)
             setEditingId(null)
-            setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [] })
+            setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [], allow_revision: true })
             fetchData()
         } finally {
             setSaving(false)
@@ -233,7 +237,8 @@ export default function TugasPage() {
                             type: copyForm.type,
                             due_date: formattedDueDate,
                             submission_mode: copySourceAssignment.submission_mode || 'ONLINE',
-                            attachments: copySourceAssignment.attachments || []
+                            attachments: copySourceAssignment.attachments || [],
+                            allow_revision: copySourceAssignment.allow_revision !== false
                         })
                     }).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -272,7 +277,8 @@ export default function TugasPage() {
             description: assignment.description || '',
             type: assignment.type,
             due_date: localDueStr,
-            attachments: assignment.attachments || []
+            attachments: assignment.attachments || [],
+            allow_revision: assignment.allow_revision !== false
         })
         setShowModal(true)
     }
@@ -533,7 +539,7 @@ export default function TugasPage() {
 
             <Modal
                 open={showModal}
-                onClose={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [] }) }}
+                onClose={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [], allow_revision: true }) }}
                 title={editingId ? `Edit ${labels.tugas}` : `Buat ${labels.tugas} Baru`}
             >
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -610,8 +616,23 @@ export default function TugasPage() {
                         </div>
                     </div>
 
+                    <label className="flex items-start gap-3 p-3 bg-secondary/5 border border-secondary/20 rounded-xl cursor-pointer hover:bg-secondary/10 transition-colors">
+                        <input
+                            type="checkbox"
+                            checked={formData.allow_revision}
+                            onChange={(e) => setFormData({ ...formData, allow_revision: e.target.checked })}
+                            className="mt-0.5 w-4 h-4 accent-primary cursor-pointer shrink-0"
+                        />
+                        <span>
+                            <span className="block text-sm font-bold text-text-main dark:text-white">Izinkan siswa revisi setelah dinilai</span>
+                            <span className="block text-xs text-text-secondary dark:text-zinc-400 mt-0.5">
+                                Jika aktif, siswa bisa memperbaiki {labels.tugas.toLowerCase()} selama belum deadline — nilai &amp; komentar akan direset dan {labels.tugas.toLowerCase()} menunggu dinilai ulang. Jika nonaktif, jawaban terkunci setelah dinilai.
+                            </span>
+                        </span>
+                    </label>
+
                     <div className="flex gap-3 pt-4 border-t border-secondary/10 mt-4" data-tutorial="task-form-submit">
-                        <Button type="button" variant="secondary" onClick={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [] }) }} className="flex-1">
+                        <Button type="button" variant="secondary" onClick={() => { setShowModal(false); setEditingId(null); setFormData({ teaching_assignment_ids: [], title: '', description: '', type: 'TUGAS', due_date: '', attachments: [], allow_revision: true }) }} className="flex-1">
                             Batal
                         </Button>
                         <Button type="submit" loading={saving} disabled={formData.teaching_assignment_ids.length === 0 || !formData.title} className="flex-1">
