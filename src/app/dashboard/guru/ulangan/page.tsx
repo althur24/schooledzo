@@ -54,6 +54,7 @@ interface OfficialExam {
     subject: { id: string; name: string; kkm?: number }
     created_by?: string | null
     creator_role?: string | null
+    created_at: string
 }
 
 interface TeachingAssignment {
@@ -995,6 +996,9 @@ export default function GuruUlanganPage() {
                                             classNameLabel={exam.teaching_assignment?.class?.name}
                                             durationMinutes={exam.duration_minutes}
                                             questionCount={exam.question_count}
+                                            createdAt={exam.created_at}
+                                            startTime={exam.start_time}
+                                            windowEndTime={exam.window_end_time ?? null}
                                             batchSize={exam.batch_size}
                                             submission={{ submitted, total }}
                                             pendingGrading={pendingGrading}
@@ -1031,14 +1035,14 @@ export default function GuruUlanganPage() {
                                         ? { label: 'Edit Soal', href: `/dashboard/guru/uts-uas/${exam.id}`, icon: <Edit set="bold" primaryColor="currentColor" size={16} /> }
                                         : isLive
                                             ? { label: 'Monitor Live', href: `/dashboard/guru/uts-uas/${exam.id}/monitor`, icon: <Activity className="w-4 h-4" /> }
-                                            : { label: 'Lihat Hasil', href: `/dashboard/guru/uts-uas/${exam.id}/hasil`, icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> }
+                                            : { label: 'Lihat Hasil', href: `/dashboard/guru/uts-uas/${exam.id}#hasil`, icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> }
 
                                     const officialMenuItems: DropdownMenuItem[] = [
                                         {
                                             label: 'Lihat Hasil',
                                             show: exam.is_active && !isLive,
                                             icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={14} /></span>,
-                                            onClick: () => router.push(`/dashboard/guru/uts-uas/${exam.id}/hasil`),
+                                            onClick: () => router.push(`/dashboard/guru/uts-uas/${exam.id}#hasil`),
                                         },
                                         {
                                             label: `Buat Remedial ${exam.exam_type === 'UTS' ? labels.uts : labels.uas}`,
@@ -1088,6 +1092,9 @@ export default function GuruUlanganPage() {
                                             classNameLabel={`${exam.target_class_ids?.length ?? 0} kelas`}
                                             durationMinutes={exam.duration_minutes}
                                             questionCount={exam.question_count}
+                                            createdAt={exam.created_at}
+                                            startTime={exam.start_time}
+                                            windowEndTime={exam.window_end_time ?? null}
                                             primaryAction={primaryAction}
                                             menuItems={officialMenuItems}
                                         />

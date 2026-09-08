@@ -26,9 +26,10 @@ export async function GET(
                 teaching_assignment:teaching_assignments(
                     id,
                     academic_year_id,
+                    teacher:teachers(id, user:users(full_name)),
                     subject:subjects(id, name),
                     class:classes(id, name, school_level, grade_level),
-                    academic_year:academic_years(school_id)
+                    academic_year:academic_years(id, name, school_id)
                 ),
                 questions:quiz_questions(*)
             `)

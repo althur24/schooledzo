@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { PageHeader, Card, Button, EmptyState, StatsCard } from '@/components/ui'
-import { InfoCircle, TickSquare, User, TimeCircle, Document, ArrowDown, ChevronDown } from 'react-iconly'
+import { TickSquare, User, TimeCircle, Document, ArrowDown } from 'react-iconly'
 import { Loader2 } from 'lucide-react'
 import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
+import PDFDownloadButton from '@/components/analytics/pdf/PDFDownloadButton'
+import NotSubmittedPanel from '@/components/NotSubmittedPanel'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 interface QuizSubmission {
@@ -27,9 +29,14 @@ interface QuizSubmission {
 interface Quiz {
     title: string
     submission_mode?: string
+    duration_minutes?: number | null
+    available_from?: string | null
+    deadline?: string | null
     teaching_assignment: {
         class: { id: string; name: string }
         subject: { name: string }
+        teacher?: { user?: { full_name: string } }
+        academic_year?: { id: string; name: string }
     }
 }
 
@@ -48,7 +55,6 @@ export default function QuizSubmissionsPage() {
     const [quiz, setQuiz] = useState<Quiz | null>(null)
     const [classStudents, setClassStudents] = useState<Student[]>([])
     const [loading, setLoading] = useState(true)
-    const [showNotSubmitted, setShowNotSubmitted] = useState(false)
 
     // Grid roster untuk kuis offline (input nilai tanpa pengerjaan online)
     const [offlineScores, setOfflineScores] = useState<Record<string, string>>({})
@@ -258,44 +264,40 @@ export default function QuizSubmissionsPage() {
             ) : (
             <>
             {/* Not Submitted Students Section */}
-            {notSubmittedStudents.length > 0 && (
-                <Card className="bg-red-500/10 border-red-500/30">
-                    <button
-                        onClick={() => setShowNotSubmitted(!showNotSubmitted)}
-                        className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-red-500/20 transition-colors rounded-lg"
-                    >
-                        <div className="flex items-center gap-3">
-                            <span className="text-red-400"><InfoCircle set="bold" primaryColor="currentColor" size={20} /></span>
-                            <span className="text-red-400 font-medium">{notSubmittedStudents.length} Siswa Belum Mengerjakan</span>
-                        </div>
-                        <div className={`text-red-400 transition-transform ${showNotSubmitted ? 'rotate-180' : ''}`}>
-                            <ChevronDown set="bold" primaryColor="currentColor" size={20} />
-                        </div>
-                    </button>
-                    {showNotSubmitted && (
-                        <div className="px-4 pb-4 space-y-2 mt-2">
-                            {notSubmittedStudents.map(student => (
-                                <div key={student.id} className="flex items-center gap-3 px-3 py-2 bg-white dark:bg-surface-dark rounded-lg shadow-sm">
-                                    <div className="w-8 h-8 rounded-full bg-red-100 dark:bg-red-500/20 text-red-500 dark:text-red-400 flex items-center justify-center text-xs font-bold">
-                                        {student.user.full_name.charAt(0)}
-                                    </div>
-                                    <div>
-                                        <p className="text-text-main dark:text-white text-sm font-medium">{student.user.full_name}</p>
-                                        <p className="text-xs text-text-secondary dark:text-zinc-500">{student.nis}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </Card>
-            )}
+            <NotSubmittedPanel
+                students={notSubmittedStudents.map(student => ({
+                    id: student.id,
+                    name: student.user.full_name,
+                    nis: student.nis,
+                }))}
+            />
 
             {/* Analytics Dashboard — hanya attempt yang sudah dikumpulkan */}
             {submitted.length > 0 && (
-                <AssessmentAnalytics
-                    assessmentId={quizId}
-                    assessmentType="quiz"
-                />
+                <>
+                    <div className="flex justify-end">
+                        <PDFDownloadButton
+                            assessmentId={quizId}
+                            assessmentType="quiz"
+                            meta={{
+                                typeLabel: labels.kuis,
+                                title: quiz?.title || '',
+                                subjectName: quiz?.teaching_assignment?.subject?.name || '',
+                                className: quiz?.teaching_assignment?.class?.name || '',
+                                teacherName: quiz?.teaching_assignment?.teacher?.user?.full_name,
+                                academicYearName: quiz?.teaching_assignment?.academic_year?.name,
+                                dateStart: quiz?.available_from || null,
+                                dateEnd: quiz?.deadline || null,
+                                durationMinutes: quiz?.duration_minutes ?? null,
+                                showViolations: false,
+                            }}
+                        />
+                    </div>
+                    <AssessmentAnalytics
+                        assessmentId={quizId}
+                        assessmentType="quiz"
+                    />
+                </>
             )}
 
             {/* In-Progress Submissions — siswa yang membuka kuis tapi belum mengumpulkan */}

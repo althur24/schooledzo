@@ -51,13 +51,17 @@ export async function checkEndedOfficialExams(schoolId: string): Promise<void> {
         if (!activeYear) return
 
         for (const exam of endedExams) {
-            // Check if notification already sent for this exam (deduplicate by link)
-            const notifLink = `/dashboard/guru/uts-uas/${exam.id}/hasil`
+            // Check if notification already sent for this exam (deduplicate by link).
+            // Dua format: link lama `/hasil` (halaman sudah dihapus, konsolidasi ke
+            // editor shared) dan link baru deep-link `#hasil` — tanpa cek keduanya,
+            // notifikasi dobel terkirim untuk ujian yang sudah dinotifikasi era link lama.
+            const notifLink = `/dashboard/guru/uts-uas/${exam.id}#hasil`
+            const legacyNotifLink = `/dashboard/guru/uts-uas/${exam.id}/hasil`
             const { data: existingNotif } = await supabase
                 .from('notifications')
                 .select('id')
                 .eq('type', 'UJIAN_SELESAI')
-                .eq('link', notifLink)
+                .in('link', [notifLink, legacyNotifLink])
                 .limit(1)
 
             if (existingNotif && existingNotif.length > 0) continue // Already notified

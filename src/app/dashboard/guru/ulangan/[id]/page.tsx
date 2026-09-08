@@ -24,6 +24,9 @@ import TagInput from '@/components/TagInput'
 import BankQuestionPicker from '@/components/BankQuestionPicker'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import InlineQuestionTags from '@/components/InlineQuestionTags'
+import NotSubmittedPanel from '@/components/NotSubmittedPanel'
+import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
+import PDFDownloadButton from '@/components/analytics/pdf/PDFDownloadButton'
 import { detectTextDirection } from '@/lib/textDirection'
 import { Modal, PageHeader, Button, EmptyState, Toast, type ToastType } from '@/components/ui'
 import Card from '@/components/ui/Card'
@@ -66,8 +69,16 @@ interface Exam {
     max_violations: number
     teaching_assignment: {
         subject: { id: string; name: string; kkm?: number }
-        class: { name: string; school_level?: string; grade_level?: number }
+        class: { id?: string; name: string; school_level?: string; grade_level?: number }
+        teacher?: { user?: { full_name: string } }
+        academic_year?: { id: string; name: string }
     }
+}
+
+interface ClassStudent {
+    id: string
+    nis: string
+    user: { full_name: string }
 }
 
 type Mode = 'list' | 'manual' | 'clean' | 'ai' | 'bank'
@@ -204,6 +215,8 @@ function EditExamPageInner() {
     const [selectedSubmission, setSelectedSubmission] = useState<any>(null)
     const [resettingId, setResettingId] = useState<string | null>(null)
     const [resetMenuId, setResetMenuId] = useState<string | null>(null)
+    // Roster kelas year-aware — untuk panel "Belum Mengerjakan" (paritas halaman kuis)
+    const [classStudents, setClassStudents] = useState<ClassStudent[]>([])
 
     // Edit settings state
     const [showEditSettings, setShowEditSettings] = useState(false)
@@ -296,6 +309,26 @@ function EditExamPageInner() {
     useEffect(() => {
         fetchExam()
     }, [fetchExam])
+
+    // Roster year-aware untuk panel "Belum Mengerjakan": siswa yang terdaftar di
+    // kelas ini pada tahun ajaran ulangan — bukan roster sekarang (siswa bisa
+    // sudah naik kelas). Effect terpisah dari fetchExam agar tidak ikut
+    // terpanggil oleh auto-poll review AI (tiap 5 dtk) — cukup sekali per exam.
+    useEffect(() => {
+        const ta = exam?.teaching_assignment
+        const classId = ta?.class?.id
+        if (!classId) return
+        let cancelled = false
+        const yearId = ta?.academic_year?.id || ''
+        fetch(`/api/students?class_id=${classId}&enrollment_year_id=${yearId}`)
+            .then(r => r.ok ? r.json() : [])
+            .then((d: ClassStudent[]) => { if (!cancelled) setClassStudents(Array.isArray(d) ? d : []) })
+            .catch(() => { })
+        return () => { cancelled = true }
+        // Primitif saja — re-fetch exam (poll review AI, publish, dsb.) tidak
+        // perlu memicu fetch roster ulang
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [exam?.id, exam?.teaching_assignment?.class?.id])
 
     // Auto-poll when questions are being AI-reviewed
     useEffect(() => {
@@ -1222,6 +1255,14 @@ function EditExamPageInner() {
             count: submitted.length
         }
     }
+
+    // Belum mengerjakan = roster kelas − semua siswa yang punya record submission
+    // (termasuk yang membuka tapi belum mengumpulkan — mereka muncul di tabel
+    // sebagai "Mengerjakan", bukan di panel ini). Paritas dengan halaman kuis.
+    const anyAttemptStudentIds = submissions.map(s => s.student?.id || s.student_id)
+    const notSubmittedStudents = classStudents
+        .filter(s => !anyAttemptStudentIds.includes(s.id))
+        .sort((a, b) => a.user.full_name.localeCompare(b.user.full_name, 'id'))
 
     const handleDownloadExcel = () => {
         if (!exam || submissions.length === 0) return
@@ -2567,12 +2608,47 @@ function EditExamPageInner() {
                                 </Button>
                             )}
                             {submissions.length > 0 && (
+                                <PDFDownloadButton
+                                    assessmentId={examId}
+                                    assessmentType="exam"
+                                    meta={{
+                                        typeLabel: labels.ulangan,
+                                        title: exam?.title || '',
+                                        subjectName: exam?.teaching_assignment?.subject?.name || '',
+                                        className: exam?.teaching_assignment?.class?.name || '',
+                                        teacherName: exam?.teaching_assignment?.teacher?.user?.full_name,
+                                        academicYearName: exam?.teaching_assignment?.academic_year?.name,
+                                        dateStart: exam?.start_time || null,
+                                        dateEnd: exam?.window_end_time || null,
+                                        durationMinutes: exam?.duration_minutes ?? null,
+                                        showViolations: true,
+                                    }}
+                                />
+                            )}
+                            {submissions.length > 0 && (
                                 <Button onClick={handleDownloadExcel} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm" icon={<Download className="w-4 h-4 ml-1" />}>
                                     Download Excel
                                 </Button>
                             )}
                         </div>
                     </div>
+
+                    {/* Siswa belum mengerjakan — paritas dengan halaman hasil kuis */}
+                    <NotSubmittedPanel
+                        students={notSubmittedStudents.map(student => ({
+                            id: student.id,
+                            name: student.user.full_name,
+                            nis: student.nis,
+                        }))}
+                    />
+
+                    {/* Analytics Dashboard — hanya attempt yang sudah dikumpulkan */}
+                    {submissions.filter((s: any) => s.is_submitted).length > 0 && (
+                        <AssessmentAnalytics
+                            assessmentId={examId}
+                            assessmentType="exam"
+                        />
+                    )}
 
                     {/* Submissions Table */}
                     {resultsLoading && submissions.length === 0 ? (

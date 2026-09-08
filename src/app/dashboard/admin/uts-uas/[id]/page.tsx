@@ -15,6 +15,8 @@ import {
     ChevronUp, CheckCircle, Download
 } from 'lucide-react'
 import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
+import PDFDownloadButton from '@/components/analytics/pdf/PDFDownloadButton'
+import NotSubmittedPanel from '@/components/NotSubmittedPanel'
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
@@ -41,6 +43,8 @@ interface ExamDetail {
     subject: { id: string; name: string }
     target_classes: { id: string; name: string; school_level: string; grade_level: number }[]
     academic_year: { id: string; name: string }
+    creator?: { full_name: string }
+    window_end_time?: string | null
     is_remedial?: boolean
     remedial_for_id?: string | null
     allowed_student_ids?: string[] | null
@@ -173,6 +177,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     const [resultsLoading, setResultsLoading] = useState(false)
     const [resultsClassFilter, setResultsClassFilter] = useState('')
     const [selectedSubmission, setSelectedSubmission] = useState<any | null>(null)
+    // Roster per kelas target (year-aware) — untuk panel "Belum Mengerjakan"
+    const [classRoster, setClassRoster] = useState<{ id: string; name: string; nis: string; classId: string; className: string }[]>([])
 
     // AI Review setting
     const [aiReviewEnabled, setAiReviewEnabled] = useState(false)
@@ -305,6 +311,44 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     useEffect(() => {
         if (activeTab === 'hasil') fetchResults()
     }, [activeTab, resultsClassFilter])
+
+    // Roster year-aware per kelas target — untuk panel "Belum Mengerjakan".
+    // Official: loop semua kelas target (scoped TA exam); ulangan: satu kelas TA.
+    // Fetch ringan (1 request/kelas), hanya saat tab Hasil dibuka.
+    useEffect(() => {
+        if (activeTab !== 'hasil' || !exam) return
+        const yearId = isUlangan
+            ? (exam as any)?.teaching_assignment?.academic_year?.id
+            : (exam as any)?.academic_year?.id
+        const classList = isUlangan
+            ? (exam.teaching_assignment?.class?.id
+                ? [{ id: exam.teaching_assignment.class.id, name: exam.teaching_assignment.class.name }]
+                : [])
+            : (exam.target_classes || [])
+        let cancelled = false
+        Promise.all(
+            classList
+                .filter((c: any) => c.id)
+                .map((c: any) =>
+                    fetch(`/api/students?class_id=${c.id}&enrollment_year_id=${yearId || ''}`)
+                        .then(r => r.ok ? r.json() : [])
+                        .then((d: any[]) => (Array.isArray(d) ? d : []).map((s: any) => ({
+                            id: s.id,
+                            name: s.user?.full_name || '',
+                            nis: s.nis || '',
+                            classId: c.id,
+                            className: c.name,
+                        })))
+                        .catch(() => [] as { id: string; name: string; nis: string; classId: string; className: string }[])
+                )
+        ).then(lists => {
+            if (!cancelled) setClassRoster(lists.flat())
+        })
+        return () => { cancelled = true }
+        // exam?.id (bukan object exam) — merge state skalar (toggle active, dll)
+        // tidak perlu memicu re-fetch roster
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, exam?.id, isUlangan])
 
     // Abstraksi perbedaan format API soal: official-exams vs exams
     // POST: official terima objek tunggal / {questions}; exams HANYA {questions: [...]}
@@ -1015,6 +1059,36 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                             <span className="text-sm font-medium text-text-secondary border-l border-secondary/20 pl-3">{submissions.length} submission</span>
                         </div>
                         <div className="flex items-center gap-2">
+                            {submissions.length > 0 && (
+                                <PDFDownloadButton
+                                    assessmentId={examId}
+                                    assessmentType={isUlangan ? 'exam' : 'official-exam'}
+                                    classId={!isUlangan ? (resultsClassFilter || undefined) : undefined}
+                                    meta={{
+                                        typeLabel: isUlangan
+                                            ? labels.ulangan
+                                            : (exam?.exam_type === 'UTS' ? labels.uts : labels.uas),
+                                        title: exam?.title || '',
+                                        subjectName: examSubject?.name || '',
+                                        className: isUlangan
+                                            ? (examClass?.name || '')
+                                            : (resultsClassFilter
+                                                ? (allClasses.find(c => c.id === resultsClassFilter)?.name
+                                                    || exam?.target_classes?.find(c => c.id === resultsClassFilter)?.name
+                                                    || '')
+                                                : `Semua Kelas (${exam?.target_classes?.length || 0})`),
+                                        teacherName: isUlangan
+                                            ? (examTeacherName || undefined)
+                                            : exam?.creator?.full_name,
+                                        academicYearName: exam?.academic_year?.name,
+                                        dateStart: exam?.start_time || null,
+                                        dateEnd: exam?.window_end_time || null,
+                                        durationMinutes: exam?.duration_minutes ?? null,
+                                        showViolations: true,
+                                    }}
+                                    label="Unduh PDF"
+                                />
+                            )}
                             {exam?.show_results_immediately === false && exam?.results_released === false && submissions.length > 0 && (
                                 <Button onClick={handleShareResults} className="bg-primary hover:bg-primary-dark text-white text-sm">
                                     Bagikan Hasil
@@ -1027,6 +1101,21 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                             )}
                         </div>
                     </div>
+
+                    {/* Siswa belum mengerjakan — roster year-aware, dikelompokkan
+                        per kelas saat "Semua Kelas" (official multi-kelas) */}
+                    <NotSubmittedPanel
+                        students={(() => {
+                            const anyAttemptStudentIds = submissions.map((s: any) => s.student?.id || s.student_id)
+                            const rosterInView = (!isUlangan && resultsClassFilter)
+                                ? classRoster.filter(s => s.classId === resultsClassFilter)
+                                : classRoster
+                            return rosterInView
+                                .filter(s => s.id && !anyAttemptStudentIds.includes(s.id))
+                                .sort((a, b) => a.name.localeCompare(b.name, 'id'))
+                        })()}
+                        groupByClass={!isUlangan && !resultsClassFilter}
+                    />
 
                     {/* Analytics Dashboard */}
                     {submissions.length > 0 && (

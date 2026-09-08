@@ -1200,7 +1200,7 @@ export default function NilaiPage() {
                                                         </div>
                                                         <h3 className="text-lg font-bold text-text-main dark:text-white mb-1">{exam.title}</h3>
                                                         <p className="text-sm text-text-secondary mb-4">{subs.length} submission</p>
-                                                        <Link href={`/dashboard/guru/ulangan/${exam.id}/hasil`} className="w-full block">
+                                                        <Link href={`/dashboard/guru/ulangan/${exam.id}?tab=hasil`} className="w-full block">
                                                             <Button size="sm" variant="outline" className="w-full">
                                                                 Lihat Hasil →
                                                             </Button>
@@ -1259,7 +1259,7 @@ export default function NilaiPage() {
                                                         </div>
                                                         <h3 className="text-lg font-bold text-text-main dark:text-white mb-1">{oe.title}</h3>
                                                         <p className="text-sm text-text-secondary mb-4">{subs.length} submission • {graded} dinilai</p>
-                                                        <Link href={`/dashboard/guru/uts-uas/${oe.id}/hasil`} className="w-full block">
+                                                        <Link href={`/dashboard/guru/uts-uas/${oe.id}#hasil`} className="w-full block">
                                                             <Button size="sm" variant="outline" className="w-full">
                                                                 Lihat Hasil →
                                                             </Button>
