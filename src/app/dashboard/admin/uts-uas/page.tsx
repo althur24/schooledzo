@@ -1,14 +1,16 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
-import Card from '@/components/ui/Card'
+import type { DropdownMenuItem } from '@/components/ui/DropdownMenu'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
+import DailyExamCard from '@/components/exam/DailyExamCard'
+import OfficialExamCard from '@/components/exam/OfficialExamCard'
+import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
 import { Plus, ChevronDown } from 'react-iconly'
-import { Loader2, FileText, Clock, Users, CheckCircle, Edit3, Trash2, GraduationCap, BarChart3, Copy, RefreshCw } from 'lucide-react'
+import { Loader2, Activity, Edit3, Trash2, GraduationCap, BarChart3, Copy, RefreshCw } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
 
@@ -31,6 +33,8 @@ interface OfficialExam {
     is_remedial?: boolean
     remedial_for_id?: string | null
     allowed_student_ids?: string[] | null
+    creator_role?: string | null
+    creator_name?: string | null
 }
 
 interface Subject {
@@ -625,29 +629,6 @@ export default function AdminUtsUasPage() {
         }))
     }
 
-    const getExamStatus = (exam: OfficialExam) => {
-        const now = new Date()
-        const startTime = new Date(exam.start_time)
-        // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
-        const endTime = exam.window_end_time
-            ? new Date(exam.window_end_time)
-            : new Date(startTime.getTime() + exam.duration_minutes * 60000)
-
-        // Draft dicek sebelum waktu — draft yang jendela waktunya sudah lewat
-        // tetap tampil "Draft" (bisa diedit/dilengkapi), bukan "Selesai"
-        if (!exam.is_active) return { label: 'Draft', color: 'bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-500/20 dark:text-amber-400' }
-        if (now < startTime) return { label: 'Terjadwal', color: 'bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-500/20 dark:text-blue-400' }
-        if (now >= startTime && now <= endTime) return { label: 'Berlangsung', color: 'bg-green-500/10 text-green-600 border-green-200 dark:border-green-500/20 dark:text-green-400' }
-        return { label: 'Selesai', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' }
-    }
-
-    const formatDateTime = (dateString: string) => {
-        return new Date(dateString).toLocaleString('id-ID', {
-            day: '2-digit', month: 'short', year: 'numeric',
-            hour: '2-digit', minute: '2-digit'
-        })
-    }
-
     const filteredExams = exams.filter(e => {
         if (filterType && e.exam_type !== filterType) return false
         if (filterSubject && e.subject?.id !== filterSubject) return false
@@ -748,130 +729,59 @@ export default function AdminUtsUasPage() {
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {filteredExams.map((exam) => {
-                        const status = getExamStatus(exam)
+                        const status = getOfficialExamStatus(exam)
+                        const isLive = status.isLive
+                        const isDone = status.isDone
                         const counts = submissionCounts[exam.id]
+
+                        // Aksi utama kontekstual: Monitor saat live, Hasil saat selesai, Detail selebihnya
+                        const primaryAction = isLive
+                            ? { label: 'Monitor Live', href: `/dashboard/admin/uts-uas/${exam.id}/monitor`, icon: <Activity className="w-4 h-4" /> }
+                            : isDone && exam.is_active
+                                ? { label: 'Lihat Hasil', href: `/dashboard/admin/uts-uas/${exam.id}#hasil`, icon: <BarChart3 className="w-4 h-4" /> }
+                                : { label: 'Detail', href: `/dashboard/admin/uts-uas/${exam.id}`, icon: <Edit3 className="w-4 h-4" /> }
+
+                        const menuItems: DropdownMenuItem[] = [
+                            {
+                                label: 'Monitor Live',
+                                show: isLive,
+                                icon: <Activity className="w-4 h-4" />,
+                                onClick: () => router.push(`/dashboard/admin/uts-uas/${exam.id}/monitor`),
+                            },
+                            {
+                                label: 'Lihat Hasil',
+                                show: exam.is_active && !isLive,
+                                icon: <BarChart3 className="w-4 h-4" />,
+                                onClick: () => router.push(`/dashboard/admin/uts-uas/${exam.id}#hasil`),
+                            },
+                            {
+                                label: 'Duplikasi Ujian',
+                                icon: <Copy className="w-4 h-4" />,
+                                onClick: () => handleOpenDuplicate(exam, 'BIASA'),
+                            },
+                            {
+                                label: 'Buat Remedial',
+                                show: isDone && !exam.is_remedial,
+                                icon: <RefreshCw className="w-4 h-4" />,
+                                onClick: () => handleOpenDuplicate(exam, 'REMEDIAL'),
+                            },
+                            {
+                                label: 'Hapus',
+                                danger: true,
+                                icon: <Trash2 className="w-4 h-4" />,
+                                onClick: () => handleDelete(exam.id),
+                            },
+                        ]
+
                         return (
-                            <Card key={exam.id} padding="p-5" className="group hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all">
-                                <div className="flex flex-col h-full gap-3">
-                                    <div className="flex items-start justify-between">
-                                        <div className="flex-1">
-                                            <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${status.color}`}>{status.label}</span>
-                                                <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${exam.exam_type === 'UTS'
-                                                    ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
-                                                    : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
-                                                    }`}>
-                                                    {exam.exam_type === 'UTS' ? labels.uts : labels.uas}
-                                                </span>
-                                                {exam.is_remedial && (
-                                                    <span className="px-2.5 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full">
-                                                        REMEDIAL
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <h3 className="font-bold text-text-main dark:text-white text-lg group-hover:text-primary transition-colors line-clamp-2">{exam.title}</h3>
-                                        </div>
-                                        <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-500">
-                                            <GraduationCap className="w-5 h-5" />
-                                        </div>
-                                    </div>
-
-                                    <p className="text-sm text-text-secondary dark:text-zinc-400 line-clamp-1">{exam.description || 'Tidak ada deskripsi'}</p>
-
-                                    <div className="space-y-2 pt-3 border-t border-secondary/10">
-                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                            <span>Mata Pelajaran</span>
-                                            <span className="px-2 py-1 bg-primary/10 rounded font-bold text-primary">{exam.subject?.name}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                            <span>Kelas Target</span>
-                                            <span className="font-bold text-text-main dark:text-white flex items-center gap-1">
-                                                <Users className="w-3.5 h-3.5" /> {exam.target_class_ids?.length || 0} kelas
-                                            </span>
-                                        </div>
-                                        <div className="flex items-center justify-between text-xs text-text-secondary">
-                                            <span>Soal & Durasi</span>
-                                            <div className="flex gap-3">
-                                                <span className="flex items-center gap-1 font-medium">
-                                                    <FileText className="w-3.5 h-3.5" /> {exam.question_count}
-                                                </span>
-                                                <span className="flex items-center gap-1 font-medium">
-                                                    <Clock className="w-3.5 h-3.5" /> {exam.duration_minutes}m
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <div className="flex flex-col gap-1.5 pt-1 text-xs text-text-secondary">
-                                            <div className="flex items-center justify-between">
-                                                <span>{exam.window_end_time ? 'Dibuka' : 'Waktu Mulai'}</span>
-                                                <span className="font-bold text-text-main dark:text-white">{formatDateTime(exam.start_time)}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between">
-                                                <span>{exam.window_end_time ? 'Ditutup' : 'Waktu Selesai'}</span>
-                                                <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                                                    <Clock className="w-3.5 h-3.5" />
-                                                    {formatDateTime(exam.window_end_time
-                                                        ? exam.window_end_time
-                                                        : new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60000).toISOString())}
-                                                </span>
-                                            </div>
-                                        </div>
-                                        {counts && (
-                                            <div className="flex items-center justify-between text-xs">
-                                                <span className="text-text-secondary">Pengumpulan</span>
-                                                <span className="font-bold text-primary">{counts.submitted} terkumpul</span>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div className="flex flex-wrap gap-2 mt-auto pt-3">
-                                        {status.label === 'Berlangsung' && (
-                                            <Link href={`/dashboard/admin/uts-uas/${exam.id}/monitor`} className="flex-1 min-w-[120px]">
-                                                <Button variant="outline" size="sm" className="w-full justify-center text-red-600 border-red-200 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-900/20 whitespace-nowrap gap-1.5">
-                                                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
-                                                    Monitor Live
-                                                </Button>
-                                            </Link>
-                                        )}
-                                        {status.label === 'Selesai' && (
-                                            <Link href={`/dashboard/admin/uts-uas/${exam.id}#hasil`} className="flex-1 min-w-[80px]">
-                                                <Button variant="outline" size="sm" className="w-full justify-center text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:border-emerald-900/50 dark:hover:bg-emerald-900/20">
-                                                    <BarChart3 className="w-4 h-4 mr-1" /> Hasil
-                                                </Button>
-                                            </Link>
-                                        )}
-                                        <Link href={`/dashboard/admin/uts-uas/${exam.id}`} className="flex-1 min-w-[80px]">
-                                            <Button variant="outline" size="sm" className="w-full justify-center border-primary/20 text-primary hover:bg-primary/5">
-                                                <Edit3 className="w-4 h-4 mr-1" /> Detail
-                                            </Button>
-                                        </Link>
-                                        <Button
-                                            variant="outline" size="sm"
-                                            onClick={() => handleOpenDuplicate(exam, 'BIASA')}
-                                            title="Duplikasi Ujian"
-                                            className="text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-blue-200 dark:border-blue-900/30"
-                                        >
-                                            <Copy className="w-4 h-4" />
-                                        </Button>
-                                        {status.label === 'Selesai' && !exam.is_remedial && (
-                                            <Button
-                                                variant="outline" size="sm"
-                                                onClick={() => handleOpenDuplicate(exam, 'REMEDIAL')}
-                                                title="Buat Remedial"
-                                                className="text-orange-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 border-orange-200 dark:border-orange-900/30"
-                                            >
-                                                <RefreshCw className="w-4 h-4" />
-                                            </Button>
-                                        )}
-                                        <Button
-                                            variant="outline" size="sm"
-                                            onClick={() => handleDelete(exam.id)}
-                                            className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-900/30"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            </Card>
+                            <OfficialExamCard
+                                key={exam.id}
+                                exam={exam}
+                                showCreator
+                                submission={counts ? { submitted: counts.submitted } : undefined}
+                                primaryAction={primaryAction}
+                                menuItems={menuItems}
+                            />
                         )
                     })}
                 </div>
@@ -894,121 +804,58 @@ export default function AdminUtsUasPage() {
                 ) : (
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                         {filteredUlangan.map((exam: any) => {
-                            const status = getExamStatus(exam as any)
-                            const ta = ulanganTA(exam)
-                            const className = (Array.isArray(ta?.class) ? ta?.class[0]?.name : ta?.class?.name) || '-'
-                            const teacherName = (Array.isArray(ta?.teacher?.user) ? ta?.teacher?.user[0]?.full_name : ta?.teacher?.user?.full_name) || '-'
-                            const subjectName = (Array.isArray(ta?.subject) ? ta?.subject[0]?.name : ta?.subject?.name) || '-'
+                            const status = getExamStatus(exam)
+                            const isLive = status.isLive
+                            const isDone = status.isDone
                             const counts = ulanganCounts[exam.id]
+
+                            // Aksi utama kontekstual: Monitor saat live, Hasil saat selesai, Detail selebihnya
+                            const primaryAction = isLive
+                                ? { label: 'Monitor Live', href: `/dashboard/admin/uts-uas/${exam.id}/monitor?type=ulangan`, icon: <Activity className="w-4 h-4" /> }
+                                : isDone && exam.is_active
+                                    ? { label: 'Lihat Hasil', href: `/dashboard/admin/uts-uas/${exam.id}?type=ulangan#hasil`, icon: <BarChart3 className="w-4 h-4" /> }
+                                    : { label: 'Detail', href: `/dashboard/admin/uts-uas/${exam.id}?type=ulangan`, icon: <Edit3 className="w-4 h-4" /> }
+
+                            const menuItems: DropdownMenuItem[] = [
+                                {
+                                    label: 'Monitor Live',
+                                    show: isLive,
+                                    icon: <Activity className="w-4 h-4" />,
+                                    onClick: () => router.push(`/dashboard/admin/uts-uas/${exam.id}/monitor?type=ulangan`),
+                                },
+                                {
+                                    label: 'Lihat Hasil',
+                                    show: exam.is_active && !isLive,
+                                    icon: <BarChart3 className="w-4 h-4" />,
+                                    onClick: () => router.push(`/dashboard/admin/uts-uas/${exam.id}?type=ulangan#hasil`),
+                                },
+                                {
+                                    label: `Duplikasi ${labels.ulangan}`,
+                                    icon: <Copy className="w-4 h-4" />,
+                                    onClick: () => handleOpenDuplicate(exam, 'BIASA', 'ulangan'),
+                                },
+                                {
+                                    label: 'Buat Remedial',
+                                    show: isDone && !exam.is_remedial,
+                                    icon: <RefreshCw className="w-4 h-4" />,
+                                    onClick: () => handleOpenDuplicate(exam, 'REMEDIAL', 'ulangan'),
+                                },
+                                {
+                                    label: 'Hapus',
+                                    danger: true,
+                                    icon: <Trash2 className="w-4 h-4" />,
+                                    onClick: () => handleDeleteUlangan(exam.id),
+                                },
+                            ]
+
                             return (
-                                <Card key={exam.id} padding="p-5" className="group hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all">
-                                    <div className="flex flex-col h-full gap-3">
-                                        <div className="flex items-start justify-between">
-                                            <div className="flex-1">
-                                                <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${status.color}`}>{status.label}</span>
-                                                    <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400">{labels.ulangan}</span>
-                                                    {exam.is_remedial && (
-                                                        <span className="px-2.5 py-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full">
-                                                            REMEDIAL
-                                                        </span>
-                                                    )}
-                                                    {exam.pending_publish && (
-                                                        <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">⏳ Review</span>
-                                                    )}
-                                                </div>
-                                                <h3 className="font-bold text-text-main dark:text-white text-lg group-hover:text-primary transition-colors line-clamp-2">{exam.title}</h3>
-                                            </div>
-                                            <div className="w-10 h-10 rounded-full bg-teal-500/10 flex items-center justify-center text-teal-500">
-                                                <FileText className="w-5 h-5" />
-                                            </div>
-                                        </div>
-                                        <div className="space-y-2 pt-3 border-t border-secondary/10">
-                                            <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                <span>Mata Pelajaran</span>
-                                                <span className="px-2 py-1 bg-primary/10 rounded font-bold text-primary">{subjectName}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                <span>Kelas</span>
-                                                <span className="font-bold text-text-main dark:text-white">{className}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                <span>Guru</span>
-                                                <span className="font-bold text-text-main dark:text-white truncate ml-2 text-right">{teacherName}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                <span>Soal & Durasi</span>
-                                                <div className="flex gap-3">
-                                                    <span className="flex items-center gap-1 font-medium"><FileText className="w-3.5 h-3.5" /> {exam.question_count}</span>
-                                                    <span className="flex items-center gap-1 font-medium"><Clock className="w-3.5 h-3.5" /> {exam.duration_minutes}m</span>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                <span>{exam.window_end_time ? 'Dibuka' : 'Mulai'}</span>
-                                                <span className="font-bold text-text-main dark:text-white">{formatDateTime(exam.start_time)}</span>
-                                            </div>
-                                            {exam.window_end_time && (
-                                                <div className="flex items-center justify-between text-xs text-text-secondary">
-                                                    <span>Ditutup</span>
-                                                    <span className="font-bold text-red-500 dark:text-red-400">{formatDateTime(exam.window_end_time)}</span>
-                                                </div>
-                                            )}
-                                            {counts && (
-                                                <div className="flex items-center justify-between text-xs">
-                                                    <span className="text-text-secondary">Pengumpulan</span>
-                                                    <span className="font-bold text-primary">{counts.submitted} terkumpul</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="flex flex-wrap gap-2 mt-auto pt-3">
-                                            {status.label === 'Berlangsung' && (
-                                                <Link href={`/dashboard/admin/uts-uas/${exam.id}/monitor?type=ulangan`} className="flex-1 min-w-[120px]">
-                                                    <Button variant="outline" size="sm" className="w-full justify-center text-red-600 border-red-200 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-900/20 whitespace-nowrap gap-1.5">
-                                                        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
-                                                        Monitor Live
-                                                    </Button>
-                                                </Link>
-                                            )}
-                                            {status.label === 'Selesai' && (
-                                                <Link href={`/dashboard/admin/uts-uas/${exam.id}?type=ulangan#hasil`} className="flex-1 min-w-[80px]">
-                                                    <Button variant="outline" size="sm" className="w-full justify-center text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:border-emerald-900/50 dark:hover:bg-emerald-900/20">
-                                                        <BarChart3 className="w-4 h-4 mr-1" /> Hasil
-                                                    </Button>
-                                                </Link>
-                                            )}
-                                            <Link href={`/dashboard/admin/uts-uas/${exam.id}?type=ulangan`} className="flex-1 min-w-[80px]">
-                                                <Button variant="outline" size="sm" className="w-full justify-center border-primary/20 text-primary hover:bg-primary/5">
-                                                    <Edit3 className="w-4 h-4 mr-1" /> Detail
-                                                </Button>
-                                            </Link>
-                                            <Button
-                                                variant="outline" size="sm"
-                                                onClick={() => handleOpenDuplicate(exam, 'BIASA', 'ulangan')}
-                                                title={`Duplikasi ${labels.ulangan}`}
-                                                className="text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-blue-200 dark:border-blue-900/30"
-                                            >
-                                                <Copy className="w-4 h-4" />
-                                            </Button>
-                                            {status.label === 'Selesai' && !exam.is_remedial && (
-                                                <Button
-                                                    variant="outline" size="sm"
-                                                    onClick={() => handleOpenDuplicate(exam, 'REMEDIAL', 'ulangan')}
-                                                    title="Buat Remedial"
-                                                    className="text-orange-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 border-orange-200 dark:border-orange-900/30"
-                                                >
-                                                    <RefreshCw className="w-4 h-4" />
-                                                </Button>
-                                            )}
-                                            <Button
-                                                variant="outline" size="sm"
-                                                onClick={() => handleDeleteUlangan(exam.id)}
-                                                className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-900/30"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </Card>
+                                <DailyExamCard
+                                    key={exam.id}
+                                    exam={exam}
+                                    submission={counts ? { submitted: counts.submitted } : undefined}
+                                    primaryAction={primaryAction}
+                                    menuItems={menuItems}
+                                />
                             )
                         })}
                     </div>

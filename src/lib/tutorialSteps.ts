@@ -820,7 +820,7 @@ export const tutorialDefinitions: TutorialDef[] = [
             {
                 element: '[data-tutorial="quiz-card-actions"]',
                 title: 'Tombol Aksi',
-                description: 'Setiap card punya tombol:\n• Edit Soal — kelola soal\n• Hasil — lihat nilai siswa\n• Pakai Ulang — salin ke kelas lain\n• Hapus — hapus kuis',
+                description: 'Setiap card punya 1 tombol utama + menu "..." untuk aksi lainnya:\n• Edit Soal — kelola soal\n• Hasil — lihat nilai siswa\n• Pakai Ulang — salin ke kelas lain\n• Hapus — hapus kuis',
                 side: 'left',
                 align: 'start',
             },

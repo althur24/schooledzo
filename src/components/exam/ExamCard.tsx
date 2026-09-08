@@ -8,6 +8,7 @@ import Button from '@/components/ui/Button'
 import DropdownMenu, { DropdownMenuItem } from '@/components/ui/DropdownMenu'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
+import { formatDate, formatDateTime } from '@/lib/exam'
 
 export interface ExamCardStatus {
     label: string
@@ -21,24 +22,41 @@ export interface ExamCardPrimaryAction {
 }
 
 interface ExamCardProps {
-    /** Status badge hasil getExamStatus / getOfficialExamStatus */
+    /** Status badge hasil getExamStatus / getOfficialExamStatus / getQuizStatus (src/lib/exam.ts) */
     status: ExamCardStatus
-    /** Badge jenis ujian: ULANGAN / UTS / UAS */
+    /** Badge jenis ujian: ULANGAN / UTS / UAS / KUIS */
     typeBadge: { label: string; className: string }
     title: string
     description?: string | null
-    /** Badge tambahan (REMEDIAL, Dibuatkan Admin, Acak, dst.) */
+    /** Badge tambahan (REMEDIAL, Dibuatkan Admin, Acak, Offline, dst.) */
     extraBadges?: ReactNode[]
     isLive?: boolean
 
     /** Nama mapel — kosongkan bila tidak relevan */
-    subjectName?: string
+    subjectName?: string | null
     /** Nama kelas / ringkasan kelas target */
-    classNameLabel?: string
-    durationMinutes?: number
+    classNameLabel?: string | null
+    durationMinutes?: number | null
     questionCount?: number
-    /** Informasi pengumpulan: submitted/total */
-    submission?: { submitted: number; total: number }
+    /** Tanggal card/ujian dibuat (created_at) */
+    createdAt?: string | null
+    /** Nama guru pemilik ujian — khusus tampilan admin */
+    teacherName?: string | null
+    /** Label sel guru (default "Guru"; UTS/UAS admin pakai "Guru Pembuat") */
+    teacherLabel?: string
+
+    /**
+     * Jadwal — murni presentasi. Perhitungan endTime & pemilihan label
+     * dilakukan adaptor (DailyExamCard/OfficialExamCard/QuizCard), bukan di sini.
+     * Baris dirender independen: kuis bisa hanya punya Dibuka, atau hanya Ditutup.
+     */
+    startTime?: string | null
+    endTime?: string | null
+    startLabel?: string
+    endLabel?: string
+
+    /** Pengumpulan: total terisi → "X/Y siswa" (guru); tanpa total → "X terkumpul" (admin) */
+    submission?: { submitted: number; total?: number }
     /** Jumlah jawaban yang belum dikoreksi */
     pendingGrading?: number
     onPendingGradingClick?: () => void
@@ -50,15 +68,20 @@ interface ExamCardProps {
     primaryAction: ExamCardPrimaryAction
     /** Aksi sekunder di menu "..." (Remedial, Pakai Ulang, Hapus, dst.) */
     menuItems?: DropdownMenuItem[]
+
+    /** Hook product-tour (data-tutorial) — root card & wadah tombol aksi */
+    dataTutorial?: string
+    actionsDataTutorial?: string
 }
 
 const typeBadgeBase = 'px-2.5 py-1 text-xs font-bold rounded-full'
 
 /**
- * Card ujian terpadu untuk guru — dipakai bersama oleh Ulangan Harian dan
- * UTS/UAS agar kedua jenis tampil dan berperilaku identik:
+ * Card ujian terpadu — dipakai bersama oleh Ulangan Harian, UTS/UAS, dan
+ * Kuis (via adaptor) agar semua jenis & role tampil identik:
  * header (status + jenis) → judul/deskripsi → ringkasan info → footer
  * (1 tombol aksi utama + menu "..." untuk aksi sekunder).
+ * Perbedaan antar role hanya lewat props (mis. teacherName khusus admin).
  */
 export default function ExamCard({
     status,
@@ -71,12 +94,21 @@ export default function ExamCard({
     classNameLabel,
     durationMinutes,
     questionCount,
+    createdAt,
+    teacherName,
+    teacherLabel = 'Guru',
+    startTime,
+    endTime,
+    startLabel = 'Mulai',
+    endLabel = 'Berakhir',
     submission,
     pendingGrading = 0,
     onPendingGradingClick,
     batchSize = 1,
     primaryAction,
     menuItems = [],
+    dataTutorial,
+    actionsDataTutorial,
 }: ExamCardProps) {
     const labels = useSchoolLabels()
     const noQuestions = (questionCount ?? 0) === 0
@@ -85,6 +117,7 @@ export default function ExamCard({
         <Card
             padding="p-0"
             className={`group flex flex-col overflow-visible transition-all hover:shadow-lg ${isLive ? 'hover:shadow-red-500/10' : 'hover:shadow-primary/5'}`}
+            {...(dataTutorial ? { 'data-tutorial': dataTutorial } : {})}
         >
             <div className="p-5 pb-4 flex flex-col gap-3 flex-1">
                 {/* Header: badges */}
@@ -104,7 +137,7 @@ export default function ExamCard({
                     <span className={`${typeBadgeBase} ${typeBadge.className}`}>{labelForGradeType(typeBadge.label, labels)}</span>
                     {(batchSize > 1) && (
                         <span
-                            title={`Soal ${labels.ulangan} ini tersinkron otomatis ke ${batchSize} kelas paralel`}
+                            title={`Soal ${labelForGradeType(typeBadge.label, labels)} ini tersinkron otomatis ke ${batchSize} kelas paralel`}
                             className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/20"
                         >
                             <Layers className="w-3.5 h-3.5" /> {batchSize} Kelas Paralel
@@ -137,6 +170,12 @@ export default function ExamCard({
                             <p className="font-bold text-text-main dark:text-white truncate">{classNameLabel}</p>
                         </div>
                     )}
+                    {teacherName && (
+                        <div className="min-w-0">
+                            <p className="text-text-secondary">{teacherLabel}</p>
+                            <p className="font-bold text-text-main dark:text-white truncate">{teacherName}</p>
+                        </div>
+                    )}
                     {typeof durationMinutes === 'number' && (
                         <div>
                             <p className="text-text-secondary">Durasi</p>
@@ -156,12 +195,38 @@ export default function ExamCard({
                             </p>
                         </div>
                     )}
+                    {createdAt && (
+                        <div className="min-w-0">
+                            <p className="text-text-secondary">Dibuat</p>
+                            <p className="font-bold text-text-main dark:text-white truncate">{formatDate(createdAt)}</p>
+                        </div>
+                    )}
+                    {(startTime || endTime) && (
+                        <div className="col-span-2 flex flex-col gap-1 pt-2 border-t border-secondary/10">
+                            {startTime && (
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-text-secondary shrink-0">{startLabel}</span>
+                                    <span className="font-bold text-text-main dark:text-white text-right">{formatDateTime(startTime)}</span>
+                                </div>
+                            )}
+                            {endTime && (
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-text-secondary shrink-0">{endLabel}</span>
+                                    <span className="font-bold text-emerald-600 dark:text-emerald-400 text-right">{formatDateTime(endTime)}</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
                     {submission && (
                         <div className="col-span-2 flex items-center justify-between">
                             <span className="text-text-secondary">Pengumpulan</span>
-                            <span className={`font-bold ${submission.total > 0 && submission.submitted >= submission.total ? 'text-green-600' : 'text-primary'}`}>
-                                {submission.submitted}/{submission.total} siswa
-                            </span>
+                            {typeof submission.total === 'number' ? (
+                                <span className={`font-bold ${submission.total > 0 && submission.submitted >= submission.total ? 'text-green-600' : 'text-primary'}`}>
+                                    {submission.submitted}/{submission.total} siswa
+                                </span>
+                            ) : (
+                                <span className="font-bold text-primary">{submission.submitted} terkumpul</span>
+                            )}
                         </div>
                     )}
                 </div>
@@ -179,7 +244,10 @@ export default function ExamCard({
             </div>
 
             {/* Footer: 1 aksi utama + menu "..." */}
-            <div className="px-5 py-4 border-t border-secondary/10 flex items-center gap-2">
+            <div
+                className="px-5 py-4 border-t border-secondary/10 flex items-center gap-2"
+                {...(actionsDataTutorial ? { 'data-tutorial': actionsDataTutorial } : {})}
+            >
                 <Link href={primaryAction.href} className="flex-1">
                     <Button
                         size="sm"

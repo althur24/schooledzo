@@ -3,10 +3,12 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Modal, PageHeader, Button, DropdownMenu } from '@/components/ui'
+import { Modal, PageHeader, Button } from '@/components/ui'
 import type { DropdownMenuItem } from '@/components/ui/DropdownMenu'
 import Card from '@/components/ui/Card'
-import ExamCard from '@/components/exam/ExamCard'
+import DailyExamCard from '@/components/exam/DailyExamCard'
+import OfficialExamCard from '@/components/exam/OfficialExamCard'
+import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
@@ -26,6 +28,7 @@ interface Exam {
     is_active: boolean
     pending_publish: boolean
     is_randomized: boolean
+    is_remedial?: boolean | null
     batch_id?: string | null
     batch_size?: number
     created_by?: string | null
@@ -49,6 +52,7 @@ interface OfficialExam {
     duration_minutes: number
     window_end_time?: string | null
     is_active: boolean
+    is_remedial?: boolean | null
     question_count: number
     target_class_ids: string[]
     subject: { id: string; name: string; kkm?: number }
@@ -787,45 +791,6 @@ export default function GuruUlanganPage() {
         }
     }
 
-    const formatDateTime = (dateString: string) => {
-        return new Date(dateString).toLocaleString('id-ID', {
-            day: '2-digit',
-            month: 'short',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        })
-    }
-
-    const getExamStatus = (exam: Exam) => {
-        const now = new Date()
-        const startTime = new Date(exam.start_time)
-        // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
-        const endTime = exam.window_end_time
-            ? new Date(exam.window_end_time)
-            : new Date(startTime.getTime() + exam.duration_minutes * 60000)
-
-        if (exam.pending_publish) return { label: '🔍 Under Review', color: 'bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-500/20 dark:text-amber-400 font-bold' }
-        if (!exam.is_active) return { label: 'Draft', color: 'bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-500/20 dark:text-amber-400' }
-        if (now < startTime) return { label: 'Terjadwal', color: 'bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-500/20 dark:text-blue-400' }
-        if (now >= startTime && now <= endTime) return { label: 'Berlangsung', color: 'bg-green-500/10 text-green-600 border-green-200 dark:border-green-500/20 dark:text-green-400' }
-        return { label: 'Selesai', color: 'bg-secondary/10 text-text-secondary border-secondary/20' }
-    }
-
-    const getOfficialExamStatus = (exam: OfficialExam) => {
-        const now = new Date()
-        const startTime = new Date(exam.start_time)
-        // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
-        const endTime = exam.window_end_time
-            ? new Date(exam.window_end_time)
-            : new Date(startTime.getTime() + exam.duration_minutes * 60000)
-
-        if (!exam.is_active) return { label: 'Draft', color: 'bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-500/20 dark:text-amber-400' }
-        if (now < startTime) return { label: 'Terjadwal', color: 'bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-500/20 dark:text-blue-400' }
-        if (now >= startTime && now <= endTime) return { label: 'Berlangsung', color: 'bg-green-500/10 text-green-600 border-green-200 dark:border-green-500/20 dark:text-green-400' }
-        return { label: 'Selesai', color: 'bg-secondary/10 text-text-secondary border-secondary/20' }
-    }
-
     return (
         <div className="space-y-6">
             <PageHeader
@@ -922,13 +887,13 @@ export default function GuruUlanganPage() {
                         ) : (
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                                 {exams.map((exam) => {
-                                    const status = getExamStatus(exam as any)
+                                    const status = getExamStatus(exam)
                                     const classId = exam.teaching_assignment?.class?.id
                                     const total = classId ? (studentCounts[classId] || 0) : 0
                                     const submitted = submissionCounts[exam.id] || 0
                                     const pendingGrading = pendingGradingCounts[exam.id] || 0
-                                    const isLive = status.label === 'Berlangsung'
-                                    const isDone = status.label === 'Selesai'
+                                    const isLive = status.isLive
+                                    const isDone = status.isDone
                                     const isActive = exam.is_active
 
                                     // Aksi utama kontekstual: Monitor saat live, Hasil saat selesai, Edit selebihnya
@@ -947,7 +912,7 @@ export default function GuruUlanganPage() {
                                         },
                                         {
                                             label: 'Buat Remedial',
-                                            show: isActive && !(exam as any).is_remedial && isDone,
+                                            show: isActive && !exam.is_remedial && isDone,
                                             icon: <RefreshCw className="w-4 h-4" />,
                                             onClick: () => handleOpenRemedial(exam),
                                         },
@@ -965,41 +930,10 @@ export default function GuruUlanganPage() {
                                         },
                                     ]
 
-                                    const extraBadges = [
-                                        ...(exam as any).is_remedial ? [(
-                                            <span key="remedial" className="px-2 py-0.5 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm animate-pulse-slow">
-                                                REMEDIAL
-                                            </span>
-                                        )] : [],
-                                        ...exam.creator_role === 'ADMIN' ? [(
-                                            <span key="admin" className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
-                                                Dibuatkan Admin
-                                            </span>
-                                        )] : [],
-                                        ...exam.is_randomized ? [(
-                                            <span key="acak" className="text-xs text-text-secondary flex items-center gap-1 bg-secondary/10 px-2 py-1 rounded-full">
-                                                <Swap set="bold" primaryColor="currentColor" size={12} /> Acak
-                                            </span>
-                                        )] : [],
-                                    ]
-
                                     return (
-                                        <ExamCard
+                                        <DailyExamCard
                                             key={exam.id}
-                                            status={status}
-                                            typeBadge={{ label: labels.ulangan, className: 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/20' }}
-                                            title={exam.title}
-                                            description={exam.description}
-                                            extraBadges={extraBadges}
-                                            isLive={isLive}
-                                            subjectName={exam.teaching_assignment?.subject?.name}
-                                            classNameLabel={exam.teaching_assignment?.class?.name}
-                                            durationMinutes={exam.duration_minutes}
-                                            questionCount={exam.question_count}
-                                            createdAt={exam.created_at}
-                                            startTime={exam.start_time}
-                                            windowEndTime={exam.window_end_time ?? null}
-                                            batchSize={exam.batch_size}
+                                            exam={exam}
                                             submission={{ submitted, total }}
                                             pendingGrading={pendingGrading}
                                             onPendingGradingClick={() => router.push(`/dashboard/guru/ulangan/${exam.id}?tab=hasil`)}
@@ -1027,8 +961,8 @@ export default function GuruUlanganPage() {
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                                 {officialExams.map(exam => {
                                     const status = getOfficialExamStatus(exam)
-                                    const isLive = status.label === 'Berlangsung'
-                                    const isDone = status.label === 'Selesai'
+                                    const isLive = status.isLive
+                                    const isDone = status.isDone
 
                                     // Draft (termasuk buatan admin) dibuka di editor agar bisa dilengkapi & dipublish
                                     const primaryAction = status.label === 'Draft'
@@ -1046,7 +980,7 @@ export default function GuruUlanganPage() {
                                         },
                                         {
                                             label: `Buat Remedial ${exam.exam_type === 'UTS' ? labels.uts : labels.uas}`,
-                                            show: isDone && !(exam as any).is_remedial,
+                                            show: isDone && !exam.is_remedial,
                                             icon: <RefreshCw className="w-4 h-4" />,
                                             onClick: () => openOfficialRemedialModal(exam),
                                         },
@@ -1064,37 +998,10 @@ export default function GuruUlanganPage() {
                                         },
                                     ]
 
-                                    const extraBadges = [
-                                        ...((exam as any).is_remedial ? [(
-                                            <span key="remedial" className="px-2 py-0.5 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm animate-pulse-slow">
-                                                REMEDIAL
-                                            </span>
-                                        )] : []),
-                                        ...(exam.creator_role === 'ADMIN' ? [(
-                                            <span key="admin" className="px-2.5 py-1 text-xs font-bold rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20">
-                                                Dibuatkan Admin
-                                            </span>
-                                        )] : []),
-                                    ]
-
                                     return (
-                                        <ExamCard
+                                        <OfficialExamCard
                                             key={exam.id}
-                                            status={status}
-                                            typeBadge={exam.exam_type === 'UTS'
-                                                ? { label: labels.uts, className: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/20' }
-                                                : { label: labels.uas, className: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20' }}
-                                            title={exam.title}
-                                            description={exam.description}
-                                            extraBadges={extraBadges}
-                                            isLive={isLive}
-                                            subjectName={exam.subject?.name}
-                                            classNameLabel={`${exam.target_class_ids?.length ?? 0} kelas`}
-                                            durationMinutes={exam.duration_minutes}
-                                            questionCount={exam.question_count}
-                                            createdAt={exam.created_at}
-                                            startTime={exam.start_time}
-                                            windowEndTime={exam.window_end_time ?? null}
+                                            exam={exam}
                                             primaryAction={primaryAction}
                                             menuItems={officialMenuItems}
                                         />

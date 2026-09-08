@@ -4,6 +4,22 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { checkEndedOfficialExams } from '@/lib/checkEndedExams'
 import { logError } from '@/lib/logError'
 import { getTeacherScope, canTeachScope } from '@/lib/teacherScope'
+import { batchedIn } from '@/lib/batchedIn'
+
+/**
+ * Bentuk baris official_exams yang dipakai filter/mapping GET ini.
+ * Query memakai select * — kolom lain ikut lewat index signature.
+ */
+interface OfficialExamRow {
+    subject_id: string
+    created_by: string | null
+    target_class_ids: string[] | null
+    is_active: boolean | null
+    is_remedial: boolean | null
+    allowed_student_ids: string[] | null
+    official_exam_questions?: { id: string }[] | null
+    [key: string]: unknown
+}
 
 // GET all official exams (UTS/UAS)
 export async function GET(request: NextRequest) {
@@ -64,7 +80,7 @@ export async function GET(request: NextRequest) {
         const { data, error } = await query
         if (error) throw error
 
-        let result = data || []
+        let result = (data || []) as OfficialExamRow[]
 
         // Role-based filtering
         if (user.role === 'SISWA') {
@@ -89,7 +105,7 @@ export async function GET(request: NextRequest) {
             }
 
             if (studentClassId) {
-                result = result.filter((exam: any) =>
+                result = result.filter((exam) =>
                     exam.target_class_ids?.includes(studentClassId)
                 )
             } else {
@@ -97,7 +113,7 @@ export async function GET(request: NextRequest) {
             }
             // Only show PUBLISHED (is_active) exams to students
             // Unpublished (draft) exams must never be visible to students
-            result = result.filter((exam: any) => {
+            result = result.filter((exam) => {
                 if (!exam.is_active) return false
                 
                 // Remedial visibility rule
@@ -125,7 +141,7 @@ export async function GET(request: NextRequest) {
                     const teacherSubjectIds = [...new Set(assignments.map(a => a.subject_id))]
                     const teacherClassIds = [...new Set(assignments.map(a => a.class_id))]
 
-                    result = result.filter((exam: any) =>
+                    result = result.filter((exam) =>
                         teacherSubjectIds.includes(exam.subject_id) &&
                         exam.target_class_ids?.some((cid: string) => teacherClassIds.includes(cid))
                     )
@@ -140,20 +156,33 @@ export async function GET(request: NextRequest) {
         }
         // ADMIN sees everything (no filter)
 
-        // Label pembuat (untuk badge "Dibuatkan Admin" di daftar guru)
-        let roleMap = new Map<string, string>()
-        const creatorIds = [...new Set(result.map((e: any) => e.created_by).filter(Boolean))] as string[]
+        // Label pembuat (untuk badge "Dibuatkan Admin" di daftar guru,
+        // dan nama "Guru Pembuat" di card admin)
+        let creatorMap = new Map<string, { role: string; name: string | null }>()
+        const creatorIds = [...new Set(
+            result.map((e) => e.created_by).filter((id): id is string => Boolean(id))
+        )]
         if (creatorIds.length > 0) {
-            const { data: creators } = await supabase.from('users').select('id, role').in('id', creatorIds)
-            roleMap = new Map((creators || []).map((c: any) => [c.id, c.role]))
+            // Lookup pembuat bersifat kosmetik (badge/nama) — kegagalannya tidak
+            // boleh merobohkan daftar ujian; degrade ke null seperti perilaku lama.
+            // batchedIn: .in() dengan ratusan UUID melewati batas URL 16KB PostgREST
+            try {
+                const creators = await batchedIn<{ id: string; role: string; full_name: string | null }>('id', creatorIds, (chunk) =>
+                    supabase.from('users').select('id, role, full_name').in('id', chunk)
+                )
+                creatorMap = new Map(creators.map((c) => [c.id, { role: c.role, name: c.full_name ?? null }]))
+            } catch (err) {
+                console.error('Gagal memuat info pembuat ujian (degrade ke null):', err)
+            }
         }
 
         // Add question count
-        const examsWithCount = result.map((exam: any) => ({
+        const examsWithCount = result.map((exam) => ({
             ...exam,
             question_count: exam.official_exam_questions?.length || 0,
             official_exam_questions: undefined,
-            creator_role: exam.created_by ? roleMap.get(exam.created_by) || null : null
+            creator_role: exam.created_by ? creatorMap.get(exam.created_by)?.role || null : null,
+            creator_name: exam.created_by ? creatorMap.get(exam.created_by)?.name || null : null
         }))
 
         return NextResponse.json(examsWithCount)

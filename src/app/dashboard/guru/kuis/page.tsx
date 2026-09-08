@@ -6,21 +6,26 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
+import type { DropdownMenuItem } from '@/components/ui/DropdownMenu'
 import Card from '@/components/ui/Card'
+import QuizCard from '@/components/exam/QuizCard'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
-import { TimeCircle as Clock, Document as FileText, Graph as BarChart3, Game as Brain, Calendar, Plus, Game, Graph, Edit, Swap } from 'react-iconly'
-import { Loader2, CheckSquare, Square, RefreshCw, Copy, CalendarDays, Clock as LuClock, FileText as LuFileText, Shuffle, Layers } from 'lucide-react'
+import { Plus, Game, Graph, Edit, Swap } from 'react-iconly'
+import { Loader2, CheckSquare, Square, RefreshCw, Copy, Trash2 } from 'lucide-react'
 
 interface Quiz {
     id: string
     title: string
     description: string | null
-    duration_minutes: number
+    duration_minutes: number | null
+    available_from?: string | null
+    deadline?: string | null
     is_active: boolean
     pending_publish: boolean
     is_randomized: boolean
-    submission_mode?: string
+    is_remedial?: boolean | null
+    submission_mode?: string | null
     batch_id?: string | null
     batch_size?: number
     created_at: string
@@ -284,7 +289,7 @@ export default function GuruKuisPage() {
             teaching_assignment_ids: [],
             title: `[Copy] ${quiz.title}`,
             description: quiz.description || '',
-            duration_minutes: quiz.duration_minutes,
+            duration_minutes: quiz.duration_minutes ?? 30,
             is_randomized: quiz.is_randomized
         })
         setCopyHasDeadline(false)
@@ -530,125 +535,63 @@ export default function GuruKuisPage() {
                     }
                 />
             ) : (
-                <div className="grid gap-4">
-                    {quizzes.map((quiz, _qIdx) => (
-                        <Card key={quiz.id} className="p-4" {...(_qIdx === 0 ? { 'data-tutorial': 'quiz-card-first' } : {})}>
-                            <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <h3 className="font-bold text-text-main dark:text-white text-lg">{quiz.title}</h3>
-                                        {(quiz as any).is_remedial && (
-                                            <span className="px-2 py-0.5 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] font-bold rounded-full shadow-sm animate-pulse-slow">
-                                                REMEDIAL
-                                            </span>
-                                        )}
-                                        {quiz.submission_mode === 'OFFLINE' && (
-                                            <span className="px-2 py-0.5 bg-teal-500/10 text-teal-600 dark:text-teal-400 text-xs rounded-full border border-teal-200 dark:border-teal-500/20 font-bold">
-                                                Offline
-                                            </span>
-                                        )}
-                                        {(quiz.batch_size || 1) > 1 && (
-                                            <span
-                                                title={`Soal ${labels.kuis.toLowerCase()} ini tersinkron otomatis ke ${quiz.batch_size} kelas paralel`}
-                                                className="flex items-center gap-1 px-2 py-0.5 bg-sky-500/10 text-sky-600 dark:text-sky-400 text-xs rounded-full border border-sky-200 dark:border-sky-500/20 font-bold"
-                                            >
-                                                <Layers className="w-3.5 h-3.5" /> {quiz.batch_size} Kelas Paralel
-                                            </span>
-                                        )}
-                                        {quiz.pending_publish ? (
-                                            <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 text-xs rounded-full border border-amber-200 dark:border-amber-500/20 font-bold">🔍 Under Review</span>
-                                        ) : quiz.is_active ? (
-                                            <span className="px-2 py-0.5 bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400 text-xs rounded-full">Aktif</span>
-                                        ) : (
-                                            <span className="px-2 py-0.5 bg-amber-100 dark:bg-yellow-500/20 text-amber-700 dark:text-yellow-500 text-xs rounded-full border border-amber-200 dark:border-yellow-500/20">Draft</span>
-                                        )}
-                                    </div>
-                                    <p className="text-sm text-text-secondary dark:text-zinc-400 mb-2">{quiz.description || '-'}</p>
-                                    <div className="flex items-center flex-wrap gap-x-4 gap-y-2 text-xs text-text-secondary dark:text-zinc-500">
-                                        <span className="flex items-center gap-1.5">
-                                            <CalendarDays className="w-3.5 h-3.5" />
-                                            Dibuat: {new Date(quiz.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                        </span>
-                                        <span className="px-2 py-1 bg-secondary/10 rounded">{quiz.teaching_assignment?.subject?.name}</span>
-                                        <span className="px-2 py-1 bg-secondary/10 rounded">{quiz.teaching_assignment?.class?.name}</span>
-                                        <span className="flex items-center gap-1"><LuClock className="w-3.5 h-3.5" /> {quiz.duration_minutes} menit</span>
-                                        <span className="flex items-center gap-1"><LuFileText className="w-3.5 h-3.5" /> {quiz.questions?.[0]?.count || 0} soal</span>
-                                        {quiz.is_randomized && <span className="flex items-center gap-1"><Shuffle className="w-3.5 h-3.5" /> Acak</span>}
-                                    </div>
-                                    {/* Submission Counter */}
-                                    {(() => {
-                                        const classId = quiz.teaching_assignment?.class?.id
-                                        const total = classId ? (studentCounts[classId] || 0) : 0
-                                        const submitted = submissionCounts[quiz.id] || 0
-                                        const pendingGrading = pendingGradingCounts[quiz.id] || 0
-                                        return (
-                                            <div className="mt-2 space-y-1">
-                                                <div className="flex items-center gap-3">
-                                                    <span className={`text-xs font-bold ${submitted >= total && total > 0 ? 'text-green-600' : 'text-primary'}`}>
-                                                        📨 {submitted}/{total} mengumpulkan
-                                                    </span>
-                                                    {total > 0 && (
-                                                        <div className="w-20 bg-secondary/20 rounded-full h-1.5 overflow-hidden">
-                                                            <div
-                                                                className={`h-full rounded-full transition-all duration-500 ${submitted >= total ? 'bg-green-500' : submitted > 0 ? 'bg-primary' : 'bg-secondary/30'}`}
-                                                                style={{ width: `${Math.min(100, total > 0 ? (submitted / total) * 100 : 0)}%` }}
-                                                            />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                {pendingGrading > 0 && (
-                                                    <Link href={`/dashboard/guru/kuis/${quiz.id}/hasil`} className="block">
-                                                        <div className="flex items-center justify-between text-xs px-2 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition-colors cursor-pointer">
-                                                            <span className="text-amber-600 dark:text-amber-400 font-medium">📝 Perlu Dikoreksi</span>
-                                                            <span className="font-bold text-amber-600 dark:text-amber-400">{pendingGrading}</span>
-                                                        </div>
-                                                    </Link>
-                                                )}
-                                            </div>
-                                        )
-                                    })()}
-                                </div>
-                                <div className="flex items-center gap-2" {...(_qIdx === 0 ? { 'data-tutorial': 'quiz-card-actions' } : {})}>
-                                    {quiz.is_active && (
-                                        <Link
-                                            href={`/dashboard/guru/kuis/${quiz.id}/hasil`}
-                                            className="px-3 py-1.5 bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400 rounded-full hover:bg-green-200 dark:hover:bg-green-500/30 transition-colors text-sm font-medium flex items-center gap-1"
-                                        >
-                                            <Graph set="bold" primaryColor="currentColor" size={16} /> Hasil
-                                        </Link>
-                                    )}
-                                    {quiz.is_active && !(quiz as any).is_remedial && (
-                                        <button
-                                            onClick={() => handleOpenRemedial(quiz)}
-                                            className="px-3 py-1.5 bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400 rounded-full hover:bg-orange-200 dark:hover:bg-orange-500/30 transition-colors text-sm font-medium flex items-center gap-1"
-                                        >
-                                            <RefreshCw className="w-4 h-4" /> Remedial
-                                        </button>
-                                    )}
-                                    {quiz.is_active && (
-                                        <button
-                                            onClick={() => openCopyModal(quiz)}
-                                            className="px-3 py-1.5 bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 rounded-full hover:bg-blue-200 dark:hover:bg-blue-500/30 transition-colors text-sm font-medium flex items-center gap-1"
-                                        >
-                                            <Copy className="w-4 h-4" /> Pakai Ulang
-                                        </button>
-                                    )}
-                                    <Link
-                                        href={`/dashboard/guru/kuis/${quiz.id}`}
-                                        className="px-3 py-1.5 bg-primary/10 text-primary rounded-full hover:bg-primary/20 transition-colors text-sm font-medium flex items-center gap-1"
-                                    >
-                                        <Edit set="bold" primaryColor="currentColor" size={16} /> Edit Soal
-                                    </Link>
-                                    <button
-                                        onClick={() => handleDelete(quiz.id)}
-                                        className="px-3 py-1.5 bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400 rounded-full hover:bg-red-200 dark:hover:bg-red-500/30 transition-colors text-sm font-medium"
-                                    >
-                                        Hapus
-                                    </button>
-                                </div>
-                            </div>
-                        </Card>
-                    ))}
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {quizzes.map((quiz, _qIdx) => {
+                        const classId = quiz.teaching_assignment?.class?.id
+                        const total = classId ? (studentCounts[classId] || 0) : 0
+                        const submitted = submissionCounts[quiz.id] || 0
+                        const pendingGrading = pendingGradingCounts[quiz.id] || 0
+
+                        // Kuis tidak punya Monitor Live — aksi utama: Hasil (aktif) / Edit (draft)
+                        const primaryAction = quiz.is_active
+                            ? { label: 'Lihat Hasil', href: `/dashboard/guru/kuis/${quiz.id}/hasil`, icon: <Graph set="bold" primaryColor="currentColor" size={16} /> }
+                            : { label: quiz.pending_publish ? 'Perbaiki Soal' : 'Edit Soal', href: `/dashboard/guru/kuis/${quiz.id}`, icon: <Edit set="bold" primaryColor="currentColor" size={16} /> }
+
+                        const menuItems: DropdownMenuItem[] = [
+                            {
+                                label: 'Lihat Hasil',
+                                show: quiz.is_active,
+                                icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={14} /></span>,
+                                onClick: () => router.push(`/dashboard/guru/kuis/${quiz.id}/hasil`),
+                            },
+                            {
+                                label: 'Buat Remedial',
+                                show: quiz.is_active && !quiz.is_remedial,
+                                icon: <RefreshCw className="w-4 h-4" />,
+                                onClick: () => handleOpenRemedial(quiz),
+                            },
+                            {
+                                label: 'Pakai Ulang',
+                                show: quiz.is_active,
+                                icon: <Copy className="w-4 h-4" />,
+                                onClick: () => openCopyModal(quiz),
+                            },
+                            {
+                                label: 'Edit Soal',
+                                icon: <Edit set="bold" primaryColor="currentColor" size={14} />,
+                                onClick: () => router.push(`/dashboard/guru/kuis/${quiz.id}`),
+                            },
+                            {
+                                label: 'Hapus',
+                                danger: true,
+                                icon: <Trash2 className="w-4 h-4" />,
+                                onClick: () => handleDelete(quiz.id),
+                            },
+                        ]
+
+                        return (
+                            <QuizCard
+                                key={quiz.id}
+                                quiz={quiz}
+                                submission={{ submitted, total }}
+                                pendingGrading={pendingGrading}
+                                onPendingGradingClick={() => router.push(`/dashboard/guru/kuis/${quiz.id}/hasil`)}
+                                primaryAction={primaryAction}
+                                menuItems={menuItems}
+                                {...(_qIdx === 0 ? { dataTutorial: 'quiz-card-first', actionsDataTutorial: 'quiz-card-actions' } : {})}
+                            />
+                        )
+                    })}
                 </div>
             )
             }
