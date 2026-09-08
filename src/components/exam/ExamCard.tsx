@@ -113,6 +113,31 @@ export default function ExamCard({
     const labels = useSchoolLabels()
     const noQuestions = (questionCount ?? 0) === 0
 
+    // Sel info meta. Bila jumlahnya ganjil, sel TERAKHIR dirender sebagai baris
+    // pasangan label-kiri/nilai-kanan agar nilainya jatuh di rel kolom kanan
+    // (sejajar nilai jadwal) dan grid tidak bolong.
+    const metaCells: { key: string; label: string; value: ReactNode; valueClass: string }[] = []
+    if (subjectName) metaCells.push({ key: 'subject', label: 'Mata Pelajaran', value: subjectName, valueClass: 'font-bold text-primary truncate' })
+    if (classNameLabel) metaCells.push({ key: 'class', label: 'Kelas', value: classNameLabel, valueClass: 'font-bold text-text-main dark:text-white truncate' })
+    if (teacherName) metaCells.push({ key: 'teacher', label: teacherLabel, value: teacherName, valueClass: 'font-bold text-text-main dark:text-white truncate' })
+    if (typeof durationMinutes === 'number') metaCells.push({ key: 'duration', label: 'Durasi', value: `${durationMinutes} menit`, valueClass: 'font-bold text-text-main dark:text-white' })
+    if (typeof questionCount === 'number') metaCells.push({
+        key: 'questions',
+        label: 'Jumlah Soal',
+        value: noQuestions
+            ? (<>
+                <span className="text-red-500">{questionCount}</span>
+                <span className="ml-1.5 px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded text-[10px] font-bold">BELUM ADA SOAL</span>
+            </>)
+            : questionCount,
+        valueClass: `font-bold ${noQuestions ? '' : 'text-text-main dark:text-white'}`,
+    })
+    if (createdAt) metaCells.push({ key: 'created', label: 'Dibuat', value: formatDate(createdAt), valueClass: 'font-bold text-text-main dark:text-white truncate' })
+
+    const oddLastCell = metaCells.length % 2 === 1 ? metaCells[metaCells.length - 1] : null
+    const stackedCells = oddLastCell ? metaCells.slice(0, -1) : metaCells
+    const hasScheduleRows = Boolean(startTime || endTime || submission)
+
     return (
         <Card
             padding="p-0"
@@ -156,80 +181,47 @@ export default function ExamCard({
                     </p>
                 </div>
 
-                {/* Meta grid */}
+                {/* Meta — SATU grid datar: sel info & baris jadwal berbagi track
+                    kolom yang sama, jadi nilai kolom kanan dan nilai jadwal
+                    dijamin sejajar presisi di satu rel vertikal. */}
+                {(metaCells.length > 0 || hasScheduleRows) && (
                 <div className="grid grid-cols-2 gap-2 pt-3 border-t border-secondary/10 text-xs">
-                    {subjectName && (
-                        <div className="min-w-0">
-                            <p className="text-text-secondary">Mata Pelajaran</p>
-                            <p className="font-bold text-primary truncate">{subjectName}</p>
+                    {stackedCells.map(cell => (
+                        <div key={cell.key} className="min-w-0">
+                            <p className="text-text-secondary">{cell.label}</p>
+                            <p className={cell.valueClass}>{cell.value}</p>
                         </div>
+                    ))}
+                    {oddLastCell && (<>
+                        <span className="text-text-secondary">{oddLastCell.label}</span>
+                        <span className={`min-w-0 ${oddLastCell.valueClass}`}>{oddLastCell.value}</span>
+                    </>)}
+                    {hasScheduleRows && metaCells.length > 0 && (
+                        <div aria-hidden className="col-span-2 border-t border-secondary/10" />
                     )}
-                    {classNameLabel && (
-                        <div className="min-w-0">
-                            <p className="text-text-secondary">Kelas</p>
-                            <p className="font-bold text-text-main dark:text-white truncate">{classNameLabel}</p>
-                        </div>
-                    )}
-                    {teacherName && (
-                        <div className="min-w-0">
-                            <p className="text-text-secondary">{teacherLabel}</p>
-                            <p className="font-bold text-text-main dark:text-white truncate">{teacherName}</p>
-                        </div>
-                    )}
-                    {typeof durationMinutes === 'number' && (
-                        <div>
-                            <p className="text-text-secondary">Durasi</p>
-                            <p className="font-bold text-text-main dark:text-white">{durationMinutes} menit</p>
-                        </div>
-                    )}
-                    {typeof questionCount === 'number' && (
-                        <div>
-                            <p className="text-text-secondary">Jumlah Soal</p>
-                            <p className={`font-bold ${noQuestions ? 'text-red-500' : 'text-text-main dark:text-white'}`}>
-                                {questionCount}
-                                {noQuestions && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded text-[10px] font-bold">
-                                        BELUM ADA SOAL
-                                    </span>
-                                )}
-                            </p>
-                        </div>
-                    )}
-                    {createdAt && (
-                        <div className="min-w-0">
-                            <p className="text-text-secondary">Dibuat</p>
-                            <p className="font-bold text-text-main dark:text-white truncate">{formatDate(createdAt)}</p>
-                        </div>
-                    )}
-                    {(startTime || endTime) && (
-                        <div className="col-span-2 flex flex-col gap-1 pt-2 border-t border-secondary/10">
-                            {startTime && (
-                                <div className="flex items-center justify-between gap-2">
-                                    <span className="text-text-secondary shrink-0">{startLabel}</span>
-                                    <span className="font-bold text-text-main dark:text-white text-right">{formatDateTime(startTime)}</span>
-                                </div>
-                            )}
-                            {endTime && (
-                                <div className="flex items-center justify-between gap-2">
-                                    <span className="text-text-secondary shrink-0">{endLabel}</span>
-                                    <span className="font-bold text-emerald-600 dark:text-emerald-400 text-right">{formatDateTime(endTime)}</span>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                    {submission && (
-                        <div className="col-span-2 flex items-center justify-between">
+                    {startTime && (<>
+                        <span className="text-text-secondary">{startLabel}</span>
+                        <span className="font-bold text-text-main dark:text-white">{formatDateTime(startTime)}</span>
+                    </>)}
+                    {endTime && (<>
+                        <span className="text-text-secondary">{endLabel}</span>
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatDateTime(endTime)}</span>
+                    </>)}
+                    {submission && (() => {
+                        const total = submission.total
+                        const value = typeof total === 'number'
+                            ? `${submission.submitted}/${total} siswa`
+                            : `${submission.submitted} terkumpul`
+                        const valueClass = typeof total === 'number' && total > 0 && submission.submitted >= total
+                            ? 'text-green-600'
+                            : 'text-primary'
+                        return (<>
                             <span className="text-text-secondary">Pengumpulan</span>
-                            {typeof submission.total === 'number' ? (
-                                <span className={`font-bold ${submission.total > 0 && submission.submitted >= submission.total ? 'text-green-600' : 'text-primary'}`}>
-                                    {submission.submitted}/{submission.total} siswa
-                                </span>
-                            ) : (
-                                <span className="font-bold text-primary">{submission.submitted} terkumpul</span>
-                            )}
-                        </div>
-                    )}
+                            <span className={`font-bold ${valueClass}`}>{value}</span>
+                        </>)
+                    })()}
                 </div>
+                )}
 
                 {pendingGrading > 0 && (
                     <button

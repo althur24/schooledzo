@@ -852,6 +852,7 @@ export default function AdminUtsUasPage() {
                                 <DailyExamCard
                                     key={exam.id}
                                     exam={exam}
+                                    showTeacher
                                     submission={counts ? { submitted: counts.submitted } : undefined}
                                     primaryAction={primaryAction}
                                     menuItems={menuItems}

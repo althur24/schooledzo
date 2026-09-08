@@ -49,8 +49,10 @@ interface DailyExamCardProps {
     submission?: { submitted: number; total?: number }
     pendingGrading?: number
     onPendingGradingClick?: () => void
-    /** Override nama guru pengampu; default dari embed teaching_assignment (dipakai admin) */
+    /** Override nama guru pengampu (dipakai bila embed tidak tersedia) */
     teacherName?: string
+    /** Tampilkan sel guru pengampu — khusus admin; guru tidak perlu melihat namanya sendiri */
+    showTeacher?: boolean
     primaryAction: ExamCardPrimaryAction
     menuItems?: DropdownMenuItem[]
     /** Badge tambahan di luar REMEDIAL / Dibuatkan Admin / Acak */
@@ -71,6 +73,7 @@ export default function DailyExamCard({
     pendingGrading,
     onPendingGradingClick,
     teacherName,
+    showTeacher = false,
     primaryAction,
     menuItems,
     extraBadges = [],
@@ -118,7 +121,7 @@ export default function DailyExamCard({
             durationMinutes={exam.duration_minutes}
             questionCount={exam.question_count ?? 0}
             createdAt={exam.created_at}
-            teacherName={teacherName ?? embeddedTeacherName}
+            teacherName={showTeacher ? (teacherName ?? embeddedTeacherName) : undefined}
             startTime={exam.start_time}
             endTime={getEffectiveEndTime(exam)}
             startLabel={scheduleLabels.start}
