@@ -156,52 +156,51 @@ export default function ExamCard({
                     </p>
                 </div>
 
-                {/* Meta grid */}
+                {/* Meta — kolom kiri nempel kiri, kolom kanan nempel kanan:
+                    nilai kolom kanan sejajar dgn rel kanan nilai jadwal di bawahnya.
+                    Sel terakhir saat jumlah ganjil jadi baris penuh agar tak ada lubang. */}
                 <div className="grid grid-cols-2 gap-2 pt-3 border-t border-secondary/10 text-xs">
-                    {subjectName && (
-                        <div className="min-w-0">
-                            <p className="text-text-secondary">Mata Pelajaran</p>
-                            <p className="font-bold text-primary truncate">{subjectName}</p>
-                        </div>
-                    )}
-                    {classNameLabel && (
-                        <div className="min-w-0">
-                            <p className="text-text-secondary">Kelas</p>
-                            <p className="font-bold text-text-main dark:text-white truncate">{classNameLabel}</p>
-                        </div>
-                    )}
-                    {teacherName && (
-                        <div className="min-w-0">
-                            <p className="text-text-secondary">{teacherLabel}</p>
-                            <p className="font-bold text-text-main dark:text-white truncate">{teacherName}</p>
-                        </div>
-                    )}
-                    {typeof durationMinutes === 'number' && (
-                        <div>
-                            <p className="text-text-secondary">Durasi</p>
-                            <p className="font-bold text-text-main dark:text-white">{durationMinutes} menit</p>
-                        </div>
-                    )}
-                    {typeof questionCount === 'number' && (
-                        <div>
-                            <p className="text-text-secondary">Jumlah Soal</p>
-                            <p className={`font-bold ${noQuestions ? 'text-red-500' : 'text-text-main dark:text-white'}`}>
-                                {questionCount}
+                    {(() => {
+                        const cells: { label: string; value: ReactNode; valueClass?: string }[] = []
+                        if (subjectName) cells.push({ label: 'Mata Pelajaran', value: <span className="truncate">{subjectName}</span>, valueClass: 'text-primary' })
+                        if (classNameLabel) cells.push({ label: 'Kelas', value: <span className="truncate">{classNameLabel}</span> })
+                        if (teacherName) cells.push({ label: teacherLabel, value: <span className="truncate">{teacherName}</span> })
+                        if (typeof durationMinutes === 'number') cells.push({ label: 'Durasi', value: <span>{durationMinutes} menit</span> })
+                        if (typeof questionCount === 'number') cells.push({
+                            label: 'Jumlah Soal',
+                            value: (<>
+                                <span className={noQuestions ? 'text-red-500' : ''}>{questionCount}</span>
                                 {noQuestions && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded text-[10px] font-bold">
+                                    <span className="px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded text-[10px] font-bold">
                                         BELUM ADA SOAL
                                     </span>
                                 )}
-                            </p>
-                        </div>
-                    )}
-                    {createdAt && (
-                        <div className="min-w-0">
-                            <p className="text-text-secondary">Dibuat</p>
-                            <p className="font-bold text-text-main dark:text-white truncate">{formatDate(createdAt)}</p>
-                        </div>
-                    )}
-                    {(startTime || endTime) && (
+                            </>),
+                        })
+                        if (createdAt) cells.push({ label: 'Dibuat', value: <span>{formatDate(createdAt)}</span> })
+
+                        return cells.map((cell, i) => {
+                            const valueColor = cell.valueClass ?? 'text-text-main dark:text-white'
+                            if (cells.length % 2 === 1 && i === cells.length - 1) {
+                                return (
+                                    <div key={cell.label} className="col-span-2 min-w-0 flex items-center justify-between gap-2">
+                                        <span className="text-text-secondary shrink-0">{cell.label}</span>
+                                        <span className={`font-bold text-right truncate ${valueColor}`}>{cell.value}</span>
+                                    </div>
+                                )
+                            }
+                            const right = i % 2 === 1
+                            return (
+                                <div key={cell.label} className="min-w-0">
+                                    <p className="text-text-secondary">{cell.label}</p>
+                                    <p className={`font-bold flex flex-wrap items-center gap-x-1.5${right ? ' justify-end text-right' : ''} ${valueColor}`}>
+                                        {cell.value}
+                                    </p>
+                                </div>
+                            )
+                        })
+                    })()}
+                    {(startTime || endTime || submission) && (
                         <div className="col-span-2 flex flex-col gap-1 pt-2 border-t border-secondary/10">
                             {startTime && (
                                 <div className="flex items-center justify-between gap-2">
@@ -215,17 +214,17 @@ export default function ExamCard({
                                     <span className="font-bold text-emerald-600 dark:text-emerald-400 text-right">{formatDateTime(endTime)}</span>
                                 </div>
                             )}
-                        </div>
-                    )}
-                    {submission && (
-                        <div className="col-span-2 flex items-center justify-between">
-                            <span className="text-text-secondary">Pengumpulan</span>
-                            {typeof submission.total === 'number' ? (
-                                <span className={`font-bold ${submission.total > 0 && submission.submitted >= submission.total ? 'text-green-600' : 'text-primary'}`}>
-                                    {submission.submitted}/{submission.total} siswa
-                                </span>
-                            ) : (
-                                <span className="font-bold text-primary">{submission.submitted} terkumpul</span>
+                            {submission && (
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-text-secondary shrink-0">Pengumpulan</span>
+                                    {typeof submission.total === 'number' ? (
+                                        <span className={`font-bold text-right ${submission.total > 0 && submission.submitted >= submission.total ? 'text-green-600' : 'text-primary'}`}>
+                                            {submission.submitted}/{submission.total} siswa
+                                        </span>
+                                    ) : (
+                                        <span className="font-bold text-primary text-right">{submission.submitted} terkumpul</span>
+                                    )}
+                                </div>
                             )}
                         </div>
                     )}
