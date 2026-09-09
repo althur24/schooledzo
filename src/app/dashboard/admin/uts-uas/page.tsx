@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import type { DropdownMenuItem } from '@/components/ui/DropdownMenu'
 import TimeWindowFields from '@/components/TimeWindowFields'
@@ -49,8 +49,10 @@ interface ClassItem {
     grade_level: number | null
 }
 
-export default function AdminUtsUasPage() {
+function AdminUtsUasPageInner() {
     const router = useRouter()
+    const pathname = usePathname()
+    const searchParams = useSearchParams()
     const labels = useSchoolLabels()
     const [exams, setExams] = useState<OfficialExam[]>([])
     const [subjects, setSubjects] = useState<Subject[]>([])
@@ -58,13 +60,30 @@ export default function AdminUtsUasPage() {
     const [loading, setLoading] = useState(true)
     const [showCreate, setShowCreate] = useState(false)
     const [creating, setCreating] = useState(false)
-    const [filterType, setFilterType] = useState<string>('')
-    const [filterSubject, setFilterSubject] = useState<string>('')
     const [submissionCounts, setSubmissionCounts] = useState<Record<string, { submitted: number; total: number }>>({})
-    const [tab, setTab] = useState<'utsuas' | 'ulangan'>('utsuas')
     const [ulanganExams, setUlanganExams] = useState<any[]>([])
     const [ulanganCounts, setUlanganCounts] = useState<Record<string, { submitted: number; total: number }>>({})
     const [ulanganLoading, setUlanganLoading] = useState(true)
+
+    // Tab & filter hidup di URL (?tab=ulangan&tipe=UTS&mapel=<id>) supaya
+    // pilihan bertahan saat kembali dari halaman detail/monitor — sebelumnya
+    // state React yang reset ke default setiap remount (back selalu jatuh ke
+    // tab UTS/UAS). replace() dipakai agar ganti tab tidak menumpuk riwayat.
+    const tab = searchParams.get('tab') === 'ulangan' ? 'ulangan' : 'utsuas'
+    const filterType = searchParams.get('tipe') || ''
+    const filterSubject = searchParams.get('mapel') || ''
+    const upsertParams = (updates: Record<string, string | null>) => {
+        const sp = new URLSearchParams(searchParams.toString())
+        for (const [k, v] of Object.entries(updates)) {
+            if (v) sp.set(k, v)
+            else sp.delete(k)
+        }
+        const qs = sp.toString()
+        router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    }
+    const setTab = (t: 'utsuas' | 'ulangan') => upsertParams({ tab: t === 'utsuas' ? null : t })
+    const setFilterType = (v: string) => upsertParams({ tipe: v || null })
+    const setFilterSubject = (v: string) => upsertParams({ mapel: v || null })
 
     // Duplicate & Remedial states (dipakai UTS/UAS & Ulangan — source membedakan endpoint)
     const [showDuplicate, setShowDuplicate] = useState(false)
@@ -1255,5 +1274,18 @@ export default function AdminUtsUasPage() {
                 </div>
             )}
         </div>
+    )
+}
+
+/**
+ * Halaman ini statically prerendered — useSearchParams() di komponen dalam
+ * wajib dibatasi <Suspense> agar build tidak gagal (persyaratan Next.js
+ * untuk halaman static yang membaca query string saat render).
+ */
+export default function AdminUtsUasPage() {
+    return (
+        <Suspense>
+            <AdminUtsUasPageInner />
+        </Suspense>
     )
 }

@@ -64,7 +64,9 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
     const isUlangan = (spRaw as { type?: string } | undefined)?.type === 'ulangan'
     const monitorEndpoint = isUlangan ? '/api/exam-submissions/monitor' : '/api/official-exam-submissions/monitor'
     const resetEndpoint = isUlangan ? '/api/exam-submissions' : '/api/official-exam-submissions'
-    const backHref = isUlangan ? '/dashboard/admin/uts-uas' : `/dashboard/admin/uts-uas/${examId}`
+    // Kembali ke tab Ulangan di halaman list (tab kini hidup di URL — tanpa
+    // ?tab=ulangan admin akan jatuh ke tab UTS/UAS lagi)
+    const backHref = isUlangan ? '/dashboard/admin/uts-uas?tab=ulangan' : `/dashboard/admin/uts-uas/${examId}`
 
     const [data, setData] = useState<MonitorData | null>(null)
     const [loading, setLoading] = useState(true)
@@ -266,9 +268,17 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
                         <ArrowLeft className="w-5 h-5" />
                     </Link>
                     <div className="flex items-center gap-3">
-                        <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600' : 'bg-purple-500/10 text-purple-600'}`}>
-                            {exam.exam_type === 'UTS' ? labels.uts : labels.uas}
-                        </span>
+                        {/* Mode ulangan: exam_type = sentinel 'Ulangan' dari API exams (bukan
+                            'UTS'/'UAS') — tanpa guard ini badge jatuh ke cabang UAS. */}
+                        {isUlangan ? (
+                            <span className="px-3 py-1 text-sm font-bold rounded-full bg-red-500/10 text-red-600 dark:text-red-400">
+                                {labels.ulangan}
+                            </span>
+                        ) : (
+                            <span className={`px-3 py-1 text-sm font-bold rounded-full ${exam.exam_type === 'UTS' ? 'bg-indigo-500/10 text-indigo-600' : 'bg-purple-500/10 text-purple-600'}`}>
+                                {exam.exam_type === 'UTS' ? labels.uts : labels.uas}
+                            </span>
+                        )}
                         <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
                         {exam.is_active && (
                             <span className="flex items-center gap-1.5 px-3 py-1 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse shadow-lg shadow-red-500/20">

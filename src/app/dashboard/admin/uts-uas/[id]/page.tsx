@@ -85,13 +85,15 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     const { user } = useAuth()
     const labels = useSchoolLabels()
     const basePath = user?.role === 'GURU' ? '/dashboard/guru/uts-uas' : '/dashboard/admin/uts-uas'
-    // Guru tidak punya halaman list uts-uas lagi (terpadu di halaman ulangan) — tombol
-    // Kembali langsung ke sana, tanpa lewat redirect
-    const backPath = user?.role === 'GURU' ? '/dashboard/guru/ulangan' : '/dashboard/admin/uts-uas'
-
     // Mode ulangan (tabel exams, dikelola guru): semua endpoint & shape data di-switch
     // mengikuti pola ?type=ulangan yang sudah ada di halaman monitor
     const isUlangan = (spRaw as { type?: string } | undefined)?.type === 'ulangan'
+    // Guru tidak punya halaman list uts-uas lagi (terpadu di halaman ulangan) — tombol
+    // Kembali langsung ke sana, tanpa lewat redirect. Admin kembali ke tab asalnya
+    // (tab list kini hidup di URL — tanpa ?tab=ulangan akan jatuh ke tab UTS/UAS).
+    const backPath = user?.role === 'GURU'
+        ? '/dashboard/guru/ulangan'
+        : (isUlangan ? '/dashboard/admin/uts-uas?tab=ulangan' : '/dashboard/admin/uts-uas')
     const examApi = isUlangan ? '/api/exams' : '/api/official-exams'
     const submissionsApi = isUlangan ? '/api/exam-submissions' : '/api/official-exam-submissions'
     const typeParam = isUlangan ? '?type=ulangan' : ''
