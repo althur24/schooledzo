@@ -97,13 +97,14 @@ async function notifySiblingActivated(table: 'exams' | 'quizzes', targetId: stri
     try {
         const { data: sibling } = await supabaseAdmin
             .from(table)
-            .select('title, start_time, teaching_assignment:teaching_assignments(class_id, subject:subjects(name), class:classes(school_id))')
+            .select('title, start_time, teaching_assignment:teaching_assignments(class_id, subject:subjects(name), academic_year:academic_years(school_id))')
             .eq('id', targetId)
             .single()
         const ta = sibling?.teaching_assignment as any
         if (!sibling || !ta?.class_id) return
 
-        const schoolId = ta?.class?.school_id
+        // classes tidak punya school_id — scope via academic_years
+        const schoolId = ta?.academic_year?.school_id
         let yearQuery = supabaseAdmin
             .from('academic_years').select('id')
             .eq('is_active', true)

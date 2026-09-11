@@ -17,8 +17,8 @@ export async function GET(
             .from('schedules')
             .select(`
                 *,
-                class:classes(id, name, grade_level, school_level, school_id),
-                academic_year:academic_years(id, name, is_active),
+                class:classes(id, name, grade_level, school_level),
+                academic_year:academic_years!inner(id, name, is_active, school_id),
                 created_by_user:users!created_by(full_name),
                 entries:schedule_entries(
                     *,
@@ -27,7 +27,8 @@ export async function GET(
                 )
             `)
             .eq('id', id)
-        if (schoolId) query = query.eq('class.school_id', schoolId)
+        // School isolation: classes tidak punya school_id — scope via academic_years
+        if (schoolId) query = query.eq('academic_year.school_id', schoolId)
         const { data, error } = await query.single()
 
         if (error) throw error
@@ -62,13 +63,13 @@ export async function PUT(
         if (notes !== undefined) updateData.notes = notes
         if (is_active !== undefined) updateData.is_active = is_active
 
-        // Verify schedule belongs to a class in this school
+        // Verify schedule belongs to this school (classes don't have school_id — use academic_year chain)
         if (schoolId) {
             const { data: schedCheck } = await supabase
                 .from('schedules')
-                .select('id, class:classes!inner(school_id)')
+                .select('id, academic_year:academic_years!inner(school_id)')
                 .eq('id', id)
-                .eq('class.school_id', schoolId)
+                .eq('academic_year.school_id', schoolId)
                 .single()
             if (!schedCheck) {
                 return NextResponse.json({ error: 'Schedule not found' }, { status: 404 })
@@ -146,13 +147,13 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Verify schedule belongs to this school
+        // Verify schedule belongs to this school (via academic_year chain — classes don't have school_id)
         if (schoolId) {
             const { data: schedCheck } = await supabase
                 .from('schedules')
-                .select('id, class:classes!inner(school_id)')
+                .select('id, academic_year:academic_years!inner(school_id)')
                 .eq('id', id)
-                .eq('class.school_id', schoolId)
+                .eq('academic_year.school_id', schoolId)
                 .single()
             if (!schedCheck) {
                 return NextResponse.json({ error: 'Schedule not found' }, { status: 404 })

@@ -18,7 +18,7 @@ export async function checkAndAutoPublish(
                 teaching_assignment:teaching_assignments(
                     class_id,
                     subject:subjects(name),
-                    class:classes(school_id)
+                    academic_year:academic_years(school_id)
                 )
             `)
             .eq('id', parentId)
@@ -124,8 +124,9 @@ export async function checkAndAutoPublish(
 
 async function sendPublishNotifications(source: 'quiz' | 'exam', parent: any) {
     try {
-        const classData = parent.teaching_assignment?.class as any
-        const schoolId = Array.isArray(classData) ? classData[0]?.school_id : classData?.school_id
+        // classes tidak punya school_id — ambil dari academic_year TA
+        const ayData = parent.teaching_assignment?.academic_year as any
+        const schoolId = Array.isArray(ayData) ? ayData[0]?.school_id : ayData?.school_id
         const labels = await getMenuLabelsForSchool(schoolId ?? null)
         const titleType = source === 'quiz' ? labels.kuis : labels.ulangan
         const link = source === 'quiz' ? '/dashboard/siswa/kuis' : '/dashboard/siswa/ulangan'
@@ -160,9 +161,9 @@ async function sendPublishNotifications(source: 'quiz' | 'exam', parent: any) {
 
         // Notify Students
         if (parent.teaching_assignment?.class_id) {
-            // Derive school_id from the teaching assignment's class
-            const classData = parent.teaching_assignment.class as any
-            const schoolId = Array.isArray(classData) ? classData[0]?.school_id : classData?.school_id
+            // Derive school_id from the teaching assignment's academic year
+            const ayData = parent.teaching_assignment.academic_year as any
+            const schoolId = Array.isArray(ayData) ? ayData[0]?.school_id : ayData?.school_id
 
             // Remedial: notifikasi HANYA ke siswa terdaftar (allowed_student_ids) —
             // bukan seluruh kelas. Tanpa ini judul "[Remedial] ..." bocor ke

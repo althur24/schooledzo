@@ -62,27 +62,32 @@ async function flush(key: string) {
 
     try {
         const isExam = entry.kind === 'exam'
-        const { data: entity } = await supabase
+        const { data: entity, error: entityError } = await supabase
             .from(isExam ? 'exams' : 'quizzes')
             .select(`
                 title,
                 teaching_assignment:teaching_assignments(
                     teacher:teachers(user_id),
-                    class:classes(school_id)
+                    academic_year:academic_years(school_id)
                 )
             `)
             .eq('id', entry.entityId)
             .single()
+        if (entityError || !entity) {
+            console.error(`[teacherNotifyBuffer] Gagal memuat ${entry.kind} ${entry.entityId} untuk notifikasi guru:`, entityError)
+            return
+        }
 
         // Embed PostgREST bisa berupa objek atau array — ambil elemen pertama
         const first = <T,>(v: T | T[] | null | undefined): T | undefined =>
             Array.isArray(v) ? v[0] : (v ?? undefined)
-        const ta = first(entity?.teaching_assignment as { teacher?: unknown; class?: unknown } | { teacher?: unknown; class?: unknown }[] | undefined)
+        const ta = first(entity?.teaching_assignment as { teacher?: unknown; academic_year?: unknown } | { teacher?: unknown; academic_year?: unknown }[] | undefined)
         const teacherUserId = (first(ta?.teacher as { user_id?: string } | { user_id?: string }[] | undefined))?.user_id
         if (!teacherUserId) return
 
-        const classInfo = first(ta?.class as { school_id?: string } | { school_id?: string }[] | undefined)
-        const labels = await getMenuLabelsForSchool(classInfo?.school_id ?? null)
+        // classes tidak punya school_id — scope via teaching_assignments → academic_years
+        const ayInfo = first(ta?.academic_year as { school_id?: string } | { school_id?: string }[] | undefined)
+        const labels = await getMenuLabelsForSchool(ayInfo?.school_id ?? null)
         // mid-sentence di message: aslinya lowercase ("telah mengumpulkan ulangan ...")
         const label = (isExam ? labels.ulangan : labels.kuis).toLowerCase()
         const who = entry.count === 1
