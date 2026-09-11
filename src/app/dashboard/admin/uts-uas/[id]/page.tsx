@@ -193,6 +193,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     const examSubject = isUlangan ? (exam as any)?.teaching_assignment?.subject : (exam as any)?.subject
     const examClass = isUlangan ? (exam as any)?.teaching_assignment?.class : null
     const examTeacherName = isUlangan ? (exam as any)?.teaching_assignment?.teacher?.user?.full_name : null
+    // exams tidak punya academic_year langsung (hanya official_exams) —
+    // untuk ulangan ambil via teaching_assignment → academic_years
+    const examYearName = isUlangan ? (exam as any)?.teaching_assignment?.academic_year?.name : (exam as any)?.academic_year?.name
 
     const getStudentKkm = (student: any) => {
         const baseKkm = examSubject?.kkm || 75;
@@ -1082,7 +1085,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                         teacherName: isUlangan
                                             ? (examTeacherName || undefined)
                                             : exam?.creator?.full_name,
-                                        academicYearName: exam?.academic_year?.name,
+                                        academicYearName: examYearName,
                                         dateStart: exam?.start_time || null,
                                         dateEnd: exam?.window_end_time || null,
                                         durationMinutes: exam?.duration_minutes ?? null,
