@@ -236,34 +236,21 @@ export default function GuruUlanganPage() {
             )
             setExams(myExams)
 
+            // Satu request ringkasan (bukan N+1 per ulangan/UTS). Definisi sama
+            // dengan sebelumnya: submitted = is_submitted, pending = is_submitted && !is_graded.
             const subCounts: Record<string, number> = {}
             const pendingCounts: Record<string, number> = {}
-            
-            const regularExamPromises = myExams.map(async (exam: Exam) => {
-                try {
-                    const res = await fetch(`/api/exam-submissions?exam_id=${exam.id}`)
-                    if (res.ok) {
-                        const subs = await res.json()
-                        const subsArr = Array.isArray(subs) ? subs : []
-                        subCounts[exam.id] = subsArr.filter((s: any) => s.is_submitted).length
-                        pendingCounts[exam.id] = subsArr.filter((s: any) => s.is_submitted && !s.is_graded).length
-                    }
-                } catch { }
-            })
-
-            const officialExamPromises = officialExamsData.map(async (exam: OfficialExam) => {
-                try {
-                    const res = await fetch(`/api/official-exam-submissions?exam_id=${exam.id}`)
-                    if (res.ok) {
-                        const subs = await res.json()
-                        const subsArr = Array.isArray(subs) ? subs : []
-                        subCounts[exam.id] = subsArr.filter((s: any) => s.is_submitted).length
-                        pendingCounts[exam.id] = subsArr.filter((s: any) => s.is_submitted && !s.is_graded).length
-                    }
-                } catch { }
-            })
-
-            await Promise.all([...regularExamPromises, ...officialExamPromises])
+            try {
+                const res = await fetch('/api/dashboard/guru/grading-overview')
+                if (res.ok) {
+                    const data = await res.json()
+                    const items = Array.isArray(data?.items) ? data.items : []
+                    items.forEach((it: any) => {
+                        subCounts[it.id] = it.submitted_count || 0
+                        pendingCounts[it.id] = it.ungraded_count || 0
+                    })
+                }
+            } catch { }
             setSubmissionCounts(subCounts)
             setPendingGradingCounts(pendingCounts)
         } catch (error) {
@@ -1004,6 +991,7 @@ export default function GuruUlanganPage() {
                                             exam={exam}
                                             primaryAction={primaryAction}
                                             menuItems={officialMenuItems}
+                                            pendingGrading={pendingGradingCounts[exam.id] || 0}
                                         />
                                     )
                                 })}

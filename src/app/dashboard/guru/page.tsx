@@ -4,10 +4,11 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { TimeCircle as Clock, Danger, Calendar, Category } from 'react-iconly'
+import { TimeCircle as Clock, Danger, Calendar, Category, Edit } from 'react-iconly'
 import { PlayCircle } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
+import { useGradingCounts } from '@/hooks/useGradingCounts'
 
 interface WarningItem {
     student_id: string
@@ -28,10 +29,26 @@ interface MyClassItem {
     isHomeroom: boolean
 }
 
+interface MissingItem {
+    type: string
+    title: string
+    subject_name: string
+}
+
+interface MissingStudent {
+    student_id: string
+    student_name: string
+    class_id: string
+    class_name: string
+    missing_count: number
+    items: MissingItem[]
+}
+
 interface WarningsData {
     teachingWarnings: WarningItem[]
     homeroomWarnings: WarningItem[]
     myClasses: MyClassItem[]
+    missingSubmissions?: MissingStudent[]
 }
 
 interface ScheduleEntry {
@@ -52,11 +69,14 @@ export default function GuruDashboard() {
     const { user } = useAuth()
     const router = useRouter()
     const labels = useSchoolLabels()
+    const { items: gradingItems, loaded: gradingLoaded } = useGradingCounts(user?.role === 'GURU')
     const [warnings, setWarnings] = useState<WarningsData | null>(null)
     const [todaySchedule, setTodaySchedule] = useState<ScheduleEntry[]>([])
     const [loading, setLoading] = useState(true)
     const [activeWarningTab, setActiveWarningTab] = useState<'teaching' | 'homeroom'>('teaching')
     const [warningVisibleCount, setWarningVisibleCount] = useState(5)
+    const [missingVisibleCount, setMissingVisibleCount] = useState(5)
+    const [gradingVisibleCount, setGradingVisibleCount] = useState(5)
     const [activeOfficialExams, setActiveOfficialExams] = useState<any[]>([])
     // undefined = belum termuat, null = tidak ada tahun aktif
     const [activeYearInfo, setActiveYearInfo] = useState<{ name: string } | null | undefined>(undefined)
@@ -131,6 +151,26 @@ export default function GuruDashboard() {
     const myClasses = warnings?.myClasses || []
 
     const activeWarnings = activeWarningTab === 'teaching' ? teachingWarnings : homeroomWarnings
+
+    const missingSubmissions = warnings?.missingSubmissions || []
+    const pendingGrading = gradingItems.filter(i => i.ungraded_count > 0)
+    const totalPendingGrading = pendingGrading.reduce((a, i) => a + i.ungraded_count, 0)
+
+    const gradingLinkFor = (type: string, id: string) => {
+        switch (type) {
+            case 'TUGAS': return `/dashboard/guru/tugas/${id}/hasil`
+            case 'KUIS': return `/dashboard/guru/kuis/${id}/hasil`
+            case 'ULANGAN': return `/dashboard/guru/ulangan/${id}/hasil`
+            default: return `/dashboard/guru/uts-uas/${id}/hasil`
+        }
+    }
+
+    const typeBadgeClass = (type: string) =>
+        type === 'TUGAS'
+            ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+            : type === 'KUIS'
+                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
 
     // Render a single warning card (reused across both tabs)
     const renderWarningCard = (warning: WarningItem, idx: number) => (
@@ -445,6 +485,143 @@ export default function GuruDashboard() {
                                     className="w-full py-3 rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-700 text-text-secondary dark:text-zinc-400 text-sm font-bold hover:bg-zinc-50 dark:hover:bg-zinc-800/30 hover:border-zinc-300 dark:hover:border-zinc-600 transition-all"
                                 >
                                     Tampilkan Lebih Sedikit
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Pengingat: Belum Mengumpulkan & Belum Dikoreksi */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 md:gap-8">
+                {/* Belum Mengumpulkan */}
+                <div className="space-y-4">
+                    <div className="flex items-center gap-3 border-b-2 border-amber-500/20 pb-4">
+                        <div className="p-2 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl text-white shadow-lg shadow-amber-500/20">
+                            <Clock set="bold" size={24} />
+                        </div>
+                        <h2 className="text-xl md:text-2xl font-bold text-text-main dark:text-white tracking-tight">Belum Mengumpulkan</h2>
+                        {missingSubmissions.length > 0 && (
+                            <span className="px-2.5 py-1 bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 text-xs font-bold rounded-full">
+                                {missingSubmissions.length} Siswa
+                            </span>
+                        )}
+                    </div>
+
+                    {!loading && missingSubmissions.length === 0 ? (
+                        <div className="h-52 flex flex-col items-center justify-center text-center p-4 md:p-8 bg-gradient-to-br from-emerald-50/50 to-transparent dark:from-emerald-900/10 dark:to-transparent rounded-3xl border border-emerald-100 dark:border-emerald-900/30">
+                            <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500 rounded-full flex items-center justify-center mb-4">
+                                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                            </div>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Semua Terkumpul!</h3>
+                            <p className="text-text-secondary dark:text-zinc-400">Tidak ada siswa yang melewatkan tenggat {labels.tugas.toLowerCase()}, {labels.kuis.toLowerCase()}, atau {labels.ulangan.toLowerCase()} di mapel Anda.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {missingSubmissions.slice(0, missingVisibleCount).map((s, idx) => (
+                                <div key={`${s.student_id}-${idx}`} className="group flex items-start gap-4 p-4 rounded-2xl bg-white/70 dark:bg-surface-dark/70 backdrop-blur-xl border border-amber-100 dark:border-amber-900/30 shadow-sm hover:shadow-md hover:border-amber-300 dark:hover:border-amber-700 transition-all">
+                                    <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center font-black flex-shrink-0">
+                                        {s.missing_count}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <h4 className="font-bold text-text-main dark:text-white truncate">{s.student_name}</h4>
+                                            <span className="px-2 py-0.5 bg-black/5 dark:bg-white/5 rounded text-[10px] font-bold text-text-secondary">
+                                                {s.class_name}
+                                            </span>
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                            {s.items.slice(0, 4).map((it, i) => (
+                                                <span key={i} title={it.title} className={`inline-block max-w-[200px] truncate px-2 py-0.5 rounded text-[10px] font-bold align-bottom ${typeBadgeClass(it.type)}`}>
+                                                    {labelForGradeType(it.type, labels)}: {it.title}
+                                                </span>
+                                            ))}
+                                            {s.items.length > 4 && (
+                                                <span className="px-2 py-0.5 bg-black/5 dark:bg-white/5 rounded text-[10px] font-bold text-text-secondary">
+                                                    +{s.items.length - 4} lainnya
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <Link href={`/dashboard/guru/siswa/${s.student_id}?class_id=${s.class_id}`} className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-amber-50 dark:bg-amber-900/20 text-amber-500 hover:bg-amber-500 hover:text-white transition-colors">
+                                        <svg className="w-5 h-5 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                                    </Link>
+                                </div>
+                            ))}
+                            {missingSubmissions.length > missingVisibleCount && (
+                                <button
+                                    onClick={() => setMissingVisibleCount(prev => prev + 5)}
+                                    className="w-full py-3 rounded-2xl border-2 border-dashed border-amber-200 dark:border-amber-900/40 text-amber-600 dark:text-amber-400 text-sm font-bold hover:bg-amber-50 dark:hover:bg-amber-900/10 hover:border-amber-300 dark:hover:border-amber-800 transition-all"
+                                >
+                                    Tampilkan Lebih Banyak ({missingSubmissions.length - missingVisibleCount} sisanya)
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* Belum Dikoreksi */}
+                <div className="space-y-4">
+                    <div className="flex items-center gap-3 border-b-2 border-indigo-500/20 pb-4">
+                        <div className="p-2 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-xl text-white shadow-lg shadow-indigo-500/20">
+                            <Edit set="bold" size={24} />
+                        </div>
+                        <h2 className="text-xl md:text-2xl font-bold text-text-main dark:text-white tracking-tight">Belum Dikoreksi</h2>
+                        {totalPendingGrading > 0 && (
+                            <span className="px-2.5 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 text-xs font-bold rounded-full">
+                                {totalPendingGrading} Pengumpulan
+                            </span>
+                        )}
+                    </div>
+
+                    {!gradingLoaded ? (
+                        <div className="space-y-3 animate-pulse">
+                            {[0, 1, 2].map(i => (
+                                <div key={i} className="h-20 rounded-2xl bg-black/5 dark:bg-white/5" />
+                            ))}
+                        </div>
+                    ) : pendingGrading.length === 0 ? (
+                        <div className="h-52 flex flex-col items-center justify-center text-center p-4 md:p-8 bg-gradient-to-br from-emerald-50/50 to-transparent dark:from-emerald-900/10 dark:to-transparent rounded-3xl border border-emerald-100 dark:border-emerald-900/30">
+                            <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500 rounded-full flex items-center justify-center mb-4">
+                                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                            </div>
+                            <h3 className="text-xl font-bold text-text-main dark:text-white mb-2">Semua Terkoreksi!</h3>
+                            <p className="text-text-secondary dark:text-zinc-400">Tidak ada pengumpulan yang menunggu penilaian Anda.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {pendingGrading.slice(0, gradingVisibleCount).map((item) => (
+                                <Link
+                                    key={`${item.type}-${item.id}`}
+                                    href={gradingLinkFor(item.type, item.id)}
+                                    className="group flex items-center gap-4 p-4 rounded-2xl bg-white/70 dark:bg-surface-dark/70 backdrop-blur-xl border border-indigo-100 dark:border-indigo-900/30 shadow-sm hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition-all"
+                                >
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${typeBadgeClass(item.type)}`}>
+                                                {labelForGradeType(item.type, labels)}
+                                            </span>
+                                            <span className="px-2 py-0.5 bg-black/5 dark:bg-white/5 rounded text-[10px] font-bold text-text-secondary truncate max-w-[160px]">
+                                                {item.class_name}
+                                            </span>
+                                        </div>
+                                        <h4 className="font-bold text-text-main dark:text-white truncate mt-1.5">{item.title}</h4>
+                                        {item.subject_name && (
+                                            <p className="text-xs text-text-secondary dark:text-zinc-400 truncate">{item.subject_name}</p>
+                                        )}
+                                    </div>
+                                    <div className="text-right flex-shrink-0">
+                                        <div className="text-2xl font-black text-indigo-500 dark:text-indigo-400">{item.ungraded_count}</div>
+                                        <div className="text-[10px] font-bold text-text-secondary">belum dinilai</div>
+                                    </div>
+                                </Link>
+                            ))}
+                            {pendingGrading.length > gradingVisibleCount && (
+                                <button
+                                    onClick={() => setGradingVisibleCount(prev => prev + 5)}
+                                    className="w-full py-3 rounded-2xl border-2 border-dashed border-indigo-200 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-400 text-sm font-bold hover:bg-indigo-50 dark:hover:bg-indigo-900/10 hover:border-indigo-300 dark:hover:border-indigo-800 transition-all"
+                                >
+                                    Tampilkan Lebih Banyak ({pendingGrading.length - gradingVisibleCount} sisanya)
                                 </button>
                             )}
                         </div>

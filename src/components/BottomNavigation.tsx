@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { useGradingCounts } from '@/hooks/useGradingCounts'
 import type { MenuLabels } from '@/lib/labels'
 import {
     Home, Document as DocumentIcon, Edit, Game, Graph, TimeCircle, User, Work,
@@ -111,6 +112,7 @@ export default function BottomNavigation() {
     const pathname = usePathname()
     const { user } = useAuth()
     const labels = useSchoolLabels()
+    const { counts } = useGradingCounts(user?.role === 'GURU')
     const [isOpen, setIsOpen] = useState(false)
 
     useEffect(() => {
@@ -131,6 +133,13 @@ export default function BottomNavigation() {
     }, [])
 
     if (!user) return null
+
+    // Badge "belum dikoreksi" (guru) — menu Ulangan mencakup ulangan + UTS/UAS.
+    const gradingBadges: Record<string, number> = {
+        '/dashboard/guru/tugas': counts.tugas,
+        '/dashboard/guru/ulangan': counts.ulangan + counts.utsUas,
+        '/dashboard/guru/kuis': counts.kuis,
+    }
 
     let barLeft: NavItem[], barRight: NavItem[], arcItems: NavItem[]
     switch (user.role) {
@@ -175,6 +184,7 @@ export default function BottomNavigation() {
     const renderBarItem = (item: NavItem) => {
         const active = isActive(item.path)
         const IconComponent = item.icon
+        const badge = gradingBadges[item.path] || 0
         return (
             <Link
                 key={item.path}
@@ -183,7 +193,7 @@ export default function BottomNavigation() {
                 onClick={() => setIsOpen(false)}
                 data-tutorial={TUTORIAL_NAV_IDS[item.path]}
             >
-                <div className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-300 ${active
+                <div className={`relative flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-300 ${active
                     ? 'bg-gradient-to-br from-primary to-emerald-500 text-white shadow-lg shadow-primary/30 scale-105 -translate-y-0.5'
                     : isOpen
                         ? 'text-white/60 dark:text-slate-500'
@@ -194,6 +204,11 @@ export default function BottomNavigation() {
                         primaryColor={active ? 'white' : 'currentColor'}
                         size="small"
                     />
+                    {badge > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 flex items-center justify-center text-[9px] font-bold rounded-full bg-red-500 text-white shadow-sm">
+                            {badge > 99 ? '99+' : badge}
+                        </span>
+                    )}
                 </div>
                 <span className={`text-[10px] mt-0.5 font-bold transition-colors ${active
                     ? 'text-primary'

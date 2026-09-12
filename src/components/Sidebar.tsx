@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { useGradingCounts } from '@/hooks/useGradingCounts'
 import type { MenuLabels } from '@/lib/labels'
 import {
     Home, Document as DocumentIcon, Edit, Game, Graph, TimeCircle, User, Work,
@@ -92,8 +93,17 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onClo
     const pathname = usePathname()
     const { user } = useAuth()
     const labels = useSchoolLabels()
+    const { counts } = useGradingCounts(user?.role === 'GURU')
 
     if (!user) return null
+
+    // Badge "belum dikoreksi" per path menu (guru). Menu Ulangan mencakup
+    // ulangan harian + UTS/UAS (satu pintu).
+    const gradingBadges: Record<string, number> = {
+        '/dashboard/guru/tugas': counts.tugas,
+        '/dashboard/guru/ulangan': counts.ulangan + counts.utsUas,
+        '/dashboard/guru/kuis': counts.kuis,
+    }
 
     const getNavItems = (): NavItem[] => {
         switch (user.role) {
@@ -129,6 +139,7 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onClo
                 const active = isActive(item.path)
                 const IconComponent = item.icon
                 const displayLabel = LABEL_PATH_MAP[item.path]?.(labels) ?? item.label
+                const badge = gradingBadges[item.path] || 0
 
                 return (
                     <Link
@@ -143,7 +154,7 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onClo
                                 : 'text-text-secondary hover:bg-[#F2F7F1] dark:hover:bg-white/5 hover:text-text-main dark:hover:text-white font-medium'
                             }`}
                     >
-                        <div className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors flex-shrink-0 ${active
+                        <div className={`relative flex items-center justify-center w-8 h-8 rounded-lg transition-colors flex-shrink-0 ${active
                             ? 'bg-primary text-white shadow-md shadow-primary/30'
                             : 'bg-[#E8F0E6] dark:bg-surface-ground text-text-secondary group-hover:bg-white dark:group-hover:bg-surface-light group-hover:shadow-sm'
                             }`}>
@@ -152,8 +163,18 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onClo
                                 primaryColor={active ? 'white' : 'currentColor'}
                                 size="small"
                             />
+                            {iconOnly && badge > 0 && (
+                                <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 flex items-center justify-center text-[9px] font-bold rounded-full bg-red-500 text-white shadow-sm">
+                                    {badge > 99 ? '99+' : badge}
+                                </span>
+                            )}
                         </div>
                         {!iconOnly && <span className="text-sm whitespace-nowrap">{displayLabel}</span>}
+                        {!iconOnly && badge > 0 && (
+                            <span className="ml-auto min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[10px] font-bold rounded-full bg-red-500 text-white shadow-sm">
+                                {badge > 99 ? '99+' : badge}
+                            </span>
+                        )}
                     </Link>
                 )
             })}

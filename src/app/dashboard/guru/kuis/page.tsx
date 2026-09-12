@@ -176,20 +176,21 @@ export default function GuruKuisPage() {
             )
             setQuizzes(myQuizzes)
 
-            // Fetch submission counts per quiz
+            // Satu request ringkasan (bukan N+1 per kuis). Definisi sama dengan
+            // sebelumnya: submitted = submitted_at terisi, pending = submitted && !is_graded.
             const subCounts: Record<string, number> = {}
             const pendingCounts: Record<string, number> = {}
-            await Promise.all(myQuizzes.map(async (quiz: Quiz) => {
-                try {
-                    const res = await fetch(`/api/quiz-submissions?quiz_id=${quiz.id}`)
-                    if (res.ok) {
-                        const subs = await res.json()
-                        const subsArr = Array.isArray(subs) ? subs : []
-                        subCounts[quiz.id] = subsArr.filter((s: any) => s.submitted_at).length
-                        pendingCounts[quiz.id] = subsArr.filter((s: any) => s.submitted_at && !s.is_graded).length
-                    }
-                } catch { }
-            }))
+            try {
+                const res = await fetch('/api/dashboard/guru/grading-overview')
+                if (res.ok) {
+                    const data = await res.json()
+                    const items = Array.isArray(data?.items) ? data.items : []
+                    items.forEach((it: any) => {
+                        subCounts[it.id] = it.submitted_count || 0
+                        pendingCounts[it.id] = it.ungraded_count || 0
+                    })
+                }
+            } catch { }
             setSubmissionCounts(subCounts)
             setPendingGradingCounts(pendingCounts)
         } catch (error) {
