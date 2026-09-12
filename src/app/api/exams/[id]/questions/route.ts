@@ -6,7 +6,7 @@ import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type T
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncQuestionsToBank } from '@/lib/questionBankSync'
-import { canManageExam, getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
+import { canManageExamCoTaught, getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 import { syncDraftExamQuestions } from '@/lib/examBatch'
 import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
 
@@ -81,17 +81,20 @@ export async function GET(
 
         // GURU non-pemilik TA tidak boleh membaca soal ulangan guru lain
         // (bocor soal + kunci jawaban antar guru satu sekolah) — paritas
-        // dengan guard mutasi POST/PUT/DELETE di route ini. ADMIN tetap boleh
+        // dengan guard mutasi POST/PUT/DELETE di route ini. Co-teacher
+        // (mapel+kelas sama) tetap boleh. ADMIN tetap boleh
         // (review queue, monitor, editor bersama ?type=ulangan).
         if (user.role === 'GURU') {
             const { data: examTa } = await supabase
                 .from('exams')
-                .select('teaching_assignment:teaching_assignments(teacher_id)')
+                .select('teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
                 .eq('id', id)
                 .single()
-            const taTeacherId = (examTa?.teaching_assignment as any)?.teacher_id
-            const scope = await getTeacherScope(user.id)
-            if (!ownsTeachingAssignment(scope, taTeacherId)) {
+            const taCtx = Array.isArray(examTa?.teaching_assignment)
+                ? (examTa.teaching_assignment as any)[0]
+                : (examTa?.teaching_assignment as any)
+            const scope = await getTeacherScope(user.id, taCtx?.academic_year_id ?? null)
+            if (!ownsTeachingAssignment(scope, taCtx?.teacher_id) && !coTeachesClassSubject(scope, taCtx?.subject_id, taCtx?.class_id)) {
                 return notFound()
             }
         }
@@ -173,7 +176,7 @@ export async function POST(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('is_active, teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
+            .select('is_active, teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -181,9 +184,12 @@ export async function POST(
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
-        // Kepemilikan: hanya ADMIN atau guru pemilik TA yang boleh mengelola soal ulangan ini
-        const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
-        if (!(await canManageExam(user, taTeacherId))) {
+        // Kepemilikan: ADMIN sekolah yang sama, guru pemilik TA, ATAU co-teacher
+        // (mengampu mapel+kelas yang sama) — semua pengampu kelola soal ulangan yang sama
+        const taCtx = Array.isArray(examForYear?.teaching_assignment)
+            ? (examForYear.teaching_assignment as any)[0]
+            : (examForYear?.teaching_assignment as any)
+        if (!(await canManageExamCoTaught(user, taCtx))) {
             return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
         }
 
@@ -359,7 +365,7 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('is_active, teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
+            .select('is_active, teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -367,9 +373,12 @@ export async function PUT(
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
-        // Kepemilikan: hanya ADMIN atau guru pemilik TA yang boleh mengelola soal ulangan ini
-        const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
-        if (!(await canManageExam(user, taTeacherId))) {
+        // Kepemilikan: ADMIN sekolah yang sama, guru pemilik TA, ATAU co-teacher
+        // (mengampu mapel+kelas yang sama) — semua pengampu kelola soal ulangan yang sama
+        const taCtx = Array.isArray(examForYear?.teaching_assignment)
+            ? (examForYear.teaching_assignment as any)[0]
+            : (examForYear?.teaching_assignment as any)
+        if (!(await canManageExamCoTaught(user, taCtx))) {
             return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
         }
 
@@ -475,7 +484,7 @@ export async function DELETE(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('is_active, teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
+            .select('is_active, teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -483,9 +492,12 @@ export async function DELETE(
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
-        // Kepemilikan: hanya ADMIN atau guru pemilik TA yang boleh mengelola soal ulangan ini
-        const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
-        if (!(await canManageExam(user, taTeacherId))) {
+        // Kepemilikan: ADMIN sekolah yang sama, guru pemilik TA, ATAU co-teacher
+        // (mengampu mapel+kelas yang sama) — semua pengampu kelola soal ulangan yang sama
+        const taCtx = Array.isArray(examForYear?.teaching_assignment)
+            ? (examForYear.teaching_assignment as any)[0]
+            : (examForYear?.teaching_assignment as any)
+        if (!(await canManageExamCoTaught(user, taCtx))) {
             return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
         }
 

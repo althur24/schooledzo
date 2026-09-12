@@ -7,6 +7,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { getAnswerStats } from '@/lib/monitorAnswerStats'
 import { resolveWindowExpiry, isSweepDue, endsAtIso } from '@/lib/examExpiry'
+import { getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 
 // Monitor ulangan reguler (tabel exams/exam_submissions/exam_answers/exam_questions).
 // Mirror dari /api/official-exam-submissions/monitor, dengan roster diturunkan dari
@@ -93,7 +94,8 @@ export async function GET(request: NextRequest) {
             target_class_ids: [classId]
         }
 
-        // 2. GURU guard: harus pemilik teaching_assignment ini (admin bebas)
+        // 2. GURU guard: pemilik teaching_assignment ini ATAU co-teacher
+        //    (mengampu mapel+kelas yang sama di tahun TA) — admin bebas
         if (user.role === 'GURU') {
             const { data: teacher } = await supabase
                 .from('teachers')
@@ -106,7 +108,10 @@ export async function GET(request: NextRequest) {
             }
 
             if (ta?.teacher_id !== teacher.id) {
-                return NextResponse.json({ error: 'You do not teach this class' }, { status: 403 })
+                const scope = await getTeacherScope(user.id, ta?.academic_year_id ?? null)
+                if (!coTeachesClassSubject(scope, ta?.subject_id, ta?.class_id)) {
+                    return NextResponse.json({ error: 'You do not teach this class' }, { status: 403 })
+                }
             }
         }
 

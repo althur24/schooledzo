@@ -37,6 +37,8 @@ export interface DailyExamRow {
     is_randomized?: boolean | null
     is_remedial?: boolean | null
     batch_size?: number | null
+    /** Nama kelas unik dalam batch — tooltip badge "N Kelas Paralel" */
+    batch_class_names?: string[] | null
     created_at?: string | null
     question_count?: number | null
     creator_role?: string | null
@@ -130,6 +132,7 @@ export default function DailyExamCard({
             pendingGrading={pendingGrading}
             onPendingGradingClick={onPendingGradingClick}
             batchSize={exam.batch_size ?? 1}
+            batchClassNames={exam.batch_class_names ?? undefined}
             primaryAction={primaryAction}
             menuItems={menuItems}
             dataTutorial={dataTutorial}

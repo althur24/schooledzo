@@ -6,6 +6,7 @@ import { canManageOfficialExam } from '@/lib/teacherScope'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { batchedIn } from '@/lib/batchedIn'
 import { sanitizePolicyInput } from '@/lib/remedialScore'
+import { validateTargetClassIds } from '@/lib/targetClassValidation'
 
 export async function POST(request: NextRequest) {
     try {
@@ -69,6 +70,22 @@ export async function POST(request: NextRequest) {
         // dan menyuntik duplikat ke sekolah sumber (school_id ikut sumber).
         if (tenantMismatch((sourceExam as any).school_id, schoolId)) {
             return NextResponse.json({ error: 'Source exam not found' }, { status: 404 })
+        }
+
+        // Validasi kelas target efektif (payload bila diisi, jika tidak target
+        // sumber): wajib milik sekolah caller + tahun ajaran exam. Duplicate
+        // adalah jalur utama polusi — exam sumber lama bisa membawa kelas
+        // tahun ajaran lampau yang ikut tersalin diam-diam.
+        const effectiveTargetForValidation = (Array.isArray(target_class_ids) && target_class_ids.length > 0)
+            ? target_class_ids
+            : sourceExam.target_class_ids
+        const targetValidation = await validateTargetClassIds(
+            effectiveTargetForValidation,
+            schoolId,
+            sourceExam.academic_year_id
+        )
+        if (!targetValidation.ok) {
+            return NextResponse.json({ error: targetValidation.errorMessage }, { status: 400 })
         }
 
         // Kepemilikan guru: boleh menyalin hanya bila dia mengajar mapel source exam

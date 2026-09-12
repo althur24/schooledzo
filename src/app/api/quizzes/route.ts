@@ -3,7 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findTeachingAssignmentsOutsideSchool, findQuizzesOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
-import { getBatchSizes } from '@/lib/examBatch'
+import { getBatchInfo } from '@/lib/examBatch'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { sanitizePolicyInput } from '@/lib/remedialScore'
 
@@ -122,12 +122,13 @@ export async function GET(request: NextRequest) {
             ? (data || []).filter((q: any) => !(q.is_remedial && Array.isArray(q.allowed_student_ids) && q.allowed_student_ids.length > 0 && !q.allowed_student_ids.includes(remedialStudentId)))
             : (data || [])
 
-        // Ukuran batch (untuk badge "N Kelas Paralel" di daftar guru)
+        // Info batch (badge "N Kelas Paralel" — kelas unik — + tooltip nama kelas)
         const batchIds = [...new Set(visibleData.map((q: any) => q.batch_id).filter(Boolean))] as string[]
-        const batchSizes = await getBatchSizes('quizzes', batchIds)
+        const batchInfos = await getBatchInfo('quizzes', batchIds)
         const quizzesWithBatch = visibleData.map(quiz => ({
             ...quiz,
-            batch_size: quiz.batch_id ? batchSizes.get(quiz.batch_id) || 1 : 1
+            batch_size: quiz.batch_id ? batchInfos.get(quiz.batch_id)?.uniqueClassCount || 1 : 1,
+            batch_class_names: quiz.batch_id ? batchInfos.get(quiz.batch_id)?.classNames || [] : []
         }))
 
         // SISWA: jangan bocorkan allowed_student_ids (daftar "siapa yang remedial")

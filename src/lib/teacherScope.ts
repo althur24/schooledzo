@@ -66,6 +66,61 @@ export function ownsTeachingAssignment(scope: TeacherScope | null, taTeacherId: 
     return !!scope && !!taTeacherId && taTeacherId === scope.teacherId
 }
 
+/** Konteks TA anchor sebuah ulangan — dipakai guard co-teaching. */
+export interface CoTaughtExamContext {
+    teacher_id: string | null
+    subject_id: string | null
+    class_id: string | null
+    academic_year_id: string | null
+}
+
+/**
+ * Apakah guru dalam scope ini mengampu kombinasi mapel+kelas yang sama
+ * (co-teacher) — dipakai agar semua pengampu kelas multi-guru punya akses
+ * setara ke ulangan yang sama (1 exam per kelas).
+ */
+export function coTeachesClassSubject(
+    scope: TeacherScope | null,
+    subjectId: string | null | undefined,
+    classId: string | null | undefined
+): boolean {
+    if (!scope || !subjectId || !classId) return false
+    return scope.assignments.some(a => a.subject_id === subjectId && a.class_id === classId)
+}
+
+/**
+ * Helper gabungan guard endpoint ulangan (versi co-teaching):
+ * ADMIN hanya boleh di sekolahnya sendiri (via TA anchor → teachers.school_id);
+ * GURU bila TA-nya sendiri (anchor) ATAU dia co-teacher mapel+kelas yang sama
+ * di tahun ajaran TA tersebut.
+ *
+ * Penggunaan: caller mem-fetch TA anchor exam dengan kolom
+ * (teacher_id, subject_id, class_id, academic_year_id) lalu memanggil ini.
+ */
+export async function canManageExamCoTaught(
+    user: { id: string; role: string; school_id?: string | null },
+    ta: CoTaughtExamContext | null | undefined
+): Promise<boolean> {
+    if (!ta) return false
+    if (user.role === 'ADMIN') {
+        const callerSchoolId = user.school_id ?? null
+        if (!callerSchoolId || !ta.teacher_id) return false
+        const { data: teacher } = await supabase
+            .from('teachers')
+            .select('school_id')
+            .eq('id', ta.teacher_id)
+            .single()
+        const teacherSchoolId = (teacher as any)?.school_id
+        return !!teacherSchoolId && teacherSchoolId === callerSchoolId
+    }
+    if (user.role !== 'GURU') return false
+    // Anchor owner sendiri — cek murah tanpa query scope
+    if (!ta.teacher_id) return false
+    const scope = await getTeacherScope(user.id, ta.academic_year_id)
+    if (ownsTeachingAssignment(scope, ta.teacher_id)) return true
+    return coTeachesClassSubject(scope, ta.subject_id, ta.class_id)
+}
+
 /**
  * Helper gabungan untuk guard endpoint ulangan:
  * ADMIN hanya boleh di sekolahnya sendiri (via teacher → teachers.school_id);

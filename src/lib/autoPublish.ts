@@ -132,27 +132,43 @@ async function sendPublishNotifications(source: 'quiz' | 'exam', parent: any) {
         const link = source === 'quiz' ? '/dashboard/siswa/kuis' : '/dashboard/siswa/ulangan'
         const typeEnum = source === 'quiz' ? 'KUIS_BARU' : 'ULANGAN_BARU'
 
-        // Notify Guru
+        // Notify Guru — SEMUA pengampu (co-teacher mapel+kelas yang sama),
+        // bukan hanya TA anchor: 1 exam per kelas, semua pengampu setara.
         if (parent.teaching_assignment_id) {
-            const { data: ta, error: taError } = await supabase
+            const { data: anchorTa } = await supabase
                 .from('teaching_assignments')
-                .select('teacher:teachers(user_id)')
+                .select('subject_id, class_id, academic_year_id')
                 .eq('id', parent.teaching_assignment_id)
                 .single()
 
-            console.log(`[autoPublish-NOTIF] ta query result:`, JSON.stringify(ta), 'error:', taError)
-            const teacherData = ta?.teacher as any
-            const teacherUserId = Array.isArray(teacherData) ? teacherData[0]?.user_id : teacherData?.user_id
-            console.log(`[autoPublish-NOTIF] teacherUserId=${teacherUserId}`)
+            let teacherUserIds: string[] = []
+            if (anchorTa?.subject_id && anchorTa?.class_id) {
+                let coQuery = supabase
+                    .from('teaching_assignments')
+                    .select('teacher:teachers(user_id)')
+                    .eq('subject_id', anchorTa.subject_id)
+                    .eq('class_id', anchorTa.class_id)
+                if (anchorTa.academic_year_id) coQuery = coQuery.eq('academic_year_id', anchorTa.academic_year_id)
+                const { data: coTeachers } = await coQuery
+                const first = (v: unknown) => Array.isArray(v) ? v[0] : v
+                teacherUserIds = [...new Set(
+                    (coTeachers || [])
+                        .map((r: any) => (first(r?.teacher as { user_id?: string } | { user_id?: string }[] | undefined))?.user_id)
+                        .filter(Boolean)
+                )] as string[]
+            }
+            console.log(`[autoPublish-NOTIF] teacherUserIds (co-teacher): ${teacherUserIds.length}`)
 
-            if (teacherUserId) {
-                const { error: insertErr } = await supabase.from('notifications').insert({
-                    user_id: teacherUserId,
-                    type: 'SYSTEM',
-                    title: `✅ ${titleType} Selesai Direview & Dipublikasikan`,
-                    message: `${titleType} "${parent.title}" telah selesai di review dan sudah di publish.`,
-                    link: source === 'quiz' ? `/dashboard/guru/kuis/${parent.id}` : `/dashboard/guru/ulangan/${parent.id}`
-                })
+            if (teacherUserIds.length > 0) {
+                const { error: insertErr } = await supabase.from('notifications').insert(
+                    teacherUserIds.map(user_id => ({
+                        user_id,
+                        type: 'SYSTEM',
+                        title: `✅ ${titleType} Selesai Direview & Dipublikasikan`,
+                        message: `${titleType} "${parent.title}" telah selesai di review dan sudah di publish.`,
+                        link: source === 'quiz' ? `/dashboard/guru/kuis/${parent.id}` : `/dashboard/guru/ulangan/${parent.id}`
+                    }))
+                )
                 console.log(`[autoPublish-NOTIF] guru notification insert error:`, insertErr)
             }
         } else {

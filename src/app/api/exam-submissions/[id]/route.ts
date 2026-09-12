@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch, notFound } from '@/lib/tenantGuard'
+import { getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { logGradeChange } from '@/lib/gradeHistory'
 
 // GET single exam submission with questions and answers
@@ -149,7 +150,8 @@ export async function PUT(
             return NextResponse.json({ error: 'Ulangan ini belum dikumpulkan siswa — tidak bisa dinilai' }, { status: 400 })
         }
 
-        // Verify teacher owns the teaching assignment for this exam (ADMIN bypass)
+        // Verify teacher owns the teaching assignment for this exam (ADMIN bypass);
+        // co-teacher (mapel+kelas sama) juga boleh menilai
         if (user.role === 'GURU') {
             const { data: teacher } = await supabase
                 .from('teachers')
@@ -159,13 +161,18 @@ export async function PUT(
 
             const { data: submissionData } = await supabase
                 .from('exam_submissions')
-                .select('exam:exams(teaching_assignment:teaching_assignments(teacher_id))')
+                .select('exam:exams(teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id))')
                 .eq('id', id)
                 .single()
 
-            const assignmentTeacherId = (submissionData?.exam as any)?.teaching_assignment?.teacher_id
-            if (!teacher || assignmentTeacherId !== teacher.id) {
-                return NextResponse.json({ error: 'Forbidden: You do not have access to grade this class' }, { status: 403 })
+            const taAny = (submissionData?.exam as any)?.teaching_assignment
+            const ta = Array.isArray(taAny) ? taAny[0] : taAny
+            const isOwner = !!teacher && ta?.teacher_id === teacher.id
+            if (!isOwner) {
+                const scope = await getTeacherScope(user.id, ta?.academic_year_id ?? null)
+                if (!coTeachesClassSubject(scope, ta?.subject_id, ta?.class_id)) {
+                    return NextResponse.json({ error: 'Forbidden: You do not have access to grade this class' }, { status: 403 })
+                }
             }
         } else if (user.role === 'ADMIN') {
             // K2 Security Fix: scope sekolah untuk admin — exams tidak punya school_id,

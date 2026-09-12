@@ -74,6 +74,11 @@ async function main() {
     // Tahun NON-AKTIF untuk membuktikan official exam tahun lalu tidak terhitung
     const oldYear = await mustInsert(supabase, 'academic_years', { name: `${U} TA Lama`, school_id: school.id, is_active: false }, 'tahun non-aktif')
     created.academicYears.push(oldYear.id)
+    // Kelas milik tahun non-aktif — trigger validasi (migrasi 20260912) melarang
+    // exam tahun lama menargetkan kelas tahun aktif, jadi fixture harus konsisten:
+    // exam o2 menargetkan kelas TAHUN LAMA (data valid, semantik test sama).
+    const oldCls = await mustInsert(supabase, 'classes', { name: `${U} 8Lama`, academic_year_id: oldYear.id, grade_level: 2, school_level: 'SMP' }, 'kelas tahun non-aktif')
+    created.classes.push(oldCls.id)
 
     const subjA = await mustInsert(supabase, 'subjects', { name: `${U} B. Indonesia`, school_id: school.id, kkm: 75 }, 'subject A')
     const subjB = await mustInsert(supabase, 'subjects', { name: `${U} Prakarya`, school_id: school.id, kkm: 75 }, 'subject B')
@@ -197,7 +202,7 @@ async function main() {
     created.officialExams.push(o1.id)
     const o1sub = await mustInsert(supabase, 'official_exam_submissions', { exam_id: o1.id, student_id: s1.student.id, started_at: iso(-2 * H), submitted_at: iso(-1.5 * H), is_submitted: true, is_graded: false, total_score: 50, max_score: 100 }, 'o1 sub s1')
     created.officialSubmissions.push(o1sub.id)
-    const o2 = await mustInsert(supabase, 'official_exams', { title: `${U} UTS Tahun Lama`, exam_type: 'UTS', school_id: school.id, academic_year_id: oldYear.id, subject_id: subjA.id, target_class_ids: [clsA.id], start_time: iso(-3 * H), window_end_time: iso(-1 * H), duration_minutes: 60, is_active: true }, 'official tahun lama')
+    const o2 = await mustInsert(supabase, 'official_exams', { title: `${U} UTS Tahun Lama`, exam_type: 'UTS', school_id: school.id, academic_year_id: oldYear.id, subject_id: subjA.id, target_class_ids: [oldCls.id], start_time: iso(-3 * H), window_end_time: iso(-1 * H), duration_minutes: 60, is_active: true }, 'official tahun lama')
     created.officialExams.push(o2.id)
     const o2sub = await mustInsert(supabase, 'official_exam_submissions', { exam_id: o2.id, student_id: s1.student.id, started_at: iso(-2 * H), submitted_at: iso(-1.5 * H), is_submitted: true, is_graded: false, total_score: 50, max_score: 100 }, 'o2 sub s1')
     created.officialSubmissions.push(o2sub.id)

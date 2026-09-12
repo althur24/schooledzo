@@ -231,9 +231,17 @@ export default function GuruUlanganPage() {
 
             setTeachingAssignments(myAssignments)
 
-            const myExams = examsData.filter((e: Exam) =>
-                myAssignments.some((ta: TeachingAssignment) => ta.id === e.teaching_assignment?.id)
-            )
+            // Exam milik saya = TA anchor saya ATAU co-teacher (mapel+kelas yang
+            // saya ampou) — paritas filter server GET /api/exams (co-teaching).
+            const first = (v: unknown) => Array.isArray(v) ? v[0] : v
+            const myExams = examsData.filter((e: Exam) => {
+                const ta = first(e.teaching_assignment) as any
+                const subjId = first(ta?.subject)?.id
+                const classId = first(ta?.class)?.id
+                return myAssignments.some((ta2: TeachingAssignment) =>
+                    ta2.id === ta?.id || (ta2.subject?.id === subjId && ta2.class?.id === classId)
+                )
+            })
             setExams(myExams)
 
             // Satu request ringkasan (bukan N+1 per ulangan/UTS). Definisi sama

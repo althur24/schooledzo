@@ -67,7 +67,7 @@ async function flush(key: string) {
             .select(`
                 title,
                 teaching_assignment:teaching_assignments(
-                    teacher:teachers(user_id),
+                    subject_id, class_id, academic_year_id,
                     academic_year:academic_years(school_id)
                 )
             `)
@@ -81,9 +81,29 @@ async function flush(key: string) {
         // Embed PostgREST bisa berupa objek atau array — ambil elemen pertama
         const first = <T,>(v: T | T[] | null | undefined): T | undefined =>
             Array.isArray(v) ? v[0] : (v ?? undefined)
-        const ta = first(entity?.teaching_assignment as { teacher?: unknown; academic_year?: unknown } | { teacher?: unknown; academic_year?: unknown }[] | undefined)
-        const teacherUserId = (first(ta?.teacher as { user_id?: string } | { user_id?: string }[] | undefined))?.user_id
-        if (!teacherUserId) return
+        const ta = first(entity?.teaching_assignment as { academic_year?: unknown; subject_id?: string; class_id?: string; academic_year_id?: string } | { academic_year?: unknown; subject_id?: string; class_id?: string; academic_year_id?: string }[] | undefined)
+        if (!ta?.class_id || !ta?.subject_id) return
+
+        // Semua co-teacher (pengampu mapel+kelas yang sama) dapat notifikasi —
+        // bukan hanya TA anchor. 1 exam per kelas, semua pengampu setara.
+        let teacherUserIds: string[] = []
+        let coTeacherQuery = supabase
+            .from('teaching_assignments')
+            .select('teacher:teachers(user_id)')
+            .eq('subject_id', ta.subject_id)
+            .eq('class_id', ta.class_id)
+        if (ta.academic_year_id) coTeacherQuery = coTeacherQuery.eq('academic_year_id', ta.academic_year_id)
+        const { data: coTeachers, error: coErr } = await coTeacherQuery
+        if (coErr) {
+            console.error(`[teacherNotifyBuffer] Gagal memuat co-teacher ${entry.kind} ${entry.entityId}:`, coErr)
+            return
+        }
+        teacherUserIds = [...new Set(
+            (coTeachers || [])
+                .map((r: any) => (first(r?.teacher as { user_id?: string } | { user_id?: string }[] | undefined))?.user_id)
+                .filter(Boolean)
+        )] as string[]
+        if (teacherUserIds.length === 0) return
 
         // classes tidak punya school_id — scope via teaching_assignments → academic_years
         const ayInfo = first(ta?.academic_year as { school_id?: string } | { school_id?: string }[] | undefined)
@@ -100,15 +120,17 @@ async function flush(key: string) {
             ? `${who} — ${label} "${entity?.title}" dikumpulkan otomatis karena pelanggaran`
             : `${who} telah mengumpulkan ${label} "${entity?.title}"`
 
-        await supabase.from('notifications').insert({
-            user_id: teacherUserId,
-            type: isExam ? 'SUBMISSION_ULANGAN' : 'SUBMISSION_KUIS',
-            title: isExam
-                ? (entry.force ? `${labels.ulangan} Dikumpulkan Otomatis` : `${labels.ulangan} Dikumpulkan`)
-                : `${labels.kuis} Dikumpulkan`,
-            message,
-            link: isExam ? '/dashboard/guru/ulangan' : '/dashboard/guru/kuis'
-        })
+        await supabase.from('notifications').insert(
+            teacherUserIds.map(user_id => ({
+                user_id,
+                type: isExam ? 'SUBMISSION_ULANGAN' : 'SUBMISSION_KUIS',
+                title: isExam
+                    ? (entry.force ? `${labels.ulangan} Dikumpulkan Otomatis` : `${labels.ulangan} Dikumpulkan`)
+                    : `${labels.kuis} Dikumpulkan`,
+                message,
+                link: isExam ? '/dashboard/guru/ulangan' : '/dashboard/guru/kuis'
+            }))
+        )
     } catch (error) {
         console.error('Error flushing teacher submission notification:', error)
     }

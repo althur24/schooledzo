@@ -5,6 +5,7 @@ import { checkEndedOfficialExams } from '@/lib/checkEndedExams'
 import { logError } from '@/lib/logError'
 import { getTeacherScope, canTeachScope } from '@/lib/teacherScope'
 import { batchedIn } from '@/lib/batchedIn'
+import { validateTargetClassIds } from '@/lib/targetClassValidation'
 
 /**
  * Bentuk baris official_exams yang dipakai filter/mapping GET ini.
@@ -176,13 +177,31 @@ export async function GET(request: NextRequest) {
             }
         }
 
+        // Nama kelas target (tooltip "N kelas" di card) — kosmetik, degrade ke
+        // daftar kosong bila gagal. batchedIn: .in() dengan banyak UUID.
+        let classNameById = new Map<string, string>()
+        try {
+            const allTargetIds = [...new Set(
+                result.flatMap((e) => e.target_class_ids || [])
+            )]
+            if (allTargetIds.length > 0) {
+                const classRows = await batchedIn<{ id: string; name: string }>('id', allTargetIds, (chunk) =>
+                    supabase.from('classes').select('id, name').in('id', chunk)
+                )
+                classNameById = new Map(classRows.map((c) => [c.id, c.name]))
+            }
+        } catch (err) {
+            console.error('Gagal memuat nama kelas target (degrade ke kosong):', err)
+        }
+
         // Add question count
         const examsWithCount = result.map((exam) => ({
             ...exam,
             question_count: exam.official_exam_questions?.length || 0,
             official_exam_questions: undefined,
             creator_role: exam.created_by ? creatorMap.get(exam.created_by)?.role || null : null,
-            creator_name: exam.created_by ? creatorMap.get(exam.created_by)?.name || null : null
+            creator_name: exam.created_by ? creatorMap.get(exam.created_by)?.name || null : null,
+            target_class_names: (exam.target_class_ids || []).map((cid: string) => classNameById.get(cid) || cid.slice(0, 8))
         }))
 
         return NextResponse.json(examsWithCount)
@@ -234,6 +253,14 @@ export async function POST(request: NextRequest) {
 
         if (!yearId) {
             return NextResponse.json({ error: 'No active academic year found' }, { status: 400 })
+        }
+
+        // Validasi kelas target: wajib milik sekolah caller + tahun ajaran exam.
+        // Tanpa ini ADMIN bisa memasukkan kelas tahun lama (COMPLETED) atau kelas
+        // sekolah lain — polusi target_class_ids yang tidak dijamin FK database.
+        const targetValidation = await validateTargetClassIds(target_class_ids, schoolId, yearId)
+        if (!targetValidation.ok) {
+            return NextResponse.json({ error: targetValidation.errorMessage }, { status: 400 })
         }
 
         // GURU hanya boleh membuat untuk mapel & kelas yang diajar di tahun tsb (scope ketat);

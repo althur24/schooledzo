@@ -29,6 +29,8 @@ export interface OfficialExamRow {
     /** Nama pembuat (guru/admin) — ditambahkan oleh GET /api/official-exams */
     creator_name?: string | null
     target_class_ids?: string[] | null
+    /** Nama kelas target (aligned dengan target_class_ids) — ditambahkan GET /api/official-exams */
+    target_class_names?: string[] | null
     subject?: { name?: string | null } | null
 }
 
@@ -67,6 +69,12 @@ export default function OfficialExamCard({
 }: OfficialExamCardProps) {
     const status = getOfficialExamStatus(exam)
     const scheduleLabels = examScheduleLabels(exam.window_end_time)
+    const nClasses = exam.target_class_ids?.length ?? 0
+    // Tooltip nama kelas target — admin/guru bisa melihat kelas mana saja
+    // tanpa membuka halaman detail (mengatasi "gatau kelas mana yang terpilih")
+    const classCell = nClasses > 0 && exam.target_class_names?.length ? (
+        <span title={exam.target_class_names.join(', ')}>{nClasses} kelas</span>
+    ) : `${nClasses} kelas`
 
     const badges = [
         ...(exam.is_remedial ? [(
@@ -96,7 +104,7 @@ export default function OfficialExamCard({
             extraBadges={badges}
             isLive={status.isLive}
             subjectName={exam.subject?.name}
-            classNameLabel={`${exam.target_class_ids?.length ?? 0} kelas`}
+            classNameLabel={classCell}
             durationMinutes={exam.duration_minutes}
             questionCount={exam.question_count ?? 0}
             createdAt={exam.created_at}

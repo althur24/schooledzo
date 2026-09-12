@@ -99,15 +99,32 @@ export async function GET(request: NextRequest) {
             return NextResponse.json(body)
         }
 
-        const [quizzes, exams, tasks] = await Promise.all([
+        const [quizzes, tasks] = await Promise.all([
             batchedIn<any>('teaching_assignment_id', taIds,
                 (chunk) => supabase.from('quizzes').select('id, title, teaching_assignment_id, is_remedial').in('teaching_assignment_id', chunk)),
-            batchedIn<any>('teaching_assignment_id', taIds,
-                (chunk) => supabase.from('exams').select('id, title, teaching_assignment_id, is_remedial').in('teaching_assignment_id', chunk)),
             batchedIn<any>('teaching_assignment_id', taIds,
                 (chunk) => supabase.from('assignments').select('id, title, teaching_assignment_id').in('teaching_assignment_id', chunk)),
         ])
 
+        // Ulangan — CO-TAUGHT: exam milik TA sendiri ATAU TA pengampu lain dengan
+        // mapel+kelas yang sama (kelas multi-guru = 1 exam per kelas; semua
+        // pengampu menanggapi beban koreksinya). class_id unik per tahun ajaran
+        // (tiap tahun punya baris kelas sendiri) → pair filter otomatis year-scoped.
+        let exams: any[] = []
+        if (subjectIds.length > 0 && classIds.length > 0) {
+            const pairSet = new Set(
+                activeAssignments.map((ta: any) => `${unwrap(ta.subject)?.id}|${ta.class_id}`)
+            )
+            const { data: exRows } = await supabase
+                .from('exams')
+                .select('id, title, teaching_assignment_id, is_remedial, ta:teaching_assignments!inner(subject_id, class_id)')
+                .in('ta.subject_id', subjectIds)
+                .in('ta.class_id', classIds)
+            exams = (exRows || []).filter((e: any) => {
+                const ta = unwrap(e.ta)
+                return pairSet.has(`${ta?.subject_id}|${ta?.class_id}`)
+            })
+        }
         const quizIds = quizzes.map((q: any) => q.id)
         const examIds = exams.map((e: any) => e.id)
         const taskIds = tasks.map((t: any) => t.id)
@@ -221,7 +238,12 @@ export async function GET(request: NextRequest) {
         }
 
         for (const e of exams) {
-            const meta = taMeta.get(e.teaching_assignment_id) || { class_name: '', subject_name: '' }
+            // TA anchor bisa milik co-teacher — resolve nama via map kelas/mapel
+            const ta = unwrap((e as any).ta)
+            const meta = taMeta.get(e.teaching_assignment_id) || {
+                class_name: classNameById.get(ta?.class_id) || '',
+                subject_name: subjectNameById.get(ta?.subject_id) || '',
+            }
             const stat = examStats.get(e.id) || { submitted: 0, ungraded: 0 }
             items.push({ type: 'ULANGAN', id: e.id, title: e.title, class_name: meta.class_name, subject_name: meta.subject_name, submitted_count: stat.submitted, ungraded_count: stat.ungraded })
         }

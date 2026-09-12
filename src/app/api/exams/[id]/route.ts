@@ -5,7 +5,7 @@ import { tenantMismatch, notFound, resolveExamSchoolId } from '@/lib/tenantGuard
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncExamBatch } from '@/lib/examBatch'
-import { canManageExam } from '@/lib/teacherScope'
+import { canManageExamCoTaught } from '@/lib/teacherScope'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET single exam
@@ -82,7 +82,7 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id, results_released, start_time, is_active, teaching_assignment:teaching_assignments(teacher_id)')
+            .select('teaching_assignment_id, results_released, start_time, is_active, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -90,11 +90,13 @@ export async function PUT(
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
-        // Kepemilikan: hanya ADMIN atau guru pemilik TA yang boleh mengubah ulangan ini
-        // (pengetatan — sebelumnya semua guru bisa mengedit ulangan guru lain)
+        // Kepemilikan: ADMIN sekolah yang sama, guru pemilik TA, ATAU co-teacher
+        // (mengampu mapel+kelas yang sama) — semua pengampu kelola ulangan yang sama
         const labels = await getMenuLabelsForSchool(schoolId)
-        const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
-        if (!(await canManageExam(user, taTeacherId))) {
+        const taCtx = Array.isArray(examForYear?.teaching_assignment)
+            ? (examForYear.teaching_assignment as any)[0]
+            : (examForYear?.teaching_assignment as any)
+        if (!(await canManageExamCoTaught(user, taCtx))) {
             return NextResponse.json({ error: `Anda tidak memiliki akses ke ${labels.ulangan.toLowerCase()} ini` }, { status: 403 })
         }
 
@@ -319,7 +321,7 @@ export async function DELETE(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
+            .select('teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -327,9 +329,11 @@ export async function DELETE(
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
         }
 
-        // Kepemilikan: hanya ADMIN atau guru pemilik TA yang boleh menghapus ulangan ini
-        const taTeacherId = (examForYear?.teaching_assignment as any)?.teacher_id
-        if (!(await canManageExam(user, taTeacherId))) {
+        // Kepemilikan: ADMIN sekolah yang sama, guru pemilik TA, ATAU co-teacher
+        const taCtx = Array.isArray(examForYear?.teaching_assignment)
+            ? (examForYear.teaching_assignment as any)[0]
+            : (examForYear?.teaching_assignment as any)
+        if (!(await canManageExamCoTaught(user, taCtx))) {
             const labels = await getMenuLabelsForSchool(schoolId)
             return NextResponse.json({ error: `Anda tidak memiliki akses ke ${labels.ulangan.toLowerCase()} ini` }, { status: 403 })
         }

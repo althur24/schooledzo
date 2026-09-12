@@ -5,6 +5,7 @@ import { batchedIn, IN_BATCH_SIZE } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { logError } from '@/lib/logError'
 import { canManageOfficialExam } from '@/lib/teacherScope'
+import { validateTargetClassIds } from '@/lib/targetClassValidation'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET single official exam
@@ -89,6 +90,20 @@ export async function PUT(
             is_randomized, is_active, max_violations,
             target_class_ids, subject_id, show_results_immediately, results_released
         } = body
+
+        // Validasi kelas target baru (bila diubah): wajib milik sekolah caller +
+        // tahun ajaran exam — paritas guard POST create/duplicate (A1/A2).
+        if (target_class_ids !== undefined) {
+            const { data: examYear } = await supabase
+                .from('official_exams')
+                .select('academic_year_id')
+                .eq('id', id)
+                .single()
+            const targetValidation = await validateTargetClassIds(target_class_ids, ctx.schoolId ?? null, examYear?.academic_year_id ?? null)
+            if (!targetValidation.ok) {
+                return NextResponse.json({ error: targetValidation.errorMessage }, { status: 400 })
+            }
+        }
 
         // Validasi jendela waktu: jam tutup harus setelah jam buka (pakai start_time
         // baru bila ada, jika tidak cek start_time lama di DB)

@@ -29,6 +29,8 @@ export interface QuizRow {
     is_remedial?: boolean | null
     submission_mode?: string | null
     batch_size?: number | null
+    /** Nama kelas unik dalam batch — tooltip badge "N Kelas Paralel" */
+    batch_class_names?: string[] | null
     created_at?: string | null
     questions?: { count: number }[] | null
     teaching_assignment?: TaEmbed | TaEmbed[] | null
@@ -113,6 +115,7 @@ export default function QuizCard({
             pendingGrading={pendingGrading}
             onPendingGradingClick={onPendingGradingClick}
             batchSize={quiz.batch_size ?? 1}
+            batchClassNames={quiz.batch_class_names ?? undefined}
             primaryAction={primaryAction}
             menuItems={menuItems}
             dataTutorial={dataTutorial}

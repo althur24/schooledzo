@@ -111,6 +111,9 @@ function AdminUtsUasPageInner() {
     const [duplicateExam, setDuplicateExam] = useState<OfficialExam | any | null>(null)
     const [duplicateSource, setDuplicateSource] = useState<'official' | 'ulangan'>('official')
     const [duplicateMode, setDuplicateMode] = useState<'BIASA' | 'REMEDIAL'>('BIASA')
+    // Kelas target sumber yang TIDAK ikut di-prefill (bukan kelas tahun ajaran
+    // aktif) — ditampilkan sebagai peringatan transparan di modal duplikat
+    const [droppedDuplicateClasses, setDroppedDuplicateClasses] = useState<{ id: string; name: string }[]>([])
     const [duplicating, setDuplicating] = useState(false)
     const [remedialStudents, setRemedialStudents] = useState<any[]>([])
     const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
@@ -239,6 +242,8 @@ function AdminUtsUasPageInner() {
     // Pencocokan guru pengampu per kelas terpilih untuk mode Ulangan —
     // ulangan wajib terikat teaching_assignment, jadi sistem mencocokkan
     // guru pengampu mapel×kelas dari data penugasan (bisa >1 guru per kelas).
+    // Anchor = TA yang dipilih untuk membuat exam (1 exam per KELAS); guru
+    // pengampu lain tetap dapat akses penuh via co-teaching (guard server).
     const computeUlanganMatches = () => {
         if (form.exam_type !== 'ULANGAN' || !form.subject_id) return []
         return form.target_class_ids.map(classId => {
@@ -253,6 +258,9 @@ function AdminUtsUasPageInner() {
                     id: ta.id,
                     teacherName: (Array.isArray(ta.teacher?.user) ? ta.teacher.user[0]?.full_name : ta.teacher?.user?.full_name) || 'Tanpa Nama'
                 }))
+                // Anchor deterministik: nama guru terkecil secara leksikografis —
+                // urutan stabil antar reload, tidak tergantung urutan fetch TA
+                .sort((a: any, b: any) => a.teacherName.localeCompare(b.teacherName))
             return { classId, className: cls?.name || '-', teachers }
         })
     }
@@ -277,8 +285,12 @@ function AdminUtsUasPageInner() {
                     return
                 }
 
-                const allTAs = withTeachers.flatMap(m => m.teachers)
-                const batchId = allTAs.length > 1 ? crypto.randomUUID() : null
+                // 1 exam PER KELAS (bukan per guru): kelas multi-pengampu hanya
+                // membuat satu ulangan — siswa tidak melihat ulangan kembar.
+                // TA anchor = pengampu pertama (nama terkecil, deterministik);
+                // co-teacher lain tetap dapat akses via guard server co-teaching.
+                const anchorTAs = withTeachers.map(m => m.teachers[0])
+                const batchId = anchorTAs.length > 1 ? crypto.randomUUID() : null
                 const basePayload = {
                     title: form.title,
                     description: form.description,
@@ -292,7 +304,7 @@ function AdminUtsUasPageInner() {
                 }
 
                 const results = await Promise.allSettled(
-                    allTAs.map(ta =>
+                    anchorTAs.map(ta =>
                         fetch('/api/exams', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -329,10 +341,10 @@ function AdminUtsUasPageInner() {
                 if (skipped.length > 0) {
                     parts.push(`${skipped.length} kelas di-skip karena belum ada guru pengampu mapel ini: ${skipped.map(s => s.className).join(', ')}`)
                 }
-                if (okCount < allTAs.length) {
-                    parts.push(`${allTAs.length - okCount} gagal dibuat — buat ulang untuk kelas tersebut`)
+                if (okCount < anchorTAs.length) {
+                    parts.push(`${anchorTAs.length - okCount} gagal dibuat — buat ulang untuk kelas tersebut`)
                 }
-                showToast(parts.join('. ') + '.', okCount < allTAs.length ? 'error' : 'success')
+                showToast(parts.join('. ') + '.', okCount < anchorTAs.length ? 'error' : 'success')
 
                 const firstCreated = results.find(r => r.status === 'fulfilled')?.value
                 if (firstCreated?.id) {
@@ -423,6 +435,7 @@ function AdminUtsUasPageInner() {
         setSelectedStudentIds([])
         setUlanganRemedialMethod('ASLI')
         setRemedialPolicy({ policy: 'HIGHEST', cap: exam.subject?.kkm || 75 })
+        setDroppedDuplicateClasses([])
 
         const pad = (n: number) => n.toString().padStart(2, '0')
         const now = new Date()
@@ -431,13 +444,41 @@ function AdminUtsUasPageInner() {
 
         const defaultTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
 
+        // Prefill kelas target (khusus ujian resmi): HANYA kelas tahun ajaran
+        // aktif. Kelas sumber dari tahun lampau/sekolah lain tidak di-prefill —
+        // tampilkan sebagai peringatan agar admin tahu persis apa yang dibuang
+        // (bukan dibuang diam-diam), dan biarkan admin memilih ulang kelas.
+        let prefillTargetIds: string[] = (exam.target_class_ids as string[]) || []
+        if (source === 'official' && prefillTargetIds.length > 0) {
+            const activeIds = new Set(classes.map(c => c.id))
+            const kept = prefillTargetIds.filter(id => activeIds.has(id))
+            const droppedIds = prefillTargetIds.filter(id => !activeIds.has(id))
+            prefillTargetIds = kept
+            if (droppedIds.length > 0) {
+                try {
+                    // classes state hanya berisi tahun aktif — resolve nama kelas
+                    // terbuang via /api/classes (semua tahun, masih scope sekolah)
+                    const res = await fetch('/api/classes')
+                    if (res.ok) {
+                        const all = await res.json()
+                        const nameById = new Map<string, string>((Array.isArray(all) ? all : []).map((c: any) => [c.id, c.name]))
+                        setDroppedDuplicateClasses(droppedIds.map(id => ({ id, name: nameById.get(id) || id.slice(0, 8) })))
+                    } else {
+                        setDroppedDuplicateClasses(droppedIds.map(id => ({ id, name: id.slice(0, 8) })))
+                    }
+                } catch {
+                    setDroppedDuplicateClasses(droppedIds.map(id => ({ id, name: id.slice(0, 8) })))
+                }
+            }
+        }
+
         setDuplicateForm({
             title: mode === 'REMEDIAL' ? `Remedial ${exam.title}` : `Copy of ${exam.title}`,
             start_time: defaultTime,
             duration_minutes: exam.duration_minutes,
             schedule_mode: exam.window_end_time ? 'window' : 'sync',
             window_end_time: '',
-            target_class_ids: exam.target_class_ids || []
+            target_class_ids: prefillTargetIds
         })
 
         if (mode === 'REMEDIAL') {
@@ -626,6 +667,15 @@ function AdminUtsUasPageInner() {
 
     const toggleClassSelection = (classId: string) => {
         setForm(prev => ({
+            ...prev,
+            target_class_ids: prev.target_class_ids.includes(classId)
+                ? prev.target_class_ids.filter(id => id !== classId)
+                : [...prev.target_class_ids, classId]
+        }))
+    }
+
+    const toggleDuplicateClass = (classId: string) => {
+        setDuplicateForm(prev => ({
             ...prev,
             target_class_ids: prev.target_class_ids.includes(classId)
                 ? prev.target_class_ids.filter(id => id !== classId)
@@ -1019,7 +1069,12 @@ function AdminUtsUasPageInner() {
                                             <div key={m.classId} className="flex items-start justify-between gap-3 text-sm">
                                                 <span className="font-bold text-text-main dark:text-white flex-shrink-0">{m.className}</span>
                                                 {m.teachers.length > 0 ? (
-                                                    <span className="text-emerald-600 dark:text-emerald-400 text-right">✓ {m.teachers.map(t => t.teacherName).join(', ')}</span>
+                                                    <span className="text-emerald-600 dark:text-emerald-400 text-right">
+                                                        ✓ {m.teachers[0].teacherName}
+                                                        {m.teachers.length > 1 && (
+                                                            <span className="text-xs font-normal text-text-secondary"> (+{m.teachers.length - 1} co-teacher: {m.teachers.slice(1).map(t => t.teacherName).join(', ')})</span>
+                                                        )}
+                                                    </span>
                                                 ) : (
                                                     <span className="text-red-500 text-right">✗ Tidak ada guru pengampu — di-skip</span>
                                                 )}
@@ -1027,7 +1082,7 @@ function AdminUtsUasPageInner() {
                                         ))}
                                     </div>
                                     <p className="text-xs text-text-secondary">
-                                        {ulanganMatches.filter(m => m.teachers.length > 0).length} dari {ulanganMatches.length} kelas siap — draft {labels.ulangan} akan muncul di daftar guru terkait dan bisa dilengkapi atau dipublikasikan baik oleh guru maupun Anda.
+                                        {ulanganMatches.filter(m => m.teachers.length > 0).length} dari {ulanganMatches.length} kelas siap — 1 {labels.ulangan.toLowerCase()} per kelas; semua pengampu (co-teacher) dapat mengelola & menilai {labels.ulangan.toLowerCase()} yang sama.
                                     </p>
                                 </>
                             )}
@@ -1128,10 +1183,67 @@ function AdminUtsUasPageInner() {
                                 type="text"
                                 value={duplicateForm.title}
                                 onChange={(e) => setDuplicateForm({ ...duplicateForm, title: e.target.value })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary/50"
                                 placeholder="Judul ujian..."
                             />
                         </div>
+
+                        {/* Target Classes (ujian resmi) — sebelumnya prefill tersembunyi
+                            dari exam sumber; kini eksplisit & bisa diedit */}
+                        {duplicateSource === 'official' && (
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
+                                    Kelas Target ({duplicateForm.target_class_ids.length} terpilih)
+                                </label>
+                                {droppedDuplicateClasses.length > 0 && (
+                                    <div className="mb-3 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-700 dark:text-amber-300">
+                                        <span className="font-bold">{droppedDuplicateClasses.length} kelas dari ujian sumber tidak ikut disalin</span> karena bukan kelas tahun ajaran aktif:{' '}
+                                        <span className="font-medium">{droppedDuplicateClasses.map(c => c.name).join(', ')}</span>. Pilih kelas pengganti di bawah bila diperlukan.
+                                    </div>
+                                )}
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setDuplicateForm(prev => ({ ...prev, target_class_ids: classes.map(c => c.id) }))}
+                                        className="text-xs px-3 py-1.5 bg-primary/10 text-primary font-bold rounded-lg hover:bg-primary/20 transition-colors"
+                                    >
+                                        Pilih Semua
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setDuplicateForm(prev => ({ ...prev, target_class_ids: [] }))}
+                                        className="text-xs px-3 py-1.5 bg-red-500/10 text-red-500 font-bold rounded-lg hover:bg-red-500/20 transition-colors"
+                                    >
+                                        Reset
+                                    </button>
+                                </div>
+                                <div className="max-h-48 overflow-y-auto space-y-1 pr-2 custom-scrollbar">
+                                    {Object.entries(classesByLevel).map(([level, levelClasses]) => (
+                                        <div key={level}>
+                                            <p className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-1 mt-2">{level}</p>
+                                            <div className="grid grid-cols-3 gap-1.5">
+                                                {(levelClasses as ClassItem[]).map(c => {
+                                                    const selected = duplicateForm.target_class_ids.includes(c.id)
+                                                    return (
+                                                        <button
+                                                            type="button"
+                                                            key={c.id}
+                                                            onClick={() => toggleDuplicateClass(c.id)}
+                                                            className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${selected
+                                                                ? 'bg-primary text-white shadow-sm'
+                                                                : 'bg-secondary/5 text-text-secondary hover:bg-secondary/10 border border-secondary/10'
+                                                                }`}
+                                                        >
+                                                            {c.name}
+                                                        </button>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {/* Schedule */}
                         <div>
@@ -1238,7 +1350,9 @@ function AdminUtsUasPageInner() {
                             <Button
                                 onClick={handleDuplicate}
                                 loading={duplicating}
-                                disabled={!duplicateForm.title || !duplicateForm.start_time || (duplicateMode === 'REMEDIAL' && selectedStudentIds.length === 0)}
+                                disabled={!duplicateForm.title || !duplicateForm.start_time
+                                    || (duplicateSource === 'official' && duplicateForm.target_class_ids.length === 0)
+                                    || (duplicateMode === 'REMEDIAL' && selectedStudentIds.length === 0)}
                                 className="flex-1"
                             >
                                 Duplikasi & Buat Ujian

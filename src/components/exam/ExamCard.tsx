@@ -34,8 +34,8 @@ interface ExamCardProps {
 
     /** Nama mapel — kosongkan bila tidak relevan */
     subjectName?: string | null
-    /** Nama kelas / ringkasan kelas target */
-    classNameLabel?: string | null
+    /** Nama kelas / ringkasan kelas target (bisa ReactNode — mis. span ber-tooltip) */
+    classNameLabel?: ReactNode
     durationMinutes?: number | null
     questionCount?: number
     /** Tanggal card/ujian dibuat (created_at) */
@@ -63,6 +63,8 @@ interface ExamCardProps {
 
     /** Jumlah anggota batch multi-kelas (1 = bukan batch). Soal batch tersinkron antar kelas. */
     batchSize?: number
+    /** Nama kelas dalam batch (tooltip badge "N Kelas Paralel") */
+    batchClassNames?: string[]
 
     /** Aksi utama kontekstual: Edit (draft) / Monitor (live) / Hasil (selesai) */
     primaryAction: ExamCardPrimaryAction
@@ -105,6 +107,7 @@ export default function ExamCard({
     pendingGrading = 0,
     onPendingGradingClick,
     batchSize = 1,
+    batchClassNames,
     primaryAction,
     menuItems = [],
     dataTutorial,
@@ -162,7 +165,7 @@ export default function ExamCard({
                     <span className={`${typeBadgeBase} ${typeBadge.className}`}>{labelForGradeType(typeBadge.label, labels)}</span>
                     {(batchSize > 1) && (
                         <span
-                            title={`Soal ${labelForGradeType(typeBadge.label, labels)} ini tersinkron otomatis ke ${batchSize} kelas paralel`}
+                            title={`Soal ${labelForGradeType(typeBadge.label, labels)} ini tersinkron otomatis ke ${batchSize} kelas paralel${batchClassNames?.length ? `:\n${batchClassNames.join(', ')}` : ''}`}
                             className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/20"
                         >
                             <Layers className="w-3.5 h-3.5" /> {batchSize} Kelas Paralel

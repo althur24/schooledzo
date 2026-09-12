@@ -1,5 +1,6 @@
 import { supabaseAdmin } from './supabase'
 import { getMenuLabelsForSchool } from './serverLabels'
+import { batchedIn } from './batchedIn'
 
 /**
  * examBatch — sinkronisasi soal + status terbit untuk ujian/kuis multi-kelas
@@ -23,37 +24,68 @@ export interface BatchMemberRow {
     created_at: string | null
 }
 
+export interface BatchInfo {
+    /**
+     * Jumlah KELAS unik dalam batch — bukan jumlah baris exam/quiz.
+     * Batch lama (pra co-teaching) bisa berisi beberapa exam untuk kelas
+     * yang sama (satu per guru pengampu); kelas tetap dihitung sekali
+     * agar badge "N Kelas Paralel" mencerminkan jumlah kelas sesungguhnya.
+     */
+    uniqueClassCount: number
+    /** Nama kelas unik, urut abjad — untuk tooltip badge. */
+    classNames: string[]
+}
+
 /**
- * Hitung jumlah anggota per batch untuk sekumpulan exam/quiz.
+ * Info batch multi-kelas untuk sekumpulan exam/quiz.
  *
- * Dipakai API list agar UI bisa menampilkan badge "N Kelas Paralel" —
- * guru (terutama yang senior) perlu tahu bahwa card yang diedit akan
- * tersinkron ke kelas lain dalam batch yang sama.
+ * Dipakai API list agar UI bisa menampilkan badge "N Kelas Paralel" yang
+ * akurat (kelas unik, bukan jumlah exam) beserta tooltip nama kelasnya —
+ * guru (terutama yang senior) perlu tahu kelas mana saja yang tersinkron.
  *
  * Query terpisah (bukan hitung dari data yang sudah terfilter) supaya
  * ukuran batch tetap benar walau list dipangkas (filter TA / tahun ajaran).
  */
-export async function getBatchSizes(
+export async function getBatchInfo(
     table: 'exams' | 'quizzes',
     batchIds: string[]
-): Promise<Map<string, number>> {
-    const sizes = new Map<string, number>()
-    if (batchIds.length === 0) return sizes
+): Promise<Map<string, BatchInfo>> {
+    const byBatch = new Map<string, { classIds: Set<string>; nameById: Map<string, string> }>()
+    if (batchIds.length === 0) return new Map()
 
-    const { data, error } = await supabaseAdmin
-        .from(table)
-        .select('batch_id')
-        .in('batch_id', batchIds)
+    // batchedIn: jumlah anggota batch bisa ratusan (belah per 100 — batas URL)
+    const rows = await batchedIn<any>('batch_id', batchIds, (chunk) =>
+        supabaseAdmin
+            .from(table)
+            .select('batch_id, teaching_assignment:teaching_assignments(class:classes(id, name))')
+            .in('batch_id', chunk)
+    )
 
-    if (error) {
-        console.error(`[batch] gagal menghitung ukuran batch ${table}:`, error)
-        return sizes
+    for (const row of rows || []) {
+        const batchId = row?.batch_id as string | null
+        if (!batchId) continue
+        // Embed PostgREST bisa objek atau array — ambil elemen pertama
+        const ta = Array.isArray(row.teaching_assignment) ? row.teaching_assignment[0] : row.teaching_assignment
+        const cls = Array.isArray(ta?.class) ? ta?.class[0] : ta?.class
+        let entry = byBatch.get(batchId)
+        if (!entry) {
+            entry = { classIds: new Set(), nameById: new Map() }
+            byBatch.set(batchId, entry)
+        }
+        if (cls?.id && !entry.classIds.has(cls.id)) {
+            entry.classIds.add(cls.id)
+            entry.nameById.set(cls.id, cls.name || '-')
+        }
     }
-    for (const row of data || []) {
-        const id = (row as { batch_id: string | null }).batch_id
-        if (id) sizes.set(id, (sizes.get(id) || 0) + 1)
+
+    const result = new Map<string, BatchInfo>()
+    for (const [batchId, entry] of byBatch) {
+        result.set(batchId, {
+            uniqueClassCount: entry.classIds.size,
+            classNames: [...entry.nameById.values()].sort((a, b) => a.localeCompare(b)),
+        })
     }
-    return sizes
+    return result
 }
 
 /**

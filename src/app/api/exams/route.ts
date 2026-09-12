@@ -4,7 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findTeachingAssignmentsOutsideSchool, findExamsOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
-import { getBatchSizes } from '@/lib/examBatch'
+import { getBatchInfo } from '@/lib/examBatch'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { sanitizePolicyInput } from '@/lib/remedialScore'
 
@@ -12,6 +12,8 @@ import { sanitizePolicyInput } from '@/lib/remedialScore'
 export async function GET(request: NextRequest) {
     // SISWA: id siswa untuk filter remedial (null = bukan siswa → tanpa filter)
     let remedialStudentId: string | null = null
+    // Scope pasangan mapel+kelas guru (co-teaching) — diisi bila caller GURU
+    let guruScopePairs: Set<string> | null = null
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
@@ -79,7 +81,9 @@ export async function GET(request: NextRequest) {
                         return NextResponse.json([])
                     }
                 } else if (user.role === 'GURU') {
-                    // STRICT FILTERING FOR GURU: only own teaching assignments
+                    // STRICT FILTERING FOR GURU: exams milik TA sendiri ATAU TA
+                    // co-teacher (mapel+kelas yang sama) — kelas multi-pengampu
+                    // membuat 1 exam per kelas; semua pengampu melihatnya.
                     const { data: teacher } = await supabase
                         .from('teachers')
                         .select('id')
@@ -87,7 +91,19 @@ export async function GET(request: NextRequest) {
                         .single()
 
                     if (teacher) {
-                        query = query.eq('teaching_assignment.teacher_id', teacher.id)
+                        const { data: myTAs } = await supabase
+                            .from('teaching_assignments')
+                            .select('subject_id, class_id')
+                            .eq('teacher_id', teacher.id)
+                            .eq('academic_year_id', activeYear.id)
+                        const pairs = new Set((myTAs || []).map((ta: any) => `${ta.subject_id}|${ta.class_id}`))
+                        const classIds = [...new Set((myTAs || []).map((ta: any) => ta.class_id).filter(Boolean))]
+                        if (classIds.length === 0) return NextResponse.json([])
+                        // Pre-filter per kelas (murah di DB), lalu exact pair mapel+kelas
+                        // post-fetch — guru A co-teacher kelas X hanya untuk mapel yang
+                        // dia ampau, bukan semua exam di kelas X.
+                        query = query.in('teaching_assignment.class_id', classIds)
+                        guruScopePairs = pairs
                     } else {
                         return NextResponse.json([])
                     }
@@ -106,9 +122,18 @@ export async function GET(request: NextRequest) {
         // SISWA: buang remedial yang bukan miliknya (ulangan remedial hanya
         // terlihat oleh siswa terdaftar — guard attempt sudah menolak siswa
         // lain, ini mencegah item tak bisa dikerjakan tampil di daftar).
-        const visibleData = remedialStudentId
+        // GURU: pre-filter per kelas diperketat jadi exact pair mapel+kelas
+        // (co-teaching — guru hanya co-teacher untuk mapel yang dia ampau).
+        let visibleData = remedialStudentId
             ? (data || []).filter((e: any) => !(e.is_remedial && Array.isArray(e.allowed_student_ids) && e.allowed_student_ids.length > 0 && !e.allowed_student_ids.includes(remedialStudentId)))
             : (data || [])
+        if (guruScopePairs) {
+            const first = (v: unknown) => Array.isArray(v) ? v[0] : v
+            visibleData = visibleData.filter((e: any) => {
+                const ta = first(e?.teaching_assignment)
+                return guruScopePairs!.has(`${first(ta?.subject)?.id}|${first(ta?.class)?.id}`)
+            })
+        }
 
         // Label pembuat (untuk badge "Dibuatkan Admin" di daftar guru)
         let roleMap = new Map<string, string>()
@@ -118,9 +143,9 @@ export async function GET(request: NextRequest) {
             roleMap = new Map((creators || []).map((c: any) => [c.id, c.role]))
         }
 
-        // Ukuran batch (untuk badge "N Kelas Paralel" di daftar guru)
+        // Info batch (untuk badge "N Kelas Paralel" — kelas unik — + tooltip nama kelas)
         const batchIds = [...new Set(visibleData.map((e: any) => e.batch_id).filter(Boolean))] as string[]
-        const batchSizes = await getBatchSizes('exams', batchIds)
+        const batchInfos = await getBatchInfo('exams', batchIds)
 
         // Add question count
         const examsWithCount = visibleData.map(exam => ({
@@ -128,7 +153,8 @@ export async function GET(request: NextRequest) {
             question_count: exam.exam_questions?.length || 0,
             exam_questions: undefined,
             creator_role: exam.created_by ? roleMap.get(exam.created_by) || null : null,
-            batch_size: exam.batch_id ? batchSizes.get(exam.batch_id) || 1 : 1
+            batch_size: exam.batch_id ? batchInfos.get(exam.batch_id)?.uniqueClassCount || 1 : 1,
+            batch_class_names: exam.batch_id ? batchInfos.get(exam.batch_id)?.classNames || [] : []
         }))
 
         // SISWA: jangan bocorkan allowed_student_ids (daftar "siapa yang remedial")

@@ -183,11 +183,19 @@ export async function GET(request: NextRequest) {
             .filter(g => g.final !== null)
             .map(g => ({ quiz_id: g.quiz_id, student_id: g.student_id, total_score: g.final as number, max_score: 100 }))
 
-        // - Exams (batched, alasan sama)
+        // - Exams (batched, alasan sama). Embed TA pair (mapel+kelas) untuk
+        //   matching co-teaching: exam anchor pengampu lain dengan mapel+kelas
+        //   yang sama juga relevan untuk guru ini (1 exam per kelas).
         const exams = await batchedIn<any>(
             'teaching_assignment_id', allTaIds,
-            (chunk) => supabase.from('exams').select('id, title, teaching_assignment_id, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score, start_time, duration_minutes, window_end_time, allowed_student_ids').in('teaching_assignment_id', chunk)
+            (chunk) => supabase.from('exams').select('id, title, teaching_assignment_id, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score, start_time, duration_minutes, window_end_time, allowed_student_ids, ta:teaching_assignments(subject_id, class_id)').in('teaching_assignment_id', chunk)
         )
+        // Co-teaching: exam milik TA ini ATAU TA pengampu lain dgn mapel+kelas sama
+        const examMatchesTa = (exam: any, ta: any) => {
+            if (exam.teaching_assignment_id === ta.id) return true
+            const examTa = unwrap(exam.ta)
+            return !!examTa && examTa.subject_id === unwrap(ta.subject)?.id && examTa.class_id === ta.class_id
+        }
         const examIds = exams.map(e => e.id)
         const allExamSubs = await batchedFetchAll<{ exam_id: string; student_id: string; total_score: number; max_score: number }>(
             'exam_id', examIds,
@@ -259,8 +267,10 @@ export async function GET(request: NextRequest) {
         }
 
         // 6. Aggregate Data
-        // A helper to lookup a student's grades for a SPECIFIC teaching assignment (Mapel in a class)
-        const getScoresForTAAndStudent = (taId: string, studentId: string) => {
+        // A helper to lookup a student's grades for a SPECIFIC teaching assignment (Mapel in a class).
+        // Menerima objek TA (bukan hanya id) untuk matching co-teaching exam.
+        const getScoresForTAAndStudent = (ta: any, studentId: string) => {
+            const taId = ta.id
             const scores: number[] = []
 
             // Quizzes (sudah di-merge remedial di atas: satu entri per kuis asli, skor terbaik)
@@ -268,8 +278,9 @@ export async function GET(request: NextRequest) {
             for (const qs of quizSubs.filter(s => s.student_id === studentId && relatedQuizzes.includes(s.quiz_id))) {
                 if (qs.max_score > 0) scores.push((qs.total_score / qs.max_score) * 100)
             }
-            // Exams — normalize to percentage (total_score is raw points; max_score varies per exam)
-            const relatedExams = exams.filter(e => e.teaching_assignment_id === taId).map(e => e.id)
+            // Exams — normalize to percentage (total_score is raw points; max_score varies per exam).
+            // Co-teaching: termasuk exam anchor pengampu lain dengan mapel+kelas sama.
+            const relatedExams = exams.filter(e => examMatchesTa(e, ta)).map(e => e.id)
             for (const es of examSubs.filter(s => s.student_id === studentId && relatedExams.includes(s.exam_id))) {
                 const raw = es.total_score || 0
                 // max_score 0/null → poin mentah TIDAK boleh dicampur dengan skala
@@ -494,8 +505,10 @@ export async function GET(request: NextRequest) {
                 }
             }
 
-            // Ulangan — jendela pengerjaan sudah tutup; remedial bukan item terpisah
-            for (const exam of exams.filter((e: any) => e.teaching_assignment_id === ta.id && !e.is_remedial)) {
+            // Ulangan — jendela pengerjaan sudah tutup; remedial bukan item terpisah.
+            // Co-teaching: exam anchor pengampu lain dengan mapel+kelas sama juga
+            // diawasi guru ini (1 exam per kelas, semua pengampu setara).
+            for (const exam of exams.filter((e: any) => !e.is_remedial && examMatchesTa(e, ta))) {
                 if (!isEnded(exam.start_time, exam.duration_minutes, exam.window_end_time)) continue
                 for (const student of expectedStudents(classStudents, exam.allowed_student_ids)) {
                     if (!doneExams.has(`${student.id}:${exam.id}`) && !stillWorkingExams.has(`${student.id}:${exam.id}`)) {
@@ -530,7 +543,7 @@ export async function GET(request: NextRequest) {
         for (const ta of activeDirectAssignments) {
             const classStudents = students.filter(s => s.class_id === ta.class_id)
             for (const student of classStudents) {
-                const scores = getScoresForTAAndStudent(ta.id, student.id)
+                const scores = getScoresForTAAndStudent(ta, student.id)
                 if (scores.length > 0) {
                     const avg = scores.reduce((a, b) => a + b, 0) / scores.length
                     const subject = unwrap(ta.subject)
@@ -559,9 +572,9 @@ export async function GET(request: NextRequest) {
             // Get all mapels (TAs) for this class
             const classTAs = activeAllAssignments.filter(ta => ta.class_id === hrClass.id)
 
-            for (const student of classStudents) {
+                for (const student of classStudents) {
                 for (const ta of classTAs) {
-                    const scores = getScoresForTAAndStudent(ta.id, student.id)
+                    const scores = getScoresForTAAndStudent(ta, student.id)
                     if (scores.length > 0) {
                         const avg = scores.reduce((a, b) => a + b, 0) / scores.length
                         const subject = unwrap(ta.subject)
