@@ -113,6 +113,22 @@ function escapeNonMathHtml(text: string, mathHtmls: string[]): string {
     return restoreMathHtml(escapeHtmlText(text), mathHtmls)
 }
 
+// Pulihkan entity HTML di ekspresi math sebelum masuk KaTeX.
+// Konten dari RichTextEditor (TipTap getHTML = innerHTML) meng-escape karakter
+// spesial: & → &amp;, < → &lt;, dsb. Dalam LaTeX, & adalah pemisah kolom
+// matriks — tanpa decode ini sel matriks tampil "amp;b", "amp;c", ...
+// &amp; diganti paling akhir (meniru browser) agar &amp;lt; tidak ter-decode ganda.
+function decodeHtmlEntities(text: string): string {
+    return text
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'")
+        .replace(/&amp;/g, '&')
+}
+
 // KaTeX trust callback: tetap permissif untuk perintah legitim, tapi blokir
 // URL javascript: pada \href/\url (bisa dimanfaatkan dari input siswa).
 const trustKaTeX = (context: { command: string; url?: string }) => {
@@ -133,7 +149,7 @@ function renderLatexInText(text: string, escapeNonMath = false): string {
     let result = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, expr) => {
         // Fix common matrix issue: single backslash at end of line instead of double
         // handle both real newlines and literal \n string
-        let cleanExpr = expr.replace(/(?<!\\)\\(?:\s*[\n\r]|\s*\\n)/g, '\\\\ ')
+        let cleanExpr = decodeHtmlEntities(expr).replace(/(?<!\\)\\(?:\s*[\n\r]|\s*\\n)/g, '\\\\ ')
 
         try {
             return ph(`<div class="katex-block">${katex.renderToString(cleanExpr.trim(), { displayMode: true, throwOnError: false, trust: trustKaTeX })}</div>`)
@@ -146,7 +162,7 @@ function renderLatexInText(text: string, escapeNonMath = false): string {
     result = result.replace(/\$((?:[^\$]|\\\$)+?)\$/g, (_, expr) => {
         // Fix common matrix issue: single backslash at end of line instead of double
         // handle both real newlines and literal \n string
-        let cleanExpr = expr.replace(/(?<!\\)\\(?:\s*[\n\r]|\s*\\n)/g, '\\\\ ')
+        let cleanExpr = decodeHtmlEntities(expr).replace(/(?<!\\)\\(?:\s*[\n\r]|\s*\\n)/g, '\\\\ ')
 
         try {
             return ph(katex.renderToString(cleanExpr.trim(), { displayMode: false, throwOnError: false, trust: trustKaTeX }))
@@ -178,7 +194,7 @@ function renderRawLatexInText(text: string): string {
     // First, try to find and render parenthesized LaTeX expressions: ( \expr ... )
     let result = text.replace(/\(\s*((?:[^()]*\\[a-zA-Z]+[^()]*)+)\s*\)/g, (match, expr) => {
         try {
-            const rendered = katex.renderToString(expr.trim(), { displayMode: false, throwOnError: false })
+            const rendered = katex.renderToString(decodeHtmlEntities(expr).trim(), { displayMode: false, throwOnError: false })
             return ph(rendered)
         } catch {
             return match
@@ -192,7 +208,7 @@ function renderRawLatexInText(text: string): string {
             /((?:\\[a-zA-Z]+(?:_\{[^}]*\}|_[a-zA-Z0-9]|\^\{[^}]*\}|\^[a-zA-Z0-9]|\{[^}]*\}|\([^)]*\))*(?:\s*[+\-=<>*/^_,]\s*(?:[a-zA-Z0-9]+(?:_\{[^}]*\}|_[a-zA-Z0-9]|\^\{[^}]*\}|\^[a-zA-Z0-9])*|\\[a-zA-Z]+(?:\{[^}]*\})*))*)+)/g,
             (match) => {
                 try {
-                    return ph(katex.renderToString(match.trim(), { displayMode: false, throwOnError: false }))
+                    return ph(katex.renderToString(decodeHtmlEntities(match).trim(), { displayMode: false, throwOnError: false }))
                 } catch {
                     return match
                 }

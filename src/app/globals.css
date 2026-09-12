@@ -116,11 +116,12 @@ input[dir="rtl"] {
   font-family: 'Amiri', 'Noto Naskh Arabic', serif;
 }
 
-/* KaTeX block math */
+/* KaTeX block math — overflow-x untuk matriks besar di layar sempit */
 .katex-block {
   display: block;
   text-align: center;
   margin: 0.5em 0;
+  overflow-x: auto;
 }
 
 /* MathLive WYSIWYG Editor */
