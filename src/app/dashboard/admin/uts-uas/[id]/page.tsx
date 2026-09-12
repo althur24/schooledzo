@@ -699,20 +699,25 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         }
     }
 
-    // Balance points
-    const handleBalancePoints = () => {
+    // Balance points — UI hanya diubah bila SEMUA update server berhasil
+    // (dahulu fire-and-forget: UI bisa menampilkan poin "seimbang" palsu
+    // padahal server menolak 409 karena ujian sedang aktif)
+    const handleBalancePoints = async () => {
         const pointPerQ = Math.floor(100 / questions.length)
         const remainder = 100 - (pointPerQ * questions.length)
         const balanced = questions.map((q, idx) => ({ ...q, points: pointPerQ + (idx < remainder ? 1 : 0) }))
-        setQuestions(balanced)
-        balanced.forEach(async (q) => {
-            if (q.id) {
-                await fetch(`${examApi}/${examId}/questions`, {
-                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question_id: q.id, points: q.points })
-                })
-            }
-        })
+        const results = await Promise.all(balanced.filter(q => q.id).map(q =>
+            fetch(`${examApi}/${examId}/questions`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question_id: q.id, points: q.points })
+            })
+        ))
+        if (results.every(r => r.ok)) {
+            setQuestions(balanced)
+        } else {
+            showToast('Sebagian poin gagal disimpan. Tarik ujian ke draft untuk mengubah poin.', 'error')
+            fetchExam()
+        }
     }
 
     if (loading) {
@@ -773,8 +778,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 </div>
             </div>
 
-            {/* Points Warning */}
-            {totalPoints !== 100 && questions.length > 0 && (
+            {/* Points Warning — hanya saat draft: poin soal terkunci saat
+                ujian aktif (integritas penilaian) dan saat menunggu review */}
+            {totalPoints !== 100 && questions.length > 0 && !exam.is_active && !exam.pending_publish && (
                 <div className={`px-4 py-3 rounded-xl flex items-center justify-between ${totalPoints > 100 ? 'bg-red-500/10 border border-red-200 dark:border-red-500/30' : 'bg-amber-500/10 border border-amber-200 dark:border-amber-500/30'}`}>
                     <span className={totalPoints > 100 ? 'text-red-600 dark:text-red-400 font-medium text-sm' : 'text-amber-600 dark:text-amber-400 font-medium text-sm'}>
                         {totalPoints > 100 ? `⚠️ Total poin melebihi 100 (${totalPoints}). Kurangi poin beberapa soal.` : `ℹ️ Total poin: ${totalPoints}/100. Disarankan total = 100.`}
@@ -1648,7 +1654,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 description={exam.description}
                 durationMinutes={exam.duration_minutes}
                 questions={questions}
-                type="ulangan"
+                type={isUlangan ? 'ulangan' : 'uts-uas'}
+                examType={isUlangan ? undefined : exam.exam_type}
+                subjectName={examSubject?.name}
             />
 
             {/* Toast Notification */}

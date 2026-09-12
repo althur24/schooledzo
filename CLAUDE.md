@@ -58,6 +58,28 @@ REST API Supabase (PostgREST) **memotong hasil query diam-diam di 1000 baris** (
 - Query berisiko tapi tanpa `.order()` harus diberi order + tiebreaker unik (mis. `.order('id')`) sebelum dibungkus `fetchAllRows` — paginasi tanpa order stabil bisa melewatkan/duplikat baris.
 - Aman tanpa helper: query dengan `.single()`/`.maybeSingle()`, filter `.eq('id', ...)`, atau tabel yang pasti kecil (classes, subjects, academic_years, schools).
 
+## Ruang Ujian = ExamRunner (WAJIB — jangan divergen lagi)
+
+Sejarah: markup ruang ujian dulu diduplikasi manual per halaman (ulangan, kuis, UTS/UAS, preview) — setiap update hanya menyentuh satu salinan, sisanya busuk (warna indigo tertinggal, preview tak sinkron, resume berbeda-beda). Sekarang SATU komponen:
+
+```
+src/components/exam/runner/
+├── useExamRunner.ts     ← SEMUA perilaku (load, resume, autosave, timer,
+│                          fullscreen, pelanggaran, offline, submit)
+├── ExamRunnerView.tsx   ← SEMUA tampilan (header, navigator, kartu soal, modals)
+├── QuestionCard.tsx / AudioGroupCard.tsx / ExamQuestionNavigator.tsx
+├── useExamPreview.ts    ← state no-op untuk preview guru/admin
+└── types.ts             ← ExamRunnerConfig — SATU-satunya hal yang boleh beda antar tipe ujian
+```
+
+Aturan:
+- Halaman siswa (ulangan, UTS/UAS) hanyalah **wrapper tipis** yang menyusun `ExamRunnerConfig` (endpoint, storagePrefix, route, label) — dilarang menambah markup soal di halaman.
+- **Preview guru/admin = `ExamRunnerView mode="preview"`** (via PreviewModal) — merender file yang sama dengan siswa, sehingga 1:1 by construction. Dilarang menulis markup soal duplikat di preview.
+- Mengubah UI/UX ruang ujian → ubah di `ExamRunnerView`/subkomponen, BUKAN menyalin ke halaman lain. Dengan begitu siswa & preview berubah bersamaan.
+- `storagePrefix` (`exam` / `official_exam`) adalah kontrak localStorage draft siswa — **jangan diubah** (memutus resume draft yang sedang berjalan).
+- Kuis siswa masih scroll-list mandiri (`siswa/kuis/[id]`) — saat dimigrasi ke ExamRunner, hapus layout duplikat di PreviewModal (`KuisPreviewLayout`) sekaligus.
+- Label tipe soal: `QUESTION_TYPE_LABELS` di `src/lib/questionTypeUtils.ts` (satu sumber, jangan buat ternary baru).
+
 ## Perintah umum
 
 - Dev: `npm run dev` • Build: `npm run build` • Typecheck: `npx tsc --noEmit`
