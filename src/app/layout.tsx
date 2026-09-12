@@ -36,11 +36,21 @@ export default function RootLayout({
       <head>
         <script
           dangerouslySetInnerHTML={{
+            // SW CacheFirst untuk /_next/static hanya aman di production (nama
+            // file content-hashed). Di dev, nama chunk tetap antar recompile —
+            // SW lama menyajikan JS basi selamanya meski halaman di-refresh.
+            // NODE_ENV di-inline saat render: dev → unregister SW basi, prod → register.
             __html: `
               if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js');
-                });
+                if (${process.env.NODE_ENV === 'production'}) {
+                  window.addEventListener('load', function() {
+                    navigator.serviceWorker.register('/sw.js');
+                  });
+                } else {
+                  navigator.serviceWorker.getRegistrations().then(function(regs) {
+                    regs.forEach(function(r) { r.unregister(); });
+                  });
+                }
               }
             `,
           }}

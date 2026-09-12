@@ -1,5 +1,9 @@
-const CACHE_NAME = 'lms-ypp-v2';
+// v3: (1) purge cache v2 — chunk dev tertahan CacheFirst walau halaman di-refresh
+//         (nama chunk dev stabil antar recompile, tidak di-hash seperti production);
+//     (2) SW jadi no-op penuh di localhost/dev — tidak pernah intercept apa pun.
+const CACHE_NAME = 'lms-ypp-v3';
 const OFFLINE_URL = '/offline.html';
+const IS_DEV_HOST = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
 
 // Safe cache.put wrapper — prevents "Entry already exists" and "Unexpected internal error"
 async function safeCachePut(request, response) {
@@ -39,6 +43,10 @@ self.addEventListener('activate', (event) => {
 
 // Fetch strategy
 self.addEventListener('fetch', (event) => {
+  // DEV (localhost): jangan intercept APA PUN. Chunk dev tidak di-hash —
+  // caching apa pun di sini menyajikan kode basi setelah recompile.
+  if (IS_DEV_HOST) return;
+
   const { request } = event;
   const url = new URL(request.url);
 
