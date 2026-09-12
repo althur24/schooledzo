@@ -135,12 +135,20 @@ export async function POST(
         // Block writes to archived (COMPLETED) academic years
         const { data: quizForYear } = await supabase
             .from('quizzes')
-            .select('teaching_assignment_id')
+            .select('teaching_assignment_id, is_active')
             .eq('id', id)
             .single()
         if (quizForYear?.teaching_assignment_id) {
             const yearStatus = await getYearStatusByTA(quizForYear.teaching_assignment_id)
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
+        }
+
+        // Integritas ujian: soal terkunci saat kuis aktif — perubahan kunci
+        // jawaban/poin mid-exam menggeser nilai siswa yang belum submit, dan
+        // penghapusan soal memutus relasi jawaban tersimpan. Tarik ke draft dulu.
+        // (Paritas dengan guard /api/exams/[id]/questions yang sudah ada.)
+        if (quizForYear?.is_active) {
+            return NextResponse.json({ error: 'Kuis sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
         }
 
         const body = await request.json()
@@ -406,12 +414,20 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: quizForYear } = await supabase
             .from('quizzes')
-            .select('teaching_assignment_id')
+            .select('teaching_assignment_id, is_active')
             .eq('id', id)
             .single()
         if (quizForYear?.teaching_assignment_id) {
             const yearStatus = await getYearStatusByTA(quizForYear.teaching_assignment_id)
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
+        }
+
+        // Integritas ujian: soal terkunci saat kuis aktif — perubahan kunci
+        // jawaban/poin mid-exam menggeser nilai siswa yang belum submit, dan
+        // penghapusan soal memutus relasi jawaban tersimpan. Tarik ke draft dulu.
+        // (Paritas dengan guard /api/exams/[id]/questions yang sudah ada.)
+        if (quizForYear?.is_active) {
+            return NextResponse.json({ error: 'Kuis sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
         }
 
         const body = await request.json()
@@ -526,12 +542,20 @@ export async function DELETE(
         // Block writes to archived (COMPLETED) academic years
         const { data: quizForYear } = await supabase
             .from('quizzes')
-            .select('teaching_assignment_id')
+            .select('teaching_assignment_id, is_active')
             .eq('id', id)
             .single()
         if (quizForYear?.teaching_assignment_id) {
             const yearStatus = await getYearStatusByTA(quizForYear.teaching_assignment_id)
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
+        }
+
+        // Integritas ujian: soal terkunci saat kuis aktif — perubahan kunci
+        // jawaban/poin mid-exam menggeser nilai siswa yang belum submit, dan
+        // penghapusan soal memutus relasi jawaban tersimpan. Tarik ke draft dulu.
+        // (Paritas dengan guard /api/exams/[id]/questions yang sudah ada.)
+        if (quizForYear?.is_active) {
+            return NextResponse.json({ error: 'Kuis sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
         }
 
         const questionId = request.nextUrl.searchParams.get('question_id')

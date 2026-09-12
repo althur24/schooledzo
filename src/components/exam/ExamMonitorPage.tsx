@@ -4,12 +4,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Card } from '@/components/ui'
+import ResetAttemptMenu from '@/components/exam/ResetAttemptMenu'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
 import {
     Loader2, ArrowLeft, GraduationCap, Users,
     CheckCircle, AlertTriangle, Clock, PlayCircle, RefreshCw,
-    RotateCcw, ChevronDown as ChevronDownIcon
 } from 'lucide-react'
 
 /**
@@ -516,45 +516,14 @@ export default function ExamMonitorPage({ examId, mode }: {
                                         {/* Aksi: Soft/Hard Reset (hanya untuk siswa yang sudah submit) */}
                                         <td className="p-4 text-center">
                                             {student.submission_id && student.status === 'submitted' ? (
-                                                <div className="relative inline-block text-left" data-reset-menu>
-                                                    <button
-                                                        onClick={() => setResetMenuId(resetMenuId === student.submission_id ? null : student.submission_id)}
-                                                        disabled={resettingId === student.submission_id}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400 rounded-lg hover:bg-orange-200 dark:hover:bg-orange-500/30 transition-colors text-xs font-bold disabled:opacity-50"
-                                                    >
-                                                        {resettingId === student.submission_id ? (
-                                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                        ) : (
-                                                            <RotateCcw className="w-3.5 h-3.5" />
-                                                        )}
-                                                        Reset
-                                                        <ChevronDownIcon className="w-3.5 h-3.5" />
-                                                    </button>
-                                                    {resetMenuId === student.submission_id && (
-                                                        <div className="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-xl bg-white dark:bg-surface-dark shadow-xl ring-1 ring-black ring-opacity-5 border border-secondary/20 overflow-hidden">
-                                                            <div className="p-1.5">
-                                                                <button
-                                                                    onClick={() => handleResetAttempt(student.submission_id!, student.student_name, 'soft')}
-                                                                    className="w-full text-left px-3 py-2.5 hover:bg-secondary/10 rounded-lg transition-colors flex flex-col mb-1"
-                                                                >
-                                                                    <span className="font-bold text-text-main dark:text-white flex items-center gap-1.5 text-xs">
-                                                                        <RotateCcw className="w-3.5 h-3.5 text-blue-500" /> Soft Reset
-                                                                    </span>
-                                                                    <span className="text-text-secondary mt-0.5 text-[10px] leading-tight">Lanjutkan, timer tetap &amp; jawaban aman</span>
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => handleResetAttempt(student.submission_id!, student.student_name, 'hard')}
-                                                                    className="w-full text-left px-3 py-2.5 hover:bg-red-500/10 rounded-lg transition-colors flex flex-col"
-                                                                >
-                                                                    <span className="font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5 text-xs">
-                                                                        <RotateCcw className="w-3.5 h-3.5" /> Hard Reset
-                                                                    </span>
-                                                                    <span className="text-red-600/70 dark:text-red-400/80 mt-0.5 text-[10px] leading-tight">Mulai ulang (jawaban dihapus, timer penuh)</span>
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
+                                                <ResetAttemptMenu
+                                                    menuId={student.submission_id}
+                                                    openMenuId={resetMenuId}
+                                                    onToggle={setResetMenuId}
+                                                    onSelect={(mode) => handleResetAttempt(student.submission_id!, student.student_name, mode)}
+                                                    busy={resettingId === student.submission_id}
+                                                    label="Reset"
+                                                />
                                             ) : (
                                                 <span className="text-text-secondary">-</span>
                                             )}

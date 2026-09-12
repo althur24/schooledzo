@@ -1190,8 +1190,9 @@ function EditQuizPageInner() {
                 </div>
             )}
 
-            {/* Points Warning */}
-            {totalPoints !== 100 && questions.length > 0 && (
+            {/* Points Warning — hanya saat draft: poin soal terkunci saat kuis
+                aktif (integritas penilaian) dan saat menunggu review */}
+            {totalPoints !== 100 && questions.length > 0 && !quiz?.is_active && !quiz?.pending_publish && (
                 <div className={`px-4 py-3 rounded-xl flex items-center justify-between ${totalPoints > 100 ? 'bg-red-500/20 border border-red-500/30' : 'bg-amber-500/20 border border-amber-500/30'}`}>
                     <div className="flex items-center gap-2">
                         <span>{totalPoints > 100 ? <Danger set="bold" primaryColor="currentColor" size={20} /> : <InfoCircle set="bold" primaryColor="currentColor" size={20} />}</span>
@@ -1205,24 +1206,29 @@ function EditQuizPageInner() {
                     <Button
                         size="sm"
                         variant="secondary"
-                        onClick={() => {
+                        onClick={async () => {
                             const pointPerQuestion = Math.floor(100 / questions.length)
                             const remainder = 100 - (pointPerQuestion * questions.length)
                             const balanced = questions.map((q, idx) => ({
                                 ...q,
                                 points: pointPerQuestion + (idx < remainder ? 1 : 0)
                             }))
-                            setQuestions(balanced)
-                            // Update in database
-                            balanced.forEach(async (q) => {
-                                if (q.id) {
-                                    await fetch(`/api/quizzes/${quizId}/questions`, {
-                                        method: 'PUT',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ question_id: q.id, points: q.points })
-                                    })
-                                }
-                            })
+                            // Simpan semua ke server dulu; UI hanya diubah bila semua
+                            // berhasil (dahulu fire-and-forget — UI bisa menampilkan
+                            // poin "seimbang" palsu padahal server gagal).
+                            const results = await Promise.all(balanced.filter(q => q.id).map(q =>
+                                fetch(`/api/quizzes/${quizId}/questions`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ question_id: q.id, points: q.points })
+                                })
+                            ))
+                            if (results.every(r => r.ok)) {
+                                setQuestions(balanced)
+                            } else {
+                                setAlertInfo({ type: 'error', title: 'Gagal', message: 'Sebagian poin gagal disimpan. Coba lagi.' })
+                                fetchQuiz()
+                            }
                         }}
                     >
                         Seimbangkan Poin

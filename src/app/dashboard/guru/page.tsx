@@ -78,6 +78,7 @@ export default function GuruDashboard() {
     const [missingVisibleCount, setMissingVisibleCount] = useState(5)
     const [gradingVisibleCount, setGradingVisibleCount] = useState(5)
     const [activeOfficialExams, setActiveOfficialExams] = useState<any[]>([])
+    const [activeExams, setActiveExams] = useState<any[]>([])
     // undefined = belum termuat, null = tidak ada tahun aktif
     const [activeYearInfo, setActiveYearInfo] = useState<{ name: string } | null | undefined>(undefined)
 
@@ -95,15 +96,17 @@ export default function GuruDashboard() {
     useEffect(() => {
         const fetchDashboardData = async () => {
             try {
-                const [warnRes, scheduleRes, examsRes, yearsRes] = await Promise.all([
+                const [warnRes, scheduleRes, examsRes, ulanganRes, yearsRes] = await Promise.all([
                     fetch('/api/dashboard/guru/warnings'),
                     fetch('/api/schedules/my-schedule?today=true'),
                     fetch('/api/official-exams'),
+                    fetch('/api/exams'),
                     fetch('/api/academic-years')
                 ])
                 const warnData = await warnRes.json()
                 const scheduleData = await scheduleRes.json()
                 const examsData = await examsRes.json()
+                const ulanganData = await ulanganRes.json()
                 const yearsData = await yearsRes.json()
 
                 if (Array.isArray(yearsData)) {
@@ -113,18 +116,23 @@ export default function GuruDashboard() {
 
                 if (!warnData.error) setWarnings(warnData)
                 setTodaySchedule(Array.isArray(scheduleData) ? scheduleData : [])
-                
+
+                // Ujian "sedang berlangsung": is_active + sekarang dalam rentang
+                // berjalan (mode jendela: sampai window_end_time; mode serentak:
+                // start + durasi). Ulangan dan UTS/UAS sama-sama dihitung.
+                const nowMs = new Date().getTime()
+                const isRunning = (exam: any) => {
+                    const startMs = new Date(exam.start_time).getTime()
+                    const endMs = exam.window_end_time
+                        ? new Date(exam.window_end_time).getTime()
+                        : startMs + (exam.duration_minutes * 60 * 1000)
+                    return exam.is_active && nowMs >= startMs && nowMs <= endMs
+                }
                 if (Array.isArray(examsData)) {
-                    const nowMs = new Date().getTime()
-                    const active = examsData.filter((exam: any) => {
-                        const startMs = new Date(exam.start_time).getTime()
-                        // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
-                        const endMs = exam.window_end_time
-                            ? new Date(exam.window_end_time).getTime()
-                            : startMs + (exam.duration_minutes * 60 * 1000)
-                        return exam.is_active && nowMs >= startMs && nowMs <= endMs
-                    })
-                    setActiveOfficialExams(active)
+                    setActiveOfficialExams(examsData.filter(isRunning))
+                }
+                if (Array.isArray(ulanganData)) {
+                    setActiveExams(ulanganData.filter(isRunning))
                 }
             } catch (error) {
                 console.error('Error:', error)
@@ -160,8 +168,11 @@ export default function GuruDashboard() {
         switch (type) {
             case 'TUGAS': return `/dashboard/guru/tugas/${id}/hasil`
             case 'KUIS': return `/dashboard/guru/kuis/${id}/hasil`
-            case 'ULANGAN': return `/dashboard/guru/ulangan/${id}/hasil`
-            default: return `/dashboard/guru/uts-uas/${id}/hasil`
+            // Halaman hasil ulangan adalah tab di editor ulangan (?tab=hasil) —
+            // bukan route /hasil (yang hanya ada per-submission: /hasil/[submissionId])
+            case 'ULANGAN': return `/dashboard/guru/ulangan/${id}?tab=hasil`
+            // Idem UTS/UAS: tab di editor, dibuka via deep-link hash #hasil
+            default: return `/dashboard/guru/uts-uas/${id}#hasil`
         }
     }
 
@@ -256,27 +267,62 @@ export default function GuruDashboard() {
                 {/* Left Column: Schedule (Timeline Style) & Active Exams */}
                 <div className="xl:col-span-7 space-y-6">
 
-                    {/* Active Official Exams Banner */}
-                    {activeOfficialExams.length > 0 && (
+                    {/* Active Exams Banner (ulangan + UTS/UAS yang sedang berjalan) */}
+                    {(activeExams.length > 0 || activeOfficialExams.length > 0) && (
                         <div className="space-y-4 mb-8">
                             <div className="flex items-center gap-3 border-b-2 border-red-500/20 pb-4">
                                 <div className="p-2 bg-gradient-to-br from-red-500 to-orange-500 rounded-xl text-white shadow-lg shadow-red-500/20">
                                     <PlayCircle size={24} strokeWidth={2.5} />
                                 </div>
                                 <h2 className="text-xl font-bold text-text-main dark:text-white tracking-tight flex items-center gap-2">
-                                    Sedang Berlangsung 
+                                    Sedang Berlangsung
                                     <span className="relative flex h-3 w-3">
                                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                                       <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
                                     </span>
                                 </h2>
                             </div>
-                            
+
                             <div className="grid gap-4">
+                                {/* Ulangan biasa (exam_*) — aksen primary */}
+                                {activeExams.map(exam => (
+                                    <div key={`ulg-${exam.id}`} className="relative overflow-hidden group p-4 md:p-6 rounded-2xl bg-gradient-to-br from-primary/5 to-emerald-500/5 border border-primary/20 shadow-sm transition-all hover:border-primary/40 hover:shadow-md">
+                                        <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
+
+                                        <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center relative z-10">
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <span className="px-2.5 py-1 bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary-light text-xs font-bold rounded-full">
+                                                        {labels.ulangan}
+                                                    </span>
+                                                    <span className="text-xs font-bold text-text-secondary bg-black/5 dark:bg-white/5 px-2.5 py-1 rounded-full">
+                                                        {exam.duration_minutes} Menit
+                                                    </span>
+                                                </div>
+                                                <h3 className="text-lg font-black text-text-main dark:text-white group-hover:text-primary transition-colors">
+                                                    {exam.title}
+                                                </h3>
+                                                <p className="text-sm font-bold text-text-secondary mt-1">{exam.teaching_assignment?.subject?.name}</p>
+                                            </div>
+
+                                            <Link
+                                                href={`/dashboard/guru/ulangan/${exam.id}/monitor`}
+                                                className="w-full sm:w-auto px-5 py-2.5 bg-primary hover:bg-primary-dark active:bg-primary-dark text-white font-bold text-sm rounded-xl transition-colors shadow-lg shadow-primary/30 flex items-center justify-center gap-2"
+                                            >
+                                                Pantau Live
+                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                                </svg>
+                                            </Link>
+                                        </div>
+                                    </div>
+                                ))}
+
+                                {/* UTS/UAS (official_exams) — aksen merah */}
                                 {activeOfficialExams.map(exam => (
-                                    <div key={exam.id} className="relative overflow-hidden group p-4 md:p-6 rounded-2xl bg-gradient-to-br from-red-500/5 to-orange-500/5 border border-red-500/20 shadow-sm transition-all hover:border-red-500/40 hover:shadow-md">
+                                    <div key={`off-${exam.id}`} className="relative overflow-hidden group p-4 md:p-6 rounded-2xl bg-gradient-to-br from-red-500/5 to-orange-500/5 border border-red-500/20 shadow-sm transition-all hover:border-red-500/40 hover:shadow-md">
                                         <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
-                                        
+
                                         <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center relative z-10">
                                             <div>
                                                 <div className="flex items-center gap-2 mb-2">
@@ -292,12 +338,12 @@ export default function GuruDashboard() {
                                                 </h3>
                                                 <p className="text-sm font-bold text-text-secondary mt-1">{exam.subject?.name}</p>
                                             </div>
-                                            
-                                            <Link 
+
+                                            <Link
                                                 href={`/dashboard/guru/uts-uas/${exam.id}/monitor`}
                                                 className="w-full sm:w-auto px-5 py-2.5 bg-red-500 hover:bg-red-600 active:bg-red-700 text-white font-bold text-sm rounded-xl transition-colors shadow-lg shadow-red-500/30 flex items-center justify-center gap-2"
                                             >
-                                                Pantau Live 
+                                                Pantau Live
                                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
                                                 </svg>

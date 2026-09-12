@@ -25,6 +25,7 @@ import BankQuestionPicker from '@/components/BankQuestionPicker'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import InlineQuestionTags from '@/components/InlineQuestionTags'
 import NotSubmittedPanel from '@/components/NotSubmittedPanel'
+import ResetAttemptMenu from '@/components/exam/ResetAttemptMenu'
 import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
 import PDFDownloadButton from '@/components/analytics/pdf/PDFDownloadButton'
 import { detectTextDirection } from '@/lib/textDirection'
@@ -1459,8 +1460,9 @@ function EditExamPageInner() {
                         </div>
                     )}
 
-                    {/* Points Warning */}
-            {totalPoints !== 100 && questions.length > 0 && (
+                    {/* Points Warning — hanya saat draft: poin soal terkunci saat
+                        ulangan aktif (integritas penilaian) dan saat menunggu review */}
+            {totalPoints !== 100 && questions.length > 0 && !exam?.is_active && !exam?.pending_publish && (
                 <div className={`px-4 py-3 rounded-xl flex items-center justify-between ${totalPoints > 100 ? 'bg-red-500/10 border border-red-200 dark:border-red-500/30' : 'bg-amber-500/10 border border-amber-200 dark:border-amber-500/30'}`}>
                     <div className="flex items-center gap-2">
                         <span>{totalPoints > 100 ? <Danger set="bold" primaryColor="currentColor" size={20} /> : <InfoCircle set="bold" primaryColor="currentColor" size={20} />}</span>
@@ -2659,9 +2661,12 @@ function EditExamPageInner() {
                             <p className="text-text-secondary">Belum ada siswa yang mengerjakan {labels.ulangan.toLowerCase()} ini.</p>
                         </Card>
                     ) : (
-                        <Card padding="p-0" className="overflow-hidden">
+                        // overflow-hidden TIDAK dipakai: dropdown "Izinkan Ulang"
+                        // (Soft/Hard Reset) di kolom Aksi ter-clip batas Card.
+                        // Sudut membulat dijaga lewat rounded-t-2xl pada thead.
+                        <Card padding="p-0">
                             <table className="w-full">
-                                <thead className="bg-secondary/5">
+                                <thead className="bg-secondary/5 rounded-t-2xl">
                                     <tr>
                                         <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white">No</th>
                                         <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white">Nama Siswa</th>
@@ -2730,45 +2735,14 @@ function EditExamPageInner() {
                                                             </button>
 
                                                             {exam?.is_active && (
-                                                                <div className="relative inline-block text-left" data-reset-menu>
-                                                                    <button
-                                                                        onClick={() => setResetMenuId(resetMenuId === sub.id ? null : sub.id)}
-                                                                        disabled={resettingId === sub.id}
-                                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400 rounded-lg hover:bg-orange-200 dark:hover:bg-orange-500/30 transition-colors text-xs font-bold disabled:opacity-50"
-                                                                    >
-                                                                        {resettingId === sub.id ? (
-                                                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                                        ) : (
-                                                                            <RotateCcw className="w-3.5 h-3.5" />
-                                                                        )}
-                                                                        Izinkan Ulang
-                                                                        <ChevronDownIcon className="w-3.5 h-3.5 ml-1" />
-                                                                    </button>
-                                                                    {resetMenuId === sub.id && (
-                                                                        <div className="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-xl bg-white dark:bg-surface-dark shadow-xl ring-1 ring-black ring-opacity-5 border border-secondary/20 focus:outline-none overflow-hidden">
-                                                                            <div className="p-1.5">
-                                                                                <button
-                                                                                    onClick={() => handleResetAttempt(sub.id, sub.student?.user?.full_name || 'Siswa', 'soft')}
-                                                                                    className="w-full text-left px-3 py-2.5 hover:bg-secondary/10 rounded-lg transition-colors flex flex-col mb-1"
-                                                                                >
-                                                                                    <span className="font-bold text-text-main dark:text-white flex items-center gap-1.5 text-xs">
-                                                                                        <RotateCcw className="w-3.5 h-3.5 text-blue-500" /> Soft Reset
-                                                                                    </span>
-                                                                                    <span className="text-text-secondary mt-0.5 text-[10px] leading-tight">Lanjutkan, timer berjalan & jawaban aman</span>
-                                                                                </button>
-                                                                                <button
-                                                                                    onClick={() => handleResetAttempt(sub.id, sub.student?.user?.full_name || 'Siswa', 'hard')}
-                                                                                    className="w-full text-left px-3 py-2.5 hover:bg-red-500/10 rounded-lg transition-colors flex flex-col"
-                                                                                >
-                                                                                    <span className="font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5 text-xs">
-                                                                                        <RotateCcw className="w-3.5 h-3.5" /> Hard Reset
-                                                                                    </span>
-                                                                                    <span className="text-red-600/70 dark:text-red-400/80 mt-0.5 text-[10px] leading-tight">Mulai dari awal (Jawaban dihapus, timer penuh)</span>
-                                                                                </button>
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
+                                                                <ResetAttemptMenu
+                                                                    menuId={sub.id}
+                                                                    openMenuId={resetMenuId}
+                                                                    onToggle={setResetMenuId}
+                                                                    onSelect={(mode) => handleResetAttempt(sub.id, sub.student?.user?.full_name || 'Siswa', mode)}
+                                                                    busy={resettingId === sub.id}
+                                                                    label="Izinkan Ulang"
+                                                                />
                                                             )}
                                                         </div>
                                                     ) : (
@@ -3000,6 +2974,7 @@ function EditExamPageInner() {
                 durationMinutes={exam.duration_minutes}
                 questions={questions}
                 type="ulangan"
+                subjectName={exam.teaching_assignment?.subject?.name}
             />
 
             {/* Custom Alert Modal (replaces browser alert) */}
