@@ -7,7 +7,7 @@ import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { applyRemedialPolicy } from '@/lib/remedialScore'
 import { resolveWindowExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/lib/examExpiry'
 import { forceCloseExamSubmission } from '@/lib/autoCloseExpired'
-import { canManageExam } from '@/lib/teacherScope'
+import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { bufferTeacherSubmissionNotification } from '@/lib/teacherNotifyBuffer'
 import { mergeViolations, IncomingViolation } from '@/lib/violationBatch'
@@ -466,7 +466,7 @@ export async function PUT(request: NextRequest) {
         // Get current submission
         const { data: currentSubmission } = await supabase
             .from('exam_submissions')
-            .select('*, exam:exams(max_violations, show_results_immediately, results_released, duration_minutes, start_time, window_end_time, teaching_assignment:teaching_assignments(teacher_id, teacher:teachers(school_id)))')
+            .select('*, exam:exams(max_violations, show_results_immediately, results_released, duration_minutes, start_time, window_end_time, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id, teacher:teachers(school_id)))')
             .eq('id', submission_id)
             .single()
 
@@ -483,7 +483,8 @@ export async function PUT(request: NextRequest) {
         }
 
         // K2 Security Fix: otorisasi guru/admin — sebelumnya hanya cek role.
-        // GURU harus pemilik TA ulangan ini; ADMIN harus satu sekolah (via TA → teachers.school_id).
+        // GURU harus pemilik TA ulangan ini ATAU co-teacher (mapel+kelas sama);
+        // ADMIN harus satu sekolah (via TA → teachers.school_id).
         const verifyTeacherOrAdmin = async (): Promise<boolean> => {
             const ta = taCfgOf(currentSubmission)
             if (user.role === 'ADMIN') {
@@ -491,7 +492,9 @@ export async function PUT(request: NextRequest) {
                 return !teacherSchoolId || !schoolId || teacherSchoolId === schoolId
             }
             if (user.role === 'GURU') {
-                return canManageExam(user, ta.teacher_id)
+                const scope = await getTeacherScope(user.id, ta.academic_year_id ?? null)
+                if (ownsTeachingAssignment(scope, ta.teacher_id)) return true
+                return coTeachesClassSubject(scope, ta.subject_id, ta.class_id)
             }
             return false
         }

@@ -26,19 +26,24 @@ export async function GET(request: NextRequest) {
             return NextResponse.json([])
         }
 
-        // Get all exams for this teacher's teaching assignments
+        // TA guru ini — dipakai scope co-teaching (mapel+kelas), bukan hanya
+        // TA milik sendiri: kelas multi-pengampu = 1 exam, semua pengampu
+        // harus melihat badge "Perlu Diperbaiki" exam yang sama.
         const { data: assignments } = await supabase
             .from('teaching_assignments')
-            .select('id')
+            .select('id, subject_id, class_id')
             .eq('teacher_id', teacher.id)
 
         if (!assignments || assignments.length === 0) {
             return NextResponse.json([])
         }
 
-        const assignmentIds = assignments.map(a => a.id)
+        const pairSet = new Set(assignments.map(a => `${a.subject_id}|${a.class_id}`))
+        const classIds = [...new Set(assignments.map(a => a.class_id).filter(Boolean))]
 
-        // Get exams with returned questions
+        // Get exams with returned questions — pre-filter per kelas (murah di
+        // DB), lalu exact pair mapel+kelas post-fetch (guru hanya co-teacher
+        // untuk mapel yang dia ampau, bukan semua exam di kelas itu).
         const { data: exams, error } = await supabase
             .from('exams')
             .select(`
@@ -47,20 +52,27 @@ export async function GET(request: NextRequest) {
                 batch_id,
                 pending_publish,
                 created_at,
-                questions:exam_questions(id, status)
+                questions:exam_questions(id, status),
+                ta:teaching_assignments!inner(subject_id, class_id)
             `)
-            .in('teaching_assignment_id', assignmentIds)
+            .in('ta.class_id', classIds)
 
         if (error) {
             console.error('Error fetching returned exam counts:', error)
             return NextResponse.json({ error: 'Database error' }, { status: 500 })
         }
 
+        const pairVisible = (e: any) => {
+            const ta = Array.isArray(e.ta) ? e.ta[0] : e.ta
+            return pairSet.has(`${ta?.subject_id}|${ta?.class_id}`)
+        }
+        const visibleExams = (exams || []).filter(pairVisible)
+
         // Batch multi-kelas berbagi soal identik (mirror) — badge "Perlu Diperbaiki"
         // cukup di satu representative exam, bukan di setiap sibling
-        const representativeIds = new Set(pickBatchRepresentativeIds(exams || []))
+        const representativeIds = new Set(pickBatchRepresentativeIds(visibleExams))
 
-        const returnedSummary = (exams || [])
+        const returnedSummary = visibleExams
             .filter(e => representativeIds.has(e.id))
             .map(e => {
                 const returnedQuestions = (e.questions || []).filter((question: any) => question.status === 'returned')

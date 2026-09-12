@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findExamsOutsideSchool } from '@/lib/tenantGuard'
-import { getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
+import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 import { createClient } from '@supabase/supabase-js'
 
@@ -39,17 +39,19 @@ export async function POST(req: NextRequest) {
         }
 
         // Ownership guard: GURU hanya boleh menyalin dari/ke exam yang penugasannya
-        // miliknya sendiri — tanpa ini guru A bisa menimpa seluruh soal exam guru B
-        // (sekolah sama) lalu menerbitkannya via also_publish.
+        // miliknya sendiri ATAU co-taught (mapel+kelas sama) — tanpa ini guru A bisa
+        // menimpa seluruh soal exam guru B (sekolah sama) lalu menerbitkannya
+        // via also_publish. Co-teacher pengampu kelas sama memang berhak.
         if (user.role === 'GURU') {
             const scope = await getTeacherScope(user.id)
             const { data: scopeExams } = await supabase
                 .from('exams')
-                .select('id, teaching_assignment:teaching_assignments(teacher_id)')
+                .select('id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id)')
                 .in('id', [source_exam_id, ...target_exam_ids])
             for (const ex of scopeExams || []) {
-                const taTeacherId = (ex.teaching_assignment as any)?.teacher_id
-                if (!ownsTeachingAssignment(scope, taTeacherId)) {
+                const ta = Array.isArray(ex.teaching_assignment) ? (ex.teaching_assignment as any)[0] : ex.teaching_assignment as any
+                const isOwner = ownsTeachingAssignment(scope, ta?.teacher_id)
+                if (!isOwner && !coTeachesClassSubject(scope, ta?.subject_id, ta?.class_id)) {
                     return NextResponse.json({ error: 'Anda hanya dapat menyalin soal dari/ke ulangan penugasan Anda sendiri' }, { status: 403 })
                 }
             }

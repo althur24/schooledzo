@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { resolveExamSchoolId, tenantMismatch } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncExamBatch } from '@/lib/examBatch'
+import { getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // POST /api/exams/:id/sync-batch — salin ulang soal + terbitkan semua kelas satu batch.
@@ -35,14 +36,20 @@ export async function POST(
             return NextResponse.json({ error: `${labels.ulangan} tidak ditemukan` }, { status: 404 })
         }
 
-        // Guru hanya boleh sync ujian miliknya sendiri
+        // Guru hanya boleh sync ujian miliknya sendiri ATAU co-taught (mapel+kelas sama)
         if (user.role === 'GURU') {
             const { data: teacher } = await supabase
                 .from('teachers').select('id').eq('user_id', user.id).single()
             const { data: ta } = await supabase
-                .from('teaching_assignments').select('teacher_id').eq('id', exam.teaching_assignment_id).single()
-            if (!teacher || ta?.teacher_id !== teacher.id) {
+                .from('teaching_assignments').select('teacher_id, subject_id, class_id').eq('id', exam.teaching_assignment_id).single()
+            if (!teacher) {
                 return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
+            if (ta?.teacher_id !== teacher.id) {
+                const scope = await getTeacherScope(user.id)
+                if (!coTeachesClassSubject(scope, (ta as any)?.subject_id, (ta as any)?.class_id)) {
+                    return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+                }
             }
         }
 

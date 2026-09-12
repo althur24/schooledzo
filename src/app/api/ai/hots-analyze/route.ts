@@ -4,7 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { analyzeQuestion, type HOTSAnalysisInput } from '@/lib/hotsQC'
 import { determineRouting, type RoutingInput } from '@/lib/routingRules'
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
-import { canManageExam, getTeacherScope } from '@/lib/teacherScope'
+import { canManageExam, getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 
 /**
  * POST /api/ai/hots-analyze
@@ -66,13 +66,13 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Ownership guard: soal harus milik guru pemilik (atau admin sekolah
-        // yang sama). Tanpa ini, user sekolah mana pun bisa memicu analisis
-        // (dan mengubah status) soal milik guru lain.
+        // Ownership guard: soal harus milik guru pemilik/co-teacher (atau admin
+        // sekolah yang sama). Tanpa ini, user sekolah mana pun bisa memicu
+        // analisis (dan mengubah status) soal milik guru lain.
         if (question_source === 'exam') {
             const { data: q } = await supabase
                 .from('exam_questions')
-                .select('exam:exams(teaching_assignment:teaching_assignments(teacher_id))')
+                .select('exam:exams(teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id))')
                 .eq('id', question_id)
                 .single()
             const examRow = Array.isArray(q?.exam) ? q.exam[0] : q?.exam
@@ -81,7 +81,13 @@ export async function POST(request: NextRequest) {
             if (!q || !taTeacherId) {
                 return NextResponse.json({ error: 'Soal tidak ditemukan' }, { status: 404 })
             }
-            if (!(await canManageExam(user, taTeacherId))) {
+            // Co-teaching: pengampu mapel+kelas yang sama juga boleh menganalisis
+            let allowed = await canManageExam(user, taTeacherId)
+            if (!allowed && user.role === 'GURU') {
+                const scope = await getTeacherScope(user.id, (ta as any)?.academic_year_id ?? null)
+                allowed = coTeachesClassSubject(scope, (ta as any)?.subject_id, (ta as any)?.class_id)
+            }
+            if (!allowed) {
                 return NextResponse.json({ error: 'Anda tidak memiliki akses ke soal ini' }, { status: 403 })
             }
         } else if (question_source === 'quiz') {

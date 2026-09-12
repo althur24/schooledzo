@@ -53,29 +53,36 @@ export async function getBatchInfo(
     const byBatch = new Map<string, { classIds: Set<string>; nameById: Map<string, string> }>()
     if (batchIds.length === 0) return new Map()
 
-    // batchedIn: jumlah anggota batch bisa ratusan (belah per 100 — batas URL)
-    const rows = await batchedIn<any>('batch_id', batchIds, (chunk) =>
-        supabaseAdmin
-            .from(table)
-            .select('batch_id, teaching_assignment:teaching_assignments(class:classes(id, name))')
-            .in('batch_id', chunk)
-    )
+    try {
+        // batchedIn: jumlah anggota batch bisa ratusan (belah per 100 — batas URL)
+        const rows = await batchedIn<any>('batch_id', batchIds, (chunk) =>
+            supabaseAdmin
+                .from(table)
+                .select('batch_id, teaching_assignment:teaching_assignments(class:classes(id, name))')
+                .in('batch_id', chunk)
+        )
 
-    for (const row of rows || []) {
-        const batchId = row?.batch_id as string | null
-        if (!batchId) continue
-        // Embed PostgREST bisa objek atau array — ambil elemen pertama
-        const ta = Array.isArray(row.teaching_assignment) ? row.teaching_assignment[0] : row.teaching_assignment
-        const cls = Array.isArray(ta?.class) ? ta?.class[0] : ta?.class
-        let entry = byBatch.get(batchId)
-        if (!entry) {
-            entry = { classIds: new Set(), nameById: new Map() }
-            byBatch.set(batchId, entry)
+        for (const row of rows || []) {
+            const batchId = row?.batch_id as string | null
+            if (!batchId) continue
+            // Embed PostgREST bisa objek atau array — ambil elemen pertama
+            const ta = Array.isArray(row.teaching_assignment) ? row.teaching_assignment[0] : row.teaching_assignment
+            const cls = Array.isArray(ta?.class) ? ta?.class[0] : ta?.class
+            let entry = byBatch.get(batchId)
+            if (!entry) {
+                entry = { classIds: new Set(), nameById: new Map() }
+                byBatch.set(batchId, entry)
+            }
+            if (cls?.id && !entry.classIds.has(cls.id)) {
+                entry.classIds.add(cls.id)
+                entry.nameById.set(cls.id, cls.name || '-')
+            }
         }
-        if (cls?.id && !entry.classIds.has(cls.id)) {
-            entry.classIds.add(cls.id)
-            entry.nameById.set(cls.id, cls.name || '-')
-        }
+    } catch (err) {
+        // Degrade seperti pendahulunya (getBatchSizes): kegagalan hitung batch
+        // tidak boleh merobohkan daftar ulangan/kuis — caller fallback ke 1.
+        console.error(`[batch] gagal menghitung info batch ${table}:`, err)
+        return new Map()
     }
 
     const result = new Map<string, BatchInfo>()

@@ -284,6 +284,84 @@ async function main() {
     const oeRow = (Array.isArray(oeBody) ? oeBody : []).find(e => e.id === oe1.id)
     check('target_class_names terisi (aligned dgn ids)', Array.isArray(oeRow?.target_class_names) && oeRow.target_class_names.length === 2, `names=${JSON.stringify(oeRow?.target_class_names)}`)
 
+    // ============ T8: guard co-teaching lanjutan (audit pasca-implementasi) ============
+    console.log('[T8] Guard co-teaching lanjutan — reset_attempt, returned-counts, copy-questions, sync-batch, hots-analyze')
+
+    // T8.1 reset_attempt oleh co-teacher (PUT exam-submissions {reset_attempt:'soft'})
+    const rs = await api('/api/exam-submissions', guru2.token, {
+        method: 'PUT',
+        body: JSON.stringify({ submission_id: startBody.id, reset_attempt: 'soft' }),
+    })
+    check('T8.1 co-teacher reset_attempt (soft) → 200', rs.status === 200, `status ${rs.status}`)
+    // Kontrol: guru3 (kelas lain) reset → 403
+    const rs3 = await api('/api/exam-submissions', guru3.token, {
+        method: 'PUT',
+        body: JSON.stringify({ submission_id: startBody.id, reset_attempt: 'soft' }),
+    })
+    check('T8.1 kontrol: guru kelas lain reset → 403', rs3.status === 403, `status ${rs3.status}`)
+
+    // T8.2 returned-counts: co-teacher melihat exam co-taught dgn soal returned
+    const { data: rq } = await supabase.from('exam_questions').insert({
+        exam_id: exam1.id, question_text: 'Soal returned cot', question_type: 'MULTIPLE_CHOICE',
+        options: ['A1', 'B1'], correct_answer: 'A', points: 10, order_index: 5,
+        status: 'returned', difficulty: 'MEDIUM', text_direction: 'ltr', content_format: 'plain',
+    }).select()
+    created.questions.push(...rq.map(x => x.id))
+    const rc2 = await api('/api/exams/returned-counts', guru2.token)
+    const rc2Body = await rc2.json().catch(() => null)
+    check('T8.2 co-teacher melihat returned-counts exam co-taught', (rc2Body || []).some(e => e.examId === exam1.id), `n=${(rc2Body || []).length}`)
+
+    // T8.3 copy-questions: co-teacher salin soal dari exam co-taught ke draft miliknya
+    const draft2 = await api('/api/exams', guru2.token, {
+        method: 'POST',
+        body: JSON.stringify({
+            title: `${U} Draft CoTeacher`, start_time: new Date(Date.now() - 60000).toISOString(),
+            duration_minutes: 30, teaching_assignment_id: ta2.id, is_randomized: false, max_violations: 3,
+        }),
+    })
+    const draft2e = await draft2.json().catch(() => null)
+    created.exams.push(draft2e?.id)
+    const cq = await api('/api/exams/copy-questions', guru2.token, {
+        method: 'POST',
+        body: JSON.stringify({ source_exam_id: exam1.id, target_exam_ids: [draft2e.id], also_publish: false }),
+    })
+    check('T8.3 co-teacher copy-questions dari exam co-taught → 200', cq.status === 200, `status ${cq.status}`)
+    // Kontrol: guru3 salin dari exam1 → 403
+    const cq3 = await api('/api/exams/copy-questions', guru3.token, {
+        method: 'POST',
+        body: JSON.stringify({ source_exam_id: exam1.id, target_exam_ids: [draft2e.id], also_publish: false }),
+    })
+    check('T8.3 kontrol: guru kelas lain copy-questions → 403', cq3.status === 403, `status ${cq3.status}`)
+
+    // T8.4 sync-batch oleh co-teacher (batch legacy dibuat di T6 milik anchor guru1)
+    const sb = await api(`/api/exams/${b3e.id}/sync-batch`, guru2.token, { method: 'POST' })
+    check('T8.4 co-teacher sync-batch exam co-taught → 200', sb.status === 200, `status ${sb.status}`)
+    // Kontrol: guru3 sync batch exam kelas lain → 403
+    const sb3 = await api(`/api/exams/${b3e.id}/sync-batch`, guru3.token, { method: 'POST' })
+    check('T8.4 kontrol: guru kelas lain sync-batch → 403', sb3.status === 403, `status ${sb3.status}`)
+
+    // T8.5 hots-analyze exam question oleh co-teacher → bukan 403 (guard lolos;
+    // hasil AI boleh gagal karena kredensial — yang diuji hanya guard akses)
+    const ha = await api('/api/ai/hots-analyze', guru2.token, {
+        method: 'POST',
+        body: JSON.stringify({
+            question_id: q1[0].id, question_source: 'exam',
+            question_text: 'Soal uji guard co-teacher', question_type: 'MULTIPLE_CHOICE',
+            options: ['A', 'B'], correct_answer: 'A', subject_name: 'IPA', grade_band: 'SMP',
+        }),
+    })
+    check('T8.5 co-teacher hots-analyze soal co-taught → lolos guard (bukan 403/401)', ha.status !== 403 && ha.status !== 401, `status ${ha.status}`)
+    // Kontrol: guru3 → 403
+    const ha3 = await api('/api/ai/hots-analyze', guru3.token, {
+        method: 'POST',
+        body: JSON.stringify({
+            question_id: q1[0].id, question_source: 'exam',
+            question_text: 'Soal uji guard co-teacher', question_type: 'MULTIPLE_CHOICE',
+            options: ['A', 'B'], correct_answer: 'A', subject_name: 'IPA', grade_band: 'SMP',
+        }),
+    })
+    check('T8.5 kontrol: guru kelas lain hots-analyze → 403', ha3.status === 403, `status ${ha3.status}`)
+
     // ---------- HASIL ----------
     await stopServerSafe(server, BASE)
 
