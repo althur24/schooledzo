@@ -4,7 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { batchedIn, IN_BATCH_SIZE } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { logError } from '@/lib/logError'
-import { canManageOfficialExam } from '@/lib/teacherScope'
+import { canManageOfficialExam, getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { validateTargetClassIds } from '@/lib/targetClassValidation'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
@@ -35,6 +35,20 @@ export async function GET(
         // Scope multi-tenant: ujian sekolah lain tidak boleh dibaca
         if (data && schoolId && (data as any).school_id && (data as any).school_id !== schoolId) {
             return NextResponse.json({ error: 'Ujian tidak ditemukan' }, { status: 404 })
+        }
+
+        // GURU non-pengampu tidak boleh membaca metadata ujian guru lain
+        // (paritas guard GET soal & list /api/official-exams — sebelumnya guru
+        // mana pun di sekolah bisa membuka detail ujian via API langsung).
+        // Guard baca longgar: mengajar mapel ujian di ≥1 kelas target.
+        if (ctx.user && ctx.user.role === 'GURU') {
+            const scope = await getTeacherScope(ctx.user.id, data?.academic_year_id ?? null)
+            const canRead = !!data && (data.target_class_ids || []).some((cid: string) =>
+                coTeachesClassSubject(scope, data.subject_id, cid)
+            )
+            if (!canRead) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
         }
 
         // Resolve target class names

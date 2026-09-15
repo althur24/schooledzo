@@ -4,7 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { logError } from '@/lib/logError'
-import { canManageOfficialExam } from '@/lib/teacherScope'
+import { canManageOfficialExam, getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
 
 // GET questions for an official exam
@@ -79,6 +79,27 @@ export async function GET(
                 if (!classAllowed || !examScope.is_active || !started) {
                     return NextResponse.json({ error: 'Ujian belum tersedia' }, { status: 403 })
                 }
+            }
+        }
+
+        // GURU non-pengampu tidak boleh membaca soal ujian guru lain (bocor
+        // soal + kunci jawaban antar guru — correct_answer hanya di-strip
+        // untuk SISWA). Guard baca longgar: mengajar mapel ujian di ≥1 kelas
+        // target (paritas monitor & list submissions; mutasi tetap ketat
+        // canManageOfficialExam = semua kelas target). ADMIN lolos tenant
+        // guard di atas.
+        if (user.role === 'GURU') {
+            const { data: examScope } = await supabase
+                .from('official_exams')
+                .select('subject_id, target_class_ids, academic_year_id')
+                .eq('id', id)
+                .single()
+            const scope = await getTeacherScope(user.id, examScope?.academic_year_id ?? null)
+            const canRead = !!examScope && (examScope.target_class_ids || []).some((cid: string) =>
+                coTeachesClassSubject(scope, examScope.subject_id, cid)
+            )
+            if (!canRead) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
             }
         }
 

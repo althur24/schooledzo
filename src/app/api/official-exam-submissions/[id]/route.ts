@@ -20,8 +20,8 @@ export async function GET(
             .from('official_exam_submissions')
             .select(`
                 *,
-                student:students(id, nis, user:users!students_user_id_fkey(full_name)),
-                exam:official_exams(id, title, exam_type, duration_minutes, show_results_immediately, results_released, school_id, subject:subjects(name))
+                student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name)),
+                exam:official_exams(id, title, exam_type, duration_minutes, show_results_immediately, results_released, school_id, subject_id, target_class_ids, academic_year_id, subject:subjects(name))
             `)
             .eq('id', id)
             .single()
@@ -39,6 +39,19 @@ export async function GET(
                 .from('students').select('id').eq('user_id', ctx.user.id).single()
             if (!student || (submission as any)?.student?.id !== student.id) {
                 return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+            }
+        }
+
+        // GURU non-pengampu tidak boleh membaca jawaban siswa + kunci ujian
+        // guru lain — paritas guard PUT grading & list submissions (sebelumnya
+        // detail GET tanpa verifikasi guru sama sekali). Scope per-submission:
+        // harus mengajar mapel ujian di kelas siswa pemilik submission.
+        if (ctx.user.role === 'GURU') {
+            const authExam = Array.isArray(submission?.exam) ? submission.exam[0] : (submission?.exam || {})
+            const authStudent = submission?.student || {}
+            const scope = await getTeacherScope(ctx.user.id, authExam.academic_year_id)
+            if (!canTeachStudentSubmission(scope, authExam.subject_id, authStudent?.class_id)) {
+                return NextResponse.json({ error: 'Anda tidak mengajar kelas siswa ini' }, { status: 403 })
             }
         }
 

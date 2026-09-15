@@ -110,11 +110,12 @@ export async function GET(request: NextRequest) {
         // mapel+kelas yang sama (kelas multi-guru = 1 exam per kelas; semua
         // pengampu menanggapi beban koreksinya). class_id unik per tahun ajaran
         // (tiap tahun punya baris kelas sendiri) → pair filter otomatis year-scoped.
+        // pairSet juga dipakai filter UTS/UAS di bawah (pasangan exact mapel|kelas).
+        const pairSet = new Set(
+            activeAssignments.map((ta: any) => `${unwrap(ta.subject)?.id}|${ta.class_id}`)
+        )
         let exams: any[] = []
         if (subjectIds.length > 0 && classIds.length > 0) {
-            const pairSet = new Set(
-                activeAssignments.map((ta: any) => `${unwrap(ta.subject)?.id}|${ta.class_id}`)
-            )
             const { data: exRows } = await supabase
                 .from('exams')
                 .select('id, title, teaching_assignment_id, is_remedial, ta:teaching_assignments!inner(subject_id, class_id)')
@@ -198,8 +199,13 @@ export async function GET(request: NextRequest) {
                     .eq('school_id', schoolId)
                     .eq('academic_year_id', activeYearId)
                     .in('subject_id', subjectIds)
+                // Pasangan EXACT mapel|kelas (pairSet di atas) — bukan
+                // cross-product subjectIds × classIds yang memunculkan beban
+                // koreksi ujian guru lain (guru ajar mapel tsb di kelas lain,
+                // tapi hanya ajar kelas target di mapel berbeda). Paritas fix
+                // GET /api/official-exams.
                 officialExams = (oe || []).filter((e: any) =>
-                    (e.target_class_ids || []).some((cid: string) => classIds.includes(cid))
+                    (e.target_class_ids || []).some((cid: string) => pairSet.has(`${e.subject_id}|${cid}`))
                 )
                 const oeIds = officialExams.map((e: any) => e.id)
                 const officialSubs = await batchedFetchAll<{ exam_id: string; is_graded: boolean | null }>(

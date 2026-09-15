@@ -10,6 +10,7 @@ import { forceCloseQuizSubmission } from '@/lib/autoCloseExpired'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { bufferTeacherSubmissionNotification } from '@/lib/teacherNotifyBuffer'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 
 // Helper: notify student their quiz result is out (auto-graded only)
 async function sendQuizResultNotification(quizId: string, studentUserId: string, totalScore: number, maxScore: number) {
@@ -48,6 +49,25 @@ export async function GET(request: NextRequest) {
         const quizId = request.nextUrl.searchParams.get('quiz_id')
         const studentId = request.nextUrl.searchParams.get('student_id')
         const allYears = request.nextUrl.searchParams.get('all_years')
+
+        // GURU guard (quiz_id eksplisit): harus pemilik TA kuis ATAU co-teacher
+        // (mapel+kelas sama) — sebelumnya guru mana pun bisa membaca seluruh
+        // nilai + jawaban siswa kuis guru lain, dan memicu lazy-sweep di atasnya.
+        // Paritas guard /api/quizzes/[id]/questions & PUT grading.
+        if (quizId && user.role === 'GURU') {
+            const { data: quizTa } = await supabase
+                .from('quizzes')
+                .select('teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
+                .eq('id', quizId)
+                .single()
+            const taCtx = Array.isArray(quizTa?.teaching_assignment)
+                ? quizTa.teaching_assignment[0]
+                : quizTa?.teaching_assignment
+            const scope = await getTeacherScope(user.id, taCtx?.academic_year_id ?? null)
+            if (!ownsTeachingAssignment(scope, taCtx?.teacher_id) && !coTeachesClassSubject(scope, taCtx?.subject_id, taCtx?.class_id)) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke kuis ini' }, { status: 403 })
+            }
+        }
 
         // Lazy Sweep: Auto-close expired submissions if quizId is provided (Teacher View)
         if (quizId && user.role === 'GURU') {
@@ -98,6 +118,8 @@ export async function GET(request: NextRequest) {
                     deadline,
                     teaching_assignment:teaching_assignments!inner(
                         academic_year_id,
+                        subject_id,
+                        class_id,
                         subject:subjects(name)
                     )
                 ),
@@ -193,6 +215,8 @@ export async function GET(request: NextRequest) {
                             title,
                             teaching_assignment:teaching_assignments(
                                 academic_year_id,
+                                subject_id,
+                                class_id,
                                 subject:subjects(name)
                             )
                         ),
@@ -260,6 +284,21 @@ export async function GET(request: NextRequest) {
                     });
                 }
             }
+        }
+
+        // GURU scope (tanpa quiz_id): hanya submission kuis miliknya/co-taught —
+        // sebelumnya guru menerima SEMUA submission sekolah (nilai + jawaban
+        // siswa kuis guru lain). Pasangan exact mapel|kelas; class_id unik per
+        // tahun ajaran → otomatis year-scoped. Ditempatkan setelah merge
+        // remedial agar baris remedial ikut terfilter.
+        if (user.role === 'GURU') {
+            const scope = await getTeacherScope(user.id)
+            const taughtPairs = new Set((scope?.assignments || []).map(a => `${a.subject_id}|${a.class_id}`))
+            finalData = finalData.filter((s) => {
+                const qz = Array.isArray(s.quiz) ? s.quiz[0] : s.quiz
+                const ta = Array.isArray(qz?.teaching_assignment) ? qz.teaching_assignment[0] : qz?.teaching_assignment
+                return !!ta && taughtPairs.has(`${ta.subject_id}|${ta.class_id}`)
+            })
         }
 
         // Lampirkan ends_at (batas efektif, dihitung server) per submission —

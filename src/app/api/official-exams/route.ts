@@ -139,12 +139,14 @@ export async function GET(request: NextRequest) {
                     .eq('academic_year_id', activeYear?.id || '')
 
                 if (assignments && assignments.length > 0) {
-                    const teacherSubjectIds = [...new Set(assignments.map(a => a.subject_id))]
-                    const teacherClassIds = [...new Set(assignments.map(a => a.class_id))]
+                    // Pasangan EXACT mapel|kelas — bukan cross-product dua set
+                    // terpisah. Cross-product bocor: guru yang ajar PAIBP di
+                    // kelas X dan BTQ di XI KMP akan melihat UTS PAIBP XI KMP
+                    // milik guru lain (terjadi di prod). Paritas pola /api/exams.
+                    const taughtPairs = new Set(assignments.map(a => `${a.subject_id}|${a.class_id}`))
 
                     result = result.filter((exam) =>
-                        teacherSubjectIds.includes(exam.subject_id) &&
-                        exam.target_class_ids?.some((cid: string) => teacherClassIds.includes(cid))
+                        exam.target_class_ids?.some((cid: string) => taughtPairs.has(`${exam.subject_id}|${cid}`))
                     )
                 } else {
                     result = []

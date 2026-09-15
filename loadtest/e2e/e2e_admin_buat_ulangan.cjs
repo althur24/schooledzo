@@ -206,12 +206,17 @@ async function main() {
     const guruAListRes = await api('/api/exams', tokGuruA)
     const guruAList = guruAListRes.ok ? await guruAListRes.json() : []
     const guruASees = okCreates.filter(e => (guruAList || []).some(x => x.id === e.id))
-    check('guru A melihat 2 draft buatan admin (TA miliknya)', guruASees.length === 2, `n=${guruASees.length}`)
+    // Co-teaching by-design (route /api/exams): exam TA co-teacher (mapel+kelas
+    // sama) juga terlihat — guru A (X/A + X/B) melihat 3: X/A miliknya,
+    // X/A milik guru B (pair X|A sama), X/B miliknya.
+    check('guru A melihat 3 draft (2 TA miliknya + 1 co-teacher X/A)', guruASees.length === 3, `n=${guruASees.length}`)
 
     const guruBListRes = await api('/api/exams', tokGuruB)
     const guruBList = guruBListRes.ok ? await guruBListRes.json() : []
     const guruBSees = okCreates.filter(e => (guruBList || []).some(x => x.id === e.id))
-    check('guru B melihat 1 draft (TA team teaching miliknya)', guruBSees.length === 1, `n=${guruBSees.length}`)
+    // Guru B (pair X/A + Y/A): melihat draft X/A miliknya + X/A milik guru A
+    // (co-teacher pair X|A) — draft X/B (guru A, kelas lain) tidak terlihat.
+    check('guru B melihat 2 draft (miliknya + co-teacher X/A)', guruBSees.length === 2, `n=${guruBSees.length}`)
 
     const guruCListRes = await api('/api/exams', tokGuruC)
     const guruCList = guruCListRes.ok ? await guruCListRes.json() : []

@@ -54,9 +54,14 @@ export function canTeachScope(
     targetClassIds: string[] | null | undefined
 ): boolean {
     if (!scope || !subjectId || !targetClassIds || targetClassIds.length === 0) return false
-    const taughtSubjects = new Set(scope.assignments.map(a => a.subject_id))
-    const taughtClasses = new Set(scope.assignments.map(a => a.class_id))
-    return taughtSubjects.has(subjectId) && targetClassIds.every(cid => taughtClasses.has(cid))
+    // Pasangan EXACT mapel|kelas — bukan cross-product dua set terpisah.
+    // Cross-product bocor: guru yang ajar PAIBP di kelas X dan BTQ di XI KMP
+    // lolos cek "mengajar PAIBP di semua kelas target [XI]" → bisa memutasi
+    // UTS guru lain (ketemu di e2e staging e2e_security_scope M2). Paritas
+    // fix list /api/official-exams & /api/exams.
+    return targetClassIds.every(cid =>
+        scope.assignments.some(a => a.subject_id === subjectId && a.class_id === cid)
+    )
 }
 
 /**

@@ -39,6 +39,12 @@ export async function GET(request: NextRequest) {
             .order('created_at', { ascending: false })
 
         if (teachingAssignmentId) {
+            // Jalur editor guru/admin — SISWA tidak boleh memakai param ini
+            // (tanpa cek role, siswa bisa mendaftar semua ulangan satu TA
+            // termasuk draft via API langsung; UI siswa tidak memakai param ini).
+            if (user.role === 'SISWA') {
+                return NextResponse.json([])
+            }
             // Tenant guard: TA harus milik sekolah caller (param client dipercaya)
             if ((await findTeachingAssignmentsOutsideSchool([teachingAssignmentId], schoolId)).length > 0) {
                 return NextResponse.json([])
@@ -73,6 +79,11 @@ export async function GET(request: NextRequest) {
 
                     if (student?.class_id) {
                         query = query.eq('teaching_assignment.class_id', student.class_id)
+                        // Siswa hanya melihat ulangan yang sudah dipublish —
+                        // draft/tarik tidak boleh bocor via API langsung (UI
+                        // sudah memfilter is_active client-side; ini menutup
+                        // inspect-network).
+                        query = query.eq('is_active', true)
                         // Remedial: siswa hanya melihat remedial miliknya
                         // (mirror /api/official-exams) — post-fetch di bawah.
                         remedialStudentId = (student as any).id

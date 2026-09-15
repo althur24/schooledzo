@@ -7,6 +7,7 @@ import { tenantMismatch, notFound, resolveQuizSchoolId } from '@/lib/tenantGuard
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 
 // GET single quiz with questions
 export async function GET(
@@ -25,6 +26,9 @@ export async function GET(
                 *,
                 teaching_assignment:teaching_assignments(
                     id,
+                    teacher_id,
+                    subject_id,
+                    class_id,
                     academic_year_id,
                     teacher:teachers(id, user:users(full_name)),
                     subject:subjects(id, name),
@@ -41,6 +45,46 @@ export async function GET(
         // Tenant guard: kuis harus milik sekolah caller (IDOR lintas sekolah)
         if (tenantMismatch((data?.teaching_assignment as any)?.academic_year?.school_id, schoolId)) {
             return notFound()
+        }
+
+        // Halaman siswa memuat soal dari endpoint ini (embed questions) —
+        // guard paritas /api/quizzes/[id]/questions & /api/exams/[id]/questions:
+        // siswa luar kelas tidak boleh membaca soal, dan soal hanya boleh dibaca
+        // saat kuis aktif & sudah dibuka. Pengecualian attempt (resume/hasil).
+        const taEmbed = data?.teaching_assignment
+        const taCtx = Array.isArray(taEmbed) ? taEmbed[0] : taEmbed
+        if (user.role === 'SISWA') {
+            const { data: student } = await supabase
+                .from('students')
+                .select('id, class_id')
+                .eq('user_id', user.id)
+                .single()
+
+            if (!student || !taCtx?.class_id || student.class_id !== taCtx.class_id) {
+                return notFound()
+            }
+
+            const { data: mySubmission } = await supabase
+                .from('quiz_submissions')
+                .select('id')
+                .eq('quiz_id', id)
+                .eq('student_id', student.id)
+                .limit(1)
+            const hasAttempt = (mySubmission || []).length > 0
+            const started = data.available_from ? new Date(data.available_from).getTime() <= Date.now() : true
+            if (!hasAttempt && (!data.is_active || !started)) {
+                return NextResponse.json({ error: 'Kuis belum tersedia' }, { status: 403 })
+            }
+        }
+
+        // GURU non-pemilik tidak boleh membaca detail + soal kuis guru lain
+        // (embed questions menyertakan correct_answer untuk guru). Co-teacher
+        // (mapel+kelas sama) tetap boleh — paritas guard /questions & PUT.
+        if (user.role === 'GURU') {
+            const scope = await getTeacherScope(user.id, taCtx?.academic_year_id ?? null)
+            if (!ownsTeachingAssignment(scope, taCtx?.teacher_id) && !coTeachesClassSubject(scope, taCtx?.subject_id, taCtx?.class_id)) {
+                return notFound()
+            }
         }
 
         // Sort questions by order_index

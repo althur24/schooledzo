@@ -24,6 +24,25 @@ export async function GET(request: NextRequest) {
         const studentId = request.nextUrl.searchParams.get('student_id')
         const allYears = request.nextUrl.searchParams.get('all_years')
 
+        // GURU guard (exam_id eksplisit): harus pemilik TA ulangan ATAU co-teacher
+        // (mapel+kelas sama) — sebelumnya guru mana pun bisa membaca seluruh
+        // nilai + jawaban siswa ulangan guru lain, dan memicu lazy-sweep di atasnya.
+        // Paritas guard /api/exams/[id]/questions & PUT grading [id]/route.ts.
+        if (examId && user.role === 'GURU') {
+            const { data: examTa } = await supabase
+                .from('exams')
+                .select('teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
+                .eq('id', examId)
+                .single()
+            const taCtx = Array.isArray(examTa?.teaching_assignment)
+                ? examTa.teaching_assignment[0]
+                : examTa?.teaching_assignment
+            const scope = await getTeacherScope(user.id, taCtx?.academic_year_id ?? null)
+            if (!ownsTeachingAssignment(scope, taCtx?.teacher_id) && !coTeachesClassSubject(scope, taCtx?.subject_id, taCtx?.class_id)) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
+            }
+        }
+
         // Lazy Sweep: Auto-close expired submissions if examId is provided (Teacher/Admin View)
         if (examId && (user.role === 'GURU' || user.role === 'ADMIN')) {
             try {
@@ -79,6 +98,8 @@ export async function GET(request: NextRequest) {
                     results_released,
                     teaching_assignment:teaching_assignments!inner(
                         academic_year_id,
+                        subject_id,
+                        class_id,
                         subject:subjects(id, name),
                         class:classes(id, name)
                     )
@@ -171,6 +192,8 @@ export async function GET(request: NextRequest) {
                             window_end_time,
                             teaching_assignment:teaching_assignments(
                                 academic_year_id,
+                                subject_id,
+                                class_id,
                                 subject:subjects(id, name),
                                 class:classes(id, name)
                             )
@@ -232,6 +255,21 @@ export async function GET(request: NextRequest) {
                     });
                 }
             }
+        }
+
+        // GURU scope (tanpa exam_id): hanya submission ulangan miliknya/co-taught —
+        // sebelumnya guru menerima SEMUA submission sekolah (nilai + jawaban
+        // siswa ulangan guru lain). Pasangan exact mapel|kelas; class_id unik
+        // per tahun ajaran → otomatis year-scoped. Ditempatkan setelah merge
+        // remedial agar baris remedial ikut terfilter.
+        if (user.role === 'GURU') {
+            const scope = await getTeacherScope(user.id)
+            const taughtPairs = new Set((scope?.assignments || []).map(a => `${a.subject_id}|${a.class_id}`))
+            finalData = finalData.filter((s) => {
+                const ex = Array.isArray(s.exam) ? s.exam[0] : s.exam
+                const ta = Array.isArray(ex?.teaching_assignment) ? ex.teaching_assignment[0] : ex?.teaching_assignment
+                return !!ta && taughtPairs.has(`${ta.subject_id}|${ta.class_id}`)
+            })
         }
 
         // Apply visibility rules for SISWA

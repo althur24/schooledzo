@@ -5,6 +5,7 @@ import { tenantMismatch, notFound, resolveQuizSchoolId } from '@/lib/tenantGuard
 import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
+import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 import { syncQuestionsToBank } from '@/lib/questionBankSync'
 import { syncDraftQuizQuestions } from '@/lib/examBatch'
 
@@ -37,6 +38,63 @@ export async function GET(
         // Tenant guard: kuis harus milik sekolah caller (IDOR lintas sekolah)
         if (tenantMismatch(await resolveQuizSchoolId(id), schoolId)) {
             return notFound()
+        }
+
+        // SISWA di luar kelas TA kuis tidak boleh membaca soal (integritas
+        // kuis — paritas guard /api/exams/[id]/questions), dan soal hanya
+        // boleh dibaca saat kuis aktif & sudah dibuka. Pengecualian: siswa
+        // yang sudah punya attempt tetap boleh memuat soal (resume).
+        if (user.role === 'SISWA') {
+            const { data: quizTa } = await supabase
+                .from('quizzes')
+                .select('is_active, available_from, teaching_assignment:teaching_assignments(class_id)')
+                .eq('id', id)
+                .single()
+            // Embed PostgREST bisa objek atau array — ambil class_id dari elemen pertama
+            const taEmbed = quizTa?.teaching_assignment
+            const taClassId = Array.isArray(taEmbed) ? taEmbed[0]?.class_id : (taEmbed as any)?.class_id
+
+            const { data: student } = await supabase
+                .from('students')
+                .select('id, class_id')
+                .eq('user_id', user.id)
+                .single()
+
+            if (!student || !taClassId || student.class_id !== taClassId) {
+                return notFound()
+            }
+
+            const { data: mySubmission } = await supabase
+                .from('quiz_submissions')
+                .select('id')
+                .eq('quiz_id', id)
+                .eq('student_id', student.id)
+                .limit(1)
+            const hasAttempt = (mySubmission || []).length > 0
+            const started = quizTa?.available_from ? new Date(quizTa.available_from).getTime() <= Date.now() : true
+            if (!hasAttempt && (!quizTa?.is_active || !started)) {
+                return NextResponse.json({ error: 'Kuis belum tersedia' }, { status: 403 })
+            }
+        }
+
+        // GURU non-pemilik TA tidak boleh membaca soal kuis guru lain (bocor
+        // soal + kunci jawaban — paritas guard mutasi POST/PUT/DELETE di route
+        // ini dan guard /api/exams/[id]/questions). Co-teacher (mapel+kelas
+        // sama) tetap boleh. ADMIN tetap boleh.
+        if (user.role === 'GURU') {
+            const { data: quizTa } = await supabase
+                .from('quizzes')
+                .select('teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
+                .eq('id', id)
+                .single()
+            // Embed PostgREST bisa objek atau array — ambil elemen pertama
+            const taCtx = Array.isArray(quizTa?.teaching_assignment)
+                ? quizTa.teaching_assignment[0]
+                : (quizTa?.teaching_assignment as any)
+            const scope = await getTeacherScope(user.id, taCtx?.academic_year_id ?? null)
+            if (!ownsTeachingAssignment(scope, taCtx?.teacher_id) && !coTeachesClassSubject(scope, taCtx?.subject_id, taCtx?.class_id)) {
+                return notFound()
+            }
         }
 
         const { data, error } = await supabase
