@@ -63,6 +63,13 @@ export async function GET(
             ;(data as any).target_classes = []
         }
 
+        // SISWA: jangan bocorkan allowed_student_ids (daftar "siapa yang
+        // remedial") — paritas GET /api/exams/[id] & list /api/official-exams;
+        // jalur detail ini sebelumnya terlewat (bocor via inspect network).
+        if (ctx.user?.role === 'SISWA') {
+            delete (data as any).allowed_student_ids
+        }
+
         return NextResponse.json(data)
     } catch (error) {
         logError('Error fetching official exam', error)

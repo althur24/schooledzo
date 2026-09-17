@@ -91,6 +91,14 @@ export async function GET(
                 .map(({ id, class_id, class_name }) => ({ id, class_id, class_name }))
         }
 
+        // SISWA: jangan bocorkan allowed_student_ids (daftar "siapa yang
+        // remedial") — paritas GET /api/quizzes/[id] & list /api/exams yang
+        // sudah strip; jalur detail exam ini sebelumnya terlewat (bocor via
+        // inspect network saat siswa membuka halaman remedial).
+        if (user.role === 'SISWA') {
+            delete (data as any).allowed_student_ids
+        }
+
         return NextResponse.json({ ...data, batch_siblings: batchSiblings })
     } catch (error) {
         console.error('Error fetching exam:', error)

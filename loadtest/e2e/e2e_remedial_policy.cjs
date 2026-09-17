@@ -161,6 +161,11 @@ async function main() {
         is_submitted: true, total_score: 32, max_score: 40,
     }, 'remedial exam sub')
     created.examSubmissions.push(remSub.id)
+    // Aktivasi remedial (fixture: POST membuat draft; list siswa hanya menampilkan
+    // is_active=true — tanpa ini check [11] "peserta melihat remedialnya" gagal
+    // sejak suite dibuat). Service-role langsung — jalur alami (PUT publish)
+    // menuntut soal, sedangkan remedial mode BARU di sini sengaja tanpa soal.
+    await supabase.from('exams').update({ is_active: true }).eq('id', remExam.id)
 
     // ════════ [2] REMEDIAL KUIS — policy AVERAGE ════════
     console.log('\n[2] Remedial kuis (POST /api/quizzes) — AVERAGE')
@@ -304,6 +309,21 @@ async function main() {
     // Privacy: allowed_student_ids tidak bocor ke siswa
     const s3QuizLeak = (Array.isArray(s3Quizzes) ? s3Quizzes : []).some(q => 'allowed_student_ids' in q)
     check('allowed_student_ids tidak bocor di respons siswa', !s3QuizLeak)
+
+    // Privacy (fix 2026-09-17): jalur DETAIL juga tidak boleh bocor —
+    // siswa peserta membuka halaman remedial → inspect network tidak boleh
+    // melihat daftar ID siswa remedial. Paritas strip list; dulu hanya
+    // quizzes/[id] yang strip, exams/[id] & official-exams/[id] terlewat.
+    const detExamRes = await api(`/api/exams/${remExam.id}`, tokS1)
+    const detExam = detExamRes.ok ? await detExamRes.json() : {}
+    check('GET /api/exams/[id] sebagai siswa: allowed_student_ids ter-strip',
+        detExamRes.ok && !('allowed_student_ids' in detExam),
+        `status=${detExamRes.status} hasField=${'allowed_student_ids' in detExam}`)
+    const detOffRes = await api(`/api/official-exams/${remUts.id}`, tokS1)
+    const detOff = detOffRes.ok ? await detOffRes.json() : {}
+    check('GET /api/official-exams/[id] sebagai siswa: allowed_student_ids ter-strip',
+        detOffRes.ok && !('allowed_student_ids' in detOff),
+        `status=${detOffRes.status} hasField=${'allowed_student_ids' in detOff}`)
 
     // Dashboard wali: recentQuizzes/recentExams ter-merge sesuai kebijakan
     const tokWali = await doLogin(waliUser.username)
