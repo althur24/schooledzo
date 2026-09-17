@@ -800,8 +800,12 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                             title={isMonitorDisabled ? 'Aktifkan ujian dulu untuk menggunakan Monitor' : undefined}
                             onClick={() => {
                                 if (tab.key === 'monitor') {
-                                    router.push(`${basePath}/${examId}/monitor${typeParam}`);
-                                    return;
+                                    // Ulangan batch: monitor multi-kelas (semua kelas
+                                    // batch + saring kelas) — tanpa &batch=1 halaman
+                                    // jatuh ke mode single-kelas exam ini saja.
+                                    const batchParam = isUlangan && (exam as any).batch_id ? '&batch=1' : ''
+                                    router.push(`${basePath}/${examId}/monitor${typeParam}${batchParam}`)
+                                    return
                                 }
                                 setActiveTab(tab.key);
                             }} 

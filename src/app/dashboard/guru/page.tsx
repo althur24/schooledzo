@@ -285,16 +285,33 @@ export default function GuruDashboard() {
 
                             <div className="grid gap-4">
                                 {/* Ulangan biasa (exam_*) — aksen primary */}
-                                {activeExams.map(exam => (
+                                {activeExams.map(exam => {
+                                    // Chip kelas: single = nama kelas; batch = "N kelas"
+                                    // + tooltip (paritas card list ulangan) — dulu widget
+                                    // tidak menampilkan kelas sama sekali.
+                                    const ta: any = Array.isArray(exam.teaching_assignment) ? exam.teaching_assignment[0] : exam.teaching_assignment
+                                    const cls: any = ta ? (Array.isArray(ta.class) ? ta.class[0] : ta.class) : null
+                                    const isBatch = (exam.batch_size ?? 0) > 1
+                                    const classChip = isBatch
+                                        ? <span title={(exam.batch_class_names || []).join(', ')} className="px-2.5 py-1 text-xs font-bold bg-secondary/10 text-text-main dark:text-white rounded-full">
+                                              {exam.batch_size} kelas
+                                          </span>
+                                        : (cls?.name ? <span className="px-2.5 py-1 text-xs font-bold bg-secondary/10 text-text-main dark:text-white rounded-full">{cls.name}</span> : null)
+                                    // Link batch: monitor multi-kelas (filter menampilkan
+                                    // semua kelas batch) — tanpa ini widget membuka mode
+                                    // single-kelas.
+                                    const monitorHref = `/dashboard/guru/ulangan/${exam.id}/monitor${exam.batch_id ? '?batch=1' : ''}`
+                                    return (
                                     <div key={`ulg-${exam.id}`} className="relative overflow-hidden group p-4 md:p-6 rounded-2xl bg-gradient-to-br from-primary/5 to-emerald-500/5 border border-primary/20 shadow-sm transition-all hover:border-primary/40 hover:shadow-md">
                                         <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
 
                                         <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center relative z-10">
                                             <div>
-                                                <div className="flex items-center gap-2 mb-2">
+                                                <div className="flex items-center gap-2 mb-2 flex-wrap">
                                                     <span className="px-2.5 py-1 bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary-light text-xs font-bold rounded-full">
                                                         {labels.ulangan}
                                                     </span>
+                                                    {classChip}
                                                     <span className="text-xs font-bold text-text-secondary bg-black/5 dark:bg-white/5 px-2.5 py-1 rounded-full">
                                                         {exam.duration_minutes} Menit
                                                     </span>
@@ -306,7 +323,7 @@ export default function GuruDashboard() {
                                             </div>
 
                                             <Link
-                                                href={`/dashboard/guru/ulangan/${exam.id}/monitor`}
+                                                href={monitorHref}
                                                 className="w-full sm:w-auto px-5 py-2.5 bg-primary hover:bg-primary-dark active:bg-primary-dark text-white font-bold text-sm rounded-xl transition-colors shadow-lg shadow-primary/30 flex items-center justify-center gap-2"
                                             >
                                                 Pantau Live
@@ -316,19 +333,31 @@ export default function GuruDashboard() {
                                             </Link>
                                         </div>
                                     </div>
-                                ))}
+                                    )
+                                })}
 
                                 {/* UTS/UAS (official_exams) — aksen merah */}
-                                {activeOfficialExams.map(exam => (
+                                {activeOfficialExams.map(exam => {
+                                    // Chip jumlah kelas target (konsistensi dgn widget ulangan)
+                                    const nTarget = (exam.target_class_ids || []).length
+                                    const targetChip = nTarget > 1
+                                        ? <span title={(exam.target_class_names || []).join(', ')} className="px-2.5 py-1 text-xs font-bold bg-secondary/10 text-text-main dark:text-white rounded-full">
+                                              {nTarget} kelas
+                                          </span>
+                                        : (nTarget === 1 && exam.target_class_names?.length
+                                            ? <span className="px-2.5 py-1 text-xs font-bold bg-secondary/10 text-text-main dark:text-white rounded-full">{exam.target_class_names[0]}</span>
+                                            : null)
+                                    return (
                                     <div key={`off-${exam.id}`} className="relative overflow-hidden group p-4 md:p-6 rounded-2xl bg-gradient-to-br from-red-500/5 to-orange-500/5 border border-red-500/20 shadow-sm transition-all hover:border-red-500/40 hover:shadow-md">
                                         <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
 
                                         <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center relative z-10">
                                             <div>
-                                                <div className="flex items-center gap-2 mb-2">
+                                                <div className="flex items-center gap-2 mb-2 flex-wrap">
                                                     <span className="px-2.5 py-1 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs font-bold rounded-full">
                                                         {labelForGradeType(exam.exam_type, labels)}
                                                     </span>
+                                                    {targetChip}
                                                     <span className="text-xs font-bold text-text-secondary bg-black/5 dark:bg-white/5 px-2.5 py-1 rounded-full">
                                                         {exam.duration_minutes} Menit
                                                     </span>
@@ -350,7 +379,8 @@ export default function GuruDashboard() {
                                             </Link>
                                         </div>
                                     </div>
-                                ))}
+                                    )
+                                })}
                             </div>
                         </div>
                     )}

@@ -76,6 +76,7 @@ const created = {
     users: [], teachers: [], students: [], sessions: [], classes: [],
     subjects: [], tas: [], exams: [], questions: [], submissions: [],
     enrollments: [], schools: [], quizzes: [],
+    officialExams: [], officialQuestions: [],
 }
 const results = []
 function check(name, cond, detail = '') {
@@ -610,6 +611,25 @@ async function main() {
     const g2 = groupGuard(oldBatch, subject.id, subject.id, classD.id, classD.id)
     check('GG2b: unit grouping — 2 exam 1 kelas = singleton (tidak digabung)', g2 === 2, `grup=${g2}`)
 
+    // ================= [W] fixture UTS aktif (widget dashboard) =================
+    // UTS multi-kelas aktif oleh guru1 → widget "Sedang Berlangsung" menampilkan
+    // card UTS dengan chip jumlah kelas + link monitor.
+    const utsW = await mustInsert(supabase, 'official_exams', {
+        school_id: school.id, academic_year_id: year.id, subject_id: subject.id,
+        exam_type: 'UTS', title: `${U} UTS Widget`, description: null,
+        start_time: new Date(Date.now() - 60000).toISOString(), duration_minutes: 60,
+        window_end_time: new Date(Date.now() + 3600000).toISOString(),
+        is_randomized: false, max_violations: 3, target_class_ids: [classA.id, classB.id],
+        created_by: guru1.user.id, is_active: true, show_results_immediately: true,
+    }, 'uts widget')
+    created.officialExams.push(utsW.id)
+    const { data: utsWQ } = await supabase.from('official_exam_questions').insert({
+        exam_id: utsW.id, question_text: `${U} uts w q1`, question_type: 'MULTIPLE_CHOICE',
+        options: ['A1', 'B1'], correct_answer: 'A', points: 10, order_index: 0,
+        status: 'approved', difficulty: 'MEDIUM', text_direction: 'ltr', content_format: 'plain',
+    }).select()
+    created.officialQuestions.push(utsWQ[0].id)
+
     // ================= [RENDER] =================
     console.log('\n[RENDER] Chrome headless')
     const renderDom = async (url, cookieToken, budget = 20000) => {
@@ -650,6 +670,21 @@ async function main() {
         check('R1b: list guru — sel kelas "3 kelas" tampil', domList.includes('3 kelas'))
         check('R1c: list guru — badge "Kelas Paralel" tampil', domList.includes('Kelas Paralel'))
         check('R1d: list guru — filter "Semua Kelas" tampil', domList.includes('Semua Kelas'))
+
+        // F-A: widget "Sedang Berlangsung" dashboard guru — chip kelas + link batch
+        const domDash = await renderDom('/dashboard/guru', guru1.token)
+        check('W1: widget ulangan — link "Pantau Live" membawa ?batch=1 (monitor multi-kelas)',
+            domDash.includes(`/dashboard/guru/ulangan/${examA}/monitor?batch=1`),
+            `hrefBatch=${domDash.includes('monitor?batch=1')}`)
+        check('W1b: widget ulangan — chip "3 kelas" tampil (penjelasan kelas batch)',
+            domDash.includes('3 kelas'))
+        check('W1c: widget UTS — judul UTS widget tampil',
+            domDash.includes(`${U} UTS Widget`))
+        check('W1d: widget UTS — chip "2 kelas" tampil (jumlah kelas target)',
+            domDash.includes('2 kelas'))
+        // Link UTS tetap polos (official tidak ber-batch)
+        check('W1e: widget UTS — link monitor TIDAK membawa batch param',
+            domDash.includes(`/dashboard/guru/uts-uas/${utsW.id}/monitor`) && !domDash.includes(`/dashboard/guru/uts-uas/${utsW.id}/monitor?`))
 
         const domHasil = await renderDom(`/dashboard/guru/ulangan/${examA}?tab=hasil`, guru1.token)
         check('R2: tab hasil — dropdown "Semua Kelas" tampil', domHasil.includes('Semua Kelas'))
@@ -765,6 +800,8 @@ async function cleanup() {
         }
     }
     await del('quizzes', created.quizzes)
+    await delBy('official_exam_questions', 'exam_id', created.officialExams)
+    await del('official_exams', created.officialExams)
     for (const uid of created.users) await supabase.from('notifications').delete().eq('user_id', uid)
     await del('sessions', created.sessions)
     await del('student_enrollments', created.enrollments)
