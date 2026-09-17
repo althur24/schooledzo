@@ -677,23 +677,11 @@ function EditExamPageInner() {
                 })
             })
             if (res.ok) {
-                // Terapkan jadwal ke kelas paralel (opsional, hanya field timing)
+                // K3: jadwal batch kini diseragamkan SERVER-SIDE (PUT jadwal pada
+                // member batch otomatis menular ke semua member — paritas UTS/UAS).
+                // Loop client lama menjadi no-op idempoten; toast tetap informatif.
                 if (applyScheduleToSiblings && (exam?.batch_siblings?.length || 0) > 0) {
-                    const schedulePayload = {
-                        start_time: formattedStartTime,
-                        duration_minutes: editForm.duration_minutes,
-                        window_end_time: formattedWindowEnd
-                    }
-                    await Promise.allSettled(
-                        (exam?.batch_siblings || []).map(s =>
-                            fetch(`/api/exams/${s.id}`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(schedulePayload)
-                            })
-                        )
-                    )
-                    setToast({ message: `Jadwal diterapkan ke ${exam!.batch_siblings!.length} kelas paralel`, type: 'success' })
+                    setToast({ message: `Jadwal diterapkan ke ${exam!.batch_siblings!.length + 1} kelas paralel`, type: 'success' })
                 }
                 setShowEditSettings(false)
                 setApplyScheduleToSiblings(false)
@@ -2989,7 +2977,8 @@ function EditExamPageInner() {
                                 <span className="font-medium text-text-main dark:text-white">Terapkan jadwal ini juga ke {exam!.batch_siblings!.length} kelas paralel</span>
                                 <span className="block text-xs text-text-secondary mt-0.5">
                                     {exam!.batch_siblings!.map(s => s.class_name).join(', ')}
-                                    {exam?.is_active ? ` — hanya bisa saat ${labels.ulangan.toLowerCase()} belum dipublish` : ''}
+                                    {' — jadwal batch selalu seragam otomatis (paritas UTS/UAS)'}
+                                    {exam?.is_active ? `; centang hanya mengubah tampilan pesan` : ''}
                                 </span>
                             </label>
                         </div>

@@ -125,6 +125,12 @@ export async function GET(
                     })
                 }
             }
+            // F2 guard: kombinasi examId + batch_id liar (exam bukan member batch)
+            // TIDAK boleh menghasilkan analitik campuran — paksa kembali ke
+            // single-exam. Client normal tak pernah mengirim kombinasi ini;
+            // ini menutup injeksi manual (bentuk/inspect).
+            const examIsMember = visible.some(m => m.id === examId)
+            if (!examIsMember) visible = [{ id: examId }]
             if (visible.length === 0) visible = [{ id: examId }]
             memberIds = visible.map(m => m.id)
             memberClassIds = []

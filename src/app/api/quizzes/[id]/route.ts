@@ -307,6 +307,28 @@ export async function PUT(
             throw error
         }
 
+        // ── K3: jadwal batch kuis dipaksa SERAGAM (paritas UTS/UAS) ──
+        // 1 batch = 1 jadwal; PUT field jadwal pada member batch menular ke
+        // semua member TANPA menyentuh is_active/pending_publish. Paritas
+        // implementasi exams/[id] PUT.
+        const TIMING_KEYS_QUIZ = ['duration_minutes', 'deadline', 'available_from'] as const
+        const quizTimingTouched = TIMING_KEYS_QUIZ.some(k => (updateData as any)[k] !== undefined)
+        if (data?.batch_id && quizTimingTouched) {
+            try {
+                const siblingTiming: Record<string, unknown> = {}
+                for (const k of TIMING_KEYS_QUIZ) siblingTiming[k] = (updateData as any)[k]
+                const { error: timingErr } = await supabase
+                    .from('quizzes')
+                    .update({ ...siblingTiming, updated_at: new Date().toISOString() })
+                    .eq('batch_id', data.batch_id)
+                if (timingErr) {
+                    console.error('[quiz][batch-timing] gagal menular ke sibling:', timingErr)
+                }
+            } catch (timingError) {
+                console.error('[quiz][batch-timing] error:', timingError)
+            }
+        }
+
         // If quiz was JUST published (belum aktif → aktif), send notifications to students.
         // Re-PUT kuis yang sudah aktif tidak boleh mengirim ulang notifikasi "Kuis Baru"
         // ke sekelas (spam) ataupun mengulang sinkronisasi batch.
@@ -352,14 +374,17 @@ export async function PUT(
 
                         if (enrollments && enrollments.length > 0) {
                             const subjectName = data.teaching_assignment.subject?.name || ''
+                            // Unwrap embed ambigu (student bisa array) — paritas fix
+                            // exams/[id] & examBatch; tanpa ini user_id undefined.
+                            const unwrapStudent = (e: any) => Array.isArray(e.student) ? e.student[0] : e.student
                             await supabase.from('notifications').insert(
                                 enrollments.map((e: any) => ({
-                                    user_id: e.student.user_id,
+                                    user_id: unwrapStudent(e)?.user_id,
                                     type: 'KUIS_BARU',
                                     title: `${labels.kuis} Baru: ${data.title}`,
                                     message: `${subjectName} - ${data.duration_minutes || 0} menit`,
                                     link: '/dashboard/siswa/kuis'
-                                }))
+                                })).filter((n: any) => !!n.user_id)
                             )
                         }
                     }

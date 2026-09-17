@@ -50,8 +50,11 @@ export async function GET(
         // bukan haknya di dropdown. ADMIN melihat semua sibling se-sekolah.
         // Tenant: sibling difilter sekolah caller juga (batch_id client-generated,
         // tabrakan lintas sekolah nyaris mustahil — ini lapisan berjaga-jaga).
+        // SISWA: TIDAK diberi sibling sama sekali — daftar kelas paralel satu
+        // sekolah bukan informasi miliknya (halaman siswa tidak memakainya;
+        // ini menutup bocor via inspect network).
         let batchSiblings: { id: string; class_id: string; class_name: string }[] = []
-        if (data?.batch_id) {
+        if (data?.batch_id && user.role !== 'SISWA') {
             const { data: siblings } = await supabase
                 .from('exams')
                 .select('id, teaching_assignment:teaching_assignments(subject_id, class:classes(id, name))')
@@ -241,6 +244,31 @@ export async function PUT(
 
         if (error) throw error
 
+        // ── K3: jadwal batch dipaksa SERAGAM (paritas UTS/UAS) ──
+        // Prinsip desain: 1 batch = 1 jadwal (kelas paralel mengerjakan
+        // serentak). Guru yang butuh jadwal beda membuat batch lain. Bila PUT
+        // menyentuh field jadwal pada member batch → perubahan otomatis
+        // menular ke semua member (TANPA menyentuh is_active/pending_publish/
+        // results_released — itu tetap per-member). Field non-jadwal (judul,
+        // deskripsi, dll.) tetap per-member.
+        const TIMING_KEYS_EXAM = ['start_time', 'duration_minutes', 'window_end_time'] as const
+        const timingTouched = TIMING_KEYS_EXAM.some(k => (updateData as any)[k] !== undefined)
+        if (data?.batch_id && timingTouched) {
+            try {
+                const siblingTiming: Record<string, unknown> = {}
+                for (const k of TIMING_KEYS_EXAM) siblingTiming[k] = (updateData as any)[k]
+                const { error: timingErr } = await supabase
+                    .from('exams')
+                    .update({ ...siblingTiming, updated_at: new Date().toISOString() })
+                    .eq('batch_id', data.batch_id)
+                if (timingErr) {
+                    console.error('[exam][batch-timing] gagal menular ke sibling:', timingErr)
+                }
+            } catch (timingError) {
+                console.error('[exam][batch-timing] error:', timingError)
+            }
+        }
+
         // Notifikasi hanya saat transisi draft→publish (false→true). Re-PUT
         // is_active:true (mis. edit judul) tidak boleh mengirim ulang notifikasi
         // ke sekelas — paritas guard wasActive di quizzes/[id] & dedup official-exams.
@@ -263,17 +291,21 @@ export async function PUT(
                         .eq('class_id', data.teaching_assignment.class_id)
                         .eq('status', 'ACTIVE') // siswa pindah/keluar tidak dinotifikasi
 
-                    if (enrollments && enrollments.length > 0) {
+                     if (enrollments && enrollments.length > 0) {
                         const subjectName = data.teaching_assignment.subject?.name || ''
                         const startDate = new Date(data.start_time).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })
+                        // e.student bisa ARRAY (embed PostgREST ambigu) — unwrap
+                        // seperti pola first() di codebase; tanpa ini user_id
+                        // undefined → notifikasi hilang diam-diam.
+                        const unwrapStudent = (e: any) => Array.isArray(e.student) ? e.student[0] : e.student
                         await supabase.from('notifications').insert(
                             enrollments.map((e: any) => ({
-                                user_id: e.student.user_id,
+                                user_id: unwrapStudent(e)?.user_id,
                                 type: 'ULANGAN_BARU',
                                 title: `${labels.ulangan} Baru: ${data.title}`,
                                 message: `${subjectName} - Mulai: ${startDate}`,
                                 link: '/dashboard/siswa/ulangan'
-                            }))
+                            })).filter((n: any) => !!n.user_id)
                         )
                     }
                 }
@@ -301,14 +333,18 @@ export async function PUT(
 
                     if (enrollments && enrollments.length > 0) {
                         const subjectName = data.teaching_assignment.subject?.name || ''
+                        // Unwrap embed ambigu (student bisa array) — tanpa ini
+                        // user_id undefined → notifikasi "Nilai Keluar" hilang
+                        // diam-diam untuk sebagian kelas.
+                        const unwrapStudent = (e: any) => Array.isArray(e.student) ? e.student[0] : e.student
                         await supabase.from('notifications').insert(
                             enrollments.map((e: any) => ({
-                                user_id: e.student.user_id,
+                                user_id: unwrapStudent(e)?.user_id,
                                 type: 'NILAI_KELUAR',
                                 title: `Nilai Keluar: ${data.title}`,
                                 message: `${subjectName} — Hasil ${labels.ulangan.toLowerCase()} sudah bisa dilihat`,
                                 link: '/dashboard/siswa/ulangan'
-                            }))
+                            })).filter((n: any) => !!n.user_id)
                         )
                     }
                 }

@@ -420,6 +420,60 @@ async function main() {
     check('Q2c: pasca publish B & C 4 soal & fingerprint = A',
         qB2 === 4 && qC2 === 4 && sigqB2 === sigqA2, `B=${qB2} C=${qC2}`)
 
+    // ============ [C3] Concurrency batch-specific ============
+    console.log('\n[C3] concurrency batch — publish paralel, sync+publish, share paralel')
+    // C3-1: PUBLISH PARALEL dari 2 member berbeda (2 guru co-teacher men-PUT
+    // publish bersamaan pada batch D/E/F) → lock serialize → semua aktif +
+    // soal konvergen identik.
+    const c31a = api(`/api/exams/${examD}`, tok, { method: 'PUT', body: JSON.stringify({ is_active: true, start_time: new Date(Date.now() - 60000).toISOString() }) })
+    const c31b = api(`/api/exams/${examE}`, tok, { method: 'PUT', body: JSON.stringify({ is_active: true, start_time: new Date(Date.now() - 60000).toISOString() }) })
+    const [c31aRes, c31bRes] = await Promise.all([c31a, c31b])
+    await new Promise(r => setTimeout(r, 2500))
+    const actOf = async (id) => (await supabase.from('exams').select('is_active').eq('id', id).single()).data?.is_active
+    const c3actD = await actOf(examD), c3actE = await actOf(examE), c3actF = await actOf(examF)
+    check('C3-1: publish paralel 2 member → semua member aktif (lock serialize)',
+        c3actD === true && c3actE === true && c3actF === true,
+        `status=${c31aRes.status}/${c31bRes.status} D=${c3actD} E=${c3actE} F=${c3actF}`)
+    const sigDc3 = await sigQ(examD), sigEc3 = await sigQ(examE), sigFc3 = await sigQ(examF)
+    check('C3-1b: pasca publish paralel — fingerprint konvergen identik D/E/F',
+        sigDc3 === sigEc3 && sigEc3 === sigFc3, `D=${sigDc3.length} E=${sigEc3.length} F=${sigFc3.length}`)
+
+    // C3-2: draft-sync + publish BERSAMAAN (batch baru: G draft + H draft;
+    // paralel: addQ ke G (sync draft) + PUT publish G) → lock serialize → konsisten
+    const batchC32 = crypto.randomUUID()
+    const examG = await mkExam(taA, batchC32)
+    const examH = await mkExam(taB, batchC32)
+    for (let i = 0; i < 3; i++) await addQ(examG, `${U} c32 q${i}`)
+    const c32sync = addQ(examG, `${U} c32 trigger`)
+    const c32pub = api(`/api/exams/${examG}`, tok, { method: 'PUT', body: JSON.stringify({ is_active: true, start_time: new Date(Date.now() - 60000).toISOString() }) })
+    await Promise.all([c32sync, c32pub])
+    await new Promise(r => setTimeout(r, 3000))
+    const cG = await countQ(examG), cH = await countQ(examH)
+    const sigG = await sigQ(examG), sigH = await sigQ(examH)
+    check('C3-2: sync+publish bersamaan → G & H 4 soal & fingerprint identik',
+        cG === 4 && cH === 4 && sigG === sigH, `G=${cG} H=${cH} sig=${sigG === sigH}`)
+    const c3actG = await actOf(examG), c3actH = await actOf(examH)
+    check('C3-2b: G & H aktif pasca publish', c3actG === true && c3actH === true, `G=${c3actG} H=${c3actH}`)
+
+    // C3-3: share results paralel (client loop semua member serentak) → idempotent
+    for (const id of [examD, examE, examF]) {
+        await api(`/api/exams/${id}`, tok, { method: 'PUT', body: JSON.stringify({ show_results_immediately: false, results_released: false }) })
+    }
+    await new Promise(r => setTimeout(r, 300))
+    const c3notifsBefore = (await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('type', 'NILAI_KELUAR').ilike('title', '%Guard%')).count || 0
+    await Promise.all([examD, examE, examF].map(id =>
+        api(`/api/exams/${id}`, tok, { method: 'PUT', body: JSON.stringify({ results_released: true }) })
+    ))
+    await new Promise(r => setTimeout(r, 800))
+    const c3notifsAfter = (await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('type', 'NILAI_KELUAR').ilike('title', '%Guard%')).count || 0
+    check('C3-3: share paralel 3 member → notif 0 dobel (delta=0 — kelas fixture tanpa siswa)',
+        c3notifsAfter - c3notifsBefore === 0, `delta=${c3notifsAfter - c3notifsBefore}`)
+    const relD = (await supabase.from('exams').select('results_released').eq('id', examD).single()).data?.results_released
+    const relE = (await supabase.from('exams').select('results_released').eq('id', examE).single()).data?.results_released
+    const relF = (await supabase.from('exams').select('results_released').eq('id', examF).single()).data?.results_released
+    check('C3-3b: results_released tersimpan semua member meski PUT paralel',
+        relD === true && relE === true && relF === true, `D=${relD} E=${relE} F=${relF}`)
+
     await stopServerSafe(server, BASE)
 
     const failed = results.filter(r => !r.ok)
