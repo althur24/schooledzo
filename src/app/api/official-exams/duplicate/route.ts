@@ -155,6 +155,8 @@ export async function POST(request: NextRequest) {
         }
 
         // 3. Get source exam questions
+        // Guard runaway (paritas examBatch.ts): sumber anomali >500 soal ditolak —
+        // kandidat data terduplikasi, tidak layak disalin ke ujian baru.
         const { data: sourceQuestions, error: questionsError } = await supabase
             .from('official_exam_questions')
             .select('*')
@@ -166,6 +168,12 @@ export async function POST(request: NextRequest) {
             console.error('Error fetching source questions for duplicate:', questionsError)
             await supabase.from('official_exams').delete().eq('id', newExam.id)
             return NextResponse.json({ error: 'Gagal membaca soal sumber. Duplikasi dibatalkan.' }, { status: 500 })
+        }
+
+        if ((sourceQuestions || []).length > 500) {
+            console.error(`[duplicate] ABORT: ujian resmi ${source_exam_id} punya ${sourceQuestions!.length} soal (> 500) — data anomali.`)
+            await supabase.from('official_exams').delete().eq('id', newExam.id)
+            return NextResponse.json({ error: 'Sumber punya soal melebihi batas (kemungkinan terduplikasi). Periksa ujian sumber.' }, { status: 400 })
         }
 
         if (sourceQuestions && sourceQuestions.length > 0) {

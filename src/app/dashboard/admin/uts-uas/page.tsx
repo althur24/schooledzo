@@ -9,6 +9,7 @@ import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/Remedial
 import DailyExamCard from '@/components/exam/DailyExamCard'
 import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
+import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
 import { Plus, ChevronDown } from 'react-iconly'
 import { Loader2, Activity, Edit3, Trash2, GraduationCap, BarChart3, Copy, RefreshCw } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
@@ -49,6 +50,9 @@ interface ClassItem {
     grade_level: number | null
 }
 
+// Embed PostgREST bisa array (FK ambigu) — ambil elemen pertama
+const first = (v: unknown) => Array.isArray(v) ? v[0] : v
+
 function AdminUtsUasPageInner() {
     const router = useRouter()
     const pathname = usePathname()
@@ -87,6 +91,8 @@ function AdminUtsUasPageInner() {
 
     // Duplicate & Remedial states (dipakai UTS/UAS & Ulangan — source membedakan endpoint)
     const [showDuplicate, setShowDuplicate] = useState(false)
+    // Member batch ulangan multi-kelas — >1 = sumber dari card batch, pilih kelas dulu
+    const [duplicateMembers, setDuplicateMembers] = useState<any[]>([])
 
     // === Pencocokan guru pengampu untuk mode Ulangan di modal Buat Ujian ===
     // TA semua guru di tahun ajaran aktif — dipakai mencocokkan guru pengampu
@@ -409,17 +415,35 @@ function AdminUtsUasPageInner() {
         })
     }
 
-    const handleDeleteUlangan = (id: string) => {
+    // G2: hapus card batch = hapus SEMUA member (satu per kelas) — sisa batch
+    // yatim tidak boleh tetap muncul sebagai card. Guard per-member server tetap berlaku.
+    const handleDeleteUlangan = (exam: any, group?: ExamBatchGroup<any>) => {
+        const members = group?.isBatch ? group.members : [exam]
+        const classList = members
+            .map(m => first(ulanganTA(m)?.class)?.name)
+            .filter(Boolean)
+            .join(', ')
         setConfirmDialog({
             title: `Hapus ${labels.ulangan}`,
-            message: `Hapus ${labels.ulangan} ini? Semua soal dan submission akan dihapus.`,
+            message: members.length > 1
+                ? `Hapus ${labels.ulangan} ini dari ${members.length} kelas (${classList})? Semua soal dan submission SEMUA kelas akan dihapus.`
+                : `Hapus ${labels.ulangan} ini? Semua soal dan submission akan dihapus.`,
             onConfirm: async () => {
-                const res = await fetch(`/api/exams/${id}`, { method: 'DELETE' })
-                if (res.ok) {
-                    showToast(`${labels.ulangan} berhasil dihapus`, 'success')
+                const failedClasses: string[] = []
+                await Promise.all(members.map(async (m: any) => {
+                    try {
+                        const res = await fetch(`/api/exams/${m.id}`, { method: 'DELETE' })
+                        if (!res.ok) failedClasses.push(first(ulanganTA(m)?.class)?.name || m.title)
+                    } catch {
+                        failedClasses.push(first(ulanganTA(m)?.class)?.name || m.title)
+                    }
+                }))
+                if (failedClasses.length > 0) {
+                    showToast(`Gagal menghapus kelas: ${failedClasses.join(', ')}`, 'error')
+                } else if (members.length > 1) {
+                    showToast(`${labels.ulangan} dihapus dari ${members.length} kelas`, 'success')
                 } else {
-                    const err = await res.json().catch(() => null)
-                    showToast(err?.error || `Gagal menghapus ${labels.ulangan}`, 'error')
+                    showToast(`${labels.ulangan} berhasil dihapus`, 'success')
                 }
                 fetchUlangan()
                 setConfirmDialog(null)
@@ -427,7 +451,10 @@ function AdminUtsUasPageInner() {
         })
     }
 
-    const handleOpenDuplicate = async (exam: OfficialExam | any, mode: 'BIASA' | 'REMEDIAL', source: 'official' | 'ulangan' = 'official') => {
+    // G4 (admin): sumber dari card batch → daftar member (1 per kelas) disimpan;
+    // modal menampilkan selector kelas bila >1. Duplikasi/remedial ulangan
+    // memang per-kelas (terikat teaching_assignment).
+    const handleOpenDuplicate = async (exam: OfficialExam | any, mode: 'BIASA' | 'REMEDIAL', source: 'official' | 'ulangan' = 'official', group?: ExamBatchGroup<any>) => {
         setDuplicateExam(exam)
         setDuplicateSource(source)
         setDuplicateMode(mode)
@@ -436,6 +463,7 @@ function AdminUtsUasPageInner() {
         setUlanganRemedialMethod('ASLI')
         setRemedialPolicy({ policy: 'HIGHEST', cap: exam.subject?.kkm || 75 })
         setDroppedDuplicateClasses([])
+        setDuplicateMembers(group?.isBatch ? group.members : [exam])
 
         const pad = (n: number) => n.toString().padStart(2, '0')
         const now = new Date()
@@ -577,6 +605,23 @@ function AdminUtsUasPageInner() {
         }
     }
 
+    // Ganti kelas sumber di modal duplikasi/remedial ulangan batch — input yang
+    // sudah diedit admin (judul/jadwal/durasi) dipertahankan, daftar member
+    // juga dipertahankan (handleOpenDuplicate me-resetnya ke [exam]).
+    const switchDuplicateMember = async (member: any) => {
+        const membersSnapshot = duplicateMembers
+        const snapshot = { ...duplicateForm }
+        await handleOpenDuplicate(member, duplicateMode, 'ulangan')
+        setDuplicateMembers(membersSnapshot)
+        setDuplicateForm(prev => ({
+            ...prev,
+            title: snapshot.title,
+            start_time: snapshot.start_time,
+            duration_minutes: snapshot.duration_minutes,
+            window_end_time: snapshot.window_end_time,
+        }))
+    }
+
     const handleDuplicate = async () => {
         if (!duplicateExam) return
         setDuplicating(true)
@@ -706,10 +751,20 @@ function AdminUtsUasPageInner() {
 
     // Ambil object teaching_assignment (array-aware) untuk ulangan
     const ulanganTA = (exam: any) => Array.isArray(exam?.teaching_assignment) ? exam.teaching_assignment[0] : exam?.teaching_assignment
+    const ulanganClassId = (e: any) => first(ulanganTA(e)?.class)?.id
+    const ulanganSubjectId = (e: any) => first(ulanganTA(e)?.subject)?.id
 
     const filteredUlangan = ulanganExams.filter(e => {
-        if (filterSubject && ulanganTA(e)?.subject?.id !== filterSubject) return false
+        if (filterSubject && ulanganSubjectId(e) !== filterSubject) return false
         return true
+    })
+
+    // A3: grouping batch multi-kelas → 1 card per batch (key grup mengandung
+    // mapel, jadi filter mapel sebelum grouping ekuivalen dengan sesudah).
+    // Angka pengumpulan diagregasi dari semua member.
+    const ulanganGroups = groupExamsByBatch(filteredUlangan, {
+        subjectId: ulanganSubjectId,
+        classId: ulanganClassId,
     })
 
     // Group classes by school_level for the selection UI
@@ -872,16 +927,29 @@ function AdminUtsUasPageInner() {
                     />
                 ) : (
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                        {filteredUlangan.map((exam: any) => {
-                            const status = getExamStatus(exam)
-                            const isLive = status.isLive
-                            const isDone = status.isDone
-                            const counts = ulanganCounts[exam.id]
+                        {ulanganGroups.map((group) => {
+                            const exam = group.representative
+                            const repStatus = getExamStatus(exam)
+                            // Status agregat batch: live bila ADA member live,
+                            // selesai bila SEMUA member selesai.
+                            const memberStatuses = group.members.map(m => getExamStatus(m))
+                            const isLive = group.isBatch ? memberStatuses.some(s => s.isLive) : repStatus.isLive
+                            const isDone = group.isBatch ? memberStatuses.every(s => s.isDone) : repStatus.isDone
+                            const isActive = group.isBatch ? group.members.some((m: any) => m.is_active) : exam.is_active
 
-                            // Aksi utama kontekstual: Monitor saat live, Hasil saat selesai, Detail selebihnya
+                            // Agregasi pengumpulan semua member batch
+                            const counts = group.members.reduce((acc: { submitted: number; total: number }, m: any) => {
+                                const c = ulanganCounts[m.id]
+                                return { submitted: acc.submitted + (c?.submitted || 0), total: acc.total + (c?.total || 0) }
+                            }, { submitted: 0, total: 0 })
+                            const anyCounts = group.members.some((m: any) => ulanganCounts[m.id])
+
+                            // Aksi utama kontekstual: Monitor saat live, Hasil saat selesai, Detail selebihnya.
+                            // Batch: monitor membuka SEMUA kelas member (&batch=1).
+                            const monitorHref = `/dashboard/admin/uts-uas/${exam.id}/monitor?type=ulangan${group.isBatch ? '&batch=1' : ''}`
                             const primaryAction = isLive
-                                ? { label: 'Monitor Live', href: `/dashboard/admin/uts-uas/${exam.id}/monitor?type=ulangan`, icon: <Activity className="w-4 h-4" /> }
-                                : isDone && exam.is_active
+                                ? { label: 'Monitor Live', href: monitorHref, icon: <Activity className="w-4 h-4" /> }
+                                : isDone && isActive
                                     ? { label: 'Lihat Hasil', href: `/dashboard/admin/uts-uas/${exam.id}?type=ulangan#hasil`, icon: <BarChart3 className="w-4 h-4" /> }
                                     : { label: 'Detail', href: `/dashboard/admin/uts-uas/${exam.id}?type=ulangan`, icon: <Edit3 className="w-4 h-4" /> }
 
@@ -890,30 +958,30 @@ function AdminUtsUasPageInner() {
                                     label: 'Monitor Live',
                                     show: isLive,
                                     icon: <Activity className="w-4 h-4" />,
-                                    onClick: () => router.push(`/dashboard/admin/uts-uas/${exam.id}/monitor?type=ulangan`),
+                                    onClick: () => router.push(monitorHref),
                                 },
                                 {
                                     label: 'Lihat Hasil',
-                                    show: exam.is_active && !isLive,
+                                    show: isActive && !isLive,
                                     icon: <BarChart3 className="w-4 h-4" />,
                                     onClick: () => router.push(`/dashboard/admin/uts-uas/${exam.id}?type=ulangan#hasil`),
                                 },
                                 {
                                     label: `Duplikasi ${labels.ulangan}`,
                                     icon: <Copy className="w-4 h-4" />,
-                                    onClick: () => handleOpenDuplicate(exam, 'BIASA', 'ulangan'),
+                                    onClick: () => handleOpenDuplicate(exam, 'BIASA', 'ulangan', group.isBatch ? group : undefined),
                                 },
                                 {
                                     label: 'Buat Remedial',
                                     show: isDone && !exam.is_remedial,
                                     icon: <RefreshCw className="w-4 h-4" />,
-                                    onClick: () => handleOpenDuplicate(exam, 'REMEDIAL', 'ulangan'),
+                                    onClick: () => handleOpenDuplicate(exam, 'REMEDIAL', 'ulangan', group.isBatch ? group : undefined),
                                 },
                                 {
                                     label: 'Hapus',
                                     danger: true,
                                     icon: <Trash2 className="w-4 h-4" />,
-                                    onClick: () => handleDeleteUlangan(exam.id),
+                                    onClick: () => handleDeleteUlangan(exam, group.isBatch ? group : undefined),
                                 },
                             ]
 
@@ -922,7 +990,7 @@ function AdminUtsUasPageInner() {
                                     key={exam.id}
                                     exam={exam}
                                     showTeacher
-                                    submission={counts ? { submitted: counts.submitted } : undefined}
+                                    submission={anyCounts ? { submitted: counts.submitted } : undefined}
                                     primaryAction={primaryAction}
                                     menuItems={menuItems}
                                 />
@@ -1175,6 +1243,31 @@ function AdminUtsUasPageInner() {
                                 </div>
                             </div>
                         </div>
+
+                        {/* Batch multi-kelas: duplikasi/remedial ulangan per kelas — pilih kelas sumber */}
+                        {duplicateSource === 'ulangan' && duplicateMembers.length > 1 && (
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas Sumber</label>
+                                <select
+                                    value={duplicateExam.id}
+                                    onChange={(e) => {
+                                        const m = duplicateMembers.find(x => x.id === e.target.value)
+                                        if (m) switchDuplicateMember(m)
+                                    }}
+                                    disabled={remedialLoading}
+                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                                >
+                                    {duplicateMembers.map((m: any) => (
+                                        <option key={m.id} value={m.id}>{first(ulanganTA(m)?.class)?.name || '-'}</option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-text-secondary mt-1">
+                                    {duplicateMode === 'REMEDIAL'
+                                        ? 'Remedial dibuat per kelas — pilih kelas untuk melihat siswanya.'
+                                        : `Duplikasi ${labels.ulangan.toLowerCase()} mengikuti kelas sumber yang dipilih.`}
+                                </p>
+                            </div>
+                        )}
 
                         {/* Title */}
                         <div>

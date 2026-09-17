@@ -393,9 +393,12 @@ export async function POST(request: NextRequest) {
         }
 
         // Check if exam exists
+        // official_exam_questions membawa order_index — question_order siswa
+        // dibangun dari urutan ini dan di-sort eksplisit (embed tanpa sort
+        // mengikuti urutan FISIK baris yang bisa acak — paritas fix ulangan).
         const { data: exam } = await supabase
             .from('official_exams')
-            .select('*, official_exam_questions(id)')
+            .select('*, official_exam_questions(id, order_index)')
             .eq('id', exam_id)
             .single()
 
@@ -503,9 +506,13 @@ export async function POST(request: NextRequest) {
         }
 
         // Create randomized question order if enabled
-        const questionIds = exam.official_exam_questions.map((q: any) => q.id)
+        // Sort eksplisit by order_index (tiebreaker id) — urutan return embed
+        // adalah urutan fisik baris dan bisa acak (paritas fix ulangan).
+        const sortedQuestions = [...(exam.official_exam_questions || [])].sort((a: any, b: any) =>
+            (a.order_index ?? 0) - (b.order_index ?? 0) || String(a.id).localeCompare(String(b.id)))
+        const questionIds = sortedQuestions.map((q: any) => q.id)
         const questionOrder = exam.is_randomized
-            ? questionIds.sort(() => Math.random() - 0.5)
+            ? [...questionIds].sort(() => Math.random() - 0.5)
             : questionIds
 
         // Calculate max score

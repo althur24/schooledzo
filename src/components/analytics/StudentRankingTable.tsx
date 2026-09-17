@@ -33,6 +33,9 @@ export default function StudentRankingTable({ data, kkm, showViolations }: Stude
                         <tr className="text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
                             <th className="text-center py-2.5 w-12">#</th>
                             <th className="text-left py-2.5">Siswa</th>
+                            {data[0]?.className && (
+                                <th className="text-center py-2.5">Kelas</th>
+                            )}
                             <th className="text-center py-2.5">Nilai</th>
                             <th className="text-center py-2.5">Persentase</th>
                             {data[0]?.duration !== undefined && (
@@ -62,6 +65,13 @@ export default function StudentRankingTable({ data, kkm, showViolations }: Stude
                                         <p className="text-xs font-semibold text-slate-700">{s.name}</p>
                                         <p className="text-[10px] text-slate-400">{s.nis}</p>
                                     </td>
+                                    {data[0]?.className && (
+                                        <td className="text-center py-2.5">
+                                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                                                {s.className || '-'}
+                                            </span>
+                                        </td>
+                                    )}
                                     <td className="text-center py-2.5">
                                         <span className="text-xs font-bold text-slate-700">
                                             {s.score}/{s.maxScore}

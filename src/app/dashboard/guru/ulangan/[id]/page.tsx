@@ -62,8 +62,8 @@ interface Exam {
     is_active: boolean
     pending_publish: boolean
     batch_id?: string | null
-    /** Kelas paralel dalam batch yang sama (dari API) */
-    batch_siblings?: { id: string; class_name: string }[]
+    /** Kelas paralel dalam batch yang sama (dari API — scope-filtered utk GURU) */
+    batch_siblings?: { id: string; class_id?: string; class_name: string }[]
     is_randomized: boolean
     show_results_immediately: boolean
     results_released: boolean
@@ -216,8 +216,20 @@ function EditExamPageInner() {
     const [selectedSubmission, setSelectedSubmission] = useState<any>(null)
     const [resettingId, setResettingId] = useState<string | null>(null)
     const [resetMenuId, setResetMenuId] = useState<string | null>(null)
-    // Roster kelas year-aware — untuk panel "Belum Mengerjakan" (paritas halaman kuis)
-    const [classStudents, setClassStudents] = useState<ClassStudent[]>([])
+    // Roster kelas year-aware — untuk panel "Belum Mengerjakan" (paritas halaman kuis).
+    // Batch mode: roster SEMUA kelas member, tiap baris membawa memberId/className.
+    const [classStudents, setClassStudents] = useState<(ClassStudent & { memberId?: string; className?: string })[]>([])
+    // Filter kelas di tab hasil batch: '' = Semua Kelas, selainnya = exam id member
+    const [resultsClassFilter, setResultsClassFilter] = useState('')
+
+    // Mode batch: exam ini bagian batch multi-kelas dengan sibling yang terlihat
+    // (batch_siblings scope-filtered server-side — co-teacher parsial hanya kelasnya)
+    const isBatchView = !!(exam?.batch_id && (exam.batch_siblings?.length || 0) > 0)
+    // Opsi kelas: kelas exam ini + sibling, urut abjad
+    const batchMembers = [
+        { id: examId, class_name: exam?.teaching_assignment?.class?.name || 'Kelas Ini' },
+        ...(exam?.batch_siblings || []).map(s => ({ id: s.id, class_name: s.class_name })),
+    ].sort((a, b) => a.class_name.localeCompare(b.class_name, 'id'))
 
     // Edit settings state
     const [showEditSettings, setShowEditSettings] = useState(false)
@@ -313,23 +325,37 @@ function EditExamPageInner() {
 
     // Roster year-aware untuk panel "Belum Mengerjakan": siswa yang terdaftar di
     // kelas ini pada tahun ajaran ulangan — bukan roster sekarang (siswa bisa
-    // sudah naik kelas). Effect terpisah dari fetchExam agar tidak ikut
-    // terpanggil oleh auto-poll review AI (tiap 5 dtk) — cukup sekali per exam.
+    // sudah naik kelas). Batch mode: roster SEMUA kelas member (batch dibuat
+    // serentak di tahun ajaran yang sama → yearId exam ini berlaku untuk semua).
+    // Effect terpisah dari fetchExam agar tidak ikut terpanggil oleh auto-poll
+    // review AI (tiap 5 dtk) — cukup sekali per exam.
     useEffect(() => {
         const ta = exam?.teaching_assignment
-        const classId = ta?.class?.id
-        if (!classId) return
-        let cancelled = false
+        const primaryClassId = ta?.class?.id
+        if (!primaryClassId) return
         const yearId = ta?.academic_year?.id || ''
-        fetch(`/api/students?class_id=${classId}&enrollment_year_id=${yearId}`)
-            .then(r => r.ok ? r.json() : [])
-            .then((d: ClassStudent[]) => { if (!cancelled) setClassStudents(Array.isArray(d) ? d : []) })
-            .catch(() => { })
+        const memberClasses = [
+            { memberId: examId, classId: primaryClassId, className: ta?.class?.name || '' },
+            ...(exam?.batch_siblings || []).map(s => ({ memberId: s.id, classId: s.class_id || '', className: s.class_name })),
+        ].filter(mc => mc.classId)
+        let cancelled = false
+        Promise.all(
+            memberClasses.map(mc =>
+                fetch(`/api/students?class_id=${mc.classId}&enrollment_year_id=${yearId}`)
+                    .then(r => r.ok ? r.json() : [])
+                    .then((d: ClassStudent[]) => (Array.isArray(d) ? d : []).map(s => ({
+                        ...s, memberId: mc.memberId, className: mc.className,
+                    })))
+                    .catch(() => [] as (ClassStudent & { memberId: string; className: string })[])
+            )
+        ).then(lists => {
+            if (!cancelled) setClassStudents(lists.flat())
+        })
         return () => { cancelled = true }
         // Primitif saja — re-fetch exam (poll review AI, publish, dsb.) tidak
         // perlu memicu fetch roster ulang
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [exam?.id, exam?.teaching_assignment?.class?.id])
+    }, [exam?.id, exam?.batch_id, exam?.teaching_assignment?.class?.id])
 
     // Auto-poll when questions are being AI-reviewed
     useEffect(() => {
@@ -354,7 +380,12 @@ function EditExamPageInner() {
     const fetchResults = useCallback(async () => {
         setResultsLoading(true)
         try {
-            const res = await fetch(`/api/exam-submissions?exam_id=${examId}`)
+            // Batch mode: "Semua Kelas" = submission SEMUA member batch
+            // (scope-filtered server-side); kelas spesifik = exam member tsb.
+            const url = (isBatchView && !resultsClassFilter)
+                ? `/api/exam-submissions?batch_id=${exam?.batch_id}`
+                : `/api/exam-submissions?exam_id=${resultsClassFilter || examId}`
+            const res = await fetch(url)
             if (res.ok) {
                 const data = await res.json()
                 setSubmissions(Array.isArray(data) ? data : [])
@@ -364,7 +395,8 @@ function EditExamPageInner() {
         } finally {
             setResultsLoading(false)
         }
-    }, [examId])
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [examId, exam?.batch_id, isBatchView, resultsClassFilter])
 
     // Helper function for reset
     const handleResetAttempt = async (submissionId: string, studentName: string, mode: 'soft' | 'hard') => {
@@ -677,21 +709,34 @@ function EditExamPageInner() {
         }
     }
 
+    // G3: "Bagikan Hasil" pada batch = bagikan ke SEMUA member (scope-filtered
+    // server-side per member) — tanpa ini hanya representative yang dibagikan
+    // dan siswa kelas lain tidak melihat nilainya.
     const handleShareResults = async () => {
-        if (!confirm('Apakah Anda yakin ingin membagikan hasil ke siswa sekarang? Siswa akan bisa melihat nilai mereka.')) return
-        
+        const memberIds = isBatchView
+            ? [examId, ...(exam!.batch_siblings || []).map(s => s.id)]
+            : [examId]
+        if (!confirm(memberIds.length > 1
+            ? `Apakah Anda yakin ingin membagikan hasil ke siswa SEMUA ${memberIds.length} kelas sekarang? Siswa akan bisa melihat nilai mereka.`
+            : 'Apakah Anda yakin ingin membagikan hasil ke siswa sekarang? Siswa akan bisa melihat nilai mereka.')) return
+
         try {
-            const res = await fetch(`/api/exams/${examId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ results_released: true })
-            })
-            if (res.ok) {
-                setAlertInfo({ type: 'success', title: 'Berhasil', message: `Hasil ${labels.ulangan.toLowerCase()} telah dibagikan ke siswa.` })
-                fetchExam() // Refresh to update button visibility
-            } else {
+            const results = await Promise.allSettled(memberIds.map(id =>
+                fetch(`/api/exams/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ results_released: true })
+                }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r })
+            ))
+            const failed = results.filter(r => r.status !== 'fulfilled').length
+            if (failed === 0) {
+                setAlertInfo({ type: 'success', title: 'Berhasil', message: `Hasil ${labels.ulangan.toLowerCase()} telah dibagikan ke siswa${memberIds.length > 1 ? ` ${memberIds.length} kelas` : ''}.` })
+            } else if (failed === memberIds.length) {
                 throw new Error('Gagal membagikan hasil')
+            } else {
+                setAlertInfo({ type: 'warning', title: 'Sebagian Berhasil', message: `Hasil dibagikan di ${memberIds.length - failed} kelas; gagal di ${failed} kelas. Coba ulangi.` })
             }
+            fetchExam() // Refresh to update button visibility
         } catch (error: any) {
             setAlertInfo({ type: 'error', title: 'Gagal', message: error.message })
         }
@@ -1260,22 +1305,43 @@ function EditExamPageInner() {
     // Belum mengerjakan = roster kelas − semua siswa yang punya record submission
     // (termasuk yang membuka tapi belum mengumpulkan — mereka muncul di tabel
     // sebagai "Mengerjakan", bukan di panel ini). Paritas dengan halaman kuis.
+    // Batch mode: roster mengikuti filter kelas; "Semua Kelas" dikelompokkan per kelas.
     const anyAttemptStudentIds = submissions.map(s => s.student?.id || s.student_id)
-    const notSubmittedStudents = classStudents
+    const rosterInView = (isBatchView && resultsClassFilter)
+        ? classStudents.filter(s => s.memberId === resultsClassFilter)
+        : classStudents
+    const notSubmittedStudents = rosterInView
         .filter(s => !anyAttemptStudentIds.includes(s.id))
         .sort((a, b) => a.user.full_name.localeCompare(b.user.full_name, 'id'))
+
+    // Nama kelas per baris submission — batch mode dari embed exam member
+    // (setiap member = 1 kelas); mode tunggal dari kelas exam ini.
+    const submissionClassName = (sub: any): string => {
+        if (!isBatchView) return exam?.teaching_assignment?.class?.name || '-'
+        const ex = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
+        const ta = ex?.teaching_assignment
+        const cls = Array.isArray(ta) ? ta[0]?.class : ta?.class
+        const clsObj = Array.isArray(cls) ? cls[0] : cls
+        return clsObj?.name || '-'
+    }
 
     const handleDownloadExcel = () => {
         if (!exam || submissions.length === 0) return
 
-        const sortedSubmissions = [...submissions].sort((a: any, b: any) =>
-            (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '', 'id')
-        )
+        const sortedSubmissions = [...submissions].sort((a: any, b: any) => {
+            // Batch mode: kelompokkan per kelas dulu supaya rekap per kelas rapat
+            if (isBatchView) {
+                const clsA = submissionClassName(a)
+                const clsB = submissionClassName(b)
+                if (clsA !== clsB) return clsA.localeCompare(clsB, 'id')
+            }
+            return (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '', 'id')
+        })
 
         const formattedData = sortedSubmissions.map((sub: any, index: number) => {
             const maxScore = sub.max_score || 1
             const percentage = Math.round((sub.total_score / maxScore) * 100)
-            
+
             let status = 'Mengerjakan'
             if (sub.is_submitted) {
                 status = sub.is_graded ? 'Selesai' : 'Perlu Koreksi'
@@ -1285,6 +1351,7 @@ function EditExamPageInner() {
                 'No': index + 1,
                 'Nama Siswa': sub.student?.user?.full_name || '-',
                 'NIS': sub.student?.nis || '-',
+                ...(isBatchView ? { 'Kelas': submissionClassName(sub) } : {}),
                 'Skor': sub.total_score || 0,
                 'Max Skor': sub.max_score || 0,
                 'Persentase': `${percentage}%`,
@@ -1296,11 +1363,12 @@ function EditExamPageInner() {
         })
 
         const ws = XLSX.utils.json_to_sheet(formattedData)
-        
+
         const colWidths = [
             { wch: 5 },  // No
             { wch: 30 }, // Nama
             { wch: 15 }, // NIS
+            ...(isBatchView ? [{ wch: 15 }] : []), // Kelas
             { wch: 10 }, // Skor
             { wch: 10 }, // Max
             { wch: 15 }, // Persentase
@@ -1314,8 +1382,12 @@ function EditExamPageInner() {
         const wb = XLSX.utils.book_new()
         XLSX.utils.book_append_sheet(wb, ws, "Hasil_Ulangan")
 
-        const fileName = `Hasil_Ulangan_${exam.title.replace(/ /g, '_')}.xlsx`
-        
+        // Nama file mengikuti filter kelas (mirror pola UTS/UAS admin)
+        const filterClassName = (isBatchView && resultsClassFilter)
+            ? (batchMembers.find(m => m.id === resultsClassFilter)?.class_name || 'Filter').replace(/ /g, '_')
+            : (isBatchView ? 'Semua_Kelas' : '')
+        const fileName = `Hasil_Ulangan_${exam.title.replace(/ /g, '_')}${filterClassName ? `_${filterClassName}` : ''}.xlsx`
+
         XLSX.writeFile(wb, fileName)
     }
 
@@ -2591,7 +2663,20 @@ function EditExamPageInner() {
 
                     {/* Action Bar — matches UTS/UAS pattern */}
                     <div className="flex justify-between items-center bg-white dark:bg-surface-dark border border-secondary/20 p-3 rounded-xl shadow-sm">
-                        <div className="flex gap-3 items-center">
+                        <div className="flex gap-3 items-center flex-wrap">
+                            {isBatchView && (
+                                <select
+                                    value={resultsClassFilter}
+                                    onChange={(e) => setResultsClassFilter(e.target.value)}
+                                    className="px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm font-bold"
+                                    title="Filter kelas"
+                                >
+                                    <option value="">Semua Kelas</option>
+                                    {batchMembers.map(m => (
+                                        <option key={m.id} value={m.id}>{m.class_name}</option>
+                                    ))}
+                                </select>
+                            )}
                             {exam?.is_active && (
                                 <span className="flex items-center gap-1.5 text-xs font-bold text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-500/20 px-2.5 py-1 rounded-full">
                                     <span className="relative flex h-2 w-2">
@@ -2604,20 +2689,25 @@ function EditExamPageInner() {
                             <span className="text-sm font-medium text-text-secondary border-l border-secondary/20 pl-3">{submissions.length} submission</span>
                         </div>
                         <div className="flex items-center gap-2">
-                           {exam?.show_results_immediately === false && exam?.results_released === false && submissions.length > 0 && (
+                            {exam?.show_results_immediately === false && exam?.results_released === false && submissions.length > 0 && (
                                 <Button onClick={handleShareResults} className="bg-primary hover:bg-primary-dark text-white text-sm">
                                     Bagikan Hasil
                                 </Button>
                             )}
                             {submissions.length > 0 && (
                                 <PDFDownloadButton
-                                    assessmentId={examId}
+                                    assessmentId={(isBatchView && resultsClassFilter) ? resultsClassFilter : examId}
                                     assessmentType="exam"
+                                    batchId={(isBatchView && !resultsClassFilter) ? (exam?.batch_id || undefined) : undefined}
                                     meta={{
                                         typeLabel: labels.ulangan,
                                         title: exam?.title || '',
                                         subjectName: exam?.teaching_assignment?.subject?.name || '',
-                                        className: exam?.teaching_assignment?.class?.name || '',
+                                        className: isBatchView
+                                            ? (resultsClassFilter
+                                                ? (batchMembers.find(m => m.id === resultsClassFilter)?.class_name || '')
+                                                : `Semua Kelas (${batchMembers.length})`)
+                                            : (exam?.teaching_assignment?.class?.name || ''),
                                         teacherName: exam?.teaching_assignment?.teacher?.user?.full_name,
                                         academicYearName: exam?.teaching_assignment?.academic_year?.name,
                                         dateStart: exam?.start_time || null,
@@ -2635,20 +2725,25 @@ function EditExamPageInner() {
                         </div>
                     </div>
 
-                    {/* Siswa belum mengerjakan — paritas dengan halaman hasil kuis */}
+                    {/* Siswa belum mengerjakan — paritas dengan halaman hasil kuis;
+                        batch "Semua Kelas" dikelompokkan per kelas (pola UTS/UAS) */}
                     <NotSubmittedPanel
                         students={notSubmittedStudents.map(student => ({
                             id: student.id,
                             name: student.user.full_name,
                             nis: student.nis,
+                            className: student.className,
                         }))}
+                        groupByClass={isBatchView && !resultsClassFilter}
                     />
 
-                    {/* Analytics Dashboard — hanya attempt yang sudah dikumpulkan */}
+                    {/* Analytics Dashboard — hanya attempt yang sudah dikumpulkan.
+                        Kelas spesifik = analytics member; "Semua Kelas" = merge batch. */}
                     {submissions.filter((s: any) => s.is_submitted).length > 0 && (
                         <AssessmentAnalytics
-                            assessmentId={examId}
+                            assessmentId={(isBatchView && resultsClassFilter) ? resultsClassFilter : examId}
                             assessmentType="exam"
+                            batchId={(isBatchView && !resultsClassFilter) ? (exam?.batch_id || undefined) : undefined}
                         />
                     )}
 
@@ -2670,6 +2765,7 @@ function EditExamPageInner() {
                                     <tr>
                                         <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white">No</th>
                                         <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white">Nama Siswa</th>
+                                        {isBatchView && <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white">Kelas</th>}
                                         <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Skor</th>
                                         <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Durasi</th>
                                         <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white">Pelanggaran</th>
@@ -2688,6 +2784,13 @@ function EditExamPageInner() {
                                                     <span className="text-sm font-medium text-text-main dark:text-white">{sub.student?.user?.full_name || '-'}</span>
                                                     <span className="text-xs text-text-secondary ml-2">{sub.student?.nis}</span>
                                                 </td>
+                                                {isBatchView && (
+                                                    <td className="px-4 py-3">
+                                                        <span className="px-2.5 py-1 bg-secondary/10 dark:bg-secondary/20 rounded-lg text-xs font-bold text-text-main dark:text-white whitespace-nowrap">
+                                                            {submissionClassName(sub)}
+                                                        </span>
+                                                    </td>
+                                                )}
                                                 <td className="px-4 py-3 text-center">
                                                     {sub.is_submitted ? (
                                                         <span className={`font-bold text-sm ${percentage >= resolvedKkm ? 'text-green-600' : percentage >= resolvedKkm - 15 ? 'text-amber-600' : 'text-red-600'}`}>
@@ -2722,7 +2825,9 @@ function EditExamPageInner() {
                                                 <td className="px-4 py-3 text-center">
                                                     {sub.is_submitted ? (
                                                         <div className="flex items-center justify-center gap-2">
-                                                            <Link href={`/dashboard/guru/ulangan/${examId}/hasil/${sub.id}`}>
+                                                            {/* exam member pemilik submission — halaman koreksi & tombol
+                                                                back mengarah ke exam kelas yang benar (batch mode) */}
+                                                            <Link href={`/dashboard/guru/ulangan/${sub.exam_id || examId}/hasil/${sub.id}`}>
                                                                 <Button size="sm" variant={sub.is_graded ? 'ghost' : 'primary'} className={!sub.is_graded ? 'bg-gradient-to-r from-blue-600 to-cyan-600' : ''}>
                                                                     {sub.is_graded ? 'Lihat' : 'Koreksi'}
                                                                 </Button>

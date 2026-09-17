@@ -286,7 +286,10 @@ async function main() {
             const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'chrome-mc-'))
             execFile(CHROME, [
                 '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-                `--user-data-dir=${tmp}`, '--virtual-time-budget=15000', '--dump-dom',
+                // Budget 30 dtk (dulu 15): publish batch kini sedikit lebih lambat
+                // (cek idempotency per sibling) — snapshot 15 dtk sempat menangkap
+                // DOM di tengah hydration (soal ke-1 belum mount) = flake palsu.
+                `--user-data-dir=${tmp}`, '--virtual-time-budget=30000', '--dump-dom',
                 `http://localhost:${PROXY_PORT}/dashboard/siswa/ulangan/${examC}`,
             ], { maxBuffer: 64 * 1024 * 1024, timeout: 60000 }, (err, stdout) => {
                 fs.rmSync(tmp, { recursive: true, force: true })

@@ -67,6 +67,8 @@ export interface HeatmapStudent {
 export interface StudentRankItem {
     name: string
     nis: string
+    /** Nama kelas — terisi saat merge batch ulangan multi-kelas */
+    className?: string
     score: number
     maxScore: number
     percentage: number
@@ -89,12 +91,15 @@ interface AssessmentAnalyticsProps {
     assessmentId: string
     assessmentType: 'quiz' | 'exam' | 'official-exam'
     classId?: string // for official-exam multi-class filter
+    /** Merge analitik SEMUA member batch ulangan multi-kelas (mode "Semua Kelas") */
+    batchId?: string
 }
 
 export default function AssessmentAnalytics({
     assessmentId,
     assessmentType,
-    classId
+    classId,
+    batchId
 }: AssessmentAnalyticsProps) {
     const [data, setData] = useState<AnalyticsData | null>(null)
     const [loading, setLoading] = useState(true)
@@ -106,8 +111,11 @@ export default function AssessmentAnalytics({
             setLoading(true)
             setError(null)
             try {
-                const params = classId ? `?class_id=${classId}` : ''
-                const res = await fetch(`/api/analytics/${assessmentType}/${assessmentId}${params}`)
+                const params = new URLSearchParams()
+                if (classId) params.set('class_id', classId)
+                if (batchId) params.set('batch_id', batchId)
+                const qs = params.toString()
+                const res = await fetch(`/api/analytics/${assessmentType}/${assessmentId}${qs ? `?${qs}` : ''}`)
                 if (!res.ok) {
                     throw new Error('Gagal memuat data analytics')
                 }
@@ -120,7 +128,7 @@ export default function AssessmentAnalytics({
             }
         }
         fetchAnalytics()
-    }, [assessmentId, assessmentType, classId])
+    }, [assessmentId, assessmentType, classId, batchId])
 
     if (loading) {
         return (

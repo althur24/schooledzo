@@ -7,6 +7,7 @@ import { getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
 import { getBatchInfo } from '@/lib/examBatch'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { sanitizePolicyInput } from '@/lib/remedialScore'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // GET all exams
 export async function GET(request: NextRequest) {
@@ -298,12 +299,17 @@ export async function POST(request: NextRequest) {
         // atau duplikasi biasa (duplicate_from_exam_id, meniru official-exams/duplicate).
         // duplicateSourceId sudah tervalidasi tenant/ownership di guard atas.
         if (duplicate_questions && duplicateSourceId) {
-            const { data: originalQuestions, error: fetchError } = await supabase
-                .from('exam_questions')
-                .select('*')
-                .eq('exam_id', duplicateSourceId)
-
-            if (fetchError) {
+            // fetchAllRows (batas 1000 diam-diam) + order pedagogis (order_index
+            // dulu, bukan id UUID acak) — baris salinan ter-insert terurut.
+            let originalQuestions: any[] = []
+            try {
+                originalQuestions = await fetchAllRows(supabase
+                    .from('exam_questions')
+                    .select('*')
+                    .eq('exam_id', duplicateSourceId)
+                    .order('order_index', { ascending: true })
+                    .order('id'))
+            } catch (fetchError) {
                 console.error('Error fetching source questions for duplicate:', fetchError)
                 await supabase.from('exams').delete().eq('id', data.id)
                 return NextResponse.json({ error: 'Gagal membaca soal sumber. Duplikasi dibatalkan.' }, { status: 500 })

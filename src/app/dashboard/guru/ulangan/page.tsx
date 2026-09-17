@@ -9,6 +9,7 @@ import Card from '@/components/ui/Card'
 import DailyExamCard from '@/components/exam/DailyExamCard'
 import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
+import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
@@ -67,6 +68,12 @@ interface TeachingAssignment {
     class: { id: string; name: string }
 }
 
+// Embed PostgREST bisa array (FK ambigu) — ambil elemen pertama
+const first = (v: unknown) => Array.isArray(v) ? v[0] : v
+const taOf = (e: Exam) => first(e.teaching_assignment) as Exam['teaching_assignment'] | undefined
+const classIdOf = (e: Exam) => first(taOf(e)?.class)?.id as string | undefined
+const subjectIdOf = (e: Exam) => first(taOf(e)?.subject)?.id as string | undefined
+
 export default function GuruUlanganPage() {
     const { user } = useAuth()
     const router = useRouter()
@@ -80,6 +87,8 @@ export default function GuruUlanganPage() {
     const [loading, setLoading] = useState(true)
     const [returnedExams, setReturnedExams] = useState<{examId: string, title: string, returnedCount: number}[]>([])
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
+    // Filter kelas di list ulangan (batch multi-kelas + filter manual guru)
+    const [classFilter, setClassFilter] = useState('')
     const [showCreate, setShowCreate] = useState(false)
     const [creating, setCreating] = useState(false)
     const [form, setForm] = useState({
@@ -129,6 +138,8 @@ export default function GuruUlanganPage() {
     // Remedial States
     const [showRemedial, setShowRemedial] = useState(false)
     const [remedialExam, setRemedialExam] = useState<Exam | null>(null)
+    // Member batch (1 per kelas) — >1 = remedial dari card batch, pilih kelas dulu
+    const [remedialMembers, setRemedialMembers] = useState<Exam[]>([])
     const [remedialStudents, setRemedialStudents] = useState<any[]>([])
     const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
     const [remedialMethod, setRemedialMethod] = useState<'ASLI' | 'BARU'>('ASLI')
@@ -233,7 +244,6 @@ export default function GuruUlanganPage() {
 
             // Exam milik saya = TA anchor saya ATAU co-teacher (mapel+kelas yang
             // saya ampou) — paritas filter server GET /api/exams (co-teaching).
-            const first = (v: unknown) => Array.isArray(v) ? v[0] : v
             const myExams = examsData.filter((e: Exam) => {
                 const ta = first(e.teaching_assignment) as any
                 const subjId = first(ta?.subject)?.id
@@ -489,9 +499,32 @@ export default function GuruUlanganPage() {
         }
     }
 
-    const handleDelete = async (id: string) => {
-        if (!confirm(`Hapus ${labels.ulangan.toLowerCase()} ini?`)) return
-        await fetch(`/api/exams/${id}`, { method: 'DELETE' })
+    // G2: hapus card batch = hapus SEMUA member (satu per kelas). Tanpa ini,
+    // sisanya jadi batch yatim yang tetap muncul sebagai card. Guard per-member
+    // di server (canManageExamCoTaught) tetap berlaku; kegagalan parsial dilaporkan.
+    const handleDelete = async (exam: Exam, group?: ExamBatchGroup<Exam>) => {
+        const members = group?.isBatch ? group.members : [exam]
+        if (members.length > 1) {
+            const classNames = members
+                .map(m => first(taOf(m)?.class)?.name)
+                .filter(Boolean)
+                .join(', ')
+            if (!confirm(`Hapus ${labels.ulangan.toLowerCase()} ini dari ${members.length} kelas (${classNames})? Semua soal & hasil pengerjaan siswa di semua kelas ikut terhapus.`)) return
+        } else {
+            if (!confirm(`Hapus ${labels.ulangan.toLowerCase()} ini?`)) return
+        }
+        const failedClasses: string[] = []
+        await Promise.all(members.map(async (m) => {
+            try {
+                const res = await fetch(`/api/exams/${m.id}`, { method: 'DELETE' })
+                if (!res.ok) failedClasses.push(first(taOf(m)?.class)?.name || m.title)
+            } catch {
+                failedClasses.push(first(taOf(m)?.class)?.name || m.title)
+            }
+        }))
+        if (failedClasses.length > 0) {
+            alert(`${members.length - failedClasses.length} kelas berhasil dihapus. GAGAL (${failedClasses.length}): ${failedClasses.join(', ')}. Coba ulangi untuk kelas tersebut.`)
+        }
         fetchData()
     }
 
@@ -673,9 +706,22 @@ export default function GuruUlanganPage() {
         }
     }
 
-    const handleOpenRemedial = async (exam: Exam) => {
-        setRemedialExam(exam)
+    // G4: remedial dari card batch → daftar member (1 per kelas) dipilih dulu;
+    // remedial memang per-kelas by design (siswa remedial terdefinisi per kelas).
+    // Modal menampilkan selector kelas saat remedialMembers.length > 1.
+    const handleOpenRemedial = async (exam: Exam, group?: ExamBatchGroup<Exam>) => {
+        const members = group?.isBatch ? group.members : [exam]
+        setRemedialMembers(members)
         setShowRemedial(true)
+        // exam = representative card (pending_publish bila ada) — mulai dari situ,
+        // bukan members[0] (tertua), agar selector kelas sinkron dengan card.
+        await loadRemedialMember(exam)
+    }
+
+    // Muat KKM + siswa + submission untuk satu member (kelas) terpilih — dipakai
+    // ulang saat guru berganti kelas di modal remedial batch.
+    const loadRemedialMember = async (exam: Exam) => {
+        setRemedialExam(exam)
         setRemedialLoading(true)
         setSelectedStudentIds([])
         setRemedialMethod('ASLI')
@@ -683,16 +729,19 @@ export default function GuruUlanganPage() {
         setRemedialStartTime('')
 
         try {
-            const classId = exam.teaching_assignment?.class?.id
-            let kkm = exam.teaching_assignment?.subject?.kkm || 75
+            const ta: any = first(exam.teaching_assignment)
+            const cls: any = first(ta?.class)
+            const subj: any = first(ta?.subject)
+            const classId = cls?.id
+            let kkm = subj?.kkm || 75
 
             // Resolve Granular KKM if available
             try {
-                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${exam.teaching_assignment?.subject?.id}`)
+                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${subj?.id}`)
                 if (kkmRes.ok) {
                     const kkmData = await kkmRes.json()
-                    const classLevel = (exam.teaching_assignment?.class as any)?.school_level
-                    const gradeLevel = (exam.teaching_assignment?.class as any)?.grade_level
+                    const classLevel = cls?.school_level
+                    const gradeLevel = cls?.grade_level
                     const granular = kkmData.find((k: any) => k.school_level === classLevel && k.grade_level === gradeLevel)
                     if (granular) kkm = granular.kkm
                 }
@@ -706,7 +755,7 @@ export default function GuruUlanganPage() {
             if (!classId) throw new Error('Class ID missing')
 
             const [studentsRes, subsRes] = await Promise.all([
-                fetch(`/api/students?class_id=${classId}&enrollment_year_id=${(exam.teaching_assignment as any)?.academic_year_id || ''}`),
+                fetch(`/api/students?class_id=${classId}&enrollment_year_id=${(ta as any)?.academic_year_id || ''}`),
                 fetch(`/api/exam-submissions?exam_id=${exam.id}&teacher_view=true`)
             ])
             const studentsData = await studentsRes.json()
@@ -749,7 +798,7 @@ export default function GuruUlanganPage() {
             }
 
             const payload = {
-                teaching_assignment_id: remedialExam.teaching_assignment.id,
+                teaching_assignment_id: (first(remedialExam.teaching_assignment) as any)?.id,
                 title: `[Remedial] ${remedialExam.title}`,
                 description: `Remedial untuk ulangan: ${remedialExam.title}`,
                 start_time: formattedRemedialStartTime,
@@ -785,6 +834,21 @@ export default function GuruUlanganPage() {
             setCreating(false)
         }
     }
+
+    // Grouping batch multi-kelas → 1 card per batch (key batch_id|mapel; guard
+    // batch lama & baris tanpa embed di examBatchGrouping). Angka pengumpulan
+    // diagregasi dari member yang TERLIHAT (co-teacher parsial hanya kelasnya);
+    // badge "N Kelas Paralel" dari server tetap mencerminkan batch penuh.
+    const examGroups = groupExamsByBatch(exams, { subjectId: subjectIdOf, classId: classIdOf })
+    const visibleExamGroups = classFilter
+        ? examGroups.filter(g => g.classIds.includes(classFilter))
+        : examGroups
+    // Opsi filter kelas = kelas unik dari TA saya (urut nama)
+    const classOptions = [...new Map(
+        teachingAssignments
+            .map(ta => [ta.class?.id, ta.class?.name] as [string, string])
+            .filter(([id]) => !!id)
+    ).entries()].sort((a, b) => a[1].localeCompare(b[1], 'id'))
 
     return (
         <div className="space-y-6">
@@ -868,10 +932,25 @@ export default function GuruUlanganPage() {
             ) : (
                 <div className="space-y-8">
                     <div>
-                        <h2 className="text-xl font-bold text-text-main dark:text-white mb-4 flex items-center gap-2">
-                            <div className="text-red-500"><Clock set="bold" primaryColor="currentColor" size={24} /></div>
-                            {labels.ulangan} Harian
-                        </h2>
+                        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                            <h2 className="text-xl font-bold text-text-main dark:text-white flex items-center gap-2">
+                                <div className="text-red-500"><Clock set="bold" primaryColor="currentColor" size={24} /></div>
+                                {labels.ulangan} Harian
+                            </h2>
+                            {classOptions.length > 1 && (
+                                <select
+                                    value={classFilter}
+                                    onChange={(e) => setClassFilter(e.target.value)}
+                                    className="px-4 py-2 bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm font-bold"
+                                    title="Filter kelas"
+                                >
+                                    <option value="">Semua Kelas</option>
+                                    {classOptions.map(([id, name]) => (
+                                        <option key={id} value={id}>{name}</option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
                         {exams.length === 0 ? (
                             <div className="bg-secondary/5 border-2 border-dashed border-secondary/20 rounded-2xl p-8 text-center">
                                 <div className="text-secondary/50 mx-auto mb-3 flex justify-center"><Document set="bold" primaryColor="currentColor" size={48} /></div>
@@ -879,21 +958,36 @@ export default function GuruUlanganPage() {
                                 <p className="text-text-secondary text-sm mb-4">Buat {labels.ulangan.toLowerCase()} baru untuk kelas Anda dengan fitur pengawasan.</p>
                                 <Button onClick={() => setShowCreate(true)} size="sm">Buat {labels.ulangan} Sekarang</Button>
                             </div>
+                        ) : visibleExamGroups.length === 0 ? (
+                            <div className="bg-secondary/5 border-2 border-dashed border-secondary/20 rounded-2xl p-8 text-center">
+                                <p className="text-text-secondary text-sm">Tidak ada {labels.ulangan.toLowerCase()} untuk kelas terpilih.</p>
+                            </div>
                         ) : (
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                                {exams.map((exam) => {
-                                    const status = getExamStatus(exam)
-                                    const classId = exam.teaching_assignment?.class?.id
-                                    const total = classId ? (studentCounts[classId] || 0) : 0
-                                    const submitted = submissionCounts[exam.id] || 0
-                                    const pendingGrading = pendingGradingCounts[exam.id] || 0
-                                    const isLive = status.isLive
-                                    const isDone = status.isDone
-                                    const isActive = exam.is_active
+                                {visibleExamGroups.map((group) => {
+                                    const exam = group.representative
+                                    const repStatus = getExamStatus(exam)
+                                    // Status agregat batch: live bila ADA member live,
+                                    // selesai bila SEMUA member selesai (representative
+                                    // pending_publish otomatis jadi Under Review).
+                                    const memberStatuses = group.members.map(m => getExamStatus(m))
+                                    const isLive = group.isBatch ? memberStatuses.some(s => s.isLive) : repStatus.isLive
+                                    const isDone = group.isBatch ? memberStatuses.every(s => s.isDone) : repStatus.isDone
+                                    const isActive = group.isBatch ? group.members.some(m => m.is_active) : exam.is_active
 
-                                    // Aksi utama kontekstual: Monitor saat live, Hasil saat selesai, Edit selebihnya
+                                    // Agregasi angka pengumpulan dari semua member terlihat
+                                    const repClassId = classIdOf(exam)
+                                    const total = group.isBatch
+                                        ? group.members.reduce((acc, m) => acc + (studentCounts[classIdOf(m) || ''] || 0), 0)
+                                        : (repClassId ? (studentCounts[repClassId] || 0) : 0)
+                                    const submitted = group.members.reduce((acc, m) => acc + (submissionCounts[m.id] || 0), 0)
+                                    const pendingGrading = group.members.reduce((acc, m) => acc + (pendingGradingCounts[m.id] || 0), 0)
+
+                                    // Aksi utama kontekstual: Monitor saat live, Hasil saat selesai, Edit selebihnya.
+                                    // Batch: monitor membuka SEMUA kelas member (?batch=1).
+                                    const monitorHref = `/dashboard/guru/ulangan/${exam.id}/monitor${group.isBatch ? '?batch=1' : ''}`
                                     const primaryAction = isLive
-                                        ? { label: 'Monitor Live', href: `/dashboard/guru/ulangan/${exam.id}/monitor`, icon: <Activity className="w-4 h-4" /> }
+                                        ? { label: 'Monitor Live', href: monitorHref, icon: <Activity className="w-4 h-4" /> }
                                         : isActive && isDone
                                             ? { label: 'Lihat Hasil', href: `/dashboard/guru/ulangan/${exam.id}?tab=hasil`, icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> }
                                             : { label: exam.pending_publish ? 'Perbaiki Soal' : 'Edit Soal', href: `/dashboard/guru/ulangan/${exam.id}`, icon: <Edit set="bold" primaryColor="currentColor" size={16} /> }
@@ -909,7 +1003,7 @@ export default function GuruUlanganPage() {
                                             label: 'Buat Remedial',
                                             show: isActive && !exam.is_remedial && isDone,
                                             icon: <RefreshCw className="w-4 h-4" />,
-                                            onClick: () => handleOpenRemedial(exam),
+                                            onClick: () => handleOpenRemedial(exam, group.isBatch ? group : undefined),
                                         },
                                         {
                                             label: 'Pakai Ulang',
@@ -921,7 +1015,7 @@ export default function GuruUlanganPage() {
                                             label: 'Hapus',
                                             danger: true,
                                             icon: <Trash2 className="w-4 h-4" />,
-                                            onClick: () => handleDelete(exam.id),
+                                            onClick: () => handleDelete(exam, group.isBatch ? group : undefined),
                                         },
                                     ]
 
@@ -1439,10 +1533,31 @@ export default function GuruUlanganPage() {
                         <div className="bg-secondary/10 p-4 rounded-xl">
                             <h4 className="font-bold text-text-main dark:text-white mb-1">{remedialExam.title}</h4>
                             <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
-                                <span>Mata Pelajaran: <strong>{remedialExam.teaching_assignment?.subject?.name}</strong></span>
+                                <span>Mata Pelajaran: <strong>{first((first(remedialExam.teaching_assignment) as any)?.subject)?.name}</strong></span>
                                 <span>KKM: <strong className="text-red-500">{remedialKkm}</strong></span>
                             </div>
                         </div>
+
+                        {/* Batch multi-kelas: remedial dikerjakan per kelas — pilih kelas dulu */}
+                        {remedialMembers.length > 1 && (
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas</label>
+                                <select
+                                    value={remedialExam.id}
+                                    onChange={(e) => {
+                                        const m = remedialMembers.find(x => x.id === e.target.value)
+                                        if (m) loadRemedialMember(m)
+                                    }}
+                                    disabled={remedialLoading}
+                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                                >
+                                    {remedialMembers.map(m => (
+                                        <option key={m.id} value={m.id}>{first((first(m.teaching_assignment) as any)?.class)?.name || '-'}</option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-text-secondary mt-1">Remedial dibuat per kelas — pilih kelas yang siswanya perlu remedial, lalu pilih siswanya.</p>
+                            </div>
+                        )}
 
                         <div>
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai {labels.ulangan} Remedial</label>

@@ -62,6 +62,8 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
     const router = useRouter()
     const labels = useSchoolLabels()
     const isUlangan = (spRaw as { type?: string } | undefined)?.type === 'ulangan'
+    // Ulangan batch multi-kelas: monitor SEMUA kelas member sekaligus (mirror UTS/UAS)
+    const isBatch = isUlangan && (spRaw as { batch?: string } | undefined)?.batch === '1'
     const monitorEndpoint = isUlangan ? '/api/exam-submissions/monitor' : '/api/official-exam-submissions/monitor'
     const resetEndpoint = isUlangan ? '/api/exam-submissions' : '/api/official-exam-submissions'
     // Kembali ke tab Ulangan di halaman list (tab kini hidup di URL — tanpa
@@ -94,7 +96,7 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
     const fetchMonitorData = async (isManualRefresh = false) => {
         if (isManualRefresh) setRefreshing(true)
         try {
-            const res = await fetch(`${monitorEndpoint}?exam_id=${examId}`)
+            const res = await fetch(`${monitorEndpoint}?exam_id=${examId}${isBatch ? '&batch=1' : ''}`)
             const json = await res.json()
             
             if (!res.ok) throw new Error(json.error || 'Gagal memuat data')

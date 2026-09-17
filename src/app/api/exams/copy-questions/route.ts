@@ -3,11 +3,19 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findExamsOutsideSchool } from '@/lib/tenantGuard'
 import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
+import { batchedIn } from '@/lib/batchedIn'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
+/**
+ * Batas soal sumber yang masih disalin — paritas guard runaway examBatch.ts
+ * (kasus 2026-09-16: exam anomali 35k–224k soal tidak boleh bisa disalin).
+ */
+const SOURCE_QUESTIONS_LIMIT = 500
 
 export async function POST(req: NextRequest) {
     try {
@@ -71,18 +79,28 @@ export async function POST(req: NextRequest) {
         }
 
         // 1. Fetch source questions
-        const { data: sourceQuestions, error: fetchError } = await supabase
+        // fetchAllRows + order pedagogis: exam bisa punya >1000 baris (anomali) —
+        // query biasa terpotong diam-diam di 1000; order_index dulu (bukan id —
+        // UUID acak) agar baris hasil salinan ter-insert terurut = urutan fisik tabel.
+        const sourceQuestions = await fetchAllRows(supabase
             .from('exam_questions')
             .select('*')
             .eq('exam_id', source_exam_id)
-
-        if (fetchError) {
-            console.error('Error fetching source questions:', fetchError)
-            return NextResponse.json({ error: fetchError.message }, { status: 500 })
-        }
+            .order('order_index', { ascending: true })
+            .order('id'))
 
         if (!sourceQuestions || sourceQuestions.length === 0) {
             return NextResponse.json({ message: 'No questions to copy' })
+        }
+
+        // Guard runaway: sumber anomali ditolak — menyalinnya hanya melipatgandakan
+        // kerusakan ke target-target (paritas SOURCE_QUESTIONS_LIMIT examBatch.ts).
+        if (sourceQuestions.length > SOURCE_QUESTIONS_LIMIT) {
+            console.error(`[copy-questions] ABORT: sumber ${source_exam_id} punya ${sourceQuestions.length} soal (> ${SOURCE_QUESTIONS_LIMIT}) — data anomali.`)
+            return NextResponse.json(
+                { error: `Sumber punya ${sourceQuestions.length} soal — di atas batas ${SOURCE_QUESTIONS_LIMIT}. Periksa ulangan sumber (kemungkinan soal terduplikasi).` },
+                { status: 400 }
+            )
         }
 
         // 2. Copy questions to each target (per-target error isolation).
@@ -99,39 +117,52 @@ export async function POST(req: NextRequest) {
                     return { ...rest, exam_id: targetId }
                 })
 
-                // Snapshot soal yang ada di target (dibersihkan setelah insert sukses)
-                const { data: oldRows, error: fetchOldError } = await supabase
+                // Snapshot soal yang ada di target (dibersihkan setelah insert sukses).
+                // fetchAllRows: target bekas anomali bisa >1000 baris.
+                const oldRows = await fetchAllRows(supabase
                     .from('exam_questions')
                     .select('id')
                     .eq('exam_id', targetId)
+                    .order('id'))
+                const oldIds = (oldRows || []).map((r: any) => r.id)
 
-                if (fetchOldError) {
-                    console.error(`Error fetching old questions for target ${targetId}:`, fetchOldError)
-                    failedTargets.push(targetId)
-                    continue
-                }
-                const oldIds = (oldRows || []).map(r => r.id)
-
-                // Insert copied questions FIRST — soal lama selamat kalau ini gagal
-                const { error: insertError } = await supabase
-                    .from('exam_questions')
-                    .insert(questionsForTarget)
-
-                if (insertError) {
-                    console.error(`Error inserting questions for target ${targetId}:`, insertError)
-                    failedTargets.push(targetId)
-                    continue
-                }
-
-                // Baru hapus soal lama setelah salinan berhasil dibuat
-                if (oldIds.length > 0) {
-                    const { error: deleteError } = await supabase
+                // Insert copied questions FIRST — soal lama selamat kalau ini gagal.
+                // Chunk 500 + T1 fix: satu chunk gagal = SELURUH target gagal
+                // (break, bukan continue) dan delete soal lama DI-SKIP — tanpa
+                // ini insert parsial + delete lama = target kehilangan soal.
+                let insertOk = true
+                for (let i = 0; i < questionsForTarget.length; i += 500) {
+                    const { error: insertError } = await supabase
                         .from('exam_questions')
-                        .delete()
-                        .in('id', oldIds)
-                    if (deleteError) {
-                        // Tidak fatal: target punya soal ganda sementara, bukan kehilangan soal
-                        console.error(`Error cleaning old questions for target ${targetId}:`, deleteError)
+                        .insert(questionsForTarget.slice(i, i + 500))
+                    if (insertError) {
+                        console.error(`Error inserting questions for target ${targetId}:`, insertError)
+                        insertOk = false
+                        break
+                    }
+                }
+                if (!insertOk) {
+                    failedTargets.push(targetId)
+                    continue
+                }
+
+                // Baru hapus soal lama setelah salinan berhasil dibuat.
+                // batchedIn chunk 100: delete .in(>±440 id) ditolak URL-limit 16KB
+                // — akar runaway 2026-09-16 (duplikat menetap permanen).
+                // Callback mengembalikan builder (kontrak {data,error} batchedIn);
+                // callback void membuat destructure TypeError = false warning.
+                if (oldIds.length > 0) {
+                    try {
+                        await batchedIn('id', oldIds, (chunk) =>
+                            supabase
+                                .from('exam_questions')
+                                .delete()
+                                .in('id', chunk)
+                        )
+                    } catch (deleteErr: any) {
+                        // Tidak fatal utk soal lama (sudah tersalin), tapi duplikat
+                        // menetap harus dilaporkan eksplisit ke caller.
+                        console.error(`Error cleaning old questions for target ${targetId}:`, deleteErr)
                         cleanupWarnings.push(targetId)
                     }
                 }

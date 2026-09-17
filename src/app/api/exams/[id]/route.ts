@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
-import { tenantMismatch, notFound, resolveExamSchoolId } from '@/lib/tenantGuard'
+import { tenantMismatch, notFound, resolveExamSchoolId, findExamsOutsideSchool } from '@/lib/tenantGuard'
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncExamBatch } from '@/lib/examBatch'
@@ -43,18 +43,49 @@ export async function GET(
         }
 
         // Sibling batch (kelas paralel) — sumber definitif untuk checkbox
-        // "Terapkan jadwal juga ke kelas paralel" (sessionStorage bisa hilang).
-        let batchSiblings: { id: string; class_name: string }[] = []
+        // "Terapkan jadwal juga ke kelas paralel" (sessionStorage bisa hilang)
+        // dan dropdown kelas di tab hasil batch.
+        // A4: untuk GURU, hanya sibling kelas yang dia ampou (owner/co-teacher
+        // mapel+kelas) — co-teacher parsial tidak boleh melihat kelas yang
+        // bukan haknya di dropdown. ADMIN melihat semua sibling se-sekolah.
+        // Tenant: sibling difilter sekolah caller juga (batch_id client-generated,
+        // tabrakan lintas sekolah nyaris mustahil — ini lapisan berjaga-jaga).
+        let batchSiblings: { id: string; class_id: string; class_name: string }[] = []
         if (data?.batch_id) {
             const { data: siblings } = await supabase
                 .from('exams')
-                .select('id, teaching_assignment:teaching_assignments(class:classes(name))')
+                .select('id, teaching_assignment:teaching_assignments(subject_id, class:classes(id, name))')
                 .eq('batch_id', data.batch_id)
                 .neq('id', id)
-            batchSiblings = (siblings || []).map((s: any) => ({
-                id: s.id,
-                class_name: (Array.isArray(s.teaching_assignment) ? s.teaching_assignment[0]?.class : s.teaching_assignment?.class)?.name || '-'
-            }))
+            let pairs: Set<string> | null = null
+            if (user.role === 'GURU') {
+                const { data: teacher } = await supabase
+                    .from('teachers')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .single()
+                if (teacher) {
+                    const { data: myTAs } = await supabase
+                        .from('teaching_assignments')
+                        .select('subject_id, class_id')
+                        .eq('teacher_id', teacher.id)
+                    pairs = new Set((myTAs || []).map((ta: any) => `${ta.subject_id}|${ta.class_id}`))
+                }
+            }
+            // Tenant guard: buang sibling yang ternyata milik sekolah lain
+            const siblingIds = (siblings || []).map((s: any) => s.id)
+            const outsideIds = new Set(siblingIds.length > 0
+                ? await findExamsOutsideSchool(siblingIds, schoolId)
+                : [])
+            batchSiblings = (siblings || [])
+                .filter((s: any) => !outsideIds.has(s.id))
+                .map((s: any) => {
+                    const ta = Array.isArray(s.teaching_assignment) ? s.teaching_assignment[0] : s.teaching_assignment
+                    const cls = Array.isArray(ta?.class) ? ta?.class[0] : ta?.class
+                    return { id: s.id, subject_id: ta?.subject_id, class_id: cls?.id, class_name: cls?.name || '-' }
+                })
+                .filter((s: any) => !pairs || pairs.has(`${s.subject_id}|${s.class_id}`))
+                .map(({ id, class_id, class_name }) => ({ id, class_id, class_name }))
         }
 
         return NextResponse.json({ ...data, batch_siblings: batchSiblings })

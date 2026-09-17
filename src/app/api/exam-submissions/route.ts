@@ -23,6 +23,35 @@ export async function GET(request: NextRequest) {
         const examId = request.nextUrl.searchParams.get('exam_id')
         const studentId = request.nextUrl.searchParams.get('student_id')
         const allYears = request.nextUrl.searchParams.get('all_years')
+        const batchId = request.nextUrl.searchParams.get('batch_id')
+
+        // Batch mode (tab hasil "Semua Kelas"): submission SEMUA member batch
+        // (1 exam per kelas). GURU hanya melihat member kelas yang dia ampou
+        // (owner/co-teacher); ADMIN semua member se-sekolah. SISWA ditolak.
+        let batchMemberIds: string[] | null = null
+        if (batchId && (user.role === 'GURU' || user.role === 'ADMIN')) {
+            const { data: members } = await supabase
+                .from('exams')
+                .select('id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
+                .eq('batch_id', batchId)
+            let visible: any[] = members || []
+            if (visible.length > 0) {
+                // Tenant guard: semua member harus milik sekolah caller
+                if ((await findExamsOutsideSchool(visible.map(m => m.id), schoolId)).length > 0) {
+                    return NextResponse.json([])
+                }
+                if (user.role === 'GURU') {
+                    const scope = await getTeacherScope(user.id)
+                    visible = visible.filter(m => {
+                        const ta = Array.isArray(m.teaching_assignment) ? m.teaching_assignment[0] : m.teaching_assignment
+                        return ownsTeachingAssignment(scope, ta?.teacher_id)
+                            || coTeachesClassSubject(scope, ta?.subject_id, ta?.class_id)
+                    })
+                }
+            }
+            if (visible.length === 0) return NextResponse.json([])
+            batchMemberIds = visible.map(m => m.id)
+        }
 
         // GURU guard (exam_id eksplisit): harus pemilik TA ulangan ATAU co-teacher
         // (mapel+kelas sama) — sebelumnya guru mana pun bisa membaca seluruh
@@ -43,38 +72,42 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        // Lazy Sweep: Auto-close expired submissions if examId is provided (Teacher/Admin View)
-        if (examId && (user.role === 'GURU' || user.role === 'ADMIN')) {
+        // Lazy Sweep: Auto-close expired submissions (Teacher/Admin View) —
+        // berlaku untuk exam tunggal maupun semua member batch.
+        const sweepIds = batchMemberIds || (examId ? [examId] : null)
+        if (sweepIds && sweepIds.length > 0 && (user.role === 'GURU' || user.role === 'ADMIN')) {
             try {
-                const { data: examData } = await supabase
+                const { data: examsData } = await supabase
                     .from('exams')
-                    .select('duration_minutes, start_time, window_end_time')
-                    .eq('id', examId)
-                    .single()
+                    .select('id, duration_minutes, start_time, window_end_time')
+                    .in('id', sweepIds)
+                const examById = new Map((examsData || []).map(e => [e.id, e]))
 
-                if (examData) {
-                    const { data: inProgress } = await supabase
-                        .from('exam_submissions')
-                        .select('id, started_at, timer_override_until')
-                        .eq('exam_id', examId)
-                        .eq('is_submitted', false)
+                const { data: inProgress } = await supabase
+                    .from('exam_submissions')
+                    .select('id, exam_id, started_at, timer_override_until')
+                    .in('exam_id', sweepIds)
+                    .eq('is_submitted', false)
 
-                    // Satu sumber kebenaran: mode serentak / jendela (src/lib/examExpiry.ts)
-                    const withExpiry = (inProgress || []).map(sub => ({
+                // Satu sumber kebenaran: mode serentak / jendela (src/lib/examExpiry.ts)
+                const withExpiry = (inProgress || []).map(sub => {
+                    const examData = examById.get(sub.exam_id)
+                    return {
                         sub,
+                        examId: sub.exam_id,
                         expiry: resolveWindowExpiry(
-                            { start_time: examData.start_time, duration_minutes: examData.duration_minutes, window_end_time: examData.window_end_time },
+                            { start_time: examData?.start_time, duration_minutes: examData?.duration_minutes, window_end_time: examData?.window_end_time },
                             { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
                         )
-                    }))
-                    const expired = withExpiry.filter(x => isSweepDue(x.expiry))
-
-                    if (expired.length > 0) {
-                        console.log(`[Auto-Close] Found ${expired.length} expired exam submissions for exam ${examId}`)
-                        await Promise.all(expired.map(x =>
-                            forceCloseExamSubmission(x.sub.id, examId, x.expiry.limited ? x.expiry.endAt : null)
-                        ))
                     }
+                }).filter(x => x.expiry)
+                const expired = withExpiry.filter(x => isSweepDue(x.expiry))
+
+                if (expired.length > 0) {
+                    console.log(`[Auto-Close] Found ${expired.length} expired exam submissions for exams ${sweepIds.join(',')}`)
+                    await Promise.all(expired.map(x =>
+                        forceCloseExamSubmission(x.sub.id, x.examId, x.expiry.limited ? x.expiry.endAt : null)
+                    ))
                 }
             } catch (sweepError) {
                 console.error('Lazy sweep error:', sweepError)
@@ -116,6 +149,10 @@ export async function GET(request: NextRequest) {
                 return NextResponse.json([])
             }
             query = query.eq('exam_id', examId)
+        } else if (batchMemberIds) {
+            // Batch: member sudah tenant-guarded & scope-filtered di atas;
+            // .in(<batchMemberIds) aman — batch maksimal lintas kelas satu angkatan
+            query = query.in('exam_id', batchMemberIds)
         }
         if (studentId) {
             query = query.eq('student_id', studentId)
@@ -132,8 +169,8 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        // Filter by active year when no specific exam is requested
-        if (!examId && allYears !== 'true') {
+        // Filter by active year when no specific exam/batch is requested
+        if (!examId && !batchMemberIds && allYears !== 'true') {
             // Tahan kasus 2 tahun aktif: .single() error diam-diam →
             // activeYear null → seluruh daftar submission kosong tanpa sebab.
             const { data: activeYears } = await supabase
@@ -165,19 +202,31 @@ export async function GET(request: NextRequest) {
 
         let finalData = data || []
 
-        // If filtering by examId and the user is a teacher/admin, fetch remedial
+        // If filtering by exam/batch and the user is a teacher/admin, fetch remedial
         // submissions and merge by score sesuai kebijakan (HIGHEST/AVERAGE/CAP).
-        if (examId && (user.role === 'GURU' || user.role === 'ADMIN')) {
+        // Key merge = `${exam sumber}|${student}` — batch multi-kelas punya siswa
+        // berbeda per member, key per-siswa saja akan saling menimpa antar kelas.
+        const mergeSourceIds = batchMemberIds || (examId ? [examId] : null)
+        if (mergeSourceIds && (user.role === 'GURU' || user.role === 'ADMIN')) {
             const { data: remedials } = await supabase
                 .from('exams')
-                .select('id, remedial_score_policy, remedial_max_score')
-                .eq('remedial_for_id', examId)
+                .select('id, remedial_for_id, remedial_score_policy, remedial_max_score')
+                .in('remedial_for_id', mergeSourceIds)
 
             if (remedials && remedials.length > 0) {
                 const remedialIds = remedials.map(r => r.id)
-                // Kebijakan remedial diambil dari remedial pertama (pola helper)
-                const remedialPolicy = (remedials[0] as any).remedial_score_policy
-                const remedialCap = (remedials[0] as any).remedial_max_score
+                // Pemetaan remedial → exam sumber + kebijakan per sumber
+                // (batch bisa punya remedial terpisah per member)
+                const sourceByRemedialId = new Map(remedials.map(r => [r.id, r.remedial_for_id]))
+                const policyBySource = new Map<string, { policy: any; cap: any }>()
+                remedials.forEach(r => {
+                    if (!policyBySource.has(r.remedial_for_id)) {
+                        policyBySource.set(r.remedial_for_id, {
+                            policy: (r as any).remedial_score_policy,
+                            cap: (r as any).remedial_max_score,
+                        })
+                    }
+                })
                 // fetchAllRows: remedial sekelas/sekolah bisa >1000 submissions
                 const remedialSubmissions = await fetchAllRows(supabase
                     .from('exam_submissions')
@@ -205,9 +254,9 @@ export async function GET(request: NextRequest) {
                 if (remedialSubmissions && remedialSubmissions.length > 0) {
                     const studentMerged = new Map<string, any>()
 
-                    // Add all original submissions first
+                    // Add all original submissions first (key per exam|siswa)
                     finalData.forEach((sub: any) => {
-                        studentMerged.set(sub.student.id, sub)
+                        studentMerged.set(`${sub.exam_id}|${sub.student.id}`, sub)
                     })
 
                     // Remedial terbaik per siswa → skor final via helper kebijakan,
@@ -215,30 +264,34 @@ export async function GET(request: NextRequest) {
                     const bestRemedialByStudent = new Map<string, any>()
                     remedialSubmissions.forEach((sub: any) => {
                         const studentId = sub.student?.id
-                        if (!studentId) return
+                        const sourceId = sourceByRemedialId.get(sub.exam_id)
+                        if (!studentId || !sourceId) return
+                        const key = `${sourceId}|${studentId}`
                         const currentScore = (sub.total_score || 0) / (sub.max_score || 1)
-                        const prev = bestRemedialByStudent.get(studentId)
+                        const prev = bestRemedialByStudent.get(key)
                         if (!prev || currentScore >= (prev.total_score || 0) / (prev.max_score || 1)) {
-                            bestRemedialByStudent.set(studentId, sub)
+                            bestRemedialByStudent.set(key, sub)
                         }
                     })
 
-                    bestRemedialByStudent.forEach((remSub, studentId) => {
-                        const original = studentMerged.get(studentId)
+                    bestRemedialByStudent.forEach((remSub, key) => {
+                        const sourceId = key.split('|')[0]
+                        const original = studentMerged.get(key)
+                        const policy = policyBySource.get(sourceId)
                         const remScore = (remSub.total_score || 0) / (remSub.max_score || 1) * 100
                         if (!original) {
-                            studentMerged.set(studentId, remSub)
+                            studentMerged.set(key, remSub)
                             return
                         }
                         const finalScore = applyRemedialPolicy(
                             (original.total_score || 0) / (original.max_score || 1) * 100,
                             remScore,
-                            remedialPolicy,
-                            remedialCap,
+                            policy?.policy,
+                            policy?.cap,
                         )
                         if (finalScore !== null) {
                             const maxScore = original.max_score || 100
-                            studentMerged.set(studentId, {
+                            studentMerged.set(key, {
                                 ...original,
                                 total_score: Math.round(finalScore / 100 * maxScore * 10) / 10,
                                 merged_from_remedial: true,
@@ -341,9 +394,13 @@ export async function POST(request: NextRequest) {
         }
 
         // Check if exam exists (+ kelas pemilik via teaching assignment)
+        // exam_questions membawa order_index & di-sort eksplisit: question_order
+        // siswa dibangun dari urutan ini — embed tanpa sort mengikuti urutan
+        // FISIK baris yang bisa acak bila baris hasil mirror/copy di-insert tak
+        // terurut (kasus: soal no.1 tampil sebagai 'MC batch 2').
         const { data: exam } = await supabase
             .from('exams')
-            .select('*, exam_questions(id), teaching_assignment:teaching_assignments(class_id)')
+            .select('*, exam_questions(id, order_index), teaching_assignment:teaching_assignments(class_id)')
             .eq('id', exam_id)
             .single()
 
@@ -427,9 +484,14 @@ export async function POST(request: NextRequest) {
         }
 
         // Create randomized question order if enabled
-        const questionIds = exam.exam_questions.map((q: any) => q.id)
+        // Sort eksplisit by order_index (tiebreaker id) — JANGAN percaya urutan
+        // return embed (urutan fisik bisa acak; randomisasi butuh basis urutan
+        // stabil supaya tiap reload mengacak dari urutan yang sama).
+        const sortedQuestions = [...(exam.exam_questions || [])].sort((a: any, b: any) =>
+            (a.order_index ?? 0) - (b.order_index ?? 0) || String(a.id).localeCompare(String(b.id)))
+        const questionIds = sortedQuestions.map((q: any) => q.id)
         const questionOrder = exam.is_randomized
-            ? questionIds.sort(() => Math.random() - 0.5)
+            ? [...questionIds].sort(() => Math.random() - 0.5)
             : questionIds
 
         // Calculate max score

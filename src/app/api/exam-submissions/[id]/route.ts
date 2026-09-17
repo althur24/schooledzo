@@ -55,6 +55,31 @@ export async function GET(
             }
         }
 
+        // G1 Security Fix (parity dengan official-exam-submissions/[id] & PUT di
+        // bawah): GURU non-pengampu tidak boleh membaca jawaban siswa + kunci
+        // ulangan kelas lain — sebelumnya GET detail tanpa verifikasi guru
+        // sama sekali (cukup bypass tenant guard + fetch id).
+        if (user.role === 'GURU') {
+            const { data: teacher } = await supabase
+                .from('teachers').select('id').eq('user_id', user.id).single()
+            const { data: subAuth } = await supabase
+                .from('exam_submissions')
+                .select('exam:exams(teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id))')
+                .eq('id', id)
+                .single()
+            const taAny = (subAuth?.exam as any)?.teaching_assignment
+            const ta = Array.isArray(taAny) ? taAny[0] : taAny
+            if (ta) {
+                const isOwner = !!teacher && ta.teacher_id === teacher.id
+                if (!isOwner) {
+                    const scope = await getTeacherScope(user.id, ta.academic_year_id ?? null)
+                    if (!coTeachesClassSubject(scope, ta.subject_id, ta.class_id)) {
+                        return NextResponse.json({ error: 'Anda tidak memiliki akses ke ulangan ini' }, { status: 403 })
+                    }
+                }
+            }
+        }
+
         // Check visibility for SISWA
         const examObj = (data as any)?.exam || {}
         const showImmediately = examObj.show_results_immediately ?? true

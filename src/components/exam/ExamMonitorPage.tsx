@@ -61,9 +61,11 @@ interface MonitorData {
     }
 }
 
-export default function ExamMonitorPage({ examId, mode }: {
+export default function ExamMonitorPage({ examId, mode, batch }: {
     examId: string
     mode: 'ulangan' | 'official'
+    /** true = monitor SEMUA member batch multi-kelas (khusus ulangan — mirror UTS/UAS) */
+    batch?: boolean
 }) {
     const router = useRouter()
     const labels = useSchoolLabels()
@@ -92,7 +94,7 @@ export default function ExamMonitorPage({ examId, mode }: {
     const fetchMonitorData = async (isManualRefresh = false) => {
         if (isManualRefresh) setRefreshing(true)
         try {
-            const res = await fetch(`${monitorEndpoint}?exam_id=${examId}`)
+            const res = await fetch(`${monitorEndpoint}?exam_id=${examId}${mode === 'ulangan' && batch ? '&batch=1' : ''}`)
             const json = await res.json()
 
             if (!res.ok) throw new Error(json.error || 'Gagal memuat data')

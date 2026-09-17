@@ -86,7 +86,14 @@ export default function DailyExamCard({
 
     const ta = unwrapEmbed(exam.teaching_assignment)
     const subjectName = unwrapEmbed(ta?.subject)?.name
-    const classNameLabel = unwrapEmbed(ta?.class)?.name
+    const classNameLabel = (exam.batch_size && exam.batch_size > 1)
+        // Batch multi-kelas: tampil sebagai ringkasan "N kelas" + tooltip nama
+        // kelas (pola OfficialExamCard) — badge tetap mencerminkan batch penuh
+        // dari server walau caller cuma melihat sebagian anggotanya.
+        ? (exam.batch_class_names?.length
+            ? <span title={exam.batch_class_names.join(', ')}>{exam.batch_size} kelas</span>
+            : `${exam.batch_size} kelas`)
+        : unwrapEmbed(ta?.class)?.name
     const embeddedTeacherName = unwrapEmbed(unwrapEmbed(ta?.teacher)?.user)?.full_name
 
     const scheduleLabels = examScheduleLabels(exam.window_end_time)

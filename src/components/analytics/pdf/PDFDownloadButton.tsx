@@ -13,6 +13,8 @@ interface PDFDownloadButtonProps {
     assessmentId: string
     assessmentType: 'quiz' | 'exam' | 'official-exam'
     classId?: string
+    /** Merge analitik SEMUA member batch ulangan multi-kelas (mode "Semua Kelas") */
+    batchId?: string
     meta: PDFMetaInput
     disabled?: boolean
     label?: string
@@ -27,6 +29,7 @@ export default function PDFDownloadButton({
     assessmentId,
     assessmentType,
     classId,
+    batchId,
     meta,
     disabled,
     label = 'Unduh PDF',
@@ -38,8 +41,11 @@ export default function PDFDownloadButton({
     const handleClick = async () => {
         setLoading(true)
         try {
-            const params = classId ? `?class_id=${classId}` : ''
-            const res = await fetch(`/api/analytics/${assessmentType}/${assessmentId}${params}`)
+            const params = new URLSearchParams()
+            if (classId) params.set('class_id', classId)
+            if (batchId) params.set('batch_id', batchId)
+            const qs = params.toString()
+            const res = await fetch(`/api/analytics/${assessmentType}/${assessmentId}${qs ? `?${qs}` : ''}`)
             if (!res.ok) throw new Error('Gagal memuat data analitik')
             const data: AnalyticsData = await res.json()
             if (!data.classOverview.submitted) {
