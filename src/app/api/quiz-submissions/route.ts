@@ -417,7 +417,60 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Attempt yang sudah dikumpulkan tidak boleh ditimpa ulang (selaras ulangan/UTS-UAS)
+        // Attempt yang sudah dikumpulkan tidak boleh ditimpa ulang (selaras ulangan/UTS-UAS).
+        // ── K1 parity (audit eksternal): RESCUE jawaban offline dulu ──
+        // Skenario: WiFi putus menjelang deadline → siswa lanjut mengerjakan →
+        // sweep/force-close menutup attempt → koneksi pulih → POST draft ditolak
+        // 400 "Kuis sudah dikumpulkan" → draft lokal dibersihkan client → jawaban
+        // HILANG. Fix: jawaban request di-MERGE (menang per soal, pola
+        // forceCloseQuizSubmission) + nilai ulang sebelum menolak; response 400
+        // dengan kode ANSWERS_RESCUED (client quiz sync menanganinya).
+        if (existing?.submitted_at && Array.isArray(answers) && answers.length > 0) {
+            try {
+                const stored: any[] = Array.isArray(existing.answers) ? existing.answers : []
+                const mergedMap = new Map<string, any>()
+                stored.forEach(a => { if (a?.question_id) mergedMap.set(a.question_id, a) })
+                answers.forEach((a: { question_id: string, answer: string }) => {
+                    if (!a?.question_id) return
+                    mergedMap.set(a.question_id, { ...mergedMap.get(a.question_id), question_id: a.question_id, answer: a.answer })
+                })
+                // Nilai ulang seluruh jawaban hasil merge (pola force-close —
+                // idempoten & konsisten dengan penilaian kuis)
+                const allQ = await getExamQuestionsForGrading('quiz_questions', quiz_id)
+                const qMap = new Map(allQ.map(q => [q.id, q]))
+                let total = 0
+                const regraded = [...mergedMap.values()].map(a => {
+                    const q = qMap.get(a.question_id)
+                    let isCorrect = false, pointsEarned = 0
+                    if (q) {
+                        const graded = gradeAnswer(q.question_type, a.answer, q.correct_answer, q.options, q.points || 1)
+                        isCorrect = graded.isCorrect
+                        pointsEarned = Math.round(graded.pointsEarned)
+                    }
+                    total += pointsEarned
+                    return { ...a, is_correct: isCorrect, points_earned: pointsEarned }
+                })
+                await supabase
+                    .from('quiz_submissions')
+                    .update({
+                        answers: regraded,
+                        total_score: total,
+                        // is_graded: esai yang belum dinilai guru tetap false — pakai
+                        // nilai ulang needsManualGrading utk keputusan yang sama dgn force-close
+                        is_graded: !allQ.some(q => needsManualGrading(q.question_type)),
+                    })
+                    .eq('id', existing.id)
+            } catch (rescueError) {
+                console.error('[K1-rescue quiz] gagal menyelamatkan jawaban:', rescueError)
+            }
+            return NextResponse.json({
+                code: 'ANSWERS_RESCUED',
+                error: `${labels.kuis} sudah dikumpulkan`,
+                message: 'Jawaban terakhirmu sudah diterima dan dikumpulkan.',
+            }, { status: 400 })
+        }
+
+        // Attempt yang sudah dikumpulkan tanpa jawaban → tolak polos (state final)
         if (existing?.submitted_at) {
             return NextResponse.json({ error: `${labels.kuis} sudah dikumpulkan` }, { status: 400 })
         }

@@ -5,6 +5,7 @@ import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { getTeacherScope, canTeachStudentSubmission } from '@/lib/teacherScope'
 import { logError } from '@/lib/logError'
 import { logGradeChange } from '@/lib/gradeHistory'
+import { resolveWindowExpiry } from '@/lib/examExpiry'
 
 // GET submission detail with answers
 export async function GET(
@@ -21,7 +22,7 @@ export async function GET(
             .select(`
                 *,
                 student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name)),
-                exam:official_exams(id, title, exam_type, duration_minutes, show_results_immediately, results_released, school_id, subject_id, target_class_ids, academic_year_id, subject:subjects(name))
+                exam:official_exams(id, title, exam_type, duration_minutes, start_time, window_end_time, show_results_immediately, results_released, school_id, subject_id, target_class_ids, academic_year_id, subject:subjects(name))
             `)
             .eq('id', id)
             .single()
@@ -65,7 +66,35 @@ export async function GET(
         // yang SUDAH submit dan hasilnya boleh dilihat. Sebelumnya strip hanya
         // berbasis visibility setting — siswa yang masih mengerjakan ujian dengan
         // show_results_immediately=true (default) bisa membaca correct_answer.
-        const hideKeys = ctx.user.role === 'SISWA' && (!(submission as any)?.is_submitted || isHidden)
+        // H2 (audit eksternal, keputusan produk "tahan kunci s/d jam tutup"):
+        // KUNCI JAWABAN ditahan sampai jendela ujian tertutup (endAt efektif dari
+        // resolveWindowExpiry) — menutup kolusi pengumpul-cepat ke teman.
+        // Ujian tanpa batas waktu tidak punya "jam tutup" → kunci langsung.
+        // H2 CATATAN REVISI: skor/is_correct siswa yang sudah submit TETAP
+        // dikirim selama jendela terbuka — itu hasilnya sendiri (fitur
+        // "Tampilkan Hasil Langsung"), bukan kunci. Over-strip versi pertama
+        // merusak halaman hasil (skor blank) — tertangkap e2e_runner_unification.
+        const examKeysWindow = ctx.user.role === 'SISWA' && (submission as any)?.is_submitted
+            ? (() => {
+                const expiry = resolveWindowExpiry(
+                    {
+                        start_time: examObj.start_time ?? null,
+                        duration_minutes: examObj.duration_minutes ?? null,
+                        window_end_time: examObj.window_end_time ?? null,
+                    },
+                    {
+                        started_at: (submission as any)?.started_at ?? null,
+                        timer_override_until: (submission as any)?.timer_override_until ?? null,
+                    },
+                )
+                return !expiry.limited || Date.now() > expiry.endAt
+            })()
+            : true
+        // Kunci disembunyikan bila: siswa belum submit, hasil ditahan setting,
+        // atau jendela masih terbuka (H2). Benar/salah & skor disembunyikan HANYA
+        // untuk siswa yang belum submit (oracle mid-exam) — keduanya dipisah.
+        const hideKeys = ctx.user.role === 'SISWA' && (!(submission as any)?.is_submitted || isHidden || !examKeysWindow)
+        const hideResult = ctx.user.role === 'SISWA' && !(submission as any)?.is_submitted
 
         // Fetch answers
         const { data: answers } = await supabase
@@ -79,8 +108,11 @@ export async function GET(
         const processedAnswers = hideKeys
             ? (answers || []).map((a: any) => ({
                 ...a,
-                is_correct: undefined,
-                points_earned: undefined,
+                // Kunci ditahan s/d jam tutup (H2); skor milik siswa hanya
+                // disembunyikan bila belum submit (hideResult) — bukan saat
+                // jendela terbuka, agar halaman hasil tetap menampilkan nilai.
+                is_correct: hideResult ? undefined : a.is_correct,
+                points_earned: hideResult ? undefined : a.points_earned,
                 question: a.question ? { ...a.question, correct_answer: undefined } : a.question
             }))
             : (answers || [])

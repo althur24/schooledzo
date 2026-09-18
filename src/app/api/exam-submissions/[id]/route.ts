@@ -4,6 +4,8 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { logGradeChange } from '@/lib/gradeHistory'
+import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
+import { resolveWindowExpiry } from '@/lib/examExpiry'
 
 // GET single exam submission with questions and answers
 export async function GET(
@@ -27,6 +29,9 @@ export async function GET(
                     title,
                     show_results_immediately,
                     results_released,
+                    start_time,
+                    duration_minutes,
+                    window_end_time,
                     questions:exam_questions(*),
                     teaching_assignment:teaching_assignments(academic_year:academic_years(school_id))
                 ),
@@ -90,7 +95,30 @@ export async function GET(
         // terlihat oleh guru/admin, ATAU siswa yang SUDAH submit dan hasilnya boleh
         // dilihat. Sebelumnya embed exam_questions(*) membocorkan kunci ke siswa
         // yang masih mengerjakan (show_results_immediately default true).
-        const canSeeAnswerKeys = user.role !== 'SISWA' || ((data as any)?.is_submitted && !isHidden)
+        // H2 (audit eksternal, keputusan produk "tahan kunci s/d jam tutup"):
+        // siswa yang mengumpulkan cepat saat ujian MASIH berjalan belum boleh
+        // melihat kunci — menutup kolusi "submit dulu, bagikan kunci ke teman".
+        // Kunci baru terbuka setelah jendela ujian tertutup (endAt efektif,
+        // satu sumber kebenaran resolveWindowExpiry — termasuk jam tutup mode
+        // jendela & start+durasi mode serentak). Ujian tanpa batas waktu
+        // (durasi 0/null tanpa jendela) tidak punya "jam tutup" → kunci langsung.
+        const examKeysWindow = user.role === 'SISWA' && (data as any)?.is_submitted
+            ? (() => {
+                const expiry = resolveWindowExpiry(
+                    {
+                        start_time: examObj.start_time ?? null,
+                        duration_minutes: examObj.duration_minutes ?? null,
+                        window_end_time: examObj.window_end_time ?? null,
+                    },
+                    {
+                        started_at: (data as any)?.started_at ?? null,
+                        timer_override_until: (data as any)?.timer_override_until ?? null,
+                    },
+                )
+                return !expiry.limited || Date.now() > expiry.endAt
+            })()
+            : true
+        const canSeeAnswerKeys = user.role !== 'SISWA' || ((data as any)?.is_submitted && !isHidden && examKeysWindow)
         const responseDataRaw: any = data
         if (!canSeeAnswerKeys && responseDataRaw?.exam?.questions) {
             responseDataRaw.exam.questions = responseDataRaw.exam.questions.map((q: any) => {
@@ -107,10 +135,16 @@ export async function GET(
 
         if (answersError) throw answersError
 
-        // K1 lanjutan: is_correct/score jawaban juga dirahasiakan dari siswa yang
+        // K1 lanjutan: is_correct/score jawaban dirahasiakan dari siswa yang
         // BELUM submit (mirror versi official) — jangan sampai jadi oracle
         // benar/salah saat ujian masih berjalan.
-        const hideAnswers = user.role === 'SISWA' && (!(data as any)?.is_submitted || isHidden)
+        // H2 CATATAN REVISI: untuk siswa yang SUDAH submit, is_correct/score
+        // miliknya TETAP dikirim selama jendela terbuka — itu hasilnya sendiri
+        // (fitur "Tampilkan Hasil Langsung"), bukan kunci jawaban. Yang ditahan
+        // sampai jam tutup hanya correct_answer (canSeeAnswerKeys di atas).
+        // Over-strip versi pertama merusak halaman hasil (skor blank/NaN) —
+        // tertangkap e2e_exam_runner_unification.
+        const hideAnswers = user.role === 'SISWA' && !(data as any)?.is_submitted
 
         // Map exam_answers to the format the frontend expects
         const answers = (examAnswers || []).map(a => ({
@@ -215,16 +249,50 @@ export async function PUT(
         }
 
         // BATCH UPDATE: Update all exam_answers scores at once instead of one-by-one
+        // ── K2 hardening (audit eksternal 2026-09-18) ──
+        //  1. question_id WAJIB soal ujian ini (via questionMap dari cache —
+        //     paritas jalur siswa POST /api/exam-submissions). Id asing membuat
+        //     junk row yang ikut di-SUM ke total_score di bawah.
+        //  2. points_earned di-clamp 0..question.points — skor koreksi tak
+        //     mungkin melebihi bobot soal.
+        //  3. answer & is_correct TIDAK diterima dari body — koreksi guru hanya
+        //     boleh mengubah nilai/feedback, bukan menimpa jawaban siswa atau
+        //     flag benar/salah (yang ditetapkan gradeAnswer server-side).
         if (answers && Array.isArray(answers) && answers.length > 0) {
-            const updates = answers.map((ans: any) => ({
-                submission_id: id,
-                question_id: ans.question_id,
-                points_earned: Math.round(ans.score ?? ans.points_earned ?? 0),
-                // Preserve existing fields by including them
-                answer: ans.answer,
-                is_correct: ans.is_correct,
-                feedback: ans.feedback || null
-            }))
+            const examRow: any = Array.isArray(subCheck.exam) ? subCheck.exam[0] : subCheck.exam
+            const examIdForQuestions = examRow?.id ?? (subCheck as any).exam_id
+            const examQuestions = await getExamQuestionsForGrading('exam_questions', examIdForQuestions)
+            const questionMap = new Map(examQuestions.map(q => [q.id, q]))
+            const invalidIds = answers.filter((ans: any) => !questionMap.has(ans.question_id)).map((ans: any) => ans.question_id)
+            if (invalidIds.length > 0) {
+                return NextResponse.json({ error: `Soal tidak ditemukan di ujian ini: ${invalidIds.slice(0, 3).join(', ')}${invalidIds.length > 3 ? '…' : ''}` }, { status: 400 })
+            }
+            // K2e: upsert partial (tanpa answer/is_correct) membuat PostgREST
+            // menimpa kolom tak-ada-di-payload dengan NULL/default saat ON CONFLICT
+            // — jawaban siswa & flag auto-grade hilang. Sertakan nilai CURRENT
+            // dari DB secara eksplisit untuk kolom yang tidak boleh berubah.
+            const qIds = answers.map((ans: any) => ans.question_id)
+            const { data: currentRows } = await supabase
+                .from('exam_answers')
+                .select('question_id, answer, is_correct')
+                .eq('submission_id', id)
+                .in('question_id', qIds)
+            const currentByQ = new Map((currentRows || []).map((r: any) => [r.question_id, r]))
+            const updates = answers.map((ans: any) => {
+                const q = questionMap.get(ans.question_id)!
+                const raw = Math.round(ans.score ?? ans.points_earned ?? 0)
+                const clamped = Math.max(0, Math.min(raw, q.points || 0))
+                const cur = currentByQ.get(ans.question_id)
+                return {
+                    submission_id: id,
+                    question_id: ans.question_id,
+                    points_earned: clamped,
+                    feedback: ans.feedback || null,
+                    // pertahankan apa adanya (bukan dari body!)
+                    answer: cur?.answer ?? null,
+                    is_correct: cur?.is_correct ?? null,
+                }
+            })
 
             // Jangan telan error upsert diam-diam: kegagalan di sini membuat nilai
             // essay guru hilang tanpa kabar (bug kolom feedback yang lama tak terdeteksi

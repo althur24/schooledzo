@@ -3,7 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findTeachingAssignmentsOutsideSchool, findExamsOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
-import { getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
+import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 import { getBatchInfo } from '@/lib/examBatch'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { sanitizePolicyInput } from '@/lib/remedialScore'
@@ -199,6 +199,18 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
         }
 
+        // K3 (audit eksternal): durasi wajib angka >= 5 — POST dulu hanya cek
+        // !== undefined; durasi 0/negatif lolos dan (mode serentak) membuat
+        // seluruh kelas tidak bisa memulai.
+        if (typeof duration_minutes !== 'number' || !Number.isFinite(duration_minutes) || duration_minutes < 5) {
+            return NextResponse.json({ error: 'Durasi pengerjaan minimal 5 menit' }, { status: 400 })
+        }
+        // M7: max_violations wajar (1..10 — paritas min/max form)
+        if (max_violations !== undefined
+            && (typeof max_violations !== 'number' || !Number.isFinite(max_violations) || max_violations < 1 || max_violations > 10)) {
+            return NextResponse.json({ error: 'Maksimal pelanggaran harus antara 1 sampai 10' }, { status: 400 })
+        }
+
         // Validasi kebijakan nilai remedial (hanya relevan saat is_remedial)
         let policyFields: { remedial_score_policy?: string; remedial_max_score?: number } = {}
         if (is_remedial) {
@@ -242,6 +254,56 @@ export async function POST(request: NextRequest) {
         // Block writes to archived (COMPLETED) academic years
         const yearStatus = await getYearStatusByTA(teaching_assignment_id)
         if (yearStatus === 'COMPLETED') return archivedYearResponse()
+
+        // ── M9: validasi batch_id dari client (audit eksternal 2026-09-18) ──
+        // batch_id dibuat client (crypto.randomUUID saat wizard multi-kelas) —
+        // tanpa validasi, guru bisa MENYUSUP exam ke batch guru lain; syncDraft
+        // lalu menyalin soal SEMUA sibling → ekfiltrasi soal guru korban.
+        // Aturan: batch yang sudah punya member hanya boleh diikuti exam dengan
+        // mapel sama DAN kelas TUJUAN yang memang kelas member batch, dan caller
+        // pengampu mapel itu di kelas tujuan (pemilik batch atau co-teacher).
+        // ADMIN boleh semua TA se-sekolahnya (paritas "admin buat ulangan utk guru").
+        if (batch_id) {
+            const { data: batchMembers } = await supabase
+                .from('exams')
+                .select('id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id)')
+                .eq('batch_id', batch_id)
+            const anchorTa = (() => {
+                const first = batchMembers?.[0]
+                const ta = Array.isArray(first?.teaching_assignment) ? first.teaching_assignment[0] : first?.teaching_assignment
+                return ta || null
+            })()
+            if (anchorTa && (batchMembers || []).length > 0) {
+                if (user.role === 'GURU') {
+                    const scope = await getTeacherScope(user.id)
+                    const isOwn = ownsTeachingAssignment(scope, anchorTa.teacher_id)
+                    if (!isOwn) {
+                        const memberClassIds = new Set(
+                            (batchMembers || []).map((m: any) => {
+                                const ta = Array.isArray(m.teaching_assignment) ? m.teaching_assignment[0] : m.teaching_assignment
+                                return ta?.class_id
+                            }).filter(Boolean)
+                        )
+                        const { data: newTa } = await supabase
+                            .from('teaching_assignments')
+                            .select('subject_id, class_id')
+                            .eq('id', teaching_assignment_id)
+                            .single()
+                        // (a) mapel TA baru == mapel batch
+                        const sameSubject = !!newTa && newTa.subject_id === anchorTa.subject_id
+                        // (b) kelas tujuan memang kelas member batch (bukan kelas
+                        //     asing milik penyerang yang kebetulan se-mapel)
+                        const targetIsMemberClass = !!newTa?.class_id && memberClassIds.has(newTa.class_id)
+                        if (!sameSubject || !targetIsMemberClass) {
+                            return NextResponse.json({ error: 'Batch ulangan ini bukan milik penugasan Anda' }, { status: 403 })
+                        }
+                    }
+                }
+                // ADMIN: boleh melanjutkan batch (alur modal terpadu admin membuat
+                // member per TA guru) — tenant guard TA di atas sudah membatasi
+                // se-sekolah.
+            }
+        }
 
         // Tenant guard: exam sumber duplikasi/remedial harus milik sekolah caller —
         // duplicate_questions menyalin seluruh soal + kunci jawaban; tanpa guard
@@ -315,6 +377,16 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json({ error: 'Gagal membaca soal sumber. Duplikasi dibatalkan.' }, { status: 500 })
             }
 
+            // M1 (audit eksternal): clamp sumber anomali — paritas
+            // SOURCE_QUESTIONS_LIMIT di copy-questions & examBatch. Sumber > 500
+            // soal = kandidat data terduplikasi (kasus runaway); menyalinnya
+            // hanya melipatgandakan kerusakan ke exam baru.
+            if (originalQuestions.length > 500) {
+                console.error(`[duplicate] ABORT: sumber ${duplicateSourceId} punya ${originalQuestions.length} soal (> 500) — data anomali.`)
+                await supabase.from('exams').delete().eq('id', data.id)
+                return NextResponse.json({ error: 'Sumber punya soal melebihi batas (kemungkinan terduplikasi). Periksa ulangan sumber.' }, { status: 400 })
+            }
+
             if (originalQuestions && originalQuestions.length > 0) {
                 const newQuestions = originalQuestions.map((q: any) => ({
                     exam_id: data.id,
@@ -333,7 +405,13 @@ export async function POST(request: NextRequest) {
                     text_direction: q.text_direction,
                     content_format: q.content_format
                 }))
-                const { error: duplicateError } = await supabase.from('exam_questions').insert(newQuestions)
+                // M1: insert belah chunk 500 (payload raksasa rawan timeout /
+                // ditolak — paritas insertQuestionsChunked examBatch)
+                let duplicateError: unknown = null
+                for (let i = 0; i < newQuestions.length; i += 500) {
+                    const { error: chunkErr } = await supabase.from('exam_questions').insert(newQuestions.slice(i, i + 500))
+                    if (chunkErr) { duplicateError = chunkErr; break }
+                }
                 if (duplicateError) {
                     console.error('Error inserting duplicated questions:', duplicateError)
                     await supabase.from('exams').delete().eq('id', data.id)

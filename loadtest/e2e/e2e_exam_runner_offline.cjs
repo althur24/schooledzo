@@ -174,8 +174,11 @@ async function main() {
     const createRes = await api('/api/exams', guruTok, {
         method: 'POST',
         body: JSON.stringify({
-            title: `${U} Ulangan Offline`, start_time: new Date(Date.now() - 30000).toISOString(),
-            duration_minutes: 1, teaching_assignment_id: taA.id, is_randomized: false,
+            // K3 (audit eksternal): durasi minimal 5 menit — validasi server baru.
+            // Timer tetap ~30 detik via start_time 4,5 menit yang lalu (mode
+            // serentak: endAt = start_time + durasi, siswa telat dapat sisa).
+            title: `${U} Ulangan Offline`, start_time: new Date(Date.now() - 270000).toISOString(),
+            duration_minutes: 5, teaching_assignment_id: taA.id, is_randomized: false,
             max_violations: 3, show_results_immediately: true,
         }),
     })

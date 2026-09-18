@@ -93,13 +93,58 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
     }, [resumeData])
 
     // === LocalStorage helpers (key mengikuti config.storagePrefix) ===
+    // M5 (audit eksternal): draft menyimpan SNAPSHOT jawaban tersinkron terakhir
+    // (`synced`) — dipakai 3-way merge saat resume: server menang secara default,
+    // KECUALI soal yang berubah lokal setelah sync terakhir (== draft ≠ snapshot)
+    // → artinya diedit offline sesudahnya dan lebih baru dari server.
     const saveAnswersToLocal = (answers: { [key: string]: string }) => {
         if (typeof window !== 'undefined') {
-            localStorage.setItem(`${configRef.current.storagePrefix}_${examId}_answers`, JSON.stringify({
-                answers,
-                lastSaved: new Date().toISOString()
-            }))
+            try {
+                const data = localStorage.getItem(`${configRef.current.storagePrefix}_${examId}_answers`)
+                let synced: { [key: string]: string } = {}
+                if (data) {
+                    try { synced = JSON.parse(data)?.synced || {} } catch { /* korup → snapshot kosong */ }
+                }
+                localStorage.setItem(`${configRef.current.storagePrefix}_${examId}_answers`, JSON.stringify({
+                    answers,
+                    synced,
+                    lastSaved: new Date().toISOString()
+                }))
+            } catch (e) {
+                // localStorage penuh/di-disable (private mode) — jangan crash ujian
+                console.warn('[exam] localStorage tidak tersedia:', e)
+            }
         }
+    }
+
+    /** Snapshot jawaban yang terakhir BERHASIL tersinkron ke server. */
+    const saveSyncedSnapshot = (synced: { [key: string]: string }) => {
+        if (typeof window !== 'undefined') {
+            try {
+                const data = localStorage.getItem(`${configRef.current.storagePrefix}_${examId}_answers`)
+                let answers: { [key: string]: string } = {}
+                if (data) {
+                    try { answers = JSON.parse(data)?.answers || {} } catch { /* korup */ }
+                }
+                localStorage.setItem(`${configRef.current.storagePrefix}_${examId}_answers`, JSON.stringify({
+                    answers,
+                    synced,
+                    lastSaved: new Date().toISOString()
+                }))
+            } catch { /* best-effort */ }
+        }
+    }
+
+    const loadSyncedSnapshot = (): { [key: string]: string } => {
+        if (typeof window !== 'undefined') {
+            const data = localStorage.getItem(`${configRef.current.storagePrefix}_${examId}_answers`)
+            if (data) {
+                try {
+                    return JSON.parse(data)?.synced || {}
+                } catch { return {} }
+            }
+        }
+        return {}
     }
 
     const loadAnswersFromLocal = (): { [key: string]: string } => {
@@ -226,13 +271,32 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         }
     }, [])
 
-    // Retry berkala saat autosave gagal: event 'online' browser TIDAK reliable —
-    // WiFi tersambung tapi internet mati tidak memicu event apa pun, sehingga
-    // badge bisa macet "Gagal simpan" selamanya. Retry ini memastikan sync
-    // terjadi begitu server benar-benar terjangkau lagi, lalu badge pulih.
+    // Retry berkala saat autosave gagal ATAU ada perubahan lokal yang belum
+    // tersinkron: event 'online' browser TIDAK reliable — WiFi tersambung tapi
+    // internet mati tidak memicu event apa pun, dan saat offline murni
+    // syncToServer early-return (badge "Offline") sehingga status tidak pernah
+    // 'error'. M8 (audit eksternal): interval kini juga berjalan bila ada
+    // perubahan belum tersinkron — pemulihan tidak lagi 100% bergantung event
+    // online yang tak selalu fire (iOS Safari/PWA).
+    // ⚠️ "Pending" = draft ≠ snapshot tersinkron (BUKAN "draft tidak kosong" —
+    // draft memang SELALU berisi jawaban aktif selama ujian; tanpa pembanding
+    // snapshot, interval akan PUT seluruh jawaban tiap 15 dtk per siswa selamanya
+    // = spam besar saat 1000 siswa serentak).
     useEffect(() => {
-        if (saveStatus !== 'error' || !submission) return
-        const iv = setInterval(() => { syncLocalToServer() }, 15000)
+        if (!submission) return
+        const hasUnsyncedChanges = () => {
+            const draft = loadAnswersFromLocal()
+            const synced = loadSyncedSnapshot()
+            const draftKeys = Object.keys(draft)
+            if (draftKeys.length === 0) return false
+            // ada soal berbeda dari snapshot (atau belum pernah tersinkron)
+            return draftKeys.some(qid => synced[qid] !== draft[qid])
+        }
+        if (saveStatus !== 'error' && !hasUnsyncedChanges()) return
+        const iv = setInterval(() => {
+            if (saveStatus !== 'error' && !hasUnsyncedChanges()) return
+            syncLocalToServer()
+        }, 15000)
         return () => clearInterval(iv)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [saveStatus, submission])
@@ -261,10 +325,14 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
 
                 // 409 TIME_EXPIRED: server sudah menutup (jawaban request ikut terselamatkan
                 // via upsert). 400 "Already submitted": submission tertutup dari jalur lain
-                // (device lain / submit mendahului sync). Keduanya = state final di server,
-                // draft lokal aman dibersihkan supaya tidak dicoba terus tiap event online.
+                // (device lain / submit mendahului sync / sweep saat offline). K1 fix:
+                // bila request membawa jawaban, server MENYELAMATKANNYA dulu (rescue) lalu
+                // menjawab 400 code ANSWERS_RESCUED — draft aman dibersihkan & user dibawa
+                // ke hasil (janji banner "otomatis dikirim saat online" jadi benar).
+                // 400 tanpa kode = PUT tanpa jawaban (mis. flush pelanggaran) — state final.
                 const errBody = res.ok ? null : await res.json().catch(() => null)
-                const alreadySubmitted = res.status === 400 && errBody?.error === 'Already submitted'
+                const alreadySubmitted = res.status === 400
+                    && (errBody?.code === 'ANSWERS_RESCUED' || errBody?.error === 'Already submitted')
                 if (res.status === 409 || alreadySubmitted) {
                     clearLocalAnswers()
                     router.replace(configRef.current.resultRoute(examId))
@@ -274,6 +342,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 } else if (res.ok) {
                     // Pulihkan badge: sync sukses → "Tersimpan" (sebelumnya badge macet
                     // "Gagal simpan" selamanya walau jawaban sudah masuk server).
+                    // M5: catat snapshot tersinkron (basis 3-way merge saat resume).
+                    saveSyncedSnapshot(localAnswers)
                     setSaveStatus('saved')
                     setLastLatencyMs(performance.now() - t0)
                 } else {
@@ -385,14 +455,30 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             }
 
             // Jawaban tersimpan di server (resume lintas device / localStorage kosong)
-            // digabung dengan draft lokal — draft lokal menang per soal (paling baru).
+            // digabung dengan draft lokal — M5 (audit eksternal): 3-WAY MERGE via
+            // snapshot tersinkron. Dulu draft lokal SELALU menang → device lama
+            // (draft basi) menimpa jawaban yang lebih baru di server. Sekarang:
+            //   - default: SERVER menang (paling segar)
+            //   - soal dengan draft ≠ snapshot = diedit offline SETELAH sync
+            //     terakhir → lokal memang lebih baru dari server → lokal menang
+            //   - soal dengan draft == snapshot = tidak berubah sejak sync →
+            //     pakai server (bisa jadi device lain sudah memperbaruinya)
+            const syncedSnapshot = loadSyncedSnapshot()
             const dbAnswers: Record<string, string> = {}
             if (Array.isArray(subData.saved_answers)) {
                 subData.saved_answers.forEach((a: { question_id: string; answer: string }) => {
                     if (a?.question_id) dbAnswers[a.question_id] = a.answer
                 })
             }
-            const mergedAnswers = { ...dbAnswers, ...localAnswers }
+            const mergedAnswers: Record<string, string> = { ...dbAnswers }
+            for (const [qid, localAnswerRaw] of Object.entries(localAnswers)) {
+                const localAnswer = String(localAnswerRaw ?? '')
+                if (syncedSnapshot[qid] !== localAnswer || dbAnswers[qid] === undefined) {
+                    // berubah sejak sync terakhir (atau soal baru di server) → lokal
+                    // lebih baru dari yang server pegang untuk soal ini
+                    mergedAnswers[qid] = localAnswer
+                }
+            }
 
             let initialAnswers: Record<string, string> = {}
             if (Object.keys(mergedAnswers).length > 0) {
@@ -764,6 +850,10 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             }
             setLastLatencyMs(performance.now() - t0)
             setSaveStatus(res.ok ? 'saved' : 'error')
+            // M5: autosave per soal sukses → snapshot tersinkron ikut maju
+            if (res.ok) {
+                saveSyncedSnapshot({ ...loadSyncedSnapshot(), [questionId]: answer })
+            }
         } catch (error) {
             console.error('Error saving answer:', error)
             setSaveStatus('error')

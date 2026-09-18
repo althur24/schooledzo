@@ -552,6 +552,16 @@ function EditExamPageInner() {
             if (res.ok) {
                 const resData = await res.json()
 
+                // M3 (audit eksternal): request lain (double-click / admin paralel)
+                // memenangkan flip is_active duluan — state terkini dikembalikan
+                // server tanpa notifikasi/batch-sync dobel. Info, bukan error.
+                if (resData?.concurrent_update) {
+                    setShowPublishConfirm(false)
+                    setToast({ message: `${labels.ulangan} sudah dipublikasikan oleh request lain (mungkin klik ganda atau admin)`, type: 'success' })
+                    fetchExam()
+                    return
+                }
+
                 // Soal menunggu review admin — sibling jangan diterbitkan/disalin dulu
                 if (resData?.pending_publish) {
                     setShowPublishConfirm(false)
@@ -647,6 +657,14 @@ function EditExamPageInner() {
         }
         if (editForm.schedule_mode === 'window' && !editForm.window_end_time) {
             setAlertInfo({ type: 'warning', title: 'Form Tidak Lengkap', message: 'Jam tutup jendela waktu wajib diisi!' })
+            return
+        }
+        // K3 (audit eksternal): durasi minimal 5 menit — paritas modal create.
+        // Sebelumnya hanya pesan error visual TimeWindowFields; tombol Simpan
+        // tetap aktif dan server (kini juga memvalidasi) menolak belakangan.
+        const durationNum = Number(editForm.duration_minutes)
+        if (!Number.isFinite(durationNum) || durationNum < 5) {
+            setAlertInfo({ type: 'warning', title: 'Durasi Tidak Valid', message: 'Durasi pengerjaan minimal 5 menit!' })
             return
         }
         setSavingSettings(true)

@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findTeachingAssignmentsOutsideSchool, findQuizzesOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
+import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 import { getBatchInfo } from '@/lib/examBatch'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { sanitizePolicyInput } from '@/lib/remedialScore'
@@ -201,6 +202,36 @@ export async function POST(request: NextRequest) {
         // menanam kuis di sekolah lain (dan lolos semua guard sekolah itu).
         if ((await findTeachingAssignmentsOutsideSchool([teaching_assignment_id], schoolId)).length > 0) {
             return NextResponse.json({ error: 'Teaching assignment tidak valid' }, { status: 403 })
+        }
+
+        // ── M9: validasi batch_id dari client (audit eksternal 2026-09-18) ──
+        // batch_id dibuat client (crypto.randomUUID saat wizard multi-kelas) —
+        // tanpa validasi, guru bisa menyusup kuis ke batch guru lain; syncDraft
+        // quiz lalu menyalin soal semua sibling → ekfiltrasi soal guru korban.
+        // Aturan: batch yang sudah punya member hanya boleh diikuti kuis dengan
+        // TA milik sendiri / co-teacher mapel+kelas sama (paritas guard exams).
+        if (batch_id) {
+            const { data: batchMembers } = await supabase
+                .from('quizzes')
+                .select('id, teaching_assignment:teaching_assignments(teacher_id, subject_id)')
+                .eq('batch_id', batch_id)
+                .limit(1)
+            const anchor = batchMembers?.[0]
+            if (anchor) {
+                const anchorTa = Array.isArray(anchor.teaching_assignment) ? anchor.teaching_assignment[0] : anchor.teaching_assignment
+                const scope = await getTeacherScope(user.id)
+                const isOwn = ownsTeachingAssignment(scope, anchorTa?.teacher_id)
+                if (!isOwn) {
+                    const { data: newTa } = await supabase
+                        .from('teaching_assignments')
+                        .select('subject_id, class_id')
+                        .eq('id', teaching_assignment_id)
+                        .single()
+                    if (!newTa || anchorTa?.subject_id !== newTa.subject_id || !coTeachesClassSubject(scope, newTa.subject_id, newTa.class_id)) {
+                        return NextResponse.json({ error: 'Batch kuis ini bukan milik penugasan Anda' }, { status: 403 })
+                    }
+                }
+            }
         }
 
         // Remedial: kuis sumber harus milik sekolah caller DAN TA yang sama —

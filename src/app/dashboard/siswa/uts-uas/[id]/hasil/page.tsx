@@ -12,6 +12,8 @@ import { TickSquare, TimeCircle, Danger, Calendar } from 'react-iconly'
 interface ExamResult {
     id: string
     is_submitted?: boolean
+    /** false = masih ada esai menunggu koreksi guru (nilai sementara) */
+    is_graded?: boolean | null
     total_score: number | null
     max_score: number | null
     results_hidden?: boolean
@@ -130,6 +132,13 @@ export default function OfficialExamResultPage() {
                     <p className="mt-4 text-base md:text-lg font-medium bg-white/20 inline-block px-4 py-1 rounded-full backdrop-blur-sm">
                         {percentage >= 80 ? '🎉 Excellent!' : percentage >= 60 ? '👍 Good Job!' : percentage >= 40 ? '💪 Keep Trying!' : '📚 Need More Study'}
                     </p>
+                    {/* H3 parity (audit eksternal): esai belum dikoreksi guru → nilai
+                        masih sementara — indikator yang sama dengan halaman hasil ulangan. */}
+                    {result.is_graded === false && (
+                        <p className="mt-3 text-sm font-medium bg-amber-500/30 border border-amber-300/40 inline-block px-4 py-1.5 rounded-full backdrop-blur-sm">
+                            ⏳ Menunggu koreksi guru — nilai sementara, bisa berubah setelah soal esai dinilai
+                        </p>
+                    )}
                 </div>
             )}
 

@@ -86,7 +86,10 @@ async function main() {
     const ta1 = await mustInsert(supabase, 'teaching_assignments', { teacher_id: guru1.teacher.id, class_id: classA.id, subject_id: subject.id, academic_year_id: year.id }, 'TA guru1')
     const ta2 = await mustInsert(supabase, 'teaching_assignments', { teacher_id: guru2.teacher.id, class_id: classA.id, subject_id: subject.id, academic_year_id: year.id }, 'TA guru2 (co-teacher)')
     const ta3 = await mustInsert(supabase, 'teaching_assignments', { teacher_id: guru3.teacher.id, class_id: classB.id, subject_id: subject.id, academic_year_id: year.id }, 'TA guru3')
-    created.tas.push(ta1.id, ta2.id, ta3.id)
+    // TA guru1 di kelas B — member kedua batch (pemilik batch menambah kelas
+    // miliknya sendiri, paritas wizard nyata)
+    const ta1b = await mustInsert(supabase, 'teaching_assignments', { teacher_id: guru1.teacher.id, class_id: classB.id, subject_id: subject.id, academic_year_id: year.id }, 'TA guru1 kelas B')
+    created.tas.push(ta1.id, ta2.id, ta3.id, ta1b.id)
 
     // Admin + siswa
     const adminU = await mustInsert(supabase, 'users', { username: `${U}_admin`, full_name: `${U} Admin`, password_hash: passHash, role: 'ADMIN', school_id: school.id, must_change_password: false, is_locked: false }, 'user admin')
@@ -228,7 +231,11 @@ async function main() {
 
     // ============ C1: batch badge kelas unik ============
     console.log('[T6] C1 — batch badge kelas unik')
-    // Batch 2 exam 2 kelas (normal) — batch_id WAJIB UUID (kolom DB bertipe uuid)
+    // Batch 2 exam 2 kelas (normal) — batch_id WAJIB UUID (kolom DB bertipe uuid).
+    // M9 (audit 2026-09-18): kedua POST dari PEMILIK batch (guru1) — paritas
+    // wizard nyata (batch tidak pernah dibuat lintas-guru lintas-kelas via API;
+    // guard server kini menolak kombinasi itu). Co-teacher kelas MEMBER tetap
+    // boleh (dites di e2e_audit_fixes M9c).
     const batchId = crypto.randomUUID()
     const legacyBatchId = crypto.randomUUID()
     const b1 = await api('/api/exams', guru1.token, {
@@ -240,11 +247,11 @@ async function main() {
     })
     const b1e = await b1.json().catch(() => null)
     created.exams.push(b1e?.id)
-    const b2 = await api('/api/exams', guru3.token, {
+    const b2 = await api('/api/exams', guru1.token, {
         method: 'POST',
         body: JSON.stringify({
             title: `${U} Batch B`, start_time: new Date(Date.now() - 60000).toISOString(),
-            duration_minutes: 30, teaching_assignment_id: ta3.id, is_randomized: false, max_violations: 3, batch_id: batchId,
+            duration_minutes: 30, teaching_assignment_id: ta1b.id, is_randomized: false, max_violations: 3, batch_id: batchId,
         }),
     })
     const b2e = await b2.json().catch(() => null)
@@ -268,6 +275,11 @@ async function main() {
     })
     const b4e = await b4.json().catch(() => null)
     created.exams.push(b4e?.id)
+    // M9 guard: b4 (guru2 = co-teacher TA yang SAMA dengan ta1? tidak — ta2 beda
+    // TA) — batch legacy: ta1 & ta2 = kelas SAMA guru beda: guru2 menambah kelas
+    // yang sudah jadi member → co-teacher mapel+kelas member → SAH (paritas
+    // data pra-fix yang memang begitu). Assert b4 diterima:
+    check('M9: guru co-teacher (kelas member, TA beda) boleh ikut batch legacy', b4.status === 200, `status=${b4.status}`)
 
     const l1v = await api('/api/exams', guru1.token)
     const l1vBody = await l1v.json().catch(() => null)

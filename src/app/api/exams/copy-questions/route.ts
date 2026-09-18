@@ -50,12 +50,15 @@ export async function POST(req: NextRequest) {
         // miliknya sendiri ATAU co-taught (mapel+kelas sama) — tanpa ini guru A bisa
         // menimpa seluruh soal exam guru B (sekolah sama) lalu menerbitkannya
         // via also_publish. Co-teacher pengampu kelas sama memang berhak.
+        // M2 (audit eksternal): batchedIn — batch besar (mis. salin ke 20+ kelas
+        // paralel) melewati batas URL 16KB pada .in() mentah.
         if (user.role === 'GURU') {
             const scope = await getTeacherScope(user.id)
-            const { data: scopeExams } = await supabase
-                .from('exams')
-                .select('id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id)')
-                .in('id', [source_exam_id, ...target_exam_ids])
+            const scopeExams = await batchedIn<any>('id', [source_exam_id, ...target_exam_ids], (chunk) =>
+                supabase
+                    .from('exams')
+                    .select('id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id)')
+                    .in('id', chunk))
             for (const ex of scopeExams || []) {
                 const ta = Array.isArray(ex.teaching_assignment) ? (ex.teaching_assignment as any)[0] : ex.teaching_assignment as any
                 const isOwner = ownsTeachingAssignment(scope, ta?.teacher_id)
@@ -66,10 +69,11 @@ export async function POST(req: NextRequest) {
         }
 
         // Block writes to archived (COMPLETED) academic years (checked per target exam)
-        const { data: targetExams } = await supabase
-            .from('exams')
-            .select('teaching_assignment:teaching_assignments(academic_year_id)')
-            .in('id', target_exam_ids)
+        const targetExams = await batchedIn<any>('id', target_exam_ids, (chunk) =>
+            supabase
+                .from('exams')
+                .select('teaching_assignment:teaching_assignments(academic_year_id)')
+                .in('id', chunk))
         const targetYearIds = [...new Set(
             (targetExams || []).map((e: any) => e.teaching_assignment?.academic_year_id).filter(Boolean)
         )] as string[]
@@ -190,6 +194,17 @@ export async function POST(req: NextRequest) {
             }
             const successTargets = target_exam_ids.filter(id => !failedTargets.includes(id))
             if (successTargets.length > 0) {
+                // M2 (audit eksternal): update publish/pending per chunk 100 —
+                // .in() mentah dengan banyak target kena batas URL 16KB.
+                const updateTargetsBatched = async (updateData: Record<string, unknown>) => {
+                    await batchedIn('id', successTargets, async (chunk) => {
+                        const { error: updateError } = await supabase
+                            .from('exams')
+                            .update(updateData)
+                            .in('id', chunk)
+                        if (updateError) throw new Error(updateError.message)
+                    })
+                }
                 if (counts.draft + counts.ai_reviewing + counts.returned > 0) {
                     // Ada soal belum selesai review — jangan aktifkan (paritas gate
                     // PUT yang menolak 400). Copy tetap sah, hanya publish ditahan.
@@ -198,20 +213,15 @@ export async function POST(req: NextRequest) {
                     // Menunggu approve admin — tandai pending_publish; autoPublish
                     // akan menerbitkan otomatis saat semua soal approved.
                     publishPendingTargets = successTargets
-                    const { error: updateError } = await supabase
-                        .from('exams')
-                        .update({ is_active: false, pending_publish: true })
-                        .in('id', successTargets)
-                    if (updateError) {
+                    try {
+                        await updateTargetsBatched({ is_active: false, pending_publish: true })
+                    } catch (updateError: any) {
                         console.error('Error marking targets pending_publish:', updateError)
                     }
                 } else {
-                    const { error: updateError } = await supabase
-                        .from('exams')
-                        .update({ is_active: true })
-                        .in('id', successTargets)
-
-                    if (updateError) {
+                    try {
+                        await updateTargetsBatched({ is_active: true })
+                    } catch (updateError: any) {
                         console.error('Error updating target exams publish state:', updateError)
                     }
                 }

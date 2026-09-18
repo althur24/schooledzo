@@ -9,6 +9,7 @@ import { syncQuestionsToBank } from '@/lib/questionBankSync'
 import { canManageExamCoTaught, getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 import { syncDraftExamQuestions } from '@/lib/examBatch'
 import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
+import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 /**
  * Mirror soal ke sibling batch (draft) setelah mutasi sukses.
@@ -232,6 +233,12 @@ export async function POST(
         for (const q of questions) {
             const v = validateCorrectAnswer(q.question_type || 'MULTIPLE_CHOICE', q.correct_answer, q.options)
             if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
+            // M7 (audit eksternal): poin integer >= 1 — nilai absurd (0/negatif/
+            // desimal raksasa) merusak max_score & penilaian downstream.
+            const pts = q.points ?? 1
+            if (typeof pts !== 'number' || !Number.isInteger(pts) || pts < 1 || pts > 10000) {
+                return NextResponse.json({ error: `Poin soal harus bilangan bulat >= 1 (diterima: ${pts})` }, { status: 400 })
+            }
         }
 
         // Check AI review status ONCE before any insert
@@ -408,6 +415,10 @@ export async function PUT(
         if (options !== undefined) updateData.options = options
         if (correct_answer !== undefined) updateData.correct_answer = correct_answer
         if (difficulty !== undefined) updateData.difficulty = difficulty
+        // M7 (audit eksternal): poin integer >= 1 di jalur edit
+        if (points !== undefined && (typeof points !== 'number' || !Number.isInteger(points) || points < 1 || points > 10000)) {
+            return NextResponse.json({ error: `Poin soal harus bilangan bulat >= 1 (diterima: ${points})` }, { status: 400 })
+        }
         if (points !== undefined) updateData.points = points
         if (image_url !== undefined) updateData.image_url = image_url
         if (passage_text !== undefined) updateData.passage_text = passage_text
@@ -506,6 +517,25 @@ export async function DELETE(
         // penghapusan soal memutus relasi jawaban tersimpan. Tarik ke draft dulu.
         if (examForYear?.is_active) {
             return NextResponse.json({ error: 'Ulangan sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
+        }
+
+        // ── H1 (audit eksternal 2026-09-18): hapus soal DILARANG bila ada attempt ──
+        // exam_answers.question_id → exam_questions ON DELETE CASCADE: menghapus
+        // soal ikut MENGHAPUS jawaban siswa yang sudah tersimpan (attempt berjalan
+        // maupun terkumpul), merusak total_score/max_score snapshot. Guard unpublish
+        // (409 bila is_submitted) di PUT exam menutup jalur utama; ini belt & braces
+        // untuk attempt yang masih berjalan saat ditarik ke draft.
+        {
+            const { count: attemptCount } = await supabase
+                .from('exam_submissions')
+                .select('id', { count: 'exact', head: true })
+                .eq('exam_id', id)
+            if ((attemptCount || 0) > 0) {
+                const labels = await getMenuLabelsForSchool(schoolId)
+                return NextResponse.json({
+                    error: `Tidak bisa menghapus soal — ${attemptCount} siswa sudah membuka ${labels.ulangan.toLowerCase()} ini (jawaban tersimpan akan ikut terhapus).`,
+                }, { status: 409 })
+            }
         }
 
         const questionId = request.nextUrl.searchParams.get('question_id')

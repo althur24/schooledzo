@@ -220,6 +220,21 @@ export async function PUT(
 
         const updateData: any = { updated_at: new Date().toISOString() }
 
+        // ── K3 (audit eksternal): validasi durasi end-to-end ──
+        // Durasi ulangan wajib angka >= 5 menit — tanpa ini, mode serentak dengan
+        // durasi 0/negatif membuat seluruh kelas tidak bisa memulai (start-gate
+        // menolak), sementara data absurd tersimpan diam-diam (modal create sudah
+        // memblokir < 5 di client; settings modal & API belum).
+        if (duration_minutes !== undefined
+            && (typeof duration_minutes !== 'number' || !Number.isFinite(duration_minutes) || duration_minutes < 5)) {
+            return NextResponse.json({ error: 'Durasi pengerjaan minimal 5 menit' }, { status: 400 })
+        }
+        // M7: max_violations wajar (1..10 — paritas min/max di form)
+        if (max_violations !== undefined
+            && (typeof max_violations !== 'number' || !Number.isFinite(max_violations) || max_violations < 1 || max_violations > 10)) {
+            return NextResponse.json({ error: 'Maksimal pelanggaran harus antara 1 sampai 10' }, { status: 400 })
+        }
+
         if (title !== undefined) updateData.title = title
         if (description !== undefined) updateData.description = description
         if (start_time !== undefined) updateData.start_time = start_time
@@ -237,20 +252,53 @@ export async function PUT(
 
         if (max_violations !== undefined) updateData.max_violations = max_violations
 
-        const { data, error } = await supabase
-            .from('exams')
-            .update(updateData)
-            .eq('id', id)
-            .select(`
-                *,
-                teaching_assignment:teaching_assignments(
-                    class_id,
-                    subject:subjects(name)
-                )
-            `)
-            .single()
+        // ── H1 (audit eksternal): tolak unpublish bila sudah ada yang mengumpulkan ──
+        // Alur "tarik ke draft untuk edit soal" sah, TAPI setelah ada submission
+        // terkumpul, unpublish membuka jalan hapus soal → CASCADE menghapus
+        // jawaban siswa & merusak nilai historis permanen.
+        if (is_active === false && examForYear?.is_active) {
+            const { count: submittedCount } = await supabase
+                .from('exam_submissions')
+                .select('id', { count: 'exact', head: true })
+                .eq('exam_id', id)
+                .eq('is_submitted', true)
+            if ((submittedCount || 0) > 0) {
+                return NextResponse.json({
+                    error: `Tidak bisa menarik ke draft — ${submittedCount} siswa sudah mengumpulkan ${labels.ulangan.toLowerCase()} ini. Nilai historis harus dijaga.`,
+                }, { status: 409 })
+            }
+        }
 
-        if (error) throw error
+        // ── M3 (audit eksternal): optimistic-concurrency pada transisi is_active ──
+        // Publish paralel (double-click / dua guru publish member sama serentak)
+        // dulu dua-duanya sukses + dua-duanya mengirim notifikasi dobel. Kini
+        // update is_active dibatasi kondisi state yang dibaca (eq is_active
+        // lama) → hanya SATU request yang berhasil flip; yang kalah mendapat
+        // 0 baris → di-handle sebagai "sudah berubah oleh request lain" tanpa
+        // notifikasi/batch-sync dobel.
+        const prevActive = examForYear?.is_active === true
+        const examSelect = `
+            *,
+            teaching_assignment:teaching_assignments(
+                class_id,
+                subject:subjects(name)
+            )
+        `
+        let updateQuery = supabase.from('exams').update(updateData).eq('id', id)
+        if (is_active !== undefined) updateQuery = updateQuery.eq('is_active', prevActive)
+        const { data, error } = await updateQuery.select(examSelect).single()
+
+        if (error) {
+            // PGRST116 = 0 baris ter-update → kondisi is_active berubah di tengah
+            // jalan (publish/unpublish paralel). State terkini dikembalikan apa
+            // adanya — bukan error bagi user, hanya "request lain lebih dulu".
+            if (error.code === 'PGRST116' && is_active !== undefined) {
+                const { data: fresh } = await supabase
+                    .from('exams').select(examSelect).eq('id', id).single()
+                return NextResponse.json({ ...fresh, batch_sync: null, concurrent_update: true })
+            }
+            throw error
+        }
 
         // ── K3: jadwal batch dipaksa SERAGAM (paritas UTS/UAS) ──
         // Prinsip desain: 1 batch = 1 jadwal (kelas paralel mengerjakan

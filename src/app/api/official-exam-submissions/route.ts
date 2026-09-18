@@ -11,6 +11,7 @@ import { getTeacherScope, canTeachStudentSubmission } from '@/lib/teacherScope'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { batchedIn } from '@/lib/batchedIn'
 import { mergeViolations, IncomingViolation } from '@/lib/violationBatch'
+import { logGradeChange } from '@/lib/gradeHistory'
 
 // GET official exam submissions
 export async function GET(request: NextRequest) {
@@ -687,6 +688,24 @@ export async function PUT(request: NextRequest) {
 
             if (resetError) throw resetError
 
+            // M6 (audit eksternal): paritas audit trail koreksi manual — reset
+            // mengubah nilai (total_score → 0), wajib tercatat di grade_history.
+            try {
+                await logGradeChange({
+                    schoolId,
+                    source: 'OFFICIAL_EXAM',
+                    refId: currentSubmission.exam_id,
+                    refTitle: null,
+                    studentId: currentSubmission.student_id,
+                    oldScore: currentSubmission.total_score ?? null,
+                    newScore: resetSubmission.total_score ?? 0,
+                    maxScore: resetSubmission.max_score ?? null,
+                    changedBy: user.id,
+                })
+            } catch (auditErr) {
+                console.error('[official-reset] logGradeChange gagal (best-effort):', auditErr)
+            }
+
             const expiryAfter = resolveWindowExpiry(
                 { start_time: examCfg.start_time ?? null, duration_minutes: examCfg.duration_minutes ?? null, window_end_time: examCfg.window_end_time ?? null },
                 { started_at: resetSubmission.started_at, timer_override_until: resetSubmission.timer_override_until }
@@ -735,6 +754,65 @@ export async function PUT(request: NextRequest) {
             }
         } else {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        }
+
+        // ── K1 parity (audit eksternal): RESCUE jawaban offline pada submission
+        // yang sudah ditutup. Skenario sama dengan ulangan: WiFi putus menjelang
+        // waktu habis → siswa lanjut mengerjakan → sweep menutup submission →
+        // koneksi pulih → PUT draft ditolak 400 "Already submitted" → draft lokal
+        // dibersihkan client → jawaban HILANG PERMANEN. Fix: sebelum menolak,
+        // jawaban di request DISELAMATKAN — objektif di-grade & upsert, esai
+        // upsert jawaban saja (tanpa menyentuh points_earned — nilai koreksi
+        // guru tak terinjak), lalu total_score direkap. Response tetap 400
+        // dengan kode ANSWERS_RESCUED (client runner shared ulangan/UTS-UAS
+        // sudah menanganinya).
+        if (currentSubmission.is_submitted && Array.isArray(answers) && answers.length > 0) {
+            try {
+                const rescueQuestions = await getExamQuestionsForGrading('official_exam_questions', currentSubmission.exam_id)
+                const rescueMap = new Map(rescueQuestions.map(q => [q.id, q]))
+                const rescueValid = answers.filter((a: { question_id: string }) => rescueMap.has(a.question_id))
+                if (rescueValid.length > 0) {
+                    const rescueRows = rescueValid.map((ans: { question_id: string, answer: string }) => {
+                        const q = rescueMap.get(ans.question_id)!
+                        if (needsManualGrading(q.question_type)) {
+                            // Esai: hanya jawaban — pertahankan nilai koreksi/auto-grade
+                            return { submission_id, question_id: ans.question_id, answer: ans.answer }
+                        }
+                        const graded = gradeAnswer(q.question_type, ans.answer, q.correct_answer, q.options, q.points || 1)
+                        return {
+                            submission_id,
+                            question_id: ans.question_id,
+                            answer: ans.answer,
+                            is_correct: graded.isCorrect,
+                            points_earned: Math.round(graded.pointsEarned),
+                        }
+                    })
+                    await supabase.from('official_exam_answers').upsert(rescueRows, { onConflict: 'submission_id,question_id' })
+                    // Rekap total dari seluruh jawaban (pola final-submit)
+                    const { data: rescueAll } = await supabase
+                        .from('official_exam_answers')
+                        .select('points_earned, is_correct')
+                        .eq('submission_id', submission_id)
+                    const rescueTotal = (rescueAll || []).reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0)
+                    const hasEssay = rescueQuestions.some(q => needsManualGrading(q.question_type))
+                    const essayPending = hasEssay
+                        && (rescueAll || []).some((a: any) => a.points_earned === null && a.is_correct === null)
+                    await supabase
+                        .from('official_exam_submissions')
+                        .update({
+                            total_score: rescueTotal,
+                            ...(essayPending ? { is_graded: false } : {}),
+                        })
+                        .eq('id', submission_id)
+                }
+            } catch (rescueError) {
+                console.error('[K1-rescue official] gagal menyelamatkan jawaban:', rescueError)
+            }
+            return NextResponse.json({
+                code: 'ANSWERS_RESCUED',
+                error: 'Already submitted',
+                message: 'Jawaban terakhirmu sudah diterima dan dikumpulkan.',
+            }, { status: 400 })
         }
 
         if (currentSubmission.is_submitted) {

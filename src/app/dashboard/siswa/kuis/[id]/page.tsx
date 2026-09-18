@@ -292,10 +292,13 @@ export default function KerjakanKuisPage() {
 
             // 409 TIME_EXPIRED: server sudah menutup (jawaban request ikut terselamatkan
             // via merge). 400 "Kuis sudah dikumpulkan": submission tertutup dari jalur lain
-            // (submit mendahului sync / device lain). Keduanya = state final di server,
-            // draft lokal aman dibersihkan supaya tidak bocor ke attempt berikutnya.
+            // (submit mendahului sync / device lain). K1 parity: bila request membawa
+            // jawaban, server MENYELAMATKANNYA dulu (merge + nilai ulang) lalu menjawab
+            // 400 code ANSWERS_RESCUED — draft aman dibersihkan & user dibawa ke hasil.
+            // 400 tanpa kode = state final lain. Keduanya: clear draft + redirect.
             const errBody = res.ok ? null : await res.json().catch(() => null)
-            const alreadySubmitted = res.status === 400 && errBody?.error === 'Kuis sudah dikumpulkan'
+            const alreadySubmitted = res.status === 400
+                && (errBody?.code === 'ANSWERS_RESCUED' || errBody?.error === 'Kuis sudah dikumpulkan')
             if (res.status === 409 || alreadySubmitted) {
                 clearLocalAnswers()
                 router.replace(`/dashboard/siswa/kuis/${quizId}/hasil`)
