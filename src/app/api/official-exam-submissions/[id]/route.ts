@@ -6,6 +6,7 @@ import { getTeacherScope, canTeachStudentSubmission } from '@/lib/teacherScope'
 import { logError } from '@/lib/logError'
 import { logGradeChange } from '@/lib/gradeHistory'
 import { resolveWindowExpiry } from '@/lib/examExpiry'
+import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 
 // GET submission detail with answers
 export async function GET(
@@ -181,14 +182,47 @@ export async function PUT(
             return NextResponse.json({ error: 'grades array required' }, { status: 400 })
         }
 
+        // ── K2 hardening (paritas exam-submissions/[id], audit pra-UTS 2026-09-20) ──
+        //  1. answer_id WAJIB baris jawaban milik submission ini — sebelumnya id
+        //     asing lolos diam-diam (update 0 baris tanpa error).
+        //  2. points_earned di-clamp 0..poin soal — skor koreksi tak mungkin
+        //     melebihi bobot soal (audit membuktikan 9999 tersimpan di soal
+        //     10 poin lewat request yang dibentuk manual).
+        let clampedGrades: { id: string; points_earned: number }[] = []
+        if (grades.length > 0) {
+            const { data: gradeRows } = await supabase
+                .from('official_exam_answers')
+                .select('id, question_id')
+                .eq('submission_id', id)
+                .in('id', grades.map((g: any) => g.answer_id))
+            const rowById = new Map((gradeRows || []).map((r: any) => [r.id, r]))
+            const missing = grades.filter((g: any) => !rowById.has(g.answer_id))
+            if (missing.length > 0) {
+                return NextResponse.json({
+                    error: `Jawaban tidak ditemukan di submission ini: ${missing.slice(0, 3).map((g: any) => g.answer_id).join(', ')}${missing.length > 3 ? '…' : ''}`,
+                }, { status: 400 })
+            }
+
+            const examQuestions = await getExamQuestionsForGrading('official_exam_questions', authExam?.id || id)
+            const questionPoints = new Map(examQuestions.map(q => [q.id, q.points || 10]))
+            clampedGrades = grades.map((grade: any) => {
+                const row = rowById.get(grade.answer_id)!
+                // Soal tak terdaftar (draft basi/soal dihapus) → patokan 0 — jangan
+                // biarkan nilai lolos tanpa batas yang diketahui.
+                const maxPoints = questionPoints.get(row.question_id) ?? 0
+                const raw = Math.round(grade.points_earned ?? 0)
+                return { id: grade.answer_id, points_earned: Math.max(0, Math.min(raw, maxPoints)) }
+            })
+        }
+
         // BATCH UPDATE: parallel dengan filter submission_id (safety filter).
         // Error TIDAK ditelan — kegagalan parsial membuat nilai hilang diam-diam
         // sementara total_score & is_graded:true tetap ditulis.
-        const gradeResults = await Promise.all(grades.map((grade: any) =>
+        const gradeResults = await Promise.all(clampedGrades.map((grade) =>
             supabase
                 .from('official_exam_answers')
-                .update({ points_earned: Math.round(grade.points_earned) })
-                .eq('id', grade.answer_id)
+                .update({ points_earned: grade.points_earned })
+                .eq('id', grade.id)
                 .eq('submission_id', id)
         ))
         const failedGrade = gradeResults.find(r => r.error)
