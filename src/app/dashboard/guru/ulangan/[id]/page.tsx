@@ -232,11 +232,12 @@ function EditExamPageInner() {
     // Mode batch: exam ini bagian batch multi-kelas dengan sibling yang terlihat
     // (batch_siblings scope-filtered server-side — co-teacher parsial hanya kelasnya)
     const isBatchView = !!(exam?.batch_id && (exam.batch_siblings?.length || 0) > 0)
-    // Opsi kelas: kelas exam ini + sibling, urut abjad
+    // Opsi kelas: kelas exam ini + sibling, urut abjad (numeric: "Kelas 2" < "Kelas 10",
+    // case-insensitive — konsisten dengan dropdown monitor & hasil UTS/UAS)
     const batchMembers = [
         { id: examId, class_name: exam?.teaching_assignment?.class?.name || 'Kelas Ini' },
         ...(exam?.batch_siblings || []).map(s => ({ id: s.id, class_name: s.class_name })),
-    ].sort((a, b) => a.class_name.localeCompare(b.class_name, 'id'))
+    ].sort((a, b) => a.class_name.localeCompare(b.class_name, 'id', { numeric: true, sensitivity: 'base' }))
 
     // Edit settings state
     const [showEditSettings, setShowEditSettings] = useState(false)

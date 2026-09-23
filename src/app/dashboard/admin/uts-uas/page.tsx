@@ -11,6 +11,7 @@ import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
 import { round2, formatScore } from '@/lib/formatScore'
 import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
+import ShowDraftsToggle from '@/components/ShowDraftsToggle'
 import { Plus, ChevronDown } from 'react-iconly'
 import { Loader2, Activity, Edit3, Trash2, GraduationCap, BarChart3, Copy, RefreshCw } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
@@ -77,6 +78,8 @@ function AdminUtsUasPageInner() {
     const tab = searchParams.get('tab') === 'ulangan' ? 'ulangan' : 'utsuas'
     const filterType = searchParams.get('tipe') || ''
     const filterSubject = searchParams.get('mapel') || ''
+    // ?draft=1 = tampilkan draft (belum publish / under review). Default: sembunyikan.
+    const showDrafts = searchParams.get('draft') === '1'
     const upsertParams = (updates: Record<string, string | null>) => {
         const sp = new URLSearchParams(searchParams.toString())
         for (const [k, v] of Object.entries(updates)) {
@@ -89,6 +92,7 @@ function AdminUtsUasPageInner() {
     const setTab = (t: 'utsuas' | 'ulangan') => upsertParams({ tab: t === 'utsuas' ? null : t })
     const setFilterType = (v: string) => upsertParams({ tipe: v || null })
     const setFilterSubject = (v: string) => upsertParams({ mapel: v || null })
+    const setShowDrafts = (v: boolean) => upsertParams({ draft: v ? '1' : null })
 
     // Duplicate & Remedial states (dipakai UTS/UAS & Ulangan — source membedakan endpoint)
     const [showDuplicate, setShowDuplicate] = useState(false)
@@ -747,6 +751,7 @@ function AdminUtsUasPageInner() {
     const filteredExams = exams.filter(e => {
         if (filterType && e.exam_type !== filterType) return false
         if (filterSubject && e.subject?.id !== filterSubject) return false
+        if (!showDrafts && !e.is_active) return false
         return true
     })
 
@@ -767,6 +772,20 @@ function AdminUtsUasPageInner() {
         subjectId: ulanganSubjectId,
         classId: ulanganClassId,
     })
+
+    // Draft filter ulangan DISETELAH grouping: batch disembunyikan hanya bila
+    // SEMUA member belum publish — batch campuran (ada yang publish) tetap
+    // tampil utuh supaya bentuk kartu batch tidak berubah.
+    const visibleUlanganGroups = showDrafts
+        ? ulanganGroups
+        : ulanganGroups.filter(g => g.members.some((m: any) => m.is_active))
+    // Jumlah draf tersembunyi untuk hint toggle — mengikuti tab aktif
+    const hiddenDrafts = tab === 'utsuas'
+        ? exams.filter(e =>
+            (!filterType || e.exam_type === filterType)
+            && (!filterSubject || e.subject?.id === filterSubject)
+            && !e.is_active).length
+        : ulanganGroups.length - visibleUlanganGroups.length
 
     // Group classes by school_level for the selection UI
     const classesByLevel = classes.reduce((acc, c) => {
@@ -814,7 +833,7 @@ function AdminUtsUasPageInner() {
             </div>
 
             {/* Filters */}
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-3 items-center">
                 {tab === 'utsuas' && (
                     <select
                         value={filterType}
@@ -836,6 +855,11 @@ function AdminUtsUasPageInner() {
                         <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                 </select>
+                <ShowDraftsToggle
+                    checked={showDrafts}
+                    onChange={setShowDrafts}
+                    hiddenCount={hiddenDrafts}
+                />
             </div>
 
             {/* Exam List — UTS/UAS */}
@@ -919,16 +943,16 @@ function AdminUtsUasPageInner() {
                     <div className="flex justify-center py-12">
                         <Loader2 className="w-10 h-10 animate-spin text-primary" />
                     </div>
-                ) : filteredUlangan.length === 0 ? (
-                    <EmptyState
-                        icon={<div className="text-indigo-400"><GraduationCap className="w-12 h-12" /></div>}
-                        title={`Belum Ada ${labels.ulangan}`}
-                        description={`${labels.ulangan} yang dibuat Anda atau guru akan muncul di sini untuk dikelola, dimonitor, dan dikoreksi.`}
-                        action={<Button onClick={openCreateModal}>Buat {labels.ulangan} Sekarang</Button>}
-                    />
-                ) : (
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                        {ulanganGroups.map((group) => {
+            ) : visibleUlanganGroups.length === 0 ? (
+                <EmptyState
+                    icon={<div className="text-indigo-400"><GraduationCap className="w-12 h-12" /></div>}
+                    title={`Belum Ada ${labels.ulangan}`}
+                    description={`${labels.ulangan} yang dibuat Anda atau guru akan muncul di sini untuk dikelola, dimonitor, dan dikoreksi.`}
+                    action={<Button onClick={openCreateModal}>Buat {labels.ulangan} Sekarang</Button>}
+                />
+            ) : (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {visibleUlanganGroups.map((group) => {
                             const exam = group.representative
                             const repStatus = getExamStatus(exam)
                             // Status agregat batch: live bila ADA member live,

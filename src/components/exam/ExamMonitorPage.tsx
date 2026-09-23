@@ -380,7 +380,9 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
                         >
                             <option value="">Semua Kelas</option>
                             {/* Unique classes from students array */}
-                            {Array.from(new Set(students.map(s => s.class_name))).filter(Boolean).sort().map(className => (
+                            {Array.from(new Set(students.map(s => s.class_name))).filter(Boolean)
+                                .sort((a, b) => a.localeCompare(b, 'id', { numeric: true, sensitivity: 'base' }))
+                                .map(className => (
                                 <option key={className} value={className}>{className}</option>
                             ))}
                         </select>

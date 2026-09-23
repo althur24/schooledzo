@@ -11,6 +11,7 @@ import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
 import { round2, formatScore } from '@/lib/formatScore'
 import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
+import ShowDraftsToggle from '@/components/ShowDraftsToggle'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
@@ -90,6 +91,9 @@ export default function GuruUlanganPage() {
     const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
     // Filter kelas di list ulangan (batch multi-kelas + filter manual guru)
     const [classFilter, setClassFilter] = useState('')
+    // Toggle "Tampilkan Draft" — satu kontrol untuk ulangan + UTS/UAS.
+    // Default false: draft (belum publish / under review) disembunyikan.
+    const [showDrafts, setShowDrafts] = useState(false)
     const [showCreate, setShowCreate] = useState(false)
     const [creating, setCreating] = useState(false)
     const [form, setForm] = useState({
@@ -844,9 +848,24 @@ export default function GuruUlanganPage() {
     // diagregasi dari member yang TERLIHAT (co-teacher parsial hanya kelasnya);
     // badge "N Kelas Paralel" dari server tetap mencerminkan batch penuh.
     const examGroups = groupExamsByBatch(exams, { subjectId: subjectIdOf, classId: classIdOf })
-    const visibleExamGroups = classFilter
+    const classFilteredGroups = classFilter
         ? examGroups.filter(g => g.classIds.includes(classFilter))
         : examGroups
+    // Draft filter DISETELAH grouping: batch disembunyikan hanya bila SEMUA
+    // member belum publish — batch campuran tetap tampil utuh.
+    const visibleExamGroups = showDrafts
+        ? classFilteredGroups
+        : classFilteredGroups.filter(g => g.members.some(m => m.is_active))
+    // UTS/UAS: draft (is_active=false, termasuk buatan admin) disembunyikan
+    const visibleOfficialExams = showDrafts
+        ? officialExams
+        : officialExams.filter(e => e.is_active)
+    // Draf tersembunyi per seksi — pesan empty state ulangan butuh membedakan
+    // "difilter kelas" vs "semuanya draf tersembunyi"
+    const hiddenUlanganDrafts = classFilteredGroups.length - visibleExamGroups.length
+    // Hint toggle: jumlah draf tersembunyi di kedua seksi
+    const hiddenDrafts = hiddenUlanganDrafts
+        + (officialExams.length - visibleOfficialExams.length)
     // Opsi filter kelas = kelas unik dari TA saya (urut nama)
     const classOptions = [...new Map(
         teachingAssignments
@@ -935,6 +954,14 @@ export default function GuruUlanganPage() {
                 </div>
             ) : (
                 <div className="space-y-8">
+                    {/* Satu toggle untuk kedua seksi: ulangan harian + UTS/UAS */}
+                    <div className="flex justify-end">
+                        <ShowDraftsToggle
+                            checked={showDrafts}
+                            onChange={setShowDrafts}
+                            hiddenCount={hiddenDrafts}
+                        />
+                    </div>
                     <div>
                         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
                             <h2 className="text-xl font-bold text-text-main dark:text-white flex items-center gap-2">
@@ -964,7 +991,11 @@ export default function GuruUlanganPage() {
                             </div>
                         ) : visibleExamGroups.length === 0 ? (
                             <div className="bg-secondary/5 border-2 border-dashed border-secondary/20 rounded-2xl p-8 text-center">
-                                <p className="text-text-secondary text-sm">Tidak ada {labels.ulangan.toLowerCase()} untuk kelas terpilih.</p>
+                                <p className="text-text-secondary text-sm">
+                                    {hiddenUlanganDrafts > 0
+                                        ? <>Semua {labels.ulangan.toLowerCase()} yang tampil berstatus draf — nyalakan <strong>Tampilkan Draft</strong> untuk melihatnya.</>
+                                        : <>Tidak ada {labels.ulangan.toLowerCase()} untuk kelas terpilih.</>}
+                                </p>
                             </div>
                         ) : (
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -1044,15 +1075,19 @@ export default function GuruUlanganPage() {
                             <GraduationCap className="w-6 h-6 text-indigo-500" />
                             Ujian {labels.uts} & {labels.uas}
                         </h2>
-                        {officialExams.length === 0 ? (
+                        {visibleOfficialExams.length === 0 ? (
                             <div className="bg-secondary/5 border-2 border-dashed border-secondary/20 rounded-2xl p-8 text-center">
                                 <BookOpen className="w-12 h-12 text-secondary/50 mx-auto mb-3" />
                                 <h3 className="font-bold text-text-main dark:text-white text-lg">Belum Ada {labels.uts}/{labels.uas}</h3>
-                                <p className="text-text-secondary text-sm">Tidak ada ujian resmi yang terkait dengan mata pelajaran Anda saat ini.</p>
+                                <p className="text-text-secondary text-sm">
+                                    {(officialExams.length - visibleOfficialExams.length) > 0
+                                        ? <>Semua ujian {labels.uts}/{labels.uas} yang tampil berstatus draf — nyalakan <strong>Tampilkan Draft</strong> untuk melihatnya.</>
+                                        : <>Tidak ada ujian resmi yang terkait dengan mata pelajaran Anda saat ini.</>}
+                                </p>
                             </div>
                         ) : (
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                                {officialExams.map(exam => {
+                                {visibleOfficialExams.map(exam => {
                                     const status = getOfficialExamStatus(exam)
                                     const isLive = status.isLive
                                     const isDone = status.isDone

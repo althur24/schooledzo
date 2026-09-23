@@ -1101,7 +1101,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                     className="px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm font-bold"
                                 >
                                     <option value="">Semua Kelas</option>
-                                    {(exam.target_classes || []).map(c => (
+                                    {[...(exam.target_classes || [])]
+                                        .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }))
+                                        .map(c => (
                                         <option key={c.id} value={c.id}>{c.name}</option>
                                     ))}
                                 </select>

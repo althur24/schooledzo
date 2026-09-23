@@ -377,7 +377,9 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
                                 className="w-full sm:w-auto px-3 py-2 bg-transparent text-text-main dark:text-white focus:outline-none text-sm font-bold min-w-[120px] cursor-pointer"
                             >
                                 <option value="">Semua Kelas</option>
-                                {Array.from(new Set(students.map(s => s.class_name))).filter(Boolean).sort().map(className => (
+                                {Array.from(new Set(students.map(s => s.class_name))).filter(Boolean)
+                                    .sort((a, b) => a.localeCompare(b, 'id', { numeric: true, sensitivity: 'base' }))
+                                    .map(className => (
                                     <option key={className} value={className}>{className}</option>
                                 ))}
                             </select>
