@@ -36,7 +36,11 @@ export async function getAnswerStats(
             if (!row?.submission_id) continue
             stats.set(row.submission_id, {
                 count: Number(row.answered_count) || 0,
-                points: Number(row.points_sum) || 0
+                // Round-2: SUM float8 atas nilai round-2 bisa berdebu float
+                // (33.33+33.33+33.34 → 100.00000000000001). Tanpa ini, jalur
+                // monitor lazy auto-close menulis total_score berdebu ke DB —
+                // berbeda dari jalur submit/force-close yang semuanya round-2.
+                points: Math.round((Number(row.points_sum) || 0) * 100) / 100
             })
         }
         return stats
@@ -58,16 +62,20 @@ export async function getAnswerStats(
         chunks.push(submissionIds.slice(i, i + IN_BATCH_SIZE))
     }
     await Promise.all(chunks.map(async (chunk) => {
+        // .order('id') WAJIB sebelum fetchAllRows — paginasi range() tanpa
+        // order stabil bisa melewatkan/duplikat baris (aturan CLAUDE.md).
         const rows = await fetchAllRows<{ submission_id: string; points_earned: number | null }>(
             supabaseAdmin
                 .from(table)
                 .select('submission_id, points_earned')
                 .in('submission_id', chunk)
+                .order('id')
         )
         for (const a of rows) {
             const prev = stats.get(a.submission_id) || { count: 0, points: 0 }
             prev.count += 1
-            prev.points += a.points_earned || 0
+            // Skor bisa desimal (GK proporsional) — round 2 desimal anti debu float
+            prev.points = Math.round((prev.points + (Number(a.points_earned) || 0)) * 100) / 100
             stats.set(a.submission_id, prev)
         }
     }))

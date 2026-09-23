@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { formatScore } from '@/lib/formatScore'
 
 // GET single submission
 export async function GET(
@@ -136,11 +137,43 @@ export async function PUT(
             }
         }
 
+        // ── K2 hardening (paritas exam/official PUT grading) ──
+        //  1. answers[].score di-clamp 0..poin soal — koreksi tak mungkin
+        //     melebihi bobot soal (desimal sah, round-2).
+        //  2. total_score direkonsiliasi server-side dari jawaban hasil clamp —
+        //     client tidak dipercaya menghitung total sendiri (anti debu float
+        //     & anti manipulasi payload).
+        let sanitizedAnswers = answers
+        if (Array.isArray(answers)) {
+            const quizEmbed = Array.isArray(sub.quiz) ? (sub.quiz as any)[0] : (sub.quiz as any)
+            const { data: quizQuestions } = await supabase
+                .from('quiz_questions')
+                .select('id, points')
+                .eq('quiz_id', quizEmbed?.id)
+            const pointsById = new Map((quizQuestions || []).map((q: any) => [q.id, q.points]))
+            sanitizedAnswers = answers.map((ans: any) => {
+                if (!ans?.question_id) return ans
+                const maxPoints = pointsById.get(ans.question_id)
+                // Soal tak dikenal: lewati clamp (bukan jalur ini yang menghancurkan data)
+                if (maxPoints === undefined) return ans
+                // Esai/isian belum dinilai (score null): PERTAHANKAN null —
+                // menulis 0 merusak state "menunggu koreksi guru" (is_graded,
+                // ikon netral siswa, dan rekap "belum dinilai").
+                if (ans.score === null || ans.score === undefined) return ans
+                const raw = Number(ans.score)
+                const clamped = Number.isFinite(raw) ? Math.max(0, Math.min(raw, maxPoints)) : 0
+                return { ...ans, score: Math.round(clamped * 100) / 100 }
+            })
+        }
+        const reconciledTotal = Array.isArray(sanitizedAnswers)
+            ? Math.round(sanitizedAnswers.reduce((sum: number, a: any) => sum + (typeof a?.score === 'number' ? a.score : 0), 0) * 100) / 100
+            : total_score
+
         const { data, error } = await supabase
             .from('quiz_submissions')
             .update({
-                answers,
-                total_score,
+                answers: sanitizedAnswers,
+                total_score: reconciledTotal,
                 is_graded
             })
             .eq('id', id)
@@ -162,7 +195,7 @@ export async function PUT(
                         user_id: studentUserId,
                         type: 'NILAI_KELUAR',
                         title: `Nilai Keluar: ${quiz.title}`,
-                        message: `${subjectName} — Nilai: ${total_score}/${sub.max_score}`,
+                        message: `${subjectName} — Nilai: ${formatScore(reconciledTotal)}/${formatScore(sub.max_score)}`,
                         link: '/dashboard/siswa/kuis'
                     })
                 } catch (notifError) {

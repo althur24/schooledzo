@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { mergeRemedialScores } from '@/lib/remedialScore'
+import { round2 } from '@/lib/formatScore'
 
 /**
  * Gabungkan entri asli + remedial per ujian dasar (kebijakan HIGHEST/AVERAGE/CAP)
@@ -24,8 +25,9 @@ function mergeRecentRemedial(entries: any[]): any[] {
         const finalScore = final !== null ? final : original.score
         out.push({
             ...original,
-            score: Math.round(finalScore),
-            total_score: Math.round(finalScore / 100 * (original.max_score || 100) * 10) / 10,
+            // round-2: nilai desimal (87.5) utuh — jangan dibulatkan untuk wali
+            score: round2(finalScore),
+            total_score: round2(finalScore / 100 * (original.max_score || 100)),
             completed_at: (remedial ?? original).completed_at,
         })
     })
@@ -162,7 +164,8 @@ export async function GET(request: NextRequest) {
                 isRemedial: !!q.quiz?.is_remedial,
                 policy: q.quiz?.remedial_score_policy,
                 cap: q.quiz?.remedial_max_score,
-                score: q.max_score > 0 ? (q.total_score / q.max_score) * 100 : 0,
+                // round-2 — tanpa ini wali melihat "74.66666666666667%"
+                score: q.max_score > 0 ? round2((q.total_score / q.max_score) * 100) : 0,
                 total_score: q.total_score,
                 max_score: q.max_score,
                 completed_at: q.submitted_at
@@ -189,7 +192,7 @@ export async function GET(request: NextRequest) {
                 isRemedial: !!e.exam?.is_remedial,
                 policy: e.exam?.remedial_score_policy,
                 cap: e.exam?.remedial_max_score,
-                score: e.max_score > 0 ? (e.total_score / e.max_score) * 100 : 0,
+                score: e.max_score > 0 ? round2((e.total_score / e.max_score) * 100) : 0,
                 total_score: e.total_score,
                 max_score: e.max_score,
                 completed_at: e.submitted_at

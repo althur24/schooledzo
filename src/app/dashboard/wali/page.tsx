@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import Card from '@/components/ui/Card'
 import PageHeader from '@/components/ui/PageHeader'
 import { User, Graph, Edit, Game, TimeCircle, Notification } from 'react-iconly'
+import { round2, formatScore } from '@/lib/formatScore'
 
 interface DashboardData {
     child: {
@@ -88,14 +89,15 @@ export default function WaliDashboardPage() {
 
     const child = data.child
 
+    // Rata-rata round-2 — nilai desimal (87.5) tampil utuh untuk wali
     const avgScore = child.grades.length > 0
-        ? Math.round(child.grades.reduce((sum, g) => sum + (g.score || 0), 0) / child.grades.length)
+        ? round2(child.grades.reduce((sum, g) => sum + (g.score || 0), 0) / child.grades.length)
         : null
     const quizAvg = child.recentQuizzes.length > 0
-        ? Math.round(child.recentQuizzes.reduce((sum, q) => sum + (q.score || 0), 0) / child.recentQuizzes.length)
+        ? round2(child.recentQuizzes.reduce((sum, q) => sum + (q.score || 0), 0) / child.recentQuizzes.length)
         : null
     const examAvg = child.recentExams.length > 0
-        ? Math.round(child.recentExams.reduce((sum, e) => sum + (e.score || 0), 0) / child.recentExams.length)
+        ? round2(child.recentExams.reduce((sum, e) => sum + (e.score || 0), 0) / child.recentExams.length)
         : null
 
     return (
@@ -133,17 +135,17 @@ export default function WaliDashboardPage() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <Card className="text-center py-4">
                     <div className="flex justify-center"><Graph set="bold" primaryColor="#10b981" size={24} /></div>
-                    <div className="text-2xl font-bold text-text-main dark:text-white mt-1">{avgScore ?? '-'}</div>
+                    <div className="text-2xl font-bold text-text-main dark:text-white mt-1">{avgScore !== null ? formatScore(avgScore) : '-'}</div>
                     <div className="text-[11px] text-text-secondary">Rata² {labels.tugas}</div>
                 </Card>
                 <Card className="text-center py-4">
                     <div className="flex justify-center"><Game set="bold" primaryColor="#6366f1" size={24} /></div>
-                    <div className="text-2xl font-bold text-text-main dark:text-white mt-1">{quizAvg ?? '-'}</div>
+                    <div className="text-2xl font-bold text-text-main dark:text-white mt-1">{quizAvg !== null ? formatScore(quizAvg) : '-'}</div>
                     <div className="text-[11px] text-text-secondary">Rata² {labels.kuis}</div>
                 </Card>
                 <Card className="text-center py-4">
                     <div className="flex justify-center"><TimeCircle set="bold" primaryColor="#f59e0b" size={24} /></div>
-                    <div className="text-2xl font-bold text-text-main dark:text-white mt-1">{examAvg ?? '-'}</div>
+                    <div className="text-2xl font-bold text-text-main dark:text-white mt-1">{examAvg !== null ? formatScore(examAvg) : '-'}</div>
                     <div className="text-[11px] text-text-secondary">Rata² {labels.ulangan}</div>
                 </Card>
                 <Card className="text-center py-4">
@@ -169,7 +171,7 @@ export default function WaliDashboardPage() {
                                         <p className="text-sm font-medium text-text-main dark:text-white truncate">{grade.assignment_title}</p>
                                         <p className="text-xs text-text-secondary">{grade.subject_name} • {grade.graded_at ? new Date(grade.graded_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : '-'}</p>
                                     </div>
-                                    <span className={`text-sm font-bold ${scoreColor}`}>{grade.score}</span>
+                                    <span className={`text-sm font-bold ${scoreColor}`}>{formatScore(grade.score)}</span>
                                 </div>
                             )
                         })}
@@ -195,7 +197,7 @@ export default function WaliDashboardPage() {
                                 </div>
                                 {sub.score !== null && sub.score !== undefined ? (
                                     <span className={`text-sm font-bold ${sub.score >= 80 ? 'text-emerald-600' : sub.score >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
-                                        {sub.score}
+                                        {formatScore(sub.score)}
                                     </span>
                                 ) : (
                                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${sub.status === 'SUBMITTED' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
@@ -226,9 +228,9 @@ export default function WaliDashboardPage() {
                                 </div>
                                 <div className="text-right">
                                     <span className={`text-sm font-bold ${quiz.score >= 80 ? 'text-emerald-600' : quiz.score >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
-                                        {quiz.score}%
+                                        {formatScore(quiz.score)}%
                                     </span>
-                                    <p className="text-[10px] text-text-secondary">{quiz.total_score}/{quiz.max_score}</p>
+                                    <p className="text-[10px] text-text-secondary">{formatScore(round2(quiz.total_score))}/{formatScore(round2(quiz.max_score))}</p>
                                 </div>
                             </div>
                         ))}
@@ -254,9 +256,9 @@ export default function WaliDashboardPage() {
                                 </div>
                                 <div className="text-right">
                                     <span className={`text-sm font-bold ${exam.score >= 80 ? 'text-emerald-600' : exam.score >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
-                                        {exam.score}%
+                                        {formatScore(exam.score)}%
                                     </span>
-                                    <p className="text-[10px] text-text-secondary">{exam.total_score}/{exam.max_score}</p>
+                                    <p className="text-[10px] text-text-secondary">{formatScore(round2(exam.total_score))}/{formatScore(round2(exam.max_score))}</p>
                                 </div>
                             </div>
                         ))}

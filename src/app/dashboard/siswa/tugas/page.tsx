@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
+import { formatScore } from '@/lib/formatScore'
 import { Loader2 } from 'lucide-react'
 import { Edit, TimeCircle, TickSquare, Paper, Discovery, Calendar, Star, Document } from 'react-iconly'
 import FileUpload from '@/components/FileUpload'
@@ -252,7 +253,7 @@ export default function SiswaTugasPage() {
                                             <div className="flex-1">
                                                 <div className="flex items-center justify-between mb-1">
                                                     <span className="text-sm font-bold text-text-main dark:text-white">Nilai:</span>
-                                                    <span className="text-lg font-black text-amber-600 dark:text-amber-400">{grade.score}/100</span>
+                                                    <span className="text-lg font-black text-amber-600 dark:text-amber-400">{formatScore(grade.score)}/100</span>
                                                 </div>
                                                 {grade.feedback && (
                                                     <p className="text-xs text-text-secondary dark:text-zinc-400 italic whitespace-pre-wrap break-words">"{grade.feedback}"</p>
@@ -560,7 +561,7 @@ export default function SiswaTugasPage() {
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center justify-between mb-1">
                                                     <span className="text-sm font-bold text-text-main dark:text-white">Nilai:</span>
-                                                    <span className="text-lg font-black text-amber-600 dark:text-amber-400">{grade.score}/100</span>
+                                                    <span className="text-lg font-black text-amber-600 dark:text-amber-400">{formatScore(grade.score)}/100</span>
                                                 </div>
                                                 {grade.feedback && (
                                                     <p className="text-sm text-text-secondary dark:text-zinc-400 italic whitespace-pre-wrap break-words">"{grade.feedback}"</p>

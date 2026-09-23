@@ -11,6 +11,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows'
 import { bufferTeacherSubmissionNotification } from '@/lib/teacherNotifyBuffer'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
+import { formatScore } from '@/lib/formatScore'
 
 // Helper: notify student their quiz result is out (auto-graded only)
 async function sendQuizResultNotification(quizId: string, studentUserId: string, totalScore: number, maxScore: number) {
@@ -31,7 +32,7 @@ async function sendQuizResultNotification(quizId: string, studentUserId: string,
             user_id: studentUserId,
             type: 'NILAI_KELUAR',
             title: `Nilai Keluar: ${quiz?.title}`,
-            message: `${subjectName} — Nilai: ${totalScore}/${maxScore}`,
+            message: `${subjectName} — Nilai: ${formatScore(totalScore)}/${formatScore(maxScore)}`,
             link: '/dashboard/siswa/kuis'
         })
     } catch (notifError) {
@@ -269,7 +270,7 @@ export async function GET(request: NextRequest) {
                             const maxScore = original.max_score || 100
                             studentMerged.set(studentId, {
                                 ...original,
-                                total_score: Math.round(finalScore / 100 * maxScore * 10) / 10,
+                                total_score: Math.round(finalScore / 100 * maxScore * 100) / 100,
                                 merged_from_remedial: true,
                             })
                         }
@@ -441,15 +442,27 @@ export async function POST(request: NextRequest) {
                 let total = 0
                 const regraded = [...mergedMap.values()].map(a => {
                     const q = qMap.get(a.question_id)
-                    let isCorrect = false, pointsEarned = 0
-                    if (q) {
-                        const graded = gradeAnswer(q.question_type, a.answer, q.correct_answer, q.options, q.points || 1)
-                        isCorrect = graded.isCorrect
-                        pointsEarned = Math.round(graded.pointsEarned)
+                    if (!q) return a
+                    // Isian/essay: dinilai manual guru — rescue hanya menyelamatkan
+                    // JAWABAN, bukan menimpa dengan auto-grade. Tanpa guard ini
+                    // jawaban isian ter-rescue dinilai otomatis (case-insensitive
+                    // match) dan nilai koreksi guru yang sudah ada TERINJAK —
+                    // paritas jalur rescue exam-submissions ("pertahankan nilai
+                    // koreksi") yang punya guard needsManualGrading.
+                    if (needsManualGrading(q.question_type)) {
+                        if (typeof a.score === 'number') total += a.score
+                        return a
                     }
-                    total += pointsEarned
-                    return { ...a, is_correct: isCorrect, points_earned: pointsEarned }
+                    const graded = gradeAnswer(q.question_type, a.answer, q.correct_answer, q.options, q.points || 1, q.gk_grading_mode ?? 'PROPORTIONAL')
+                    total += graded.pointsEarned
+                    // Field name `score` — KONSISTEN dengan jalur submit normal
+                    // (line ~536). Rescue path dulu menulis `points_earned`, tapi
+                    // JSONB answers dibaca sebagai `a.score` oleh analytics +
+                    // halaman hasil → nilai per-soal submission ter-rescue
+                    // tampil 0/stale di analitik.
+                    return { ...a, is_correct: graded.isCorrect, score: graded.pointsEarned }
                 })
+                total = Math.round(total * 100) / 100
                 await supabase
                     .from('quiz_submissions')
                     .update({
@@ -524,7 +537,8 @@ export async function POST(request: NextRequest) {
                         ans.answer,
                         question.correct_answer,
                         question.options,
-                        question.points || 1
+                        question.points || 1,
+                        question.gk_grading_mode ?? 'PROPORTIONAL'
                     )
                     score += graded.pointsEarned
                     return {
@@ -541,14 +555,15 @@ export async function POST(request: NextRequest) {
                     }
                 }
             })
-            return { graded, score }
+            // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float
+            return { graded, score: Math.round(score * 100) / 100 }
         }
 
         // max_score = total SEMUA soal (bukan hanya yang dijawab) — siswa yang
         // mengosongkan soal tidak boleh mendapat denominator lebih kecil (dulu:
         // jawab 4/5 soal benar = 40/50 = 80%, seharusnya 40/100 = 40%).
         // Konsisten dengan jalur force-close di autoCloseExpired.ts.
-        const maxScoreAllQuestions = questions.reduce((acc, q) => acc + (q.points || 1), 0)
+        const maxScoreAllQuestions = Math.round(questions.reduce((acc, q) => acc + (q.points || 1), 0) * 100) / 100
 
         // Only process answers if they exist
         if (answersToProcess && Array.isArray(answersToProcess) && answersToProcess.length > 0) {

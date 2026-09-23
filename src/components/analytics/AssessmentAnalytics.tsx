@@ -9,6 +9,7 @@ import QuestionAnalysisChart from './QuestionAnalysisChart'
 import TimeAnalysisChart from './TimeAnalysisChart'
 import PerformanceHeatmap from './PerformanceHeatmap'
 import StudentRankingTable from './StudentRankingTable'
+import { formatScore } from '@/lib/formatScore'
 
 // ─── Types ────────────────────────────────────────────────────
 export interface ClassOverview {
@@ -38,6 +39,9 @@ export interface QuestionAnalysisItem {
     questionText: string
     questionType: string
     correctRate: number
+    /** % siswa yang mendapat kredit APA PUN (skor > 0) — utk GK PROPORTIONAL
+     *  menangkap jawaban parsial; MC/TF identik dgn correctRate. */
+    partialRate?: number
     avgScore: number
     maxPoints: number
     optionDistribution?: { option: string; count: number; isCorrect: boolean }[]
@@ -170,7 +174,7 @@ export default function AssessmentAnalytics({
                     <div className="text-left">
                         <h3 className="font-bold text-slate-800 text-sm">📊 Analisis Pembelajaran</h3>
                         <p className="text-xs text-slate-500">
-                            Rata-rata {data.classOverview.avgRawScore}/{data.classOverview.maxScore} • {data.classOverview.submitted}/{data.classOverview.totalStudents} siswa
+                            Rata-rata {formatScore(data.classOverview.avgRawScore)}/{formatScore(data.classOverview.maxScore)} • {data.classOverview.submitted}/{data.classOverview.totalStudents} siswa
                         </p>
                     </div>
                 </div>

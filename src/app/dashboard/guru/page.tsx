@@ -9,6 +9,7 @@ import { PlayCircle } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
 import { useGradingCounts } from '@/hooks/useGradingCounts'
+import { formatScore } from '@/lib/formatScore'
 
 interface WarningItem {
     student_id: string
@@ -192,7 +193,7 @@ export default function GuruDashboard() {
                     <path className="text-red-100 dark:text-red-900/50" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
                     <path className="text-red-500" strokeDasharray={`${Math.min(100, Math.max(0, warning.avg_score))}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
                 </svg>
-                <span className="font-black text-red-600 dark:text-red-400 text-sm">{Math.round(warning.avg_score)}</span>
+                <span className="font-black text-red-600 dark:text-red-400 text-sm">{formatScore(warning.avg_score)}</span>
             </div>
 
             <div className="flex-1 min-w-0">

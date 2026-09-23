@@ -102,11 +102,18 @@ async function copyFiles() {
     console.log(`\n[copy] env: ${ENV_FILE}`)
     const { files } = JSON.parse(readFileSync(`migrate-r2-${MODE}-inventory.json`, 'utf8'))
     let ok = 0, skip = 0, fail = 0
-    for (const f of files) {
+    const failures = []
+
+    async function copyOne(f) {
         const key = r2Key(f.path)
         const srcUrl = `${SUPA_URL}/storage/v1/object/public/materials/${encodeURI(f.path)}`
         try {
-            const dl = await fetch(srcUrl)
+            // Skip file yang sudah ada & ukurannya cocok (resume aman — idempoten)
+            try {
+                const head = await R2.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }))
+                if (head.ContentLength === f.size) { skip++; return }
+            } catch { /* belum ada — lanjut salin */ }
+            const dl = await fetch(srcUrl, { signal: AbortSignal.timeout(300000) })
             if (!dl.ok) throw new Error(`download HTTP ${dl.status}`)
             // Content-Type ikut disalin (kalau tidak, R2 menyajikan application/octet-stream
             // → PDF/video ter-unduh, bukan pratinjau/diputar).
@@ -117,13 +124,23 @@ async function copyFiles() {
             const head = await R2.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }))
             if (head.ContentLength !== f.size) throw new Error(`verifikasi ukuran gagal ${head.ContentLength} vs ${f.size}`)
             ok++
-            console.log(`  ✓ ${f.path} (${f.size}B, ${srcType})`)
+            console.log(`  ✓ [${ok + skip}/${files.length}] ${f.path} (${(f.size / 1024 / 1024).toFixed(1)}MB, ${srcType})`)
         } catch (e) {
             fail++
+            failures.push(f.path)
             console.error(`  ✗ ${f.path}: ${e.message}`)
         }
     }
-    console.log(`SELESAI: ${ok} disalin, ${skip} sudah ada, ${fail} gagal`)
+
+    // Paralel ringan: 3 file sekaligus (file terbesar 44MB → puncak ±150MB memori, aman)
+    const queue = [...files]
+    const workers = Array.from({ length: 3 }, async () => {
+        while (queue.length) await copyOne(queue.shift())
+    })
+    await Promise.all(workers)
+
+    console.log(`SELESAI: ${ok} disalin, ${skip} sudah ada (skip), ${fail} gagal`)
+    if (failures.length) console.log('GAGAL:\n  ' + failures.join('\n  '))
 }
 
 async function backup() {
@@ -148,16 +165,25 @@ async function swap() {
     const { data: mats } = await SUPABASE.from('materials').select('id, content_url')
     const refs = (mats || []).filter(m => m.content_url && m.content_url.includes(OLD_MARKER))
     if (refs.length === 0) { console.log('Tidak ada materi ber-URL Supabase — skip.'); return }
-    // Satu-per-satu dengan update (aman; hanya yang mengandung marker)
-    let done = 0
+    // Self-guarding: row hanya di-swap bila file-nya TERBUKTI ada di R2 (HeadObject).
+    // Mencegah row menuju file yang gagal disalin.
+    let done = 0, skipped = 0
     for (const m of refs) {
+        const path = decodeURIComponent(m.content_url.split(OLD_MARKER)[1] || '')
+        try {
+            await R2.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: `materials/${path}` }))
+        } catch {
+            skipped++
+            console.error(`  ⏭ SKIP ${m.id}: file belum ada di R2 (${path.slice(-50)}) — URL dibiarkan Supabase`)
+            continue
+        }
         const { error } = await SUPABASE
             .from('materials')
             .update({ content_url: m.content_url.replace(OLD_MARKER, `${R2_PUBLIC}/materials/`) })
             .eq('id', m.id)
         if (error) { console.error(`  ✗ ${m.id}: ${error.message}`) } else done++
     }
-    console.log(`Swap materi: ${done}/${refs.length}`)
+    console.log(`Swap materi: ${done}/${refs.length} (skip ${skipped} — file belum di R2)`)
     // Logo sekolah TIDAK ikut di-swap: file-nya ada di bucket `uploads` (bukan `materials`),
     // di luar cakupan migrasi. Tetap disajikan dari Supabase — jangan pernah hapus bucket
     // `uploads` saat cleanup bucket `materials` nanti.

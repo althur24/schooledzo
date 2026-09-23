@@ -221,7 +221,7 @@ async function main() {
     check('Legacy violation tunggal → count 2 (belum force, max 3)', vSingle.status === 200 && vSingleBody?.violation_count === 2 && !vSingleBody?.force_submitted, `count=${vSingleBody?.violation_count}`)
 
     // ---------- 8. SUBMIT + PENILAIAN OTOMATIS ----------
-    console.log('[8] Submit — skor otomatis (MC benar 10 + SA benar 10 = 20, essay pending)')
+    console.log('[8] Submit — skor otomatis (MC benar 10; SA & essay menunggu guru — paritas kuis)')
     const submitRes = await api('/api/exam-submissions', siswaA.token, {
         method: 'PUT',
         body: JSON.stringify({
@@ -236,16 +236,23 @@ async function main() {
     })
     const submitBody = await submitRes.json().catch(() => null)
     check('Submit sukses', submitRes.status === 200, `status ${submitRes.status}`)
-    check('total_score = 20 (auto-graded, essay belum dinilai)', submitBody?.total_score === 20, `total=${submitBody?.total_score}`)
+    // PERILAKU BARU (paritas kuis + desain is_graded): isian TIDAK di-auto-grade
+    // di ulangan — jawaban tersimpan netral (is_correct/points null), menunggu
+    // guru. Dulu isian dinilai otomatis → jawaban format-spasi-bedad salah 0.
+    check('total_score = 10 (MC saja; SA & essay pending — isian tak di-auto-grade)', submitBody?.total_score === 10, `total=${submitBody?.total_score}`)
     check('is_graded = false (ada essay)', submitBody?.is_graded === false, `graded=${submitBody?.is_graded}`)
     check('submitted_at terisi', !!submitBody?.submitted_at)
 
-    // ---------- 9. KOREKSI MANUAL ESSAY ----------
-    console.log('[9] Koreksi manual essay → total_score & is_graded update')
+    // ---------- 9. KOREKSI MANUAL ESSAY + ISIAN ----------
+    console.log('[9] Koreksi manual essay + isian → total_score & is_graded update')
     const gradeRes = await api(`/api/exam-submissions/${sub1Id}`, guruTok, {
         method: 'PUT',
         body: JSON.stringify({
-            answers: [{ question_id: essayId, score: 8, answer: 'esai siswa', is_correct: null, feedback: 'cukup' }],
+            answers: [
+                { question_id: essayId, score: 8, answer: 'esai siswa', is_correct: null, feedback: 'cukup' },
+                // Isian "fotosintesis" benar → guru konfirmasi poin penuh
+                { question_id: saId, score: 10, answer: 'fotosintesis', is_correct: null, feedback: 'benar' },
+            ],
             is_graded: true,
         }),
     })
@@ -257,7 +264,7 @@ async function main() {
     console.log('    [debug] gradeRes body:', JSON.stringify(gradeBody))
     console.log('    [debug] exam_answers:', JSON.stringify(dbgAnswers))
     console.log('    [debug] essayId:', essayId)
-    check('Nilai tersimpan (28, is_graded=true)', subGraded?.total_score === 28 && subGraded?.is_graded === true, `total=${subGraded?.total_score}`)
+    check('Nilai tersimpan (28 = MC 10 + SA 10 + essay 8, is_graded=true)', subGraded?.total_score === 28 && subGraded?.is_graded === true, `total=${subGraded?.total_score}`)
 
     // ---------- 10. [K1] correct_answer MUNCUL PASCA-SUBMIT ----------
     console.log('[10] [K1] correct_answer muncul setelah submit')

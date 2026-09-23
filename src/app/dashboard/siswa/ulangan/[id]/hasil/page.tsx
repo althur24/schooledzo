@@ -7,6 +7,7 @@ import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { PageHeader } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import { TickSquare, TimeCircle, Danger, Calendar } from 'react-iconly'
+import { round2, formatScore } from '@/lib/formatScore'
 
 interface ExamResult {
     id: string
@@ -114,7 +115,8 @@ export default function ExamResultPage() {
     }
 
     const maxScore = result.max_score || 1
-    const percentage = result.results_hidden ? 0 : Math.round(((result.total_score || 0) / maxScore) * 100)
+    // Percentage round-2 (87.5 utuh); badge & kategori tampilan tetap pakai nilai ini
+    const percentage = result.results_hidden ? 0 : round2(((result.total_score || 0) / maxScore) * 100)
 
     return (
         <div className="space-y-6 max-w-3xl mx-auto">
@@ -136,8 +138,8 @@ export default function ExamResultPage() {
             ) : (
                 <div className={`bg-gradient-to-r ${getGradeColor(percentage)} p-6 rounded-2xl text-white text-center shadow-lg`}>
                     <p className="text-lg opacity-90 mb-2 font-medium">{result.exam?.teaching_assignment?.subject?.name}</p>
-                    <p className="text-4xl md:text-6xl font-bold mb-2">{result.total_score}<span className="text-2xl md:text-3xl opacity-80">/{result.max_score}</span></p>
-                    <p className="text-xl md:text-2xl font-bold">{percentage}%</p>
+                    <p className="text-4xl md:text-6xl font-bold mb-2">{formatScore(result.total_score)}<span className="text-2xl md:text-3xl opacity-80">/{formatScore(result.max_score)}</span></p>
+                    <p className="text-xl md:text-2xl font-bold">{formatScore(percentage)}%</p>
                     <p className="mt-4 text-base md:text-lg font-medium bg-white/20 inline-block px-4 py-1 rounded-full backdrop-blur-sm">
                         {percentage >= 80 ? '🎉 Excellent!' : percentage >= 60 ? '👍 Good Job!' : percentage >= 40 ? '💪 Keep Trying!' : '📚 Need More Study'}
                     </p>

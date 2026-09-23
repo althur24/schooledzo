@@ -6,6 +6,7 @@ import { PageHeader, Modal, EmptyState } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { TrendingUp, Calendar, BarChart3, School, BookOpen, GraduationCap } from 'lucide-react'
+import { round2, formatScore } from '@/lib/formatScore'
 
 interface AcademicYear {
     id: string
@@ -133,10 +134,9 @@ export default function AnalitikPage() {
         return 'bg-red-100 border-red-200 dark:bg-red-900/20 dark:border-red-900/40'
     }
 
-    const formatScore = (score: number | null) => {
-        if (score === null) return '-'
-        return score.toFixed(1)
-    }
+    // Pakai helper global formatScore (koma id-ID, tanpa nol buntut, round-2).
+    // Versi lama ada di sini dengan nama sama: toFixed(1) → "75.0" (titik &
+    // presisi cuma 1 desimal) — menimpa kontrak tampilan nilai.
 
     // Calculate overall stats
     const overallStats = {
@@ -149,7 +149,7 @@ export default function AnalitikPage() {
                 cls.subjects.filter(s => s.average !== null).map(s => s.average as number)
             )
             return allAverages.length > 0
-                ? allAverages.reduce((a, b) => a + b, 0) / allAverages.length
+                ? round2(allAverages.reduce((a, b) => a + b, 0) / allAverages.length)
                 : null
         })()
     }
@@ -167,7 +167,7 @@ export default function AnalitikPage() {
             fullLabel: `MP${grade} (Kelas ${6 + grade})`,
             classCount: smpClasses.length,
             average: allAverages.length > 0
-                ? allAverages.reduce((a, b) => a + b, 0) / allAverages.length
+                ? round2(allAverages.reduce((a, b) => a + b, 0) / allAverages.length)
                 : null
         }
     })
@@ -184,7 +184,7 @@ export default function AnalitikPage() {
             fullLabel: `MA${grade} (Kelas ${9 + grade})`,
             classCount: smaClasses.length,
             average: allAverages.length > 0
-                ? allAverages.reduce((a, b) => a + b, 0) / allAverages.length
+                ? round2(allAverages.reduce((a, b) => a + b, 0) / allAverages.length)
                 : null
         }
     })
@@ -195,7 +195,7 @@ export default function AnalitikPage() {
         .map(s => ({
             name: s.label,
             fullName: s.fullLabel,
-            average: Math.round((s.average || 0) * 10) / 10,
+            average: round2(s.average || 0),
             classCount: s.classCount
         }))
 
@@ -205,7 +205,7 @@ export default function AnalitikPage() {
         .map(s => ({
             name: s.label,
             fullName: s.fullLabel,
-            average: Math.round((s.average || 0) * 10) / 10,
+            average: round2(s.average || 0),
             classCount: s.classCount
         }))
 
@@ -224,7 +224,7 @@ export default function AnalitikPage() {
             : 0
         return {
             name: cls.class_name,
-            average: Math.round(classAvg * 10) / 10
+            average: round2(classAvg)
         }
     }).filter(c => c.average > 0).sort((a, b) => b.average - a.average)
 
@@ -244,7 +244,7 @@ export default function AnalitikPage() {
         return Object.values(subjectMap).map(sub => ({
             name: sub.name.length > 15 ? sub.name.substring(0, 15) + '...' : sub.name,
             fullName: sub.name,
-            average: Math.round((sub.scores.reduce((a, b) => a + b, 0) / sub.scores.length) * 10) / 10
+            average: round2(sub.scores.reduce((a, b) => a + b, 0) / sub.scores.length)
         })).sort((a, b) => b.average - a.average)
     })()
 
@@ -470,7 +470,7 @@ export default function AnalitikPage() {
                                                     labelStyle={{ color: '#1e293b', fontWeight: 'bold' }}
                                                     formatter={(value, name, props: any) => {
                                                         const count = props?.payload?.classCount || 0
-                                                        return [`${value} (${count} kelas)`, 'Rata-rata']
+                                                        return [`${formatScore(Number(value))} (${count} kelas)`, 'Rata-rata']
                                                     }}
                                                 />
                                                 <Bar dataKey="average" radius={[0, 4, 4, 0]}>
@@ -554,7 +554,7 @@ export default function AnalitikPage() {
                                                     labelStyle={{ color: '#1e293b', fontWeight: 'bold' }}
                                                     formatter={(value, name, props: any) => {
                                                         const count = props?.payload?.classCount || 0
-                                                        return [`${value} (${count} kelas)`, 'Rata-rata']
+                                                        return [`${formatScore(Number(value))} (${count} kelas)`, 'Rata-rata']
                                                     }}
                                                 />
                                                 <Bar dataKey="average" radius={[0, 4, 4, 0]}>
@@ -598,7 +598,7 @@ export default function AnalitikPage() {
                                             <Tooltip
                                                 contentStyle={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
                                                 labelStyle={{ color: '#1e293b', fontWeight: 'bold' }}
-                                                formatter={(value) => [`${value}`, 'Rata-rata']}
+                                                formatter={(value) => [`${formatScore(Number(value))}`, 'Rata-rata']}
                                             />
                                             <Bar dataKey="average" radius={[0, 4, 4, 0]}>
                                                 {classChartData.map((entry, index) => (
@@ -630,7 +630,7 @@ export default function AnalitikPage() {
                                             <Tooltip
                                                 contentStyle={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
                                                 labelStyle={{ color: '#1e293b', fontWeight: 'bold' }}
-                                                formatter={(value, _name, props) => [`${value}`, (props?.payload as any)?.fullName || 'Mapel']}
+                                                formatter={(value, _name, props) => [`${formatScore(Number(value))}`, (props?.payload as any)?.fullName || 'Mapel']}
                                             />
                                             <Bar dataKey="average" radius={[0, 4, 4, 0]}>
                                                 {subjectChartData.map((entry, index) => (

@@ -311,7 +311,7 @@ export async function GET(request: NextRequest) {
                             const maxScore = original.max_score || 100
                             studentMerged.set(studentId, {
                                 ...original,
-                                total_score: Math.round(finalScore / 100 * maxScore * 10) / 10,
+                                total_score: Math.round(finalScore / 100 * maxScore * 100) / 100,
                                 merged_from_remedial: true,
                             })
                         }
@@ -522,7 +522,8 @@ export async function POST(request: NextRequest) {
             .select('points')
             .eq('exam_id', exam_id)
 
-        const maxScore = questions?.reduce((sum: number, q: any) => sum + (q.points || 10), 0) || 0
+        // Round 2 desimal — poin soal kini bisa desimal (3.33 dsb), jumlah bisa berdebu float
+        const maxScore = Math.round((questions?.reduce((sum: number, q: any) => sum + (q.points || 10), 0) || 0) * 100) / 100
 
         // Create new submission
         // K3 Security Fix: race double-POST — dua request bersamaan bisa sama-sama
@@ -778,13 +779,13 @@ export async function PUT(request: NextRequest) {
                             // Esai: hanya jawaban — pertahankan nilai koreksi/auto-grade
                             return { submission_id, question_id: ans.question_id, answer: ans.answer }
                         }
-                        const graded = gradeAnswer(q.question_type, ans.answer, q.correct_answer, q.options, q.points || 1)
+                        const graded = gradeAnswer(q.question_type, ans.answer, q.correct_answer, q.options, q.points || 1, q.gk_grading_mode ?? 'PROPORTIONAL')
                         return {
                             submission_id,
                             question_id: ans.question_id,
                             answer: ans.answer,
                             is_correct: graded.isCorrect,
-                            points_earned: Math.round(graded.pointsEarned),
+                            points_earned: graded.pointsEarned,
                         }
                     })
                     await supabase.from('official_exam_answers').upsert(rescueRows, { onConflict: 'submission_id,question_id' })
@@ -793,7 +794,7 @@ export async function PUT(request: NextRequest) {
                         .from('official_exam_answers')
                         .select('points_earned, is_correct')
                         .eq('submission_id', submission_id)
-                    const rescueTotal = (rescueAll || []).reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0)
+                    const rescueTotal = Math.round((rescueAll || []).reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) * 100) / 100
                     const hasEssay = rescueQuestions.some(q => needsManualGrading(q.question_type))
                     const essayPending = hasEssay
                         && (rescueAll || []).some((a: any) => a.points_earned === null && a.is_correct === null)
@@ -877,7 +878,7 @@ export async function PUT(request: NextRequest) {
             if (merged.count >= maxViolations) {
                 const { data: existingAnswers } = await supabase
                     .from('official_exam_answers')
-                    .select('*, question:official_exam_questions(correct_answer, points, question_type)')
+                    .select('*, question:official_exam_questions(correct_answer, points, question_type, gk_grading_mode)')
                     .eq('submission_id', submission_id)
 
                 let totalScore = 0
@@ -891,7 +892,8 @@ export async function PUT(request: NextRequest) {
                                 ans.answer,
                                 q.correct_answer,
                                 null,
-                                q.points || 10
+                                q.points || 10,
+                                q.gk_grading_mode ?? 'PROPORTIONAL'
                             )
                             totalScore += graded.pointsEarned
                         } else {
@@ -903,12 +905,14 @@ export async function PUT(request: NextRequest) {
                 const examQuestions = await getExamQuestionsForGrading('official_exam_questions', currentSubmission.exam_id)
                 hasEssays = hasEssays || examQuestions.some(q => needsManualGrading(q.question_type))
 
+                // Round 2 desimal — anti debu float tersimpan ke DB
+                const roundedTotal = Math.round(totalScore * 100) / 100
                 await supabase
                     .from('official_exam_submissions')
                     .update({
                         is_submitted: true,
                         submitted_at: new Date().toISOString(),
-                        total_score: totalScore,
+                        total_score: roundedTotal,
                         is_graded: !hasEssays
                     })
                     .eq('id', submission_id)
@@ -947,15 +951,29 @@ export async function PUT(request: NextRequest) {
                 return NextResponse.json({ error: 'Payload jawaban melebihi jumlah soal' }, { status: 400 })
             }
 
+            // Grade answers — KECUALI tipe manual (isian/essay): simpan jawaban
+            // saja, nilai menunggu guru (paritas kuis + exam-submissions; tanpa
+            // ini isian dinilai otomatis → jawaban format-spasi-bedad salah 0).
             const gradedAnswers = validAnswers.map((ans: { question_id: string; answer: string }) => {
                 const question = questionMap.get(ans.question_id)!
+
+                if (needsManualGrading(question.question_type)) {
+                    return {
+                        submission_id,
+                        question_id: ans.question_id,
+                        answer: ans.answer,
+                        is_correct: null,
+                        points_earned: null
+                    }
+                }
 
                 const graded = gradeAnswer(
                     question.question_type,
                     ans.answer,
                     question.correct_answer,
                     question.options,
-                    question.points || 10
+                    question.points || 10,
+                    question.gk_grading_mode ?? 'PROPORTIONAL'
                 )
 
                 return {
@@ -963,7 +981,7 @@ export async function PUT(request: NextRequest) {
                     question_id: ans.question_id,
                     answer: ans.answer,
                     is_correct: graded.isCorrect,
-                    points_earned: Math.round(graded.pointsEarned)
+                    points_earned: graded.pointsEarned
                 }
             })
 
@@ -985,7 +1003,8 @@ export async function PUT(request: NextRequest) {
                 .select('points_earned')
                 .eq('submission_id', submission_id)
 
-            const totalScore = allAnswers?.reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) || 0
+            // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float
+            const totalScore = Math.round((allAnswers?.reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) || 0) * 100) / 100
 
             const examQuestions = await getExamQuestionsForGrading('official_exam_questions', currentSubmission.exam_id)
 

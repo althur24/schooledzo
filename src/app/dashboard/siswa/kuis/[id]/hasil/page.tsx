@@ -9,7 +9,8 @@ import { PageHeader } from '@/components/ui'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
 import PassageBlock from '@/components/PassageBlock'
-import { gradeAnswer } from '@/lib/questionTypeUtils'
+import { gradeAnswer, isAutoGradeable, parseAnswerLetters } from '@/lib/questionTypeUtils'
+import { formatScore } from '@/lib/formatScore'
 import { Star, TickSquare, CloseSquare, Paper } from 'react-iconly'
 
 interface QuizResult {
@@ -154,7 +155,10 @@ export default function HasilKuisPage() {
 
     const renderQuestion = (q: QuizQuestion, idx: number) => {
         const userAnswer = getAnswerForQuestion(q.id)
-        const isAutoGraded = ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(q.question_type)
+        // SHORT_ANSWER dinilai manual guru (isAutoGradeable false) → ikon netral
+        // sebelum dinilai. Dulu halaman ini menilai isian sendiri dengan pencocokan
+        // ketat → tampil ✗ merah padahal jawaban benar ("benar tapi disalahkan").
+        const isAutoGraded = isAutoGradeable(q.question_type)
         // Pakai gradeAnswer (fungsi grading yang sama dengan server) — perbandingan
         // string mentah salah untuk MULTIPLE_ANSWER (urutan/format JSON beda) dan
         // TRUE_FALSE (beda kapitalisasi). Fallback ke skor saat jawaban tak tersedia.
@@ -163,6 +167,20 @@ export default function HasilKuisPage() {
                 ? gradeAnswer(q.question_type, userAnswer.answer, q.correct_answer, q.options, q.points).isCorrect
                 : userAnswer?.score === q.points)
             : (userAnswer?.score === q.points)
+        // Isian: kunci hanya boleh terlihat SETELAH guru menilai (score != null) dan
+        // jawaban memang salah — bukan sebelum dinilai.
+        const shortAnswerGradedWrong = q.question_type === 'SHORT_ANSWER'
+            && result.is_graded && userAnswer?.score != null && userAnswer.score < (q.points ?? 0)
+
+        // Render jawaban GK sebagai daftar huruf + teks opsi (bukan JSON mentah)
+        const renderGKAnswer = (raw: string) => {
+            const letters = parseAnswerLetters(raw)
+            if (letters.length === 0) return raw
+            return letters.map(l => {
+                const optText = q.options?.[l.charCodeAt(0) - 65]
+                return optText ? `${l}. ${optText}` : l
+            }).join(' • ')
+        }
 
         return (
             <div key={q.id} className="flex items-start gap-4">
@@ -192,6 +210,8 @@ export default function HasilKuisPage() {
                             <div className="text-text-main dark:text-white font-medium">
                                 {q.question_type === 'MULTIPLE_CHOICE' && q.options && userAnswer?.answer
                                     ? <><span>{userAnswer.answer}. </span><SmartText text={q.options[(userAnswer.answer.charCodeAt(0) - 65)] || ''} as="span" /></>
+                                    : q.question_type === 'MULTIPLE_ANSWER' && userAnswer?.answer
+                                    ? <span>{renderGKAnswer(userAnswer.answer)}</span>
                                     : q.question_type === 'TRUE_FALSE' && userAnswer?.answer
                                     ? userAnswer.answer
                                     : userAnswer?.answer
@@ -200,13 +220,16 @@ export default function HasilKuisPage() {
                             </div>
                         </div>
 
-                        {/* Show correct answer for auto-gradeable types if graded and incorrect */}
-                        {result.is_graded && isAutoGraded && !isCorrect && q.correct_answer && (
+                        {/* Show correct answer for auto-gradeable types if graded and incorrect.
+                            Isian singkat: hanya setelah guru menilai dan jawaban salah. */}
+                        {result.is_graded && !isCorrect && q.correct_answer && (isAutoGraded || shortAnswerGradedWrong) && (
                             <div className="pt-2 border-t border-secondary/20">
                                 <p className="text-green-600 dark:text-green-400 text-xs mb-1">Kunci Jawaban:</p>
                                 <div className="text-green-700 dark:text-green-300">
                                     {q.question_type === 'MULTIPLE_CHOICE' && q.options
                                         ? <><span>{q.correct_answer}. </span><SmartText text={q.options?.[(q.correct_answer?.charCodeAt(0) || 65) - 65] || ''} as="span" /></>
+                                        : q.question_type === 'MULTIPLE_ANSWER'
+                                        ? <span>{renderGKAnswer(q.correct_answer)}</span>
                                         : q.correct_answer
                                             ? <SmartText text={q.correct_answer} as="div" />
                                             : '-'}
@@ -247,8 +270,8 @@ export default function HasilKuisPage() {
                     <Card className="text-center">
                         <p className="text-sm text-text-secondary mb-1">Total Skor</p>
                         <p className="text-2xl md:text-3xl font-bold text-primary">
-                            {result.total_score ?? '—'}
-                            <span className="text-sm text-text-secondary font-normal">/{result.max_score ?? '—'}</span>
+                            {result.total_score != null ? formatScore(result.total_score) : '—'}
+                            <span className="text-sm text-text-secondary font-normal">/{result.max_score != null ? formatScore(result.max_score) : '—'}</span>
                         </p>
                     </Card>
                     <Card className="text-center">

@@ -233,11 +233,12 @@ export async function POST(
         for (const q of questions) {
             const v = validateCorrectAnswer(q.question_type || 'MULTIPLE_CHOICE', q.correct_answer, q.options)
             if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
-            // M7 (audit eksternal): poin integer >= 1 — nilai absurd (0/negatif/
-            // desimal raksasa) merusak max_score & penilaian downstream.
+            // M7 (audit eksternal): poin finite >= 0.01 — nilai absurd (0/negatif/
+            // raksasa) merusak max_score & penilaian downstream. Desimal SAH
+            // (skema poin desimal: "30 soal dibagi rata menjadi 3,33").
             const pts = q.points ?? 1
-            if (typeof pts !== 'number' || !Number.isInteger(pts) || pts < 1 || pts > 10000) {
-                return NextResponse.json({ error: `Poin soal harus bilangan bulat >= 1 (diterima: ${pts})` }, { status: 400 })
+            if (typeof pts !== 'number' || !Number.isFinite(pts) || pts < 0.01 || pts > 10000) {
+                return NextResponse.json({ error: `Poin soal harus angka >= 0.01 (diterima: ${pts})` }, { status: 400 })
             }
         }
 
@@ -270,6 +271,8 @@ export async function POST(
             text_direction: q.text_direction || 'ltr',
             content_format: q.content_format || 'plain',
             tags: Array.isArray(q.tags) && q.tags.length > 0 ? q.tags : null,
+            // Mode penilaian GK — hanya relevan untuk MULTIPLE_ANSWER, sisanya pakai default
+            ...(q.question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: q.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL' } : {}),
             // Set initial status: approved from bank, 'draft' for AI review, 'approved' if AI off
             status: q.bank_status === 'approved' ? 'approved' : (aiEnabled ? 'draft' : 'approved')
         }))
@@ -416,8 +419,9 @@ export async function PUT(
         if (correct_answer !== undefined) updateData.correct_answer = correct_answer
         if (difficulty !== undefined) updateData.difficulty = difficulty
         // M7 (audit eksternal): poin integer >= 1 di jalur edit
-        if (points !== undefined && (typeof points !== 'number' || !Number.isInteger(points) || points < 1 || points > 10000)) {
-            return NextResponse.json({ error: `Poin soal harus bilangan bulat >= 1 (diterima: ${points})` }, { status: 400 })
+        // M7: poin finite >= 0.01 — desimal sah (poin soal kini double precision)
+        if (points !== undefined && (typeof points !== 'number' || !Number.isFinite(points) || points < 0.01 || points > 10000)) {
+            return NextResponse.json({ error: `Poin soal harus angka >= 0.01 (diterima: ${points})` }, { status: 400 })
         }
         if (points !== undefined) updateData.points = points
         if (image_url !== undefined) updateData.image_url = image_url
@@ -427,6 +431,9 @@ export async function PUT(
         if (text_direction !== undefined) updateData.text_direction = text_direction
         if (content_format !== undefined) updateData.content_format = content_format
         if (tags !== undefined) updateData.tags = Array.isArray(tags) && tags.length > 0 ? tags : null
+        if (body.gk_grading_mode === 'PROPORTIONAL' || body.gk_grading_mode === 'ALL_OR_NOTHING') {
+            updateData.gk_grading_mode = body.gk_grading_mode
+        }
 
         // Reset status & re-trigger HOTS hanya bila konten soal berubah.
         // Perubahan poin semata tidak menyentuh status (menghindari publish terblokir).

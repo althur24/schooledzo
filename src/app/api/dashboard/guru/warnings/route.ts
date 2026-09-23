@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { mergeRemedialScores } from '@/lib/remedialScore'
+import { round2 } from '@/lib/formatScore'
 
 const DEFAULT_KKM = 75
 
@@ -556,7 +557,7 @@ export async function GET(request: NextRequest) {
                             class_id: ta.class_id,
                             class_name: cls?.name || 'Tanpa Kelas',
                             subject_name: subject?.name || 'Tanpa Mapel',
-                            avg_score: Math.round(avg),
+                            avg_score: round2(avg),
                             score_count: scores.length,
                             teaching_assignment_id: ta.id,
                             kkm: subjectKkm
@@ -587,7 +588,7 @@ export async function GET(request: NextRequest) {
                                 class_id: hrClass.id,
                                 class_name: hrClass.name,
                                 subject_name: subject?.name || 'Tanpa Mapel',
-                                avg_score: Math.round(avg),
+                                avg_score: round2(avg),
                                 score_count: scores.length,
                                 kkm: subjectKkm
                             })

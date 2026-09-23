@@ -28,6 +28,7 @@ const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
     loading: () => <textarea placeholder="Memuat editor..." className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main" rows={4} readOnly />
 })
 import { plainToHtml } from '@/lib/richTextUtils'
+import { parseAnswerLetters } from '@/lib/questionTypeUtils'
 import {
     Folder, Plus, Document, Delete, Edit, Discovery, Paper, TickSquare,
     Search, Show, Swap, EditSquare, Voice, Download
@@ -52,6 +53,8 @@ interface QuestionBankItem {
     source_type?: string
     source_name?: string
     tags?: string[] | null
+    /** Mode penilaian Ganda Kompleks (hanya relevan untuk MULTIPLE_ANSWER) */
+    gk_grading_mode?: 'PROPORTIONAL' | 'ALL_OR_NOTHING' | null
 }
 
 interface Subject {
@@ -67,6 +70,7 @@ interface PassageQuestion {
     difficulty: 'EASY' | 'MEDIUM' | 'HARD'
     teacher_hots_claim?: boolean
     content_format?: 'html' | 'plain'
+    gk_grading_mode?: 'PROPORTIONAL' | 'ALL_OR_NOTHING' | null
 }
 
 interface Passage {
@@ -106,6 +110,7 @@ interface QuestionFormState {
     teacher_hots_claim: boolean
     content_format: 'html' | 'plain'
     tags: string[]
+    gk_grading_mode: 'PROPORTIONAL' | 'ALL_OR_NOTHING'
 }
 
 interface PassageFormState {
@@ -154,7 +159,8 @@ const emptyQuestionForm = (): QuestionFormState => ({
     image_url: '',
     teacher_hots_claim: false,
     content_format: 'html',
-    tags: []
+    tags: [],
+    gk_grading_mode: 'PROPORTIONAL'
 })
 
 const emptyPassageQuestion = (): PassageQuestion => ({
@@ -164,7 +170,8 @@ const emptyPassageQuestion = (): PassageQuestion => ({
     correct_answer: '',
     difficulty: 'MEDIUM',
     teacher_hots_claim: false,
-    content_format: 'html'
+    content_format: 'html',
+    gk_grading_mode: 'PROPORTIONAL'
 })
 
 const emptyPassageForm = (): PassageFormState => ({
@@ -364,6 +371,7 @@ export default function BankSoalPage() {
                     image_url: q.image_url || '',
                     teacher_hots_claim: q.teacher_hots_claim || false,
                     content_format: q.content_format || 'html',
+                    gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined,
                     allow_duplicate: true // duplikasi eksplisit — bypass dedup server
                 })
             })
@@ -401,7 +409,8 @@ export default function BankSoalPage() {
             image_url: q.image_url || '',
             teacher_hots_claim: q.teacher_hots_claim || false,
             content_format: 'html',
-            tags: q.tags || []
+            tags: q.tags || [],
+            gk_grading_mode: q.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL'
         })
         setWizardStep(1) // Edit dibuka langsung di langkah isi soal (tipe bisa diubah via Kembali)
         setShowWizard(true)
@@ -509,7 +518,8 @@ export default function BankSoalPage() {
                 correct_answer: q.correct_answer || '',
                 difficulty: q.difficulty,
                 teacher_hots_claim: q.teacher_hots_claim || false,
-                content_format: 'html' as 'html' | 'plain'
+                content_format: 'html' as 'html' | 'plain',
+                gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? ((q as any).gk_grading_mode ?? 'PROPORTIONAL') : null
             })) || []
         })
         setShowPassageModal(true)
@@ -742,10 +752,8 @@ export default function BankSoalPage() {
         // includeAnswerKey=false → lembar soal polos untuk siswa (tanpa tanda jawaban/rubrik)
         const renderOptionsHtml = (q: { question_type: string; options?: string[] | null; correct_answer?: string | null }) => {
             if (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(q.question_type) && q.options) {
-                let correctLetters: string[] = []
-                if (q.question_type === 'MULTIPLE_ANSWER') {
-                    try { correctLetters = JSON.parse(q.correct_answer || '[]') } catch { correctLetters = [] }
-                }
+                // parseAnswerLetters (paritas grading) — kunci format koma/lowercase tetap terbaca
+                const correctLetters = q.question_type === 'MULTIPLE_ANSWER' ? parseAnswerLetters(q.correct_answer) : []
                 return `
                     <ul style="list-style:none; padding-left:20px; margin:0;">
                         ${q.options.map((opt, optIdx) => {
@@ -1586,6 +1594,8 @@ export default function BankSoalPage() {
                             options={questionForm.options}
                             correctAnswer={questionForm.correct_answer}
                             onChange={(opts, correct) => setQuestionForm({ ...questionForm, options: opts || [], correct_answer: correct || '' })}
+                            gkGradingMode={questionForm.gk_grading_mode}
+                            onGkGradingModeChange={(mode) => setQuestionForm({ ...questionForm, gk_grading_mode: mode })}
                         />
                     )}
 
@@ -1796,6 +1806,8 @@ export default function BankSoalPage() {
                                         options={pq.options}
                                         correctAnswer={pq.correct_answer}
                                         onChange={(opts, correct) => updatePassageQuestion(idx, (q) => ({ ...q, options: opts || [], correct_answer: correct || '' }))}
+                                        gkGradingMode={pq.gk_grading_mode ?? 'PROPORTIONAL'}
+                                        onGkGradingModeChange={(mode) => updatePassageQuestion(idx, (q) => ({ ...q, gk_grading_mode: mode }))}
                                     />
 
                                     {aiReviewEnabled && (

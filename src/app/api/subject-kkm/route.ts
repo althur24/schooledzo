@@ -58,6 +58,13 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
         }
 
+        // KKM = kontrak integer 0-100 (keputusan desain: skor desimal, KKM tidak).
+        // Validasi eksplisit — mencegah desimal/string masuk diam-diam dan
+        // merusak semua perbandingan `pct >= kkm` di aplikasi.
+        if (typeof kkm !== 'number' || !Number.isInteger(kkm) || kkm < 0 || kkm > 100) {
+            return NextResponse.json({ error: 'KKM harus bilangan bulat 0-100' }, { status: 400 })
+        }
+
         const { data, error } = await supabase
             .from('subject_kkm')
             .upsert({

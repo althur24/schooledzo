@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --input-type=module -e ' *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'feat: correct_answer validation, move-student feature, UTS/UAS class filter *)",
+      "Bash(git push *)",
+      "Bash(git diff *)",
+      "Bash(git show *)"
+    ]
+  }
+}

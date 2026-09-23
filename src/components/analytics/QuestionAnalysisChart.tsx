@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { Card } from '@/components/ui'
 import { QuestionAnalysisItem } from './AssessmentAnalytics'
+import { formatScore } from '@/lib/formatScore'
 import { ChevronDown } from 'lucide-react'
 
 interface QuestionAnalysisChartProps {
@@ -30,6 +31,7 @@ export default function QuestionAnalysisChart({ data }: QuestionAnalysisChartPro
     const chartData = data.map(q => ({
         name: `S${q.questionIndex}`,
         correctRate: q.correctRate,
+        partialRate: q.partialRate,
         questionIndex: q.questionIndex
     }))
 
@@ -63,7 +65,7 @@ export default function QuestionAnalysisChart({ data }: QuestionAnalysisChartPro
                                 boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
                                 fontSize: '12px'
                             }}
-                            formatter={(value: number = 0) => [`${value.toFixed(1)}%`, 'Benar']}
+                            formatter={(value: number = 0) => [`${formatScore(value)}%`, 'Benar']}
                             labelFormatter={(label) => `Soal ${label.replace('S', '')}`}
                         />
                         <Bar dataKey="correctRate" radius={[6, 6, 0, 0]} maxBarSize={32}>
@@ -107,7 +109,10 @@ export default function QuestionAnalysisChart({ data }: QuestionAnalysisChartPro
                                         color: getDifficultyColor(q.correctRate)
                                     }}
                                 >
-                                    {q.correctRate.toFixed(0)}% • {getDifficultyLabel(q.correctRate)}
+                                    {formatScore(q.correctRate)}% • {getDifficultyLabel(q.correctRate)}
+                                    {q.questionType === 'MULTIPLE_ANSWER' && q.partialRate !== undefined && q.partialRate > q.correctRate && (
+                                        <span className="text-sky-600 font-medium"> · {formatScore(q.partialRate)}% parsial</span>
+                                    )}
                                 </span>
                                 <span className="text-xs text-slate-500 truncate">
                                     {q.questionType === 'MULTIPLE_CHOICE' ? '(PG)' : 
@@ -141,7 +146,7 @@ export default function QuestionAnalysisChart({ data }: QuestionAnalysisChartPro
                                                 />
                                             </div>
                                             <span className="text-[10px] text-slate-500 w-12 text-right">
-                                                {opt.count} ({pct.toFixed(0)}%)
+                                                {opt.count} ({formatScore(pct)}%)
                                             </span>
                                         </div>
                                     )

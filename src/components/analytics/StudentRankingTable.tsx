@@ -1,6 +1,7 @@
 'use client'
 
 import { Card } from '@/components/ui'
+import { formatScore } from '@/lib/formatScore'
 import { StudentRankItem } from './AssessmentAnalytics'
 import { Trophy, AlertTriangle } from 'lucide-react'
 
@@ -74,7 +75,7 @@ export default function StudentRankingTable({ data, kkm, showViolations }: Stude
                                     )}
                                     <td className="text-center py-2.5">
                                         <span className="text-xs font-bold text-slate-700">
-                                            {s.score}/{s.maxScore}
+                                            {formatScore(s.score)}/{formatScore(s.maxScore)}
                                         </span>
                                     </td>
                                     <td className="text-center py-2.5">
@@ -95,7 +96,7 @@ export default function StudentRankingTable({ data, kkm, showViolations }: Stude
                                             <span className={`text-xs font-bold ${
                                                 belowKkm ? 'text-rose-500' : 'text-slate-700'
                                             }`}>
-                                                {s.percentage.toFixed(1)}%
+                                                {formatScore(s.percentage)}%
                                             </span>
                                         </div>
                                     </td>

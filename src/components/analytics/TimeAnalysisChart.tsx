@@ -3,6 +3,7 @@
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ZAxis } from 'recharts'
 import { Card } from '@/components/ui'
 import { TimeAnalysisItem } from './AssessmentAnalytics'
+import { formatScore } from '@/lib/formatScore'
 
 interface TimeAnalysisChartProps {
     data: TimeAnalysisItem[]
@@ -75,7 +76,7 @@ export default function TimeAnalysisChart({ data }: TimeAnalysisChartProps) {
                                     <div className="bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-lg text-xs">
                                         <p className="font-bold text-slate-800">{d.studentName}</p>
                                         <p className="text-slate-500">Durasi: {d.duration.toFixed(1)} menit</p>
-                                        <p className="text-slate-500">Nilai: {d.score.toFixed(1)}%</p>
+                                        <p className="text-slate-500">Nilai: {formatScore(d.score)}%</p>
                                     </div>
                                 )
                             }}

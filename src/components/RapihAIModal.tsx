@@ -7,6 +7,7 @@ import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import TagInput from '@/components/TagInput'
+import { parseAnswerLetters } from '@/lib/questionTypeUtils'
 
 interface AIQuestion {
     question_text: string
@@ -19,6 +20,8 @@ interface AIQuestion {
     passage_text?: string
     teacher_hots_claim?: boolean
     tags?: string[]
+    /** Mode penilaian Ganda Kompleks (hanya relevan untuk MULTIPLE_ANSWER) */
+    gk_grading_mode?: 'PROPORTIONAL' | 'ALL_OR_NOTHING' | null
     [key: string]: any
 }
 
@@ -699,6 +702,8 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                                                 options={q.options}
                                                                 correctAnswer={q.correct_answer}
                                                                 onChange={(opts, correct) => setResults(prev => prev.map((item, i) => i === idx ? { ...item, options: opts, correct_answer: correct } : item))}
+                                                                gkGradingMode={q.gk_grading_mode ?? 'PROPORTIONAL'}
+                                                                onGkGradingModeChange={(mode) => setResults(prev => prev.map((item, i) => i === idx ? { ...item, gk_grading_mode: mode } : item))}
                                                             />
                                                         </div>
                                                     ) : (
@@ -708,10 +713,7 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                                             {q.options && ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER'].includes(q.question_type) && (() => {
                                                                 let correctSet = new Set<string>()
                                                                 if (q.question_type === 'MULTIPLE_ANSWER') {
-                                                                    try {
-                                                                        const parsed = JSON.parse(q.correct_answer || '[]')
-                                                                        if (Array.isArray(parsed)) correctSet = new Set(parsed)
-                                                                    } catch { /* ignore */ }
+                                                                    correctSet = new Set(parseAnswerLetters(q.correct_answer))
                                                                 } else {
                                                                     if (q.correct_answer) correctSet.add(q.correct_answer)
                                                                 }

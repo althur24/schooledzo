@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { Modal, PageHeader, Button } from '@/components/ui'
+import { formatScore, parseScoreInput, round2 } from '@/lib/formatScore'
 import Card from '@/components/ui/Card'
 import { Graph, Edit, Paper, Document, Discovery, TimeCircle } from 'react-iconly'
 import { Loader2 } from 'lucide-react'
@@ -149,7 +150,7 @@ export default function TugasHasilPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     submission_id: grading.submissionId,
-                    score: parseInt(grading.score),
+                    score: parseScoreInput(grading.score),
                     feedback: grading.feedback
                 })
             })
@@ -178,7 +179,7 @@ export default function TugasHasilPage() {
 
         const scores = graded.map(s => s.grade[0].score)
         return {
-            avg: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+            avg: round2(scores.reduce((a, b) => a + b, 0) / scores.length),
             highest: Math.max(...scores),
             lowest: Math.min(...scores),
             count: graded.length
@@ -188,7 +189,7 @@ export default function TugasHasilPage() {
     const saveOfflineScores = async () => {
         setSavingOffline(true)
         try {
-            const entries = Object.entries(offlineScores).filter(([, v]) => v !== '' && !isNaN(parseInt(v)))
+            const entries = Object.entries(offlineScores).filter(([, v]) => parseScoreInput(v) !== null)
             if (entries.length === 0) return
             await Promise.all(entries.map(([studentId, v]) =>
                 fetch('/api/grades', {
@@ -197,7 +198,7 @@ export default function TugasHasilPage() {
                     body: JSON.stringify({
                         assignment_id: assignmentId,
                         student_id: studentId,
-                        score: parseInt(v)
+                        score: parseScoreInput(v)
                     })
                 }).then(res => {
                     if (!res.ok) throw new Error('Gagal menyimpan nilai')
@@ -261,11 +262,11 @@ export default function TugasHasilPage() {
                     <p className="text-xs text-text-secondary font-bold uppercase tracking-wider">{isOffline ? 'Sudah Dinilai' : 'Terkumpul'}</p>
                 </Card>
                 <Card className="p-4 flex flex-col items-center justify-center text-center">
-                    <p className="text-2xl md:text-3xl font-bold text-blue-500 mb-1">{stats.avg || '-'}</p>
+                    <p className="text-2xl md:text-3xl font-bold text-blue-500 mb-1">{stats.avg ? formatScore(stats.avg) : '-'}</p>
                     <p className="text-xs text-text-secondary font-bold uppercase tracking-wider">Rata-rata</p>
                 </Card>
                 <Card className="p-4 flex flex-col items-center justify-center text-center">
-                    <p className="text-2xl md:text-3xl font-bold text-green-500 mb-1">{stats.highest || '-'}</p>
+                    <p className="text-2xl md:text-3xl font-bold text-green-500 mb-1">{stats.highest !== null ? formatScore(stats.highest) : '-'}</p>
                     <p className="text-xs text-text-secondary font-bold uppercase tracking-wider">Tertinggi</p>
                 </Card>
                 <Card className="p-4 flex flex-col items-center justify-center text-center">
@@ -314,6 +315,7 @@ export default function TugasHasilPage() {
                                                     type="number"
                                                     min={0}
                                                     max={100}
+                                                    step={0.01}
                                                     value={offlineScores[row.studentId] ?? (row.score !== undefined ? row.score.toString() : '')}
                                                     onChange={(e) => setOfflineScores({ ...offlineScores, [row.studentId]: e.target.value })}
                                                     className="w-20 px-3 py-2 text-center border border-secondary/30 rounded-lg bg-white dark:bg-surface-dark text-text-main dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-primary"
@@ -399,7 +401,7 @@ export default function TugasHasilPage() {
                                                             ? 'bg-amber-500/10 text-amber-600 border border-amber-200 dark:border-amber-500/20 dark:text-amber-400'
                                                             : 'bg-red-500/10 text-red-600 border border-red-200 dark:border-red-500/20 dark:text-red-400'
                                                         }`}>
-                                                        {sub.grade[0].score}
+                                                        {formatScore(sub.grade[0].score)}
                                                     </span>
                                                 ) : (
                                                     <span className="inline-flex px-3 py-1 bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-500/20 dark:text-amber-400 rounded-full text-xs font-bold">Belum Dinilai</span>
@@ -541,7 +543,7 @@ export default function TugasHasilPage() {
                                                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${rev.grade_score >= resolvedKkm
                                                                 ? 'bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400'
                                                                 : 'bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400'}`}>
-                                                                Nilai: {rev.grade_score}
+                                                                Nilai: {formatScore(rev.grade_score)}
                                                             </span>
                                                         ) : (
                                                             <span className="px-2 py-0.5 bg-secondary/10 text-text-secondary text-[10px] font-bold rounded-full">
@@ -602,6 +604,7 @@ export default function TugasHasilPage() {
                                     type="number"
                                     min="0"
                                     max="100"
+                                    step="0.01"
                                     value={grading.score}
                                     onChange={(e) => setGrading({ ...grading, score: e.target.value })}
                                     className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-2xl md:text-3xl font-bold text-center placeholder-text-secondary/30"

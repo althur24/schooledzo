@@ -277,8 +277,16 @@ export async function POST(request: NextRequest) {
 
         if (error) throw error
 
-        // Add questions if provided
+        // Add questions if provided (jalur inline-create; UI utama menambah soal
+        // via /questions route, tapi jalur ini dipakai API consumer/script).
+        // M7: validasi poin finite >= 0.01 — paritas route /questions.
         if (questions && questions.length > 0) {
+            for (const q of questions) {
+                const pts = q.points ?? 10
+                if (typeof pts !== 'number' || !Number.isFinite(pts) || pts < 0.01 || pts > 10000) {
+                    return NextResponse.json({ error: `Poin soal harus angka >= 0.01 (diterima: ${pts})` }, { status: 400 })
+                }
+            }
             const questionsWithQuizId = questions.map((q: any, idx: number) => ({
                 quiz_id: quiz.id,
                 question_text: q.question_text,
@@ -286,7 +294,17 @@ export async function POST(request: NextRequest) {
                 options: q.options || null,
                 correct_answer: q.correct_answer || null,
                 points: q.points || 10,
-                order_index: idx
+                order_index: idx,
+                // Paritas F1: bawa SEMUA atribut soal — gk_grading_mode khususnya
+                difficulty: q.difficulty || 'MEDIUM',
+                passage_text: q.passage_text || null,
+                passage_audio_url: q.passage_audio_url || null,
+                image_url: q.image_url || null,
+                teacher_hots_claim: q.teacher_hots_claim || false,
+                text_direction: q.text_direction || 'ltr',
+                content_format: q.content_format || 'plain',
+                tags: Array.isArray(q.tags) && q.tags.length > 0 ? q.tags : null,
+                gk_grading_mode: q.gk_grading_mode ?? 'PROPORTIONAL'
             }))
 
             const { error: questionsError } = await supabase
@@ -304,6 +322,12 @@ export async function POST(request: NextRequest) {
                 .eq('quiz_id', remedial_for_id)
 
             if (!fetchError && originalQuestions && originalQuestions.length > 0) {
+                // Salin SEMUA atribut soal — sekali tidak membawa sebuah field,
+                // remedial/duplikat diam-diam berbeda dari ujian asli.
+                // Yang paling kritikal: gk_grading_mode (soal GK "salah satu =
+                // salah semua" akan dinilai PROPORTIONAL bila field ini hilang
+                // → skor remedial ≠ skor asli), lalu passage/audio/gambar &
+                // content_format (soal passage remedial jadi soal polos).
                 const newQuestions = originalQuestions.map((q: any) => ({
                     quiz_id: quiz.id,
                     question_text: q.question_text,
@@ -311,7 +335,17 @@ export async function POST(request: NextRequest) {
                     options: q.options,
                     correct_answer: q.correct_answer,
                     points: q.points,
-                    order_index: q.order_index
+                    order_index: q.order_index,
+                    difficulty: q.difficulty,
+                    passage_text: q.passage_text,
+                    passage_audio_url: q.passage_audio_url,
+                    image_url: q.image_url,
+                    status: q.status, // Inherit approval status
+                    teacher_hots_claim: q.teacher_hots_claim,
+                    text_direction: q.text_direction,
+                    content_format: q.content_format,
+                    tags: q.tags,
+                    gk_grading_mode: q.gk_grading_mode ?? 'PROPORTIONAL'
                 }))
                 const { error: duplicateError } = await supabase.from('quiz_questions').insert(newQuestions)
                 if (duplicateError) throw duplicateError

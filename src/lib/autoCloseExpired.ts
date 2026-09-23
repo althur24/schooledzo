@@ -55,10 +55,21 @@ export async function forceCloseExamSubmission(
         if (Array.isArray(incomingAnswers) && incomingAnswers.length > 0) {
             const questions = await getExamQuestionsForGrading('exam_questions', examId)
             const questionMap = new Map(questions.map(q => [q.id, q]))
+            // Tipe manual (isian/essay): simpan jawaban saja — jangan auto-grade
+            // (paritas autosave & rescue; is_graded tetap false menandai pending).
             const gradedRows = incomingAnswers
                 .filter(a => a?.question_id)
                 .map((ans) => {
                     const question = questionMap.get(ans.question_id)
+                    if (question && needsManualGrading(question.question_type)) {
+                        return {
+                            submission_id: submissionId,
+                            question_id: ans.question_id,
+                            answer: ans.answer,
+                            is_correct: null,
+                            points_earned: null
+                        }
+                    }
                     let isCorrect = false
                     let pointsEarned = 0
                     if (question) {
@@ -67,7 +78,8 @@ export async function forceCloseExamSubmission(
                             ans.answer,
                             question.correct_answer,
                             question.options,
-                            question.points || 1
+                            question.points || 1,
+                            question.gk_grading_mode ?? 'PROPORTIONAL'
                         )
                         isCorrect = graded.isCorrect
                         pointsEarned = graded.pointsEarned
@@ -77,7 +89,7 @@ export async function forceCloseExamSubmission(
                         question_id: ans.question_id,
                         answer: ans.answer,
                         is_correct: isCorrect,
-                        points_earned: Math.round(pointsEarned)
+                        points_earned: pointsEarned
                     }
                 })
             if (gradedRows.length > 0) {
@@ -89,7 +101,8 @@ export async function forceCloseExamSubmission(
 
         const { data: answers } = await supabase
             .from('exam_answers').select('points_earned').eq('submission_id', submissionId)
-        const totalScore = (answers || []).reduce((s, a) => s + (a.points_earned || 0), 0)
+        // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float
+        const totalScore = Math.round((answers || []).reduce((s, a) => s + (a.points_earned || 0), 0) * 100) / 100
         const examQuestions = await getExamQuestionsForGrading('exam_questions', examId)
         const hasEssays = examQuestions.some(q => needsManualGrading(q.question_type))
         const isGraded = !hasEssays
@@ -131,10 +144,21 @@ export async function forceCloseOfficialSubmission(
         if (Array.isArray(incomingAnswers) && incomingAnswers.length > 0) {
             const questions = await getExamQuestionsForGrading('official_exam_questions', examId)
             const questionMap = new Map(questions.map(q => [q.id, q]))
+            // Tipe manual (isian/essay): simpan jawaban saja — jangan auto-grade
+            // (paritas autosave & rescue; is_graded tetap false menandai pending).
             const gradedRows = incomingAnswers
                 .filter(a => a?.question_id)
                 .map((ans) => {
                     const question = questionMap.get(ans.question_id)
+                    if (question && needsManualGrading(question.question_type)) {
+                        return {
+                            submission_id: submissionId,
+                            question_id: ans.question_id,
+                            answer: ans.answer,
+                            is_correct: null,
+                            points_earned: null
+                        }
+                    }
                     let isCorrect = false
                     let pointsEarned = 0
                     if (question) {
@@ -143,7 +167,8 @@ export async function forceCloseOfficialSubmission(
                             ans.answer,
                             question.correct_answer,
                             question.options,
-                            question.points || 1
+                            question.points || 1,
+                            question.gk_grading_mode ?? 'PROPORTIONAL'
                         )
                         isCorrect = graded.isCorrect
                         pointsEarned = graded.pointsEarned
@@ -153,7 +178,7 @@ export async function forceCloseOfficialSubmission(
                         question_id: ans.question_id,
                         answer: ans.answer,
                         is_correct: isCorrect,
-                        points_earned: Math.round(pointsEarned)
+                        points_earned: pointsEarned
                     }
                 })
             if (gradedRows.length > 0) {
@@ -165,7 +190,8 @@ export async function forceCloseOfficialSubmission(
 
         const { data: answers } = await supabase
             .from('official_exam_answers').select('points_earned').eq('submission_id', submissionId)
-        const totalScore = (answers || []).reduce((s: number, a: any) => s + (a.points_earned || 0), 0)
+        // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float
+        const totalScore = Math.round((answers || []).reduce((s: number, a: any) => s + (a.points_earned || 0), 0) * 100) / 100
         const examQuestions = await getExamQuestionsForGrading('official_exam_questions', examId)
         const hasEssays = examQuestions.some(q => needsManualGrading(q.question_type))
         const isGraded = !hasEssays
@@ -215,14 +241,17 @@ export async function forceCloseQuizSubmission(
             const q = qMap.get(a.question_id)
             if (!q) return a
             if (isAutoGradeable(q.question_type)) {
-                const graded = gradeAnswer(q.question_type, a.answer ?? '', q.correct_answer, q.options, q.points || 1)
+                const graded = gradeAnswer(q.question_type, a.answer ?? '', q.correct_answer, q.options, q.points || 1, q.gk_grading_mode ?? 'PROPORTIONAL')
                 totalScore += graded.pointsEarned
                 return { ...a, is_correct: graded.isCorrect, score: graded.pointsEarned }
             }
             return { ...a, is_correct: null, score: null }
         })
-        // maxScore = total seluruh soal (selaras lazy sweep kuis yang sudah ada)
-        const maxScore = questions.reduce((acc, q) => acc + (q.points || 1), 0)
+        // maxScore = total seluruh soal (selaras lazy sweep kuis yang sudah ada) —
+        // round 2 desimal, poin soal kini bisa desimal
+        const maxScore = Math.round(questions.reduce((acc, q) => acc + (q.points || 1), 0) * 100) / 100
+        // totalScore ikut di-round 2 — anti debu float tersimpan ke DB
+        totalScore = Math.round(totalScore * 100) / 100
         const isGraded = !questions.some(q => needsManualGrading(q.question_type))
         await supabase
             .from('quiz_submissions')

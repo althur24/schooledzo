@@ -76,6 +76,8 @@ export interface BankSyncQuestion {
     content_format?: string
     image_url?: string | null
     tags?: string[] | null
+    /** Mode penilaian Ganda Kompleks — ikut tersalin ke bank soal */
+    gk_grading_mode?: 'PROPORTIONAL' | 'ALL_OR_NOTHING' | null
 }
 
 /**
@@ -112,6 +114,7 @@ export async function syncQuestionsToBank(params: {
             content_format: q.content_format,
             image_url: q.image_url ?? null,
             tags: q.tags && q.tags.length > 0 ? q.tags : null,
+            ...(q.question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: q.gk_grading_mode ?? 'PROPORTIONAL' } : {}),
             source_type: sourceType,
             ...(sourceType === 'exam' ? { source_exam_id: sourceId } : { source_quiz_id: sourceId }),
             source_name: sourceName,

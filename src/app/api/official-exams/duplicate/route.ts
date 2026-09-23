@@ -191,7 +191,9 @@ export async function POST(request: NextRequest) {
                 image_url: q.image_url,
                 status: q.status, // Inherit approval status
                 teacher_hots_claim: q.teacher_hots_claim,
-                text_direction: q.text_direction
+                text_direction: q.text_direction,
+                content_format: q.content_format,
+                gk_grading_mode: q.gk_grading_mode ?? 'PROPORTIONAL'
             }))
 
             const { error: duplicateError } = await supabase

@@ -403,7 +403,9 @@ export async function POST(request: NextRequest) {
                     status: q.status, // Inherit approval status
                     teacher_hots_claim: q.teacher_hots_claim,
                     text_direction: q.text_direction,
-                    content_format: q.content_format
+                    content_format: q.content_format,
+                    tags: q.tags,
+                    gk_grading_mode: q.gk_grading_mode ?? 'PROPORTIONAL'
                 }))
                 // M1: insert belah chunk 500 (payload raksasa rawan timeout /
                 // ditolak — paritas insertQuestionsChunked examBatch)

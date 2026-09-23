@@ -3,6 +3,7 @@ import dynamic from 'next/dynamic'
 import { Plus } from 'react-iconly'
 import { plainToHtml } from '@/lib/richTextUtils'
 import { shouldSkipCrop, uploadQuestionImage } from '@/lib/questionImage'
+import { parseAnswerLetters } from '@/lib/questionTypeUtils'
 
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), {
     ssr: false,
@@ -17,6 +18,10 @@ interface QuestionOptionsEditorProps {
     correctAnswer: string | null
     onChange: (options: string[] | null, correctAnswer: string | null) => void
     textDirection?: 'ltr' | 'rtl'
+    /** Mode penilaian Ganda Kompleks (hanya dipakai saat questionType = MULTIPLE_ANSWER). */
+    gkGradingMode?: 'PROPORTIONAL' | 'ALL_OR_NOTHING' | null
+    /** Callback perubahan mode penilaian GK — undefined = halaman belum mendukung (toggle disembunyikan). */
+    onGkGradingModeChange?: (mode: 'PROPORTIONAL' | 'ALL_OR_NOTHING') => void
 }
 
 export default function QuestionOptionsEditor({
@@ -24,7 +29,9 @@ export default function QuestionOptionsEditor({
     options,
     correctAnswer,
     onChange,
-    textDirection = 'ltr'
+    textDirection = 'ltr',
+    gkGradingMode,
+    onGkGradingModeChange
 }: QuestionOptionsEditorProps) {
     // --- Image upload state (hooks must be before any early return) ---
     const [uploadingIdx, setUploadingIdx] = React.useState<number | null>(null)
@@ -94,17 +101,13 @@ export default function QuestionOptionsEditor({
     const isMultipleAnswer = questionType === 'MULTIPLE_ANSWER'
     const safeOptions = options || ['', '', '', '']
     
-    // For MULTIPLE_ANSWER, correctAnswer is a JSON array string
+    // For MULTIPLE_ANSWER, correctAnswer is a JSON array string.
+    // Parse via parseAnswerLetters (sumber yang sama dengan grading) — kunci
+    // format lama "A, C" tetap terbaca hijau; tanpa ini guru yang men-toggle
+    // ulang satu opsi akan menimpa kunci lama dengan '[]' + 1 huruf (data loss).
     let correctAnswersSet = new Set<string>()
     if (isMultipleAnswer) {
-        try {
-            const parsed = JSON.parse(correctAnswer || '[]')
-            if (Array.isArray(parsed)) {
-                correctAnswersSet = new Set(parsed)
-            }
-        } catch {
-            correctAnswersSet = new Set()
-        }
+        correctAnswersSet = new Set(parseAnswerLetters(correctAnswer))
     } else {
         if (correctAnswer) correctAnswersSet.add(correctAnswer)
     }
@@ -290,6 +293,38 @@ export default function QuestionOptionsEditor({
                     </button>
                 )}
             </div>
+
+            {/* Mode penilaian Ganda Kompleks — guru memilih: skor dibagi (default) atau salah satu = salah semua */}
+            {isMultipleAnswer && onGkGradingModeChange && (
+                <div className="mt-4 p-3 bg-secondary/5 dark:bg-white/5 border border-secondary/20 dark:border-white/10 rounded-xl">
+                    <label className="block text-sm font-bold text-text-main dark:text-white">Mode Penilaian</label>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                        <button
+                            type="button"
+                            onClick={() => onGkGradingModeChange('PROPORTIONAL')}
+                            className={`px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors text-left ${gkGradingMode !== 'ALL_OR_NOTHING'
+                                ? 'bg-primary text-white border-primary'
+                                : 'bg-secondary/5 dark:bg-white/5 text-text-main dark:text-white border-secondary/20 dark:border-white/20 hover:border-primary/50'}`}
+                        >
+                            Bagi Otomatis <span className="font-normal opacity-75">(default)</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => onGkGradingModeChange('ALL_OR_NOTHING')}
+                            className={`px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors text-left ${gkGradingMode === 'ALL_OR_NOTHING'
+                                ? 'bg-primary text-white border-primary'
+                                : 'bg-secondary/5 dark:bg-white/5 text-text-main dark:text-white border-secondary/20 dark:border-white/20 hover:border-primary/50'}`}
+                        >
+                            Salah Satu = Salah Semua
+                        </button>
+                    </div>
+                    <p className="text-xs text-text-secondary mt-2">
+                        {gkGradingMode === 'ALL_OR_NOTHING'
+                            ? 'Jawaban harus persis sama dengan kunci. Salah pilih satu atau kurang satu = 0 poin.'
+                            : 'Skor dihitung proporsional: benar N dari M kunci → N/M × poin soal. Contoh: benar 1 dari 3 kunci pada soal 10 poin = 3,33.'}
+                    </p>
+                </div>
+            )}
             {/* Hidden file input for option image upload */}
             <input
                 type="file"

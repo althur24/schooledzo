@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { Modal, Button, PageHeader, EmptyState } from '@/components/ui'
+import { round2, formatScore } from '@/lib/formatScore'
 import type { DropdownMenuItem } from '@/components/ui/DropdownMenu'
 import Card from '@/components/ui/Card'
 import QuizCard from '@/components/exam/QuizCard'
@@ -422,7 +423,8 @@ export default function GuruKuisPage() {
                 const isBelowKKM = hasSubmitted && score < kkm
                 return {
                     ...s,
-                    score: hasSubmitted ? Math.round(score) : null,
+                    // round-2: nilai desimal utuh (isBelowKKM tetap dari pct mentah)
+                    score: hasSubmitted ? round2(score) : null,
                     hasSubmitted,
                     isBelowKKM
                 }
@@ -934,7 +936,7 @@ export default function GuruKuisPage() {
                                                     <span className="font-medium text-text-main dark:text-white">{student.user.full_name}</span>
                                                 </div>
                                                 <div className={`px-2 py-1 rounded text-xs font-bold ${student.hasSubmitted === false ? 'bg-gray-100 text-gray-500 dark:bg-surface-dark dark:text-zinc-400' : student.isBelowKKM ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'}`}>
-                                                    {student.hasSubmitted === false ? 'Belum Mengumpulkan' : `Nilai: ${student.score}`}
+                                                    {student.hasSubmitted === false ? 'Belum Mengumpulkan' : `Nilai: ${formatScore(student.score)}`}
                                                 </div>
                                             </div>
                                         )

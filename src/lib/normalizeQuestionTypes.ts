@@ -3,6 +3,7 @@
  * The AI (Gemini) sometimes lazily defaults everything to MULTIPLE_CHOICE or ESSAY.
  * This function analyzes the actual content and corrects the type.
  */
+import { parseAnswerLetters } from './questionTypeUtils'
 
 interface RawQuestion {
     question_text: string
@@ -85,17 +86,27 @@ export function normalizeQuestionTypes(questions: RawQuestion[]): RawQuestion[] 
                 const parsed = JSON.parse(answer)
                 if (Array.isArray(parsed) && parsed.length > 1) {
                     corrected.question_type = 'MULTIPLE_ANSWER'
-                    corrected.correct_answer = JSON.stringify(parsed)
+                    corrected.correct_answer = JSON.stringify(parseAnswerLetters(answer))
                     return corrected
                 }
             } catch {
                 // Not JSON, check comma-separated letters like "A, C" or "A,C"
                 if (/^[A-E]\s*,\s*[A-E](\s*,\s*[A-E])*$/i.test(answer)) {
-                    const letters = answer.split(',').map(l => l.trim().toUpperCase())
                     corrected.question_type = 'MULTIPLE_ANSWER'
-                    corrected.correct_answer = JSON.stringify(letters)
+                    corrected.correct_answer = JSON.stringify(parseAnswerLetters(answer))
                     return corrected
                 }
+            }
+        }
+
+        // ─── Rule 2b: normalisasi kunci MULTIPLE_ANSWER yang sudah benar tipenya ───
+        // AI kadang mengirim tipe MULTIPLE_ANSWER tapi kuncinya "A, C" (koma) atau
+        // huruf kecil — gradeAnswer menerimanya (parseAnswerLetters), TAPI penyimpanan
+        // harus seragam JSON array uppercase supaya display/dedup bank soal konsisten.
+        if (q.question_type === 'MULTIPLE_ANSWER' && answer) {
+            const letters = parseAnswerLetters(answer)
+            if (letters.length > 0) {
+                corrected.correct_answer = JSON.stringify(letters)
             }
         }
 

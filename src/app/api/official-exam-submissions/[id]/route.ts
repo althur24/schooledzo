@@ -6,6 +6,7 @@ import { getTeacherScope, canTeachStudentSubmission } from '@/lib/teacherScope'
 import { logError } from '@/lib/logError'
 import { logGradeChange } from '@/lib/gradeHistory'
 import { resolveWindowExpiry } from '@/lib/examExpiry'
+import { needsManualGrading } from '@/lib/questionTypeUtils'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 
 // GET submission detail with answers
@@ -188,7 +189,7 @@ export async function PUT(
         //  2. points_earned di-clamp 0..poin soal — skor koreksi tak mungkin
         //     melebihi bobot soal (audit membuktikan 9999 tersimpan di soal
         //     10 poin lewat request yang dibentuk manual).
-        let clampedGrades: { id: string; points_earned: number }[] = []
+        let clampedGrades: { id: string; points_earned: number; isManual?: boolean }[] = []
         if (grades.length > 0) {
             const { data: gradeRows } = await supabase
                 .from('official_exam_answers')
@@ -205,13 +206,23 @@ export async function PUT(
 
             const examQuestions = await getExamQuestionsForGrading('official_exam_questions', authExam?.id || id)
             const questionPoints = new Map(examQuestions.map(q => [q.id, q.points || 10]))
+            // Tipe manual (isian/essay) per answer row — flag is_correct dinetralkan
+            // saat guru menilai (dulu preserve false dari auto-grade lama → jawaban
+            // bernilai penuh tampil merah ✗ + correctRate analytics salah).
+            const manualByQuestion = new Map(examQuestions.map(q => [q.id, needsManualGrading(q.question_type)]))
             clampedGrades = grades.map((grade: any) => {
                 const row = rowById.get(grade.answer_id)!
                 // Soal tak terdaftar (draft basi/soal dihapus) → patokan 0 — jangan
                 // biarkan nilai lolos tanpa batas yang diketahui.
                 const maxPoints = questionPoints.get(row.question_id) ?? 0
-                const raw = Math.round(grade.points_earned ?? 0)
-                return { id: grade.answer_id, points_earned: Math.max(0, Math.min(raw, maxPoints)) }
+                // Skor koreksi boleh desimal (paritas GK proporsional) — clamp 0..poin
+                const raw = Number(grade.points_earned ?? 0)
+                const clamped = Number.isFinite(raw) ? Math.max(0, Math.min(raw, maxPoints)) : 0
+                return {
+                    id: grade.answer_id,
+                    points_earned: Math.round(clamped * 100) / 100,
+                    isManual: manualByQuestion.get(row.question_id) === true,
+                }
             })
         }
 
@@ -221,7 +232,9 @@ export async function PUT(
         const gradeResults = await Promise.all(clampedGrades.map((grade) =>
             supabase
                 .from('official_exam_answers')
-                .update({ points_earned: grade.points_earned })
+                .update(grade.isManual
+                    ? { points_earned: grade.points_earned, is_correct: null }
+                    : { points_earned: grade.points_earned })
                 .eq('id', grade.id)
                 .eq('submission_id', id)
         ))
@@ -237,7 +250,8 @@ export async function PUT(
             .select('points_earned')
             .eq('submission_id', id)
 
-        const totalScore = allAnswers?.reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) || 0
+        // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float
+        const totalScore = Math.round((allAnswers?.reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) || 0) * 100) / 100
 
         // Update submission with new total and mark as graded
         const { data: updatedSubmission, error } = await supabase

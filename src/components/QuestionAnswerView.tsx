@@ -1,6 +1,7 @@
 'use client'
 
 import SmartText from '@/components/SmartText'
+import { parseAnswerLetters } from '@/lib/questionTypeUtils'
 
 // ─────────────────────────────────────────────────────────
 // Render opsi jawaban + penanda kunci (semua tipe soal)
@@ -19,7 +20,8 @@ export function AnswerOptionsView({ questionType, options, correctAnswer }: {
                 const letter = String.fromCharCode(65 + optIdx)
                 let isCorrect = false
                 if (questionType === 'MULTIPLE_ANSWER') {
-                    try { isCorrect = JSON.parse(correctAnswer || '[]').includes(letter) } catch { }
+                    // parseAnswerLetters: paritas grading — kunci format koma/lowercase tetap terbaca
+                    isCorrect = parseAnswerLetters(correctAnswer).includes(letter)
                 } else if (questionType === 'TRUE_FALSE') {
                     isCorrect = correctAnswer?.toUpperCase() === opt.toUpperCase()
                 } else {

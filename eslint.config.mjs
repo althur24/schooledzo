@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Script operasional satu-off (regrade, verify) — bukan app code,
+    // pakai require/any demi kesederhanaan (paritas loadtest/*.cjs).
+    "scripts/**",
   ]),
 ]);
 

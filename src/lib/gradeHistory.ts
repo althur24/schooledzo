@@ -16,8 +16,10 @@ export async function logGradeChange(params: {
     changedBy: string        // users.id
 }) {
     try {
-        // Nilai tidak berubah → tidak ada yang perlu dicatat
-        if (params.oldScore !== null && params.oldScore === params.newScore) return
+        // Nilai tidak berubah → tidak ada yang perlu dicatat.
+        // Compare SETELAH round-2: skor desimal menghasilkan debu float
+        // (0.1+0.2 ≠ 0.3) yang memicu false-positive "perubahan" audit.
+        if (params.oldScore !== null && Math.round(params.oldScore * 100) === Math.round((params.newScore ?? 0) * 100)) return
 
         await supabaseAdmin.from('grade_history').insert({
             school_id: params.schoolId,

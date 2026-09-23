@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { PageHeader, Card, Button, EmptyState, StatsCard } from '@/components/ui'
+import { formatScore, parseScoreInput } from '@/lib/formatScore'
 import { TickSquare, User, TimeCircle, Document, ArrowDown } from 'react-iconly'
 import { Loader2 } from 'lucide-react'
 import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
@@ -101,17 +102,17 @@ export default function QuizSubmissionsPage() {
     const saveOfflineScores = async () => {
         setSavingOffline(true)
         try {
+            // Desimal sah (87.5) — parseScoreInput menerima titik/koma
             const entries = Object.entries(offlineScores).filter(([, v]) => {
-                if (v === '') return false
-                const num = parseInt(v)
-                return !isNaN(num) && num >= 0 && num <= 100
+                const num = parseScoreInput(v)
+                return num !== null && num >= 0 && num <= 100
             })
             if (entries.length === 0) return
             await Promise.all(entries.map(([studentId, v]) =>
                 fetch('/api/quiz-submissions/manual', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ quiz_id: quizId, student_id: studentId, score: parseInt(v) })
+                    body: JSON.stringify({ quiz_id: quizId, student_id: studentId, score: parseScoreInput(v) })
                 }).then(res => {
                     if (!res.ok) throw new Error('Gagal menyimpan nilai')
                 })
@@ -239,6 +240,7 @@ export default function QuizSubmissionsPage() {
                                                     type="number"
                                                     min={0}
                                                     max={100}
+                                                    step={0.01}
                                                     value={offlineScores[row.studentId] ?? (row.score !== undefined && row.score !== null ? row.score.toString() : '')}
                                                     onChange={(e) => setOfflineScores({ ...offlineScores, [row.studentId]: e.target.value })}
                                                     className="w-20 px-3 py-2 text-center border border-secondary/30 rounded-lg bg-white dark:bg-surface-dark text-text-main dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-primary"
@@ -366,9 +368,9 @@ export default function QuizSubmissionsPage() {
                                                     className="text-xl font-bold text-text-main dark:text-white"
                                                     title={sub.merged_from_remedial ? `Nilai tergabung dengan remedial sesuai kebijakan nilai remedial — nilai mentah ujian asli tidak berubah` : undefined}
                                                 >
-                                                    {sub.total_score ?? '—'}
+                                                    {sub.total_score != null ? formatScore(sub.total_score) : '—'}
                                                 </span>
-                                                <span className="text-xs text-text-secondary dark:text-zinc-500">/{sub.max_score ?? '—'}</span>
+                                                <span className="text-xs text-text-secondary dark:text-zinc-500">/{sub.max_score != null ? formatScore(sub.max_score) : '—'}</span>
                                                 {sub.merged_from_remedial && (
                                                     <span className="ml-1 px-1.5 py-0.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 text-[10px] font-bold rounded-full border border-orange-200 dark:border-orange-500/30">
                                                         GABUNG REMEDIAL

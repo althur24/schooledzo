@@ -7,6 +7,7 @@ import SmartText from '@/components/SmartText'
 import PassageBlock from '@/components/PassageBlock'
 import GradingAnswerDisplay from '@/components/GradingAnswerDisplay'
 import { isAutoGradeable } from '@/lib/questionTypeUtils'
+import { round2, formatScore } from '@/lib/formatScore'
 import { PageHeader, Card, Button } from '@/components/ui'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -125,7 +126,12 @@ export default function AdminUtsUasGradingPage({ params, searchParams }: {
         setGrades(prev => ({
             ...prev,
             [qId]: {
-                score: typeof value === 'string' ? parseInt(value) || 0 : value
+                // Desimal sah (koreksi GK proporsional). parseFloat mentah tidak
+                // cukup: "1e999" → Infinity (truthy, lolos dari || 0) — koerce
+                // finite dulu lalu round-2 (server tetap clamp & rekonsiliasi).
+                score: typeof value === 'string'
+                    ? (Number.isFinite(parseFloat(value)) ? round2(parseFloat(value)) : 0)
+                    : value
             }
         }))
     }
@@ -199,7 +205,8 @@ export default function AdminUtsUasGradingPage({ params, searchParams }: {
     )
     if (!submission) return <div className="text-center text-text-secondary py-8">Data tidak ditemukan</div>
 
-    const currentTotalScore = Object.values(grades).reduce((acc, curr) => acc + (curr.score || 0), 0)
+    // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa menghasilkan debu float
+    const currentTotalScore = Math.round(Object.values(grades).reduce((acc, curr) => acc + (curr.score || 0), 0) * 100) / 100
 
     return (
         <div className="space-y-6 pb-24">
@@ -212,9 +219,9 @@ export default function AdminUtsUasGradingPage({ params, searchParams }: {
                     action={
                         <div className="text-right">
                             <span className="text-2xl md:text-3xl font-bold text-primary">
-                                {currentTotalScore}
+                                {formatScore(currentTotalScore)}
                             </span>
-                            <span className="text-sm text-text-secondary ml-1">/{submission.max_score}</span>
+                            <span className="text-sm text-text-secondary ml-1">/{formatScore(submission.max_score)}</span>
                         </div>
                     }
                 />
@@ -247,7 +254,7 @@ export default function AdminUtsUasGradingPage({ params, searchParams }: {
                                              q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : 
                                              q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}
                                         </span>
-                                        <span className="text-xs text-text-secondary">Max: {q.points} Poin</span>
+                                        <span className="text-xs text-text-secondary">Max: {formatScore(q.points)} Poin</span>
                                     </div>
 
                                     {/* Passage audio / text if exists */}
@@ -281,15 +288,16 @@ export default function AdminUtsUasGradingPage({ params, searchParams }: {
                                             type="number"
                                             value={grade.score ?? 0}
                                             onChange={(e) => {
-                                                const val = Math.min(q.points, Math.max(0, parseInt(e.target.value) || 0))
+                                                const val = Math.min(q.points, Math.max(0, parseFloat(e.target.value) || 0))
                                                 handleGradeChange(q.id, val)
                                             }}
                                             className={`w-24 px-3 py-2 bg-secondary/5 dark:bg-white/5 border rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 ${(q.question_type === 'ESSAY' || q.question_type === 'SHORT_ANSWER') ? 'border-amber-500 focus:ring-amber-500' : 'border-secondary/30 dark:border-white/20 focus:ring-primary'} ${isAutoGradeable(q.question_type) ? 'opacity-50 cursor-not-allowed bg-secondary/10' : ''}`}
                                             max={q.points}
                                             min={0}
+                                            step="0.01"
                                             disabled={isAutoGradeable(q.question_type)}
                                         />
-                                        <span className="text-text-secondary text-sm">/ {q.points}</span>
+                                        <span className="text-text-secondary text-sm">/ {formatScore(q.points)}</span>
                                     </div>
                                 </div>
                             </div>

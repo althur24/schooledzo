@@ -6,6 +6,7 @@ import { PageHeader, Button, EmptyState } from '@/components/ui'
 import { Graph as BarChart3, Download } from 'react-iconly'
 import { Loader2 } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { round2, formatScore } from '@/lib/formatScore'
 
 interface AcademicYear {
     id: string
@@ -233,15 +234,17 @@ export default function RekapNilaiPage() {
             ]
 
             sg.grades.forEach(g => {
-                row.push(g.tugas !== null ? Math.round(g.tugas * 10) / 10 : '-')
-                row.push(g.kuis !== null ? Math.round(g.kuis * 10) / 10 : '-')
-                row.push(g.ulangan !== null ? Math.round(g.ulangan * 10) / 10 : '-')
-                row.push(g.uts !== null ? Math.round(g.uts * 10) / 10 : '-')
-                row.push(g.uas !== null ? Math.round(g.uas * 10) / 10 : '-')
-                row.push(g.rata_rata !== null ? Math.round(g.rata_rata * 10) / 10 : '-')
+                // round-2 (kontrak presisi tunggal) — bukan round-1: 87.25 harus
+                // diekspor 87.25, bukan 87.3. Kolom tetap NUMBER agar bisa dihitung.
+                row.push(g.tugas !== null ? round2(g.tugas) : '-')
+                row.push(g.kuis !== null ? round2(g.kuis) : '-')
+                row.push(g.ulangan !== null ? round2(g.ulangan) : '-')
+                row.push(g.uts !== null ? round2(g.uts) : '-')
+                row.push(g.uas !== null ? round2(g.uas) : '-')
+                row.push(g.rata_rata !== null ? round2(g.rata_rata) : '-')
             })
 
-            row.push(sg.average !== null ? Math.round(sg.average * 10) / 10 : '-')
+            row.push(sg.average !== null ? round2(sg.average) : '-')
 
             return row
         })
@@ -257,10 +260,9 @@ export default function RekapNilaiPage() {
         XLSX.writeFile(wb, `Rekap_Nilai_${selectedClassName}_${selectedYearName}.xlsx`)
     }
 
-    const formatScore = (score: number | null) => {
-        if (score === null) return '-'
-        return Math.round(score * 10) / 10
-    }
+    // Tampilan skor pakai helper global formatScore (koma id-ID, tanpa nol buntut)
+    // — jangan bikin formatScore lokal: versi lama me-return number (titik desimal)
+    // sehingga render "87.25" bukan "87,25".
 
     return (
         <div className="space-y-6">

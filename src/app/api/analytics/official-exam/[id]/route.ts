@@ -5,6 +5,7 @@ import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { resolveKkm } from '@/lib/resolveKkm'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { parseAnswerLetters } from '@/lib/questionTypeUtils'
 
 // ─── Shared helpers ─────────────────────────────────────────────
 function median(arr: number[]): number {
@@ -22,17 +23,18 @@ function stdDev(arr: number[], avg: number): number {
 }
 
 function buildScoreDistribution(percentages: number[]) {
-    const ranges = [
-        '0-10', '11-20', '21-30', '31-40', '41-50',
-        '51-60', '61-70', '71-80', '81-90', '91-100'
-    ]
-    return ranges.map(r => {
-        const [min, max] = r.split('-').map(Number)
-        return {
-            range: r,
-            count: percentages.filter(p => p >= min && p <= max).length
-        }
-    })
+    // Binning Math.floor(p/10): nilai sela (mis. 10.5) tetap masuk bin — filter
+    // min<=p<=max versi lama MELEWATKAN nilai desimal di antara batas bin
+    // (10.5 tidak masuk '0-10' karena >10, tidak masuk '11-20' karena <11).
+    const bins = new Array(10).fill(0)
+    for (const p of percentages) {
+        const idx = Math.min(9, Math.max(0, Math.floor(p / 10)))
+        bins[idx]++
+    }
+    return bins.map((count, i) => ({
+        range: `${i * 10}-${i === 9 ? 100 : i * 10 + 10}`,
+        count,
+    }))
 }
 
 // ─── GET /api/analytics/official-exam/[id] ──────────────────────
@@ -158,7 +160,7 @@ export async function GET(
                     submitted: 0,
                     avgScore: 0, highestScore: 0, lowestScore: 0,
                     median: 0, stdDev: 0, passRate: 0, kkm,
-                    maxScore: totalMaxScore,
+                    maxScore: Math.round(totalMaxScore * 100) / 100,
                     avgRawScore: 0, highestRawScore: 0, lowestRawScore: 0, medianRaw: 0
                 },
                 scoreDistribution: buildScoreDistribution([]),
@@ -202,10 +204,10 @@ export async function GET(
             stdDev: Math.round(sd * 100) / 100,
             passRate: Math.round(passRate * 100) / 100,
             kkm,
-            maxScore: totalMaxScore,
+            maxScore: Math.round(totalMaxScore * 100) / 100,
             avgRawScore: Math.round(avgRaw * 100) / 100,
-            highestRawScore: highestRaw,
-            lowestRawScore: lowestRaw,
+            highestRawScore: Math.round(highestRaw * 100) / 100,
+            lowestRawScore: Math.round(lowestRaw * 100) / 100,
             medianRaw: Math.round(medRaw * 100) / 100
         }
 
@@ -217,6 +219,11 @@ export async function GET(
             const totalAnswered = answersForQ.length
             const correctCount = answersForQ.filter(a => a.is_correct === true).length
             const correctRate = totalAnswered > 0 ? (correctCount / totalAnswered) * 100 : 0
+            // partialRate: persentase siswa yang mendapat kredit APA PUN (skor > 0).
+            // Untuk MC/TF identik dgn correctRate; untuk GK PROPORTIONAL menangkap
+            // jawaban parsial (2 dari 3 kunci → 66.7% poin tapi is_correct false).
+            const partialCount = answersForQ.filter(a => (a.points_earned ?? 0) > 0).length
+            const partialRate = totalAnswered > 0 ? (partialCount / totalAnswered) * 100 : 0
             const avgScoreQ = totalAnswered > 0
                 ? answersForQ.reduce((sum: number, a: any) => sum + (a.points_earned ?? 0), 0) / totalAnswered
                 : 0
@@ -240,13 +247,11 @@ export async function GET(
             } else if (q.question_type === 'MULTIPLE_ANSWER' && q.options) {
                 optionDistribution = (q.options as string[]).map((_: string, optIdx: number) => {
                     const letter = String.fromCharCode(65 + optIdx)
-                    let correctLetters: string[] = []
-                    try { correctLetters = JSON.parse(q.correct_answer || '[]') } catch {}
+                    // parseAnswerLetters (paritas grading) — kunci format koma/lowercase tetap terbaca
+                    const correctLetters = parseAnswerLetters(q.correct_answer)
                     return {
                         option: letter,
-                        count: answersForQ.filter(a => {
-                            try { return JSON.parse(a.answer || '[]').includes(letter) } catch { return false }
-                        }).length,
+                        count: answersForQ.filter(a => parseAnswerLetters(a.answer).includes(letter)).length,
                         isCorrect: correctLetters.includes(letter)
                     }
                 })
@@ -257,6 +262,7 @@ export async function GET(
                 questionText: q.question_text,
                 questionType: q.question_type,
                 correctRate: Math.round(correctRate * 100) / 100,
+                partialRate: Math.round(partialRate * 100) / 100,
                 avgScore: Math.round(avgScoreQ * 100) / 100,
                 maxPoints: q.points || 0,
                 optionDistribution

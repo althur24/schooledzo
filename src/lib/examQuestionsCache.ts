@@ -15,6 +15,8 @@ export type GradableQuestion = {
     options: string[] | null
     points: number
     question_type: string
+    /** Mode penilaian MULTIPLE_ANSWER — null = default PROPORTIONAL (soal lama). */
+    gk_grading_mode?: 'PROPORTIONAL' | 'ALL_OR_NOTHING' | null
 }
 
 type CacheEntry = { data: GradableQuestion[]; expiresAt: number }
@@ -22,7 +24,7 @@ type CacheEntry = { data: GradableQuestion[]; expiresAt: number }
 const cache = new Map<string, CacheEntry>()
 const TTL_MS = 10 * 60 * 1000 // 10 menit
 
-const GRADING_SELECT = 'id, correct_answer, options, points, question_type'
+const GRADING_SELECT = 'id, correct_answer, options, points, question_type, gk_grading_mode'
 
 export async function getExamQuestionsForGrading(
     table: 'exam_questions' | 'official_exam_questions' | 'quiz_questions',

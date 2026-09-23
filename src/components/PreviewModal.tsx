@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import SmartText from '@/components/SmartText'
+import { formatScore } from '@/lib/formatScore'
 import PassageBlock from '@/components/PassageBlock'
 import StudentAnswerInput from '@/components/StudentAnswerInput'
 import { ExamRunnerView, useExamPreviewState } from '@/components/exam/runner'
@@ -240,7 +241,7 @@ function KuisPreviewLayout({
                                                         <div className="flex-1" dir={q.text_direction || 'ltr'}>
                                                             <SmartText text={q.question_text} className={`text-text-main dark:text-white text-lg leading-relaxed whitespace-pre-wrap ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
                                                         </div>
-                                                        <span className="text-xs text-text-secondary font-medium px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">{q.points} Poin</span>
+                                                        <span className="text-xs text-text-secondary font-medium px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">{formatScore(q.points)} Poin</span>
                                                     </div>
                                                     {q.image_url && (
                                                         <div className="pl-12 mb-4">
@@ -277,7 +278,7 @@ function KuisPreviewLayout({
                                         <div className="flex-1" dir={q.text_direction || 'ltr'}>
                                             <SmartText text={q.question_text} className={`text-text-main dark:text-white text-lg leading-relaxed whitespace-pre-wrap ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
                                         </div>
-                                        <span className="text-xs text-text-secondary font-medium px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">{q.points} Poin</span>
+                                        <span className="text-xs text-text-secondary font-medium px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">{formatScore(q.points)} Poin</span>
                                     </div>
                                     {q.image_url && (
                                         <div className="pl-12 mb-4">

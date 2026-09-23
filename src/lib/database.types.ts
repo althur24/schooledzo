@@ -411,6 +411,7 @@ export type Database = {
           created_at: string | null
           difficulty: string | null
           exam_id: string
+          gk_grading_mode: string | null
           id: string
           image_url: string | null
           options: Json | null
@@ -431,6 +432,7 @@ export type Database = {
           created_at?: string | null
           difficulty?: string | null
           exam_id: string
+          gk_grading_mode?: string | null
           id?: string
           image_url?: string | null
           options?: Json | null
@@ -451,6 +453,7 @@ export type Database = {
           created_at?: string | null
           difficulty?: string | null
           exam_id?: string
+          gk_grading_mode?: string | null
           id?: string
           image_url?: string | null
           options?: Json | null
@@ -839,6 +842,7 @@ export type Database = {
           created_at: string | null
           difficulty: string | null
           exam_id: string
+          gk_grading_mode: string | null
           id: string
           image_url: string | null
           options: Json | null
@@ -859,6 +863,7 @@ export type Database = {
           created_at?: string | null
           difficulty?: string | null
           exam_id: string
+          gk_grading_mode?: string | null
           id?: string
           image_url?: string | null
           options?: Json | null
@@ -879,6 +884,7 @@ export type Database = {
           created_at?: string | null
           difficulty?: string | null
           exam_id?: string
+          gk_grading_mode?: string | null
           id?: string
           image_url?: string | null
           options?: Json | null
@@ -1092,6 +1098,7 @@ export type Database = {
           correct_answer: string | null
           created_at: string | null
           difficulty: string | null
+          gk_grading_mode: string | null
           id: string
           image_url: string | null
           options: Json | null
@@ -1114,6 +1121,7 @@ export type Database = {
           correct_answer?: string | null
           created_at?: string | null
           difficulty?: string | null
+          gk_grading_mode?: string | null
           id?: string
           image_url?: string | null
           options?: Json | null
@@ -1136,6 +1144,7 @@ export type Database = {
           correct_answer?: string | null
           created_at?: string | null
           difficulty?: string | null
+          gk_grading_mode?: string | null
           id?: string
           image_url?: string | null
           options?: Json | null
@@ -1296,6 +1305,7 @@ export type Database = {
           correct_answer: string | null
           created_at: string | null
           difficulty: string | null
+          gk_grading_mode: string | null
           id: string
           image_url: string | null
           options: Json | null
@@ -1316,6 +1326,7 @@ export type Database = {
           correct_answer?: string | null
           created_at?: string | null
           difficulty?: string | null
+          gk_grading_mode?: string | null
           id?: string
           image_url?: string | null
           options?: Json | null
@@ -1336,6 +1347,7 @@ export type Database = {
           correct_answer?: string | null
           created_at?: string | null
           difficulty?: string | null
+          gk_grading_mode?: string | null
           id?: string
           image_url?: string | null
           options?: Json | null
@@ -1804,50 +1816,6 @@ export type Database = {
           },
         ]
       }
-      submission_revisions: {
-        Row: {
-          answers: Json | null
-          attachments: Json | null
-          created_at: string
-          grade_feedback: string | null
-          grade_score: number | null
-          id: string
-          is_late: boolean | null
-          submission_id: string
-          submitted_at: string | null
-        }
-        Insert: {
-          answers?: Json | null
-          attachments?: Json | null
-          created_at?: string
-          grade_feedback?: string | null
-          grade_score?: number | null
-          id?: string
-          is_late?: boolean | null
-          submission_id: string
-          submitted_at?: string | null
-        }
-        Update: {
-          answers?: Json | null
-          attachments?: Json | null
-          created_at?: string
-          grade_feedback?: string | null
-          grade_score?: number | null
-          id?: string
-          is_late?: boolean | null
-          submission_id?: string
-          submitted_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "submission_revisions_submission_id_fkey"
-            columns: ["submission_id"]
-            isOneToOne: false
-            referencedRelation: "student_submissions"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       students: {
         Row: {
           angkatan: string | null
@@ -1998,6 +1966,50 @@ export type Database = {
             columns: ["school_id"]
             isOneToOne: false
             referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      submission_revisions: {
+        Row: {
+          answers: Json | null
+          attachments: Json | null
+          created_at: string
+          grade_feedback: string | null
+          grade_score: number | null
+          id: string
+          is_late: boolean | null
+          submission_id: string
+          submitted_at: string | null
+        }
+        Insert: {
+          answers?: Json | null
+          attachments?: Json | null
+          created_at?: string
+          grade_feedback?: string | null
+          grade_score?: number | null
+          id?: string
+          is_late?: boolean | null
+          submission_id: string
+          submitted_at?: string | null
+        }
+        Update: {
+          answers?: Json | null
+          attachments?: Json | null
+          created_at?: string
+          grade_feedback?: string | null
+          grade_score?: number | null
+          id?: string
+          is_late?: boolean | null
+          submission_id?: string
+          submitted_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "submission_revisions_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "student_submissions"
             referencedColumns: ["id"]
           },
         ]
@@ -2191,6 +2203,7 @@ export type Database = {
         }
         Returns: Json
       }
+      normalize_gk_key: { Args: { raw: string }; Returns: string }
       official_exam_answer_counts: {
         Args: { p_exam_id: string }
         Returns: {

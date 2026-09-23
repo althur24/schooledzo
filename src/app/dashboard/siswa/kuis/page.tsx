@@ -8,6 +8,7 @@ import { PageHeader, EmptyState } from '@/components/ui'
 import ExpandableText from '@/components/ExpandableText'
 import { Loader2 } from 'lucide-react'
 import { Game, Calendar, TimeCircle, Document, TickSquare } from 'react-iconly'
+import { formatScore } from '@/lib/formatScore'
 
 interface Quiz {
     id: string
@@ -186,7 +187,7 @@ export default function SiswaKuisPage() {
                                                 <div className="flex-1 p-2 bg-secondary/10 rounded-lg text-center">
                                                     <p className="text-xs text-text-secondary">Nilai</p>
                                                     <p className="text-lg md:text-xl font-bold text-cyan-600 dark:text-cyan-400">
-                                                        {submission.total_score}/{submission.max_score}
+                                                        {formatScore(submission.total_score)}/{formatScore(submission.max_score)}
                                                     </p>
                                                 </div>
                                                 <Link

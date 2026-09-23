@@ -1,6 +1,7 @@
 'use client'
 
 import { Card } from '@/components/ui'
+import { formatScore } from '@/lib/formatScore'
 import { HeatmapStudent } from './AssessmentAnalytics'
 
 interface PerformanceHeatmapProps {
@@ -99,7 +100,7 @@ export default function PerformanceHeatmap({ data, totalQuestions }: Performance
                                         <div
                                             className="w-6 h-6 mx-auto rounded flex items-center justify-center text-[10px] font-bold transition-transform hover:scale-125 cursor-default"
                                             style={{ backgroundColor: getCellColor(ans) }}
-                                            title={`Soal ${qIdx + 1}: ${ans.scoreEarned}/${ans.maxPoints}`}
+                                            title={`Soal ${qIdx + 1}: ${formatScore(ans.scoreEarned)}/${formatScore(ans.maxPoints)}`}
                                         >
                                             <span style={{
                                                 color: ans.isCorrect === true ? '#16a34a'
@@ -118,7 +119,7 @@ export default function PerformanceHeatmap({ data, totalQuestions }: Performance
                                         : student.totalScore >= 40 ? 'text-amber-600'
                                         : 'text-rose-600'
                                     }`}>
-                                        {student.totalScore.toFixed(0)}%
+                                        {formatScore(student.totalScore)}%
                                     </span>
                                 </td>
                             </tr>

@@ -51,4 +51,5 @@ supabase/.temp/
 # Artefak satu-off migrasi storage → R2 (backup rollback + inventory)
 migrate-backup/
 migrate-r2-*.json
+railway-r2*
 

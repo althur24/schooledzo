@@ -1,5 +1,6 @@
 import React from 'react'
 import SmartText from '@/components/SmartText'
+import { parseAnswerLetters } from '@/lib/questionTypeUtils'
 
 interface GradingAnswerDisplayProps {
     question: {
@@ -27,21 +28,22 @@ export default function GradingAnswerDisplay({ question, answer }: GradingAnswer
         }
 
         if (question.question_type === 'MULTIPLE_ANSWER') {
-            try {
-                const parsed = JSON.parse(ansStr)
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                    return (
-                        <div className="space-y-1 mt-1">
-                            {parsed.map(char => {
-                                const idx = char.charCodeAt(0) - 65
-                                const optText = question.options?.[idx] || char
-                                return <div key={char}>• <span className="font-bold">{char}.</span> <SmartText text={optText} as="span" /></div>
-                            })}
-                        </div>
-                    )
-                }
-            } catch {}
-            return <span>(Tidak valid)</span>
+            // Satu sumber parsing dengan grading (parseAnswerLetters): JSON array
+            // ATAU koma diterima — supaya kunci tampil persis seperti yang dinilai.
+            const letters = parseAnswerLetters(ansStr)
+            if (letters.length > 0) {
+                return (
+                    <div className="space-y-1 mt-1">
+                        {letters.map(char => {
+                            const idx = char.charCodeAt(0) - 65
+                            const optText = question.options?.[idx] || char
+                            return <div key={char}>• <span className="font-bold">{char}.</span> <SmartText text={optText} as="span" /></div>
+                        })}
+                    </div>
+                )
+            }
+            // Bukan huruf yang dikenal (data lama/anomali) — tampilkan teks mentah
+            return <SmartText text={ansStr} as="div" className="whitespace-pre-wrap" />
         }
 
         return <SmartText text={ansStr} as="div" className="whitespace-pre-wrap" />

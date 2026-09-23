@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { mergeRemedialScores } from '@/lib/remedialScore'
+import { round2 } from '@/lib/formatScore'
 
 // M2: Service Role Key required — analytics needs cross-table reads that RLS blocks for anon role.
 // Access restricted to ADMIN only.
@@ -59,6 +60,7 @@ export async function GET(request: NextRequest) {
                 .from('students')
                 .select('id, nis, class_id, user:users!students_user_id_fkey(full_name)')
                 .eq('school_id', schoolId)
+                .order('id')
         )
 
         // SOURCE OF TRUTH for "who was in which class during this year": student_enrollments.
@@ -72,6 +74,7 @@ export async function GET(request: NextRequest) {
                     .select('student_id, class_id')
                     .eq('academic_year_id', academicYearId)
                     .in('class_id', yearClassIds)
+                    .order('id')
             )
             : []
 
@@ -101,7 +104,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Get all assignments (scoped by school's TAs) — batched to avoid URL overflow
-        const assignments = await batchedIn<{id: string, teaching_assignment_id: string}>(
+        const assignments = await batchedIn<{id: string, type?: string, teaching_assignment_id: string}>(
             'teaching_assignment_id', taIds,
             (chunk) => supabase.from('assignments').select('id, teaching_assignment_id').in('teaching_assignment_id', chunk)
         )
@@ -112,7 +115,7 @@ export async function GET(request: NextRequest) {
         // (100 assignment × puluhan siswa bisa >1000 baris per chunk)
         const studentSubmissions = await batchedFetchAll<{id: string, student_id: string, assignment_id: string}>(
             'assignment_id', assignmentIds,
-            (chunk) => supabase.from('student_submissions').select('id, student_id, assignment_id').in('assignment_id', chunk)
+            (chunk) => supabase.from('student_submissions').select('id, student_id, assignment_id').in('assignment_id', chunk).order('id')
         )
 
         const submissionIds = studentSubmissions.map(s => s.id)
@@ -120,7 +123,7 @@ export async function GET(request: NextRequest) {
         // Get grades for student submissions — batched (≤1 grade per submission, chunk stays small)
         const grades = await batchedIn<{id: string, submission_id: string, score: number}>(
             'submission_id', submissionIds,
-            (chunk) => supabase.from('grades').select('id, submission_id, score').in('submission_id', chunk)
+            (chunk) => supabase.from('grades').select('id, submission_id, score').in('submission_id', chunk).order('id')
         )
 
         // Get quizzes (scoped by year's TAs) — inner join instead of .in(taIds):
@@ -141,6 +144,7 @@ export async function GET(request: NextRequest) {
                 .select('id, student_id, quiz_id, total_score, max_score, submitted_at')
                 .in('quiz_id', chunk)
                 .not('submitted_at', 'is', null)
+                .order('id')
         )
 
         // Get exams (scoped by year's TAs) — inner join, pola sama seperti quizzes
@@ -160,13 +164,14 @@ export async function GET(request: NextRequest) {
                 .select('id, student_id, exam_id, total_score, max_score, submitted_at, is_submitted')
                 .in('exam_id', chunk)
                 .eq('is_submitted', true)
+                .order('id')
         )
 
         // Get official exams (UTS/UAS) for this academic year
         // (is_remedial + remedial_for_id + policy/cap dibutuhkan untuk merge nilai remedial)
         const { data: officialExams } = await supabase
             .from('official_exams')
-            .select('id, subject_id, target_class_ids, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score')
+            .select('id, subject_id, target_class_ids, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score, exam_type')
             .eq('school_id', schoolId)
             .eq('academic_year_id', academicYearId)
 
@@ -180,6 +185,7 @@ export async function GET(request: NextRequest) {
                 .select('id, student_id, exam_id, total_score, max_score, is_submitted')
                 .in('exam_id', chunk)
                 .eq('is_submitted', true)
+                .order('id')
         )
 
         // Get all granular KKM
@@ -201,8 +207,13 @@ export async function GET(request: NextRequest) {
             return match?.kkm || fallback
         }
 
-        // Build a map: class_id -> subject_id -> student grades
-        const classSubjectGrades: Record<string, Record<string, { student_id: string; scores: number[] }[]>> = {}
+        // Build a map: class_id -> subject_id -> student grades (PER KATEGORI).
+        // Rumus SATU dengan halaman Rekap Nilai (paritas pipeline /api/grades):
+        // rata-rata per kategori (TUGAS/KUIS/ULANGAN/UTS/UAS) dulu, lalu rata-rata
+        // antar kategori — BUKAN campur semua nilai jadi satu timbunan (dulu:
+        // 10 tugas 90 + 1 ulangan 50 → 86.36 vs rekap 70 untuk siswa yang sama).
+        // Kategori kosong dikecualikan (bobot dinormalisasi ke kategori yang ada).
+        const classSubjectGrades: Record<string, Record<string, { student_id: string; categoryScores: Record<string, number[]> }[]>> = {}
 
         // Initialize structure
         classes?.forEach(cls => {
@@ -212,8 +223,9 @@ export async function GET(request: NextRequest) {
             })
         })
 
-        // Helper to add grade
-        const addGrade = (classId: string, subjectId: string, studentId: string, score: number) => {
+        // Helper to add grade — skor di-round2 di input (paritas /api/grades
+        // yang membulatkan tiap skor sebelum merge, mencegah flip KKM antar halaman)
+        const addGrade = (classId: string, subjectId: string, studentId: string, category: string, score: number) => {
             if (!classSubjectGrades[classId]) return
             if (!classSubjectGrades[classId][subjectId]) {
                 classSubjectGrades[classId][subjectId] = []
@@ -221,12 +233,27 @@ export async function GET(request: NextRequest) {
 
             let studentGrades = classSubjectGrades[classId][subjectId].find(s => s.student_id === studentId)
             if (!studentGrades) {
-                studentGrades = { student_id: studentId, scores: [] }
+                studentGrades = { student_id: studentId, categoryScores: {} }
                 classSubjectGrades[classId][subjectId].push(studentGrades)
             }
-            if (score !== null && score !== undefined) {
-                studentGrades.scores.push(score)
+            if (score !== null && score !== undefined && Number.isFinite(score)) {
+                if (!studentGrades.categoryScores[category]) studentGrades.categoryScores[category] = []
+                studentGrades.categoryScores[category].push(round2(score))
             }
+        }
+
+        // Rata-rata seorang siswa utk satu mapel = mean dari rata-rata kategori
+        // yang ada (paritas rumus Rekap Nilai: tugas/kuis/ulangan/UTS/UAS bobot sama)
+        const studentCategoryAverage = (sg: { categoryScores: Record<string, number[]> }): number | null => {
+            const categoryAvgs: number[] = []
+            for (const scores of Object.values(sg.categoryScores)) {
+                if (scores.length > 0) {
+                    categoryAvgs.push(scores.reduce((a, b) => a + b, 0) / scores.length)
+                }
+            }
+            return categoryAvgs.length > 0
+                ? categoryAvgs.reduce((a, b) => a + b, 0) / categoryAvgs.length
+                : null
         }
 
         // Process tugas (assignment) submissions with grades
@@ -244,7 +271,10 @@ export async function GET(request: NextRequest) {
             // Year-aware membership: was this student enrolled in this class this year?
             if (!classRoster.get(ta.class_id)?.has(sub.student_id)) return
 
-            addGrade(ta.class_id, ta.subject_id, sub.student_id, grade.score)
+            // Paritas /api/grades: ulangan offline (type='ULANGAN') masuk kategori
+            // ULANGAN, bukan TUGAS — sama seperti yang dilihat halaman Rekap.
+            const tugasCategory = assignment.type === 'ULANGAN' ? 'ULANGAN' : 'TUGAS'
+            addGrade(ta.class_id, ta.subject_id, sub.student_id, tugasCategory, grade.score)
         })
 
         // Process quiz submissions — remedial merge: nilai remedial MENGGANTIKAN
@@ -284,7 +314,7 @@ export async function GET(request: NextRequest) {
 
             const final = mergeRemedialScores(entry.scores)
             if (final === null) return
-            addGrade(ta.class_id, ta.subject_id, studentId, final)
+            addGrade(ta.class_id, ta.subject_id, studentId, 'KUIS', final)
         })
 
         // Process exam submissions — remedial merge, pola sama dengan kuis di atas.
@@ -323,7 +353,7 @@ export async function GET(request: NextRequest) {
 
             const final = mergeRemedialScores(entry.scores)
             if (final === null) return
-            addGrade(ta.class_id, ta.subject_id, studentId, final)
+            addGrade(ta.class_id, ta.subject_id, studentId, 'ULANGAN', final)
         })
 
         // Process official exam (UTS/UAS) submissions.
@@ -367,8 +397,9 @@ export async function GET(request: NextRequest) {
             const final = mergeRemedialScores(entry.scores)
             if (final === null) return
 
-            // Attribute the grade to that class + the exam's subject
-            addGrade(studentClass, baseExam.subject_id, studentId, final)
+            // Attribute the grade to that class + the exam's subject.
+            // Kategori = exam_type (UTS/UAS) — paritas /api/grades.
+            addGrade(studentClass, baseExam.subject_id, studentId, baseExam.exam_type || 'UTS', final)
         })
 
         // Build result
@@ -380,10 +411,10 @@ export async function GET(request: NextRequest) {
                 const studentGrades = classSubjectGrades[cls.id]?.[sub.id] || []
 
                 // Calculate average for each student, then overall average
+                // Banding passCount dari avg MENTAH (keadilan batas KKM);
+                // output average/students round-2 (kontrak presisi tunggal).
                 const studentAverages = studentGrades.map(sg => {
-                    const avg = sg.scores.length > 0
-                        ? sg.scores.reduce((a, b) => a + b, 0) / sg.scores.length
-                        : null
+                    const avg = studentCategoryAverage(sg)
                     return {
                         student_id: sg.student_id,
                         average: avg
@@ -391,7 +422,7 @@ export async function GET(request: NextRequest) {
                 }).filter(sa => sa.average !== null)
 
                 const overallAvg = studentAverages.length > 0
-                    ? studentAverages.reduce((a, b) => a + (b.average || 0), 0) / studentAverages.length
+                    ? round2(studentAverages.reduce((a, b) => a + (b.average || 0), 0) / studentAverages.length)
                     : null
 
                 const kkm = getKkm(sub.id, (cls as any).school_level, (cls as any).grade_level, sub.kkm)
@@ -401,15 +432,15 @@ export async function GET(request: NextRequest) {
                 // Get student details for this subject
                 const studentDetails = studentGrades.map(sg => {
                     const student = students?.find(s => s.id === sg.student_id)
-                    const avg = sg.scores.length > 0
-                        ? sg.scores.reduce((a, b) => a + b, 0) / sg.scores.length
-                        : null
+                    const avg = studentCategoryAverage(sg)
+                    const gradeCount = Object.values(sg.categoryScores)
+                        .reduce((sum, scores) => sum + scores.length, 0)
                     return {
                         student_id: sg.student_id,
                         student_name: (student?.user as any)?.full_name || '-',
                         student_nis: student?.nis || '-',
-                        average: avg,
-                        grade_count: sg.scores.length
+                        average: avg !== null ? round2(avg) : null,
+                        grade_count: gradeCount
                     }
                 }).sort((a, b) => (a.student_name || '').localeCompare(b.student_name || ''))
 

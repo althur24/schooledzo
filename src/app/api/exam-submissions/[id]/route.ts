@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { logGradeChange } from '@/lib/gradeHistory'
+import { needsManualGrading } from '@/lib/questionTypeUtils'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { resolveWindowExpiry } from '@/lib/examExpiry'
 
@@ -280,17 +281,23 @@ export async function PUT(
             const currentByQ = new Map((currentRows || []).map((r: any) => [r.question_id, r]))
             const updates = answers.map((ans: any) => {
                 const q = questionMap.get(ans.question_id)!
-                const raw = Math.round(ans.score ?? ans.points_earned ?? 0)
-                const clamped = Math.max(0, Math.min(raw, q.points || 0))
+                // Skor koreksi boleh desimal (paritas GK proporsional) — clamp 0..poin
+                const raw = Number(ans.score ?? ans.points_earned ?? 0)
+                // Fallback paritas grading: soal points NULL dinilai auto dgn poin 1 —
+                // clamp patokan 0 memaksa koreksi guru selalu 0 utk soal itu.
+                const clamped = Number.isFinite(raw) ? Math.max(0, Math.min(raw, q.points || 1)) : 0
                 const cur = currentByQ.get(ans.question_id)
                 return {
                     submission_id: id,
                     question_id: ans.question_id,
-                    points_earned: clamped,
+                    points_earned: Math.round(clamped * 100) / 100,
                     feedback: ans.feedback || null,
                     // pertahankan apa adanya (bukan dari body!)
                     answer: cur?.answer ?? null,
-                    is_correct: cur?.is_correct ?? null,
+                    // Tipe manual (isian/essay): flag NETRAL — dulu preserve false
+                    // dari auto-grade lama → jawaban bernilai penuh tetap tampil
+                    // merah ✗ di view koreksi & correctRate analytics salah.
+                    is_correct: needsManualGrading(q.question_type) ? null : (cur?.is_correct ?? null),
                 }
             })
 
@@ -312,7 +319,8 @@ export async function PUT(
             .select('points_earned')
             .eq('submission_id', id)
 
-        const totalScore = allAnswers?.reduce((sum, a) => sum + (a.points_earned || 0), 0) || 0
+        // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float
+        const totalScore = Math.round((allAnswers?.reduce((sum, a) => sum + (a.points_earned || 0), 0) || 0) * 100) / 100
 
         // Update the submission record with server-calculated total_score and is_graded
         const { data, error } = await supabase

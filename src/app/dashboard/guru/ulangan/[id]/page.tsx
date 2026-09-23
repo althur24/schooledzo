@@ -8,6 +8,7 @@ import { useSchoolLabels } from '@/contexts/LabelsContext'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
+import { round2, formatScore } from '@/lib/formatScore'
 // Static import for RichTextEditor — previously loaded as a lazy chunk via dynamic(),
 // which crashed the whole page white when the chunk no longer existed after a deploy
 import RichTextEditor from '@/components/RichTextEditor'
@@ -22,6 +23,7 @@ import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import TagInput from '@/components/TagInput'
 import BankQuestionPicker from '@/components/BankQuestionPicker'
+import BalancePointsControl from '@/components/BalancePointsControl'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import InlineQuestionTags from '@/components/InlineQuestionTags'
 import NotSubmittedPanel from '@/components/NotSubmittedPanel'
@@ -50,6 +52,8 @@ interface ExamQuestion {
     admin_review?: any
     content_format?: 'html' | 'plain'
     tags?: string[] | null
+    /** Mode penilaian Ganda Kompleks (hanya relevan untuk MULTIPLE_ANSWER) */
+    gk_grading_mode?: 'PROPORTIONAL' | 'ALL_OR_NOTHING' | null
 }
 
 interface Exam {
@@ -155,7 +159,8 @@ function EditExamPageInner() {
         order_index: 0,
         teacher_hots_claim: false,
         text_direction: 'ltr',
-        tags: []
+        tags: [],
+        gk_grading_mode: 'PROPORTIONAL'
     })
 
     // Tag suggestions dari bank soal guru (untuk autocomplete input tag)
@@ -177,8 +182,10 @@ function EditExamPageInner() {
     }])
 
     // Calculate total points
-    const totalPoints = questions.reduce((sum, q) => sum + (q.points || 0), 0)
-    const getDefaultPoints = () => Math.floor(100 / (questions.length + 1))
+    // Round 2 desimal — poin soal kini bisa desimal (hasil "Seimbangkan" 100/30 = 3.33)
+    const totalPoints = Math.round(questions.reduce((sum, q) => sum + (q.points || 0), 0) * 100) / 100
+    // Default poin soal baru: round-2 (3 soal → 25, bukan floor 33+33+33=99)
+    const getDefaultPoints = () => round2(100 / (questions.length + 1))
 
 
 
@@ -769,7 +776,8 @@ function EditExamPageInner() {
                         passage_audio_url: passageAudioUrl || null,
                         teacher_hots_claim: q.teacher_hots_claim || false,
                         text_direction: q.text_direction || 'ltr',
-                        content_format: 'html'
+                        content_format: 'html',
+                        gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined
                     }))
                 const res = await fetch(`/api/exams/${examId}/questions`, {
                     method: 'POST',
@@ -835,7 +843,8 @@ function EditExamPageInner() {
                     order_index: 0,
                     teacher_hots_claim: false,
                     text_direction: 'ltr',
-                    tags: []
+                    tags: [],
+                    gk_grading_mode: 'PROPORTIONAL'
                 })
                 setMode('list')
             }
@@ -849,6 +858,30 @@ function EditExamPageInner() {
         if (!confirm('Hapus soal ini?')) return
         await fetch(`/api/exams/${examId}/questions?question_id=${questionId}`, { method: 'DELETE' })
         fetchExam()
+    }
+
+    // "Seimbangkan": bagi rata total poin ke seluruh soal (largest-remainder,
+    // 2 desimal — 100/3 soal → 33.33 + 33.33 + 33.34). PUT per soal lalu refetch.
+    const [balancing, setBalancing] = useState(false)
+    const handleBalancePoints = async (pointsPerQuestion: number[]) => {
+        setBalancing(true)
+        try {
+            await Promise.all(questions.map((q, i) =>
+                q.id
+                    ? fetch(`/api/exams/${examId}/questions`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ question_id: q.id, points: pointsPerQuestion[i] })
+                    })
+                    : Promise.resolve()
+            ))
+            await fetchExam()
+            setToast({ message: 'Poin soal diseimbangkan', type: 'success' })
+        } catch (e) {
+            setToast({ message: 'Gagal menyeimbangkan poin — coba lagi', type: 'error' })
+        } finally {
+            setBalancing(false)
+        }
     }
 
     const handleSaveEdit = async () => {
@@ -872,7 +905,8 @@ function EditExamPageInner() {
                     passage_text: editQuestionForm.passage_text || null,
                     passage_audio_url: (editQuestionForm as any).passage_audio_url || null,
                     content_format: 'html',
-                    tags: editQuestionForm.tags || []
+                    tags: editQuestionForm.tags || [],
+                    gk_grading_mode: editQuestionForm.question_type === 'MULTIPLE_ANSWER' ? (editQuestionForm.gk_grading_mode ?? 'PROPORTIONAL') : undefined
                 })
             })
             if (!res.ok) {
@@ -932,6 +966,8 @@ function EditExamPageInner() {
                     passage_audio_url: q.passage_audio_url || null,
                     teacher_hots_claim: q.teacher_hots_claim || false,
                     tags: q.tags || null,
+                    // Mode penilaian GK ikut dari bank soal (default PROPORTIONAL)
+                    gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined,
                     // Inherit approved status from bank soal (skip re-review)
                     bank_status: q.status
                 }))
@@ -1154,7 +1190,8 @@ function EditExamPageInner() {
                 order_index: questions.length + idx,
                 passage_text: q.passage_text || null,
                 teacher_hots_claim: q.teacher_hots_claim || false,
-                tags: q.tags || null
+                tags: q.tags || null,
+                gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined
             }))
 
             const res = await fetch(`/api/exams/${examId}/questions`, {
@@ -1301,9 +1338,10 @@ function EditExamPageInner() {
 
         const scores = submitted.map(s => (s.max_score > 0 ? (s.total_score / s.max_score) * 100 : 0))
         return {
-            avg: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
-            highest: Math.round(Math.max(...scores)),
-            lowest: Math.round(Math.min(...scores)),
+            // round-2: statistik desimal utuh (87.5)
+            avg: round2(scores.reduce((a, b) => a + b, 0) / scores.length),
+            highest: round2(Math.max(...scores)),
+            lowest: round2(Math.min(...scores)),
             count: submitted.length
         }
     }
@@ -1346,7 +1384,8 @@ function EditExamPageInner() {
 
         const formattedData = sortedSubmissions.map((sub: any, index: number) => {
             const maxScore = sub.max_score || 1
-            const percentage = Math.round((sub.total_score / maxScore) * 100)
+            // Persentase round-2 (desimal utuh di export)
+            const percentage = round2((sub.total_score / maxScore) * 100)
 
             let status = 'Mengerjakan'
             if (sub.is_submitted) {
@@ -1442,9 +1481,16 @@ function EditExamPageInner() {
                             </Button>
                         )}
                         <div className="flex items-center gap-4 border-l border-secondary/20 pl-4">
+                            <BalancePointsControl
+                                count={questions.length}
+                                disabled={!!exam?.is_active || !!exam?.pending_publish}
+                                disabledReason={exam?.is_active ? 'Soal terkunci saat aktif — tarik ke draft dulu' : 'Menunggu publish — tarik ke draft untuk mengubah soal'}
+                                applying={balancing}
+                                onApply={handleBalancePoints}
+                            />
                             <div className="text-right">
                                 <p className={`text-2xl font-bold ${totalPoints > 100 ? 'text-red-500' : totalPoints === 100 ? 'text-green-500' : 'text-amber-500'}`}>
-                                    {totalPoints}
+                                    {formatScore(totalPoints)}
                                 </p>
                                 <p className="text-xs text-text-secondary">Total Poin</p>
                             </div>
@@ -1539,46 +1585,23 @@ function EditExamPageInner() {
                     )}
 
                     {/* Points Warning — hanya saat draft: poin soal terkunci saat
-                        ulangan aktif (integritas penilaian) dan saat menunggu review */}
+                        ulangan aktif (integritas penilaian) dan saat menunggu review.
+                        Tombol "Seimbangkan" integer lama DIHAPUS — header sudah punya
+                        BalancePointsControl (largest-remainder 2 desimal, total PERSIS). */}
             {totalPoints !== 100 && questions.length > 0 && !exam?.is_active && !exam?.pending_publish && (
                 <div className={`px-4 py-3 rounded-xl flex items-center justify-between ${totalPoints > 100 ? 'bg-red-500/10 border border-red-200 dark:border-red-500/30' : 'bg-amber-500/10 border border-amber-200 dark:border-amber-500/30'}`}>
                     <div className="flex items-center gap-2">
                         <span>{totalPoints > 100 ? <Danger set="bold" primaryColor="currentColor" size={20} /> : <InfoCircle set="bold" primaryColor="currentColor" size={20} />}</span>
                         <span className={totalPoints > 100 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-amber-600 dark:text-amber-400 font-medium'}>
                             {totalPoints > 100
-                                ? `Total poin melebihi 100 (${totalPoints}). Kurangi poin beberapa soal.`
-                                : `Total poin: ${totalPoints}/100. Disarankan total = 100.`
+                                ? `Total poin melebihi 100 (${formatScore(totalPoints)}). Kurangi poin beberapa soal.`
+                                : `Total poin: ${formatScore(totalPoints)}/100. Disarankan total = 100.`
                             }
                         </span>
                     </div>
-                    <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={async () => {
-                            const pointPerQuestion = Math.floor(100 / questions.length)
-                            const remainder = 100 - (pointPerQuestion * questions.length)
-                            const balanced = questions.map((q, idx) => ({
-                                ...q,
-                                points: pointPerQuestion + (idx < remainder ? 1 : 0)
-                            }))
-                            // Simpan semua ke server dulu; UI hanya diubah bila semua berhasil
-                            const results = await Promise.all(balanced.filter(q => q.id).map(q =>
-                                fetch(`/api/exams/${examId}/questions`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ question_id: q.id, points: q.points })
-                                })
-                            ))
-                            if (results.every(r => r.ok)) {
-                                setQuestions(balanced)
-                            } else {
-                                setAlertInfo({ type: 'error', title: 'Gagal', message: 'Sebagian poin gagal disimpan. Coba lagi.' })
-                                fetchExam()
-                            }
-                        }}
-                    >
-                        Seimbangkan Poin
-                    </Button>
+                    <span className="text-xs text-text-secondary">
+                        Gunakan <strong>Seimbangkan</strong> di header (total poin → dibagi rata otomatis)
+                    </span>
                 </div>
             )}
 
@@ -1947,7 +1970,8 @@ function EditExamPageInner() {
                                                     type="number"
                                                     value={q.points}
                                                     onChange={(e) => {
-                                                        const newPoints = parseInt(e.target.value) || 1
+                                                        // Poin desimal sah (mis. 3.33 per soal hasil "Seimbangkan")
+                                                        const newPoints = Math.round((parseFloat(e.target.value) || 0) * 100) / 100
                                                         const updated = questions.map((question, i) =>
                                                             i === idx ? { ...question, points: newPoints } : question
                                                         )
@@ -1956,7 +1980,7 @@ function EditExamPageInner() {
                                                     onBlur={async (e) => {
                                                         if (q.id) {
                                                             try {
-                                                                const currentPoints = parseInt(e.target.value) || 1
+                                                                const currentPoints = Math.round((parseFloat(e.target.value) || 0) * 100) / 100
                                                                 const res = await fetch(`/api/exams/${examId}/questions`, {
                                                                     method: 'PUT',
                                                                     headers: { 'Content-Type': 'application/json' },
@@ -1974,8 +1998,8 @@ function EditExamPageInner() {
                                                         }
                                                     }}
                                                     className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary"
-                                                    min={1}
-                                                    max={100}
+                                                    min={0.01}
+                                                    step={0.01}
                                                     disabled={exam?.is_active}
                                                 />
                                             </div>
@@ -2201,6 +2225,8 @@ function EditExamPageInner() {
                                     correctAnswer={editQuestionForm.correct_answer}
                                     onChange={(opts, correct) => setEditQuestionForm({ ...editQuestionForm, options: opts, correct_answer: correct })}
                                     textDirection={editQuestionForm.text_direction}
+                                    gkGradingMode={editQuestionForm.gk_grading_mode ?? 'PROPORTIONAL'}
+                                    onGkGradingModeChange={(mode) => setEditQuestionForm({ ...editQuestionForm, gk_grading_mode: mode })}
                                 />
 
                                 <div className="flex items-center gap-4">
@@ -2218,12 +2244,13 @@ function EditExamPageInner() {
                                     </div>
                                     <div className="flex-1">
                                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Poin Soal</label>
-                                        <input 
-                                            type="number" 
+                                        <input
+                                            type="number"
                                             className="w-full px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                                             value={editQuestionForm.points}
-                                            onChange={e => setEditQuestionForm({ ...editQuestionForm, points: Number(e.target.value) || 1 })}
-                                            min={1}
+                                            onChange={e => setEditQuestionForm({ ...editQuestionForm, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 })}
+                                            min={0.01}
+                                            step={0.01}
                                         />
                                     </div>
                                 </div>
@@ -2474,6 +2501,12 @@ function EditExamPageInner() {
                                                                 setPassageQuestions(updated)
                                                             }}
                                                             textDirection={pq.text_direction || 'ltr'}
+                                                            gkGradingMode={pq.gk_grading_mode ?? 'PROPORTIONAL'}
+                                                            onGkGradingModeChange={(mode) => {
+                                                                const updated = [...passageQuestions]
+                                                                updated[pqIdx] = { ...updated[pqIdx], gk_grading_mode: mode }
+                                                                setPassageQuestions(updated)
+                                                            }}
                                                         />
                                                     </div>
 
@@ -2544,6 +2577,8 @@ function EditExamPageInner() {
                                         correctAnswer={manualForm.correct_answer}
                                         onChange={(newOptions, newCorrectAnswer) => setManualForm({ ...manualForm, options: newOptions, correct_answer: newCorrectAnswer })}
                                         textDirection={manualForm.text_direction || 'ltr'}
+                                        gkGradingMode={manualForm.gk_grading_mode ?? 'PROPORTIONAL'}
+                                        onGkGradingModeChange={(mode) => setManualForm({ ...manualForm, gk_grading_mode: mode })}
                                     />
                                     </div>
 
@@ -2564,7 +2599,7 @@ function EditExamPageInner() {
                                         </div>
                                         <div>
                                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Poin</label>
-                                            <input type="number" value={manualForm.points} onChange={(e) => setManualForm({ ...manualForm, points: parseInt(e.target.value) || 10 })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary font-bold text-center" min={1} />
+                                            <input type="number" value={manualForm.points} onChange={(e) => setManualForm({ ...manualForm, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary font-bold text-center" min={0.01} step={0.01} />
                                         </div>
                                     </div>
                                     {/* Tags (opsional) */}
@@ -2654,15 +2689,15 @@ function EditExamPageInner() {
                             <p className="text-xs text-text-secondary dark:text-zinc-400 mt-1">Mengumpulkan</p>
                         </Card>
                         <Card padding="p-4" className="text-center">
-                            <p className="text-2xl md:text-3xl font-bold text-blue-600 dark:text-blue-400">{calculateStats().avg}%</p>
+                            <p className="text-2xl md:text-3xl font-bold text-blue-600 dark:text-blue-400">{formatScore(calculateStats().avg)}%</p>
                             <p className="text-xs text-text-secondary dark:text-zinc-400 mt-1">Rata-rata</p>
                         </Card>
                         <Card padding="p-4" className="text-center">
-                            <p className="text-2xl md:text-3xl font-bold text-green-600 dark:text-green-400">{calculateStats().highest}%</p>
+                            <p className="text-2xl md:text-3xl font-bold text-green-600 dark:text-green-400">{formatScore(calculateStats().highest)}%</p>
                             <p className="text-xs text-text-secondary dark:text-zinc-400 mt-1">Tertinggi</p>
                         </Card>
                         <Card padding="p-4" className="text-center">
-                            <p className="text-2xl md:text-3xl font-bold text-red-600 dark:text-red-400">{calculateStats().lowest}%</p>
+                            <p className="text-2xl md:text-3xl font-bold text-red-600 dark:text-red-400">{formatScore(calculateStats().lowest)}%</p>
                             <p className="text-xs text-text-secondary dark:text-zinc-400 mt-1">Terendah</p>
                         </Card>
                     </div>
@@ -2782,7 +2817,9 @@ function EditExamPageInner() {
                                 </thead>
                                 <tbody className="divide-y divide-secondary/10">
                                     {[...submissions].sort((a, b) => (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '')).map((sub: any, idx: number) => {
-                                        const percentage = sub.max_score > 0 ? Math.round((sub.total_score / sub.max_score) * 100) : 0
+                                        // pct MENTAH (round-2) — banding KKM pakai nilai asli, bukan
+                                        // hasil pembulatan (74.6 < KKM 75 walau tampil 75)
+                                        const percentage = sub.max_score > 0 ? round2((sub.total_score / sub.max_score) * 100) : 0
                                         return (
                                             <tr key={sub.id} className="hover:bg-secondary/5">
                                                 <td className="px-4 py-3 text-sm text-text-secondary">{idx + 1}</td>
@@ -2800,7 +2837,7 @@ function EditExamPageInner() {
                                                 <td className="px-4 py-3 text-center">
                                                     {sub.is_submitted ? (
                                                         <span className={`font-bold text-sm ${percentage >= resolvedKkm ? 'text-green-600' : percentage >= resolvedKkm - 15 ? 'text-amber-600' : 'text-red-600'}`}>
-                                                            {sub.total_score}/{sub.max_score} ({percentage}%)
+                                                            {formatScore(sub.total_score)}/{formatScore(sub.max_score)} ({formatScore(percentage)}%)
                                                         </span>
                                                     ) : (
                                                         <span className="text-text-secondary text-sm">-</span>
@@ -2883,7 +2920,7 @@ function EditExamPageInner() {
                             <div className="bg-secondary/10 rounded-xl p-4 text-center">
                                 <p className="text-sm text-text-secondary dark:text-zinc-400">Nilai</p>
                                 <p className={`text-2xl font-bold ${getScoreColor(selectedSubmission.total_score, selectedSubmission.max_score).split(' ')[0]}`}>
-                                    {selectedSubmission.total_score}/{selectedSubmission.max_score}
+                                    {formatScore(selectedSubmission.total_score)}/{formatScore(selectedSubmission.max_score)}
                                 </p>
                             </div>
                             <div className="bg-secondary/10 rounded-xl p-4 text-center">

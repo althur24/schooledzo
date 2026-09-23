@@ -232,6 +232,9 @@ export async function PUT(request: NextRequest) {
         if (image_url !== undefined) updateData.image_url = image_url || null
         if (content_format !== undefined) updateData.content_format = content_format
         if (tags !== undefined) updateData.tags = (Array.isArray(tags) ? tags : null)
+        if (body.gk_grading_mode === 'PROPORTIONAL' || body.gk_grading_mode === 'ALL_OR_NOTHING') {
+            updateData.gk_grading_mode = body.gk_grading_mode
+        }
 
         // Check if AI review is enabled
         const aiEnabled = await isAIReviewEnabled(schoolId)
@@ -326,7 +329,8 @@ export async function POST(request: NextRequest) {
                 tags: q.tags || null,
                 image_url: q.image_url || null,
                 teacher_hots_claim: Boolean(q.teacher_hots_claim),
-                content_format: q.content_format || 'plain'
+                content_format: q.content_format || 'plain',
+                ...(q.question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: q.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL' } : {})
             }))
 
             // Skip soal yang kontennya sudah ada di bank (double-submit / import ulang)
@@ -390,7 +394,8 @@ export async function POST(request: NextRequest) {
             difficulty: difficulty || 'MEDIUM',
             tags: tags || null,
             teacher_hots_claim: Boolean(teacher_hots_claim),
-            content_format: content_format || 'plain'
+            content_format: content_format || 'plain',
+            ...(question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: body.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL' } : {})
         }
 
         // Tolak soal yang kontennya persis sama dengan yang sudah ada di bank.

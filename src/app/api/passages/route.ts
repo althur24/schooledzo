@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
             .select(`
                 *,
                 subject:subjects(id, name),
-                questions:question_bank(id, question_text, question_type, options, correct_answer, difficulty, order_in_passage, status, teacher_hots_claim, tags)
+                questions:question_bank(id, question_text, question_type, options, correct_answer, difficulty, order_in_passage, status, teacher_hots_claim, tags, gk_grading_mode)
             `)
             .eq('teacher_id', teacher.id)
             .order('created_at', { ascending: false })
@@ -161,7 +161,8 @@ export async function POST(request: NextRequest) {
             teacher_id: teacher.id,
             passage_id: passage.id,
             order_in_passage: idx + 1,
-            teacher_hots_claim: Boolean(q.teacher_hots_claim)
+            teacher_hots_claim: Boolean(q.teacher_hots_claim),
+            ...(q.question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: q.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL' } : {})
         }))
 
         const { data: insertedQuestions, error: questionsError } = await supabase
@@ -305,7 +306,8 @@ export async function PUT(request: NextRequest) {
                 teacher_id: teacher.id,
                 passage_id: id,
                 order_in_passage: idx + 1,
-                teacher_hots_claim: Boolean(q.teacher_hots_claim)
+                teacher_hots_claim: Boolean(q.teacher_hots_claim),
+                ...(q.question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: q.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL' } : {})
             }))
 
             const { data: updatedQuestions, error: questionsError } = await supabase

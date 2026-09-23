@@ -6,6 +6,7 @@ import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import Card from '@/components/ui/Card'
 import { PageHeader, EmptyState } from '@/components/ui'
+import { round2, formatScore } from '@/lib/formatScore'
 import {
     Users, Loader2, BookOpen, PenTool,
     Brain, Clock, TrendingUp, GraduationCap, FileText
@@ -46,7 +47,7 @@ function StudentDetailContent() {
 
     const calcAvg = (scores: number[]) => {
         if (scores.length === 0) return null
-        return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+        return round2(scores.reduce((a, b) => a + b, 0) / scores.length)
     }
 
     const getScoreColor = (score: number | null, kkm: number = 75) => {
@@ -135,7 +136,7 @@ function StudentDetailContent() {
 
     const validAvgs = subjectAvgs.filter(s => s.avg !== null).map(s => s.avg as number)
     const overallAvg = validAvgs.length > 0
-        ? Math.round(validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length)
+        ? round2(validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length)
         : null
     const avgKkm = subjects.length > 0 ? Math.round(subjects.reduce((sum: number, s: any) => sum + (s.kkm || 75), 0) / subjects.length) : 75
 
@@ -154,7 +155,9 @@ function StudentDetailContent() {
         })
         return {
             id: s.id,
-            avg: avgs.length > 0 ? Math.round(avgs.reduce((a: number, b: number) => a + b, 0) / avgs.length) : null
+            // Ranking dihitung dari nilai mentah round-2 (bukan dibulatkan) —
+            // urutan adil saat nilai desimal berdekatan (87.4 vs 87.5)
+            avg: avgs.length > 0 ? round2(avgs.reduce((a: number, b: number) => a + b, 0) / avgs.length) : null
         }
     }).filter((s: any) => s.avg !== null).sort((a: any, b: any) => b.avg - a.avg)
 
@@ -198,7 +201,7 @@ function StudentDetailContent() {
                     </div>
                     <div className="text-right">
                         <div className={`text-2xl md:text-3xl font-extrabold ${getScoreColor(overallAvg, avgKkm)}`}>
-                            {overallAvg !== null ? overallAvg : '-'}
+                            {overallAvg !== null ? formatScore(overallAvg) : '-'}
                         </div>
                         <div className="text-xs text-text-secondary mt-0.5">Rata-rata</div>
                         {ranking > 0 && (
@@ -255,7 +258,7 @@ function StudentDetailContent() {
                                         </div>
                                     </div>
                                     <div className={`px-4 py-1.5 rounded-full text-lg font-extrabold ${getScoreBadgeBg(avg, subj.kkm)}`}>
-                                        {avg !== null ? avg : '-'}
+                                        {avg !== null ? formatScore(avg) : '-'}
                                     </div>
                                 </div>
 
@@ -277,7 +280,7 @@ function StudentDetailContent() {
                                                             key={i}
                                                             className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score, subj.kkm)}`}
                                                         >
-                                                            {score}
+                                                            {formatScore(score)}
                                                         </span>
                                                     ))}
                                                 </div>
@@ -301,7 +304,7 @@ function StudentDetailContent() {
                                                             key={i}
                                                             className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score, subj.kkm)}`}
                                                         >
-                                                            {score}
+                                                            {formatScore(score)}
                                                         </span>
                                                     ))}
                                                 </div>
@@ -325,7 +328,7 @@ function StudentDetailContent() {
                                                             key={i}
                                                             className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score, subj.kkm)}`}
                                                         >
-                                                            {score}
+                                                            {formatScore(score)}
                                                         </span>
                                                     ))}
                                                 </div>
@@ -349,7 +352,7 @@ function StudentDetailContent() {
                                                             key={i}
                                                             className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score, subj.kkm)}`}
                                                         >
-                                                            {score}
+                                                            {formatScore(score)}
                                                         </span>
                                                     ))}
                                                 </div>
@@ -373,7 +376,7 @@ function StudentDetailContent() {
                                                             key={i}
                                                             className={`px-2 py-0.5 rounded-lg text-xs font-bold ${getScoreBadgeBg(score, subj.kkm)}`}
                                                         >
-                                                            {score}
+                                                            {formatScore(score)}
                                                         </span>
                                                     ))}
                                                 </div>

@@ -1,5 +1,12 @@
 # LMS YPP — Catatan Workflow
 
+## Seed Demo SSA (production, 2026-09-22)
+
+- `node scripts/seed-demo-ssa.cjs` — isi data demo "full experience" di sekolah SSA (tahun aktif 2029/2030, kelas X IPA 1/2): 48 siswa baru (top-up 28/kelas), 3 guru × 2 TA, tugas+nilai+audit `grade_history`+revisi, kuis (objektif/koreksi manual/remedial CAP & HIGHEST), ulangan selesai + **Ulangan Harian 2 LIVE utk Monitor Live**, UTS resmi, bank soal, materi, jadwal, pengumuman, notifikasi. Idempotent (UUID deterministik prefix `5e5a`, re-run aman).
+- `node scripts/cleanup-demo-ssa.cjs` — hapus semua row demo (range-scan UUID `5e5a0000–5e5a0100`, FK-safe). Password guru TIDAK direstore otomatis (hash lama dicetak saat seed).
+- Login demo: guru `siti.rahma.ssa` / `budi.hartono.ssa` / `dewi.anggraini.ssa`, siswa `202990101.ssa` dst. — semua `Demo123!`, `must_change_password=false`.
+- **PRODUCTION belum punya migrasi `20260922*`** (GK `gk_grading_mode` + skor float8): seed memakai skor INTEGER tanpa kolom GK; jalur submit soal live via kode baru bisa PGRST204 sampai migrasi di-push.
+
 ## Dua Project Supabase — JANGAN TERTUKAR
 
 | Project | Ref | Env file | Fungsi |
@@ -41,6 +48,28 @@ supabase db push
 ```bash
 supabase gen types typescript --linked > src/lib/database.types.ts
 ```
+
+## Skor Desimal & Ganda Kompleks (2026-09-22)
+
+- Kolom skor/poin = `double precision` (**bukan** `numeric` — PostgREST mengembalikan numeric sebagai STRING, memutus semua `sum + score`): `points` (3 tabel soal; `question_bank` tidak punya kolom points), `points_earned`, `total_score`, `max_score`, `grades.score`, `grade_history.old/new/max_score`, `submission_revisions.grade_score`. Migrasi: 4 file `20260922*`. **Deploy WAJIB migrasi dulu → kode** (select soal baru membaca `gk_grading_mode`; tanpa itu grading PGRST204).
+- Mode penilaian GK per soal `gk_grading_mode`: `PROPORTIONAL` (default, skor dibagi N/M × poin) / `ALL_OR_NOTHING` (salah satu = 0). Toggle di `QuestionOptionsEditor` (kuis/ulangan/UTS-UAS/bank/RapihAI). Kolom sengaja NULLABLE (PostgREST union kolom insert batch campuran GK+non-GK mengirim null eksplisit → NOT NULL menolak batch).
+- `parseAnswerLetters()` di `questionTypeUtils.ts` = SATU parser kunci/jawaban GK (JSON array ATAU koma) — jangan buat `JSON.parse(correct_answer)` baru; kunci format lama `"A, C"` sah dan dinilai benar.
+- `round2`/`formatScore`/`parseScoreInput` di `src/lib/formatScore.ts` = SATU sumber pembulatan (round-2), tampilan (koma id-ID, tanpa nol buntut), dan parse input nilai (titik/koma). Jangan tulis `Math.round(score)`/`parseInt(score)` baru. `formatScore` HANYA untuk render teks — payload JSON tetap number.
+- KKM = kontrak integer 0-100 (divalidasi di `subject-kkm` route); banding KKM selalu pakai pct **mentah** (74.6 < 75 walau tampil 75). Cap remedial tetap integer.
+- "Seimbangkan" poin soal: `BalancePointsControl` (header kuis/ulangan/UTS-UAS) — largest-remainder 2 desimal, total PERSIS (100/3 → 33.33+33.33+33.34).
+- Bins distribusi analytics pakai `Math.floor(p/10)` (3 route duplikat: exam/quiz/official — ubah ketiganya jika disentuh).
+- Regrade retro-aktif submission lama: `npx tsx scripts/regrade-gk.ts` (dry-run default, `--apply` menulis; hanya soal objektif, nilai manual guru tak disentuh).
+- E2E staging lengkap: `scripts/e2e-gk-staging.cjs` (135 asersi seksi A–P: GK mode/kunci koma/poin desimal/koreksi/monitor/analytics nilai/nilai tugas 87.5/audit regresi/remedial GK mode-tersalin/merge round-2/kuis offline full flow/UTS-UAS GK desimal/tugas revisi snapshot/ulangan real-world (2 siswa + randomized + essay desimal + clamp + force-submit)/Seimbangkan end-to-end/partialRate GK/rescue offline GK desimal (exam + kuis)/**isian netral di autosave + koreksi guru + flag tak stale**; build + `next start` WAJIB env staging tersource, lihat header script).
+- **Offline saat ujian** (jaringan putus): terbukti `e2e_exam_runner_offline.cjs` (Chrome CDP network emulation: draft localStorage → timer habis offline → online → auto-submit, 14/14) + `e2e_offline_grading.cjs` (40/40) + seksi [O] (rescue pasca force-close dgn GK desimal). Jalankan ketiganya saat regresi ujian.
+- **Temuan scan production (22 Sep, pra-push)**: kunci GK salah-format HANYA di Piis (Permata Insani Islamic School) — UTS "ASTS BAHASA INGGRIS KELAS 8" (exam `3493b123-9fc8-4843-b428-368ae45b0477`): 10 soal kunci dobel-case `["a","b","A","B"]` (denominator 4, siswa dapat setengah poin). Simulasi regrade: 158/161 submission berubah — 156 naik, 2 turun ±0,33 (efek Math.round integer lama di soal ambigu `["a","c","B","C"]`), total kelas +1088,93 poin (rata-rata +6,89/siswa). Jalur: migrasi (normalisasi kunci in-place) → deploy → `regrade-gk.ts --apply`. Selain itu ada ±26 soal GK "kunci teks" (LaTeX/kalimat, bukan huruf — 20 di ulangan matematika) yang TIDAK bisa auto-fix: soal itu memberi 0 ke semua siswa sejak awal; regrade-gk.ts melaporkannya utk diperbaiki guru manual.
+- `formatScore(null)` = `'-'` (bukan "0" — sel kosong ≠ nilai nol). Quiz rescue path menulis `score` (bukan `points_earned`) — analytics membaca `a.score`. **Rescue kuis WAJIB guard `needsManualGrading`** (isian/essay: simpan jawaban saja, jangan auto-grade — tanpa guard, jawaban isian ter-rescue dinilai otomatis & nilai koreksi guru terinjak; paritas jalur rescue exam yang sudah punya guard). Dibuktikan E2E seksi [O] (rescue GK desimal + isian tak tersentuh).
+- **Isian singkat NETRAL di ulangan/UTS-UAS** (2026-09-22, audit round-4): autosave/force-close exam+official dulu menilai SEMUA jawaban termasuk isian (beda dgn kuis) → jawaban format-spasi/NBSP-bedad dinilai 0 + is_correct=false sebelum guru melihat. Fix: semua jalur (autosave exam/official, forceClose, PUT grading) guard `needsManualGrading` — isian/essay simpan jawaban saja; PUT grading set is_correct **null** utk tipe manual (bukan preserve false stale). Scan prod: 1 jawaban salah-dinilai (2 poin, spasi ganda) + 924 flag stale — semua terkoreksi `regrade-gk.ts` (`[isian-fix]`: 0+cocok-kunci → poin penuh; flag stale → true).
+- **Analitik & Rekap SATU pipeline** (2026-09-22): `class-grades` menghitung rata-rata **per kategori** (TUGAS/KUIS/ULANGAN/UTS/UAS, kategori kosong dikecualikan, bobot dinormalisasi) lalu rata-rata antar kategori — paritas rumus Rekap Nilai (`/api/grades` + client). Dulu class-grades mencampur semua nilai flat (10 tugas 90 + 1 ulangan 50 → 76.67 vs rekap 70 untuk siswa yang sama). Skor di-round2 di input (anti flip KKM antar halaman). Kategori tugas mengikuti `assignment.type` (ulangan offline → ULANGAN); UTS/UAS → `exam_type`.
+- `partialRate` di questionAnalysis (3 route analytics): % siswa yang dapat kredit APA PUN (skor > 0) — untuk GK PROPORTIONAL menangkap jawaban parsial (correctRate hanya hitung exact match). Frontend QuestionAnalysisChart menampilkan "X% penuh · Y% parsial" untuk GK.
+- Rapor: nilai UTS/UAS MASUK perhitungan (dulu dibuang); kategori kosong dikecualikan & bobot dinormalisasi (bukan 30%×0). `/api/grades` memfilter `academic_year_id` untuk UTS/UAS (paritas tugas/kuis/ulangan). Query `fetchAllRows` di class-grades semuanya `.order('id')`.
+- Audit regresi nilai desimal: jalankan juga `e2e_nilai_merge` + `e2e_remedial_policy` + `e2e_exam_runner_unification` (fixture integer = subset desimal, harus tetap PASS). Matriks lengkap: `PLAN-AUDIT-STAGING.md`.
+- **Duplikasi soal (remedial/duplicate) WAJIB membawa SEMUA field** — `gk_grading_mode` khususnya: jalur `api/quizzes` (duplicate_questions), `api/exams` (duplicate_from_exam_id), `api/official-exams/duplicate` pernah menjatuhkannya → soal GK "salah satu = salah semua" di remedial diam-diam dinilai proporsional (skor remedial ≠ asli). Ditangkap audit multi-agent 22 Sep + regresi E2E seksi [I] (54 asersi total).
+- Merge remedial di GET submissions: round-**2** (`*100)/100`), BUKAN 1 desimal (`*10)/10`) — round-1 bisa flip boundary KKM di list guru.
 
 ## Type Safety (bertahap)
 

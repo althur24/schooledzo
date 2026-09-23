@@ -20,6 +20,8 @@ import NotSubmittedPanel from '@/components/NotSubmittedPanel'
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
+import BalancePointsControl from '@/components/BalancePointsControl'
+import { round2, formatScore } from '@/lib/formatScore'
 import TagInput from '@/components/TagInput'
 import BankQuestionPicker from '@/components/BankQuestionPicker'
 import InlineQuestionTags from '@/components/InlineQuestionTags'
@@ -68,6 +70,8 @@ interface Question {
     text_direction?: 'ltr' | 'rtl'
     content_format?: 'html' | 'plain'
     tags?: string[] | null
+    /** Mode penilaian Ganda Kompleks (hanya relevan untuk MULTIPLE_ANSWER) */
+    gk_grading_mode?: 'PROPORTIONAL' | 'ALL_OR_NOTHING' | null
 }
 
 type TabType = 'soal' | 'pengaturan' | 'hasil' | 'monitor'
@@ -123,7 +127,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         id: '', question_text: '', question_type: 'MULTIPLE_CHOICE',
         options: ['', '', '', ''], correct_answer: '', points: 10,
         order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false,
-        text_direction: 'ltr', content_format: 'html', tags: []
+        text_direction: 'ltr', content_format: 'html', tags: [],
+        gk_grading_mode: 'PROPORTIONAL'
     })
 
     // Tag suggestions dari bank soal (untuk autocomplete input tag)
@@ -186,8 +191,10 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     const [aiReviewEnabled, setAiReviewEnabled] = useState(false)
 
     // Helpers
-    const totalPoints = questions.reduce((sum, q) => sum + (q.points || 0), 0)
-    const getDefaultPoints = () => Math.floor(100 / (questions.length + 1))
+    // Round 2 desimal — poin soal kini bisa desimal (hasil "Seimbangkan" 100/30 = 3.33)
+    const totalPoints = Math.round(questions.reduce((sum, q) => sum + (q.points || 0), 0) * 100) / 100
+    // Default poin soal baru: round-2 (3 soal → 25, bukan floor 33+33+33=99)
+    const getDefaultPoints = () => round2(100 / (questions.length + 1))
 
     // Bentuk data ulangan vs official: subject/class dari teaching_assignment
     const examSubject = isUlangan ? (exam as any)?.teaching_assignment?.subject : (exam as any)?.subject
@@ -392,7 +399,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
 
         const formattedData = sortedSubmissions.map((sub: any, index: number) => {
             const maxScore = sub.max_score || 1
-            const percentage = Math.round((sub.total_score / maxScore) * 100)
+            // Persentase round-2 (desimal utuh di export)
+            const percentage = round2((sub.total_score / maxScore) * 100)
             
             let status = 'Mengerjakan'
             if (sub.is_submitted) {
@@ -490,7 +498,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     correct_answer: q.correct_answer || null, points: q.points || 10,
                     order_index: questions.length + idx, passage_text: passageText,
                     passage_audio_url: passageAudioUrl || null, teacher_hots_claim: q.teacher_hots_claim || false,
-                    text_direction: q.text_direction || 'ltr', content_format: 'html'
+                    text_direction: q.text_direction || 'ltr', content_format: 'html',
+                    gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined
                 }))
                 await postQuestions({ questions: questionsToSave })
                 setPassageText(''); setPassageAudioUrl('')
@@ -509,9 +518,10 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 difficulty: manualForm.difficulty, teacher_hots_claim: manualForm.teacher_hots_claim || false,
                 order_index: questions.length, text_direction: manualForm.text_direction || 'ltr',
                 content_format: 'html',
-                tags: manualForm.tags || []
+                tags: manualForm.tags || [],
+                gk_grading_mode: manualForm.question_type === 'MULTIPLE_ANSWER' ? (manualForm.gk_grading_mode ?? 'PROPORTIONAL') : undefined
             })
-            setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false, text_direction: 'ltr', content_format: 'html', tags: [] })
+            setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false, text_direction: 'ltr', content_format: 'html', tags: [], gk_grading_mode: 'PROPORTIONAL' })
             setSoalMode('list'); fetchQuestions()
         } finally { setSaving(false) }
     }
@@ -564,7 +574,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     passage_text: editQuestionForm.passage_text || null,
                     passage_audio_url: (editQuestionForm as any).passage_audio_url || null,
                     content_format: 'html',
-                    tags: editQuestionForm.tags || []
+                    tags: editQuestionForm.tags || [],
+                    gk_grading_mode: editQuestionForm.question_type === 'MULTIPLE_ANSWER' ? (editQuestionForm.gk_grading_mode ?? 'PROPORTIONAL') : undefined
                 })
             })
             setEditingQuestionId(null); setEditQuestionForm(null); fetchQuestions()
@@ -596,6 +607,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     passage_audio_url: q.passage_audio_url || null,
                     teacher_hots_claim: q.teacher_hots_claim || false,
                     tags: q.tags || null,
+                    // Mode penilaian GK ikut dari bank soal (default PROPORTIONAL)
+                    gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined,
                     bank_status: q.status
                 }))
             await postQuestions({ questions: sel })
@@ -613,7 +626,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 difficulty: q.difficulty || 'MEDIUM', points: q.points || 10,
                 order_index: questions.length + idx, passage_text: q.passage_text || null,
                 teacher_hots_claim: q.teacher_hots_claim || false,
-                tags: q.tags || null
+                tags: q.tags || null,
+                gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined
             }))
             const res = await postQuestions({ questions: newQuestions })
             if (res.ok) { setSoalMode('list'); fetchQuestions() }
@@ -631,7 +645,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     body: JSON.stringify(standalone.map((q: any) => ({
                         question_text: q.question_text, question_type: q.question_type,
                         options: q.options || null, correct_answer: q.correct_answer || null,
-                        difficulty: q.difficulty || 'MEDIUM', subject_id: subjectId, tags: q.tags || null
+                        difficulty: q.difficulty || 'MEDIUM', subject_id: subjectId, tags: q.tags || null,
+                        gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined
                     })))
                 })
             }
@@ -702,21 +717,28 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     // Balance points — UI hanya diubah bila SEMUA update server berhasil
     // (dahulu fire-and-forget: UI bisa menampilkan poin "seimbang" palsu
     // padahal server menolak 409 karena ujian sedang aktif)
-    const handleBalancePoints = async () => {
-        const pointPerQ = Math.floor(100 / questions.length)
-        const remainder = 100 - (pointPerQ * questions.length)
-        const balanced = questions.map((q, idx) => ({ ...q, points: pointPerQ + (idx < remainder ? 1 : 0) }))
-        const results = await Promise.all(balanced.filter(q => q.id).map(q =>
-            fetch(`${examApi}/${examId}/questions`, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question_id: q.id, points: q.points })
-            })
-        ))
-        if (results.every(r => r.ok)) {
-            setQuestions(balanced)
-        } else {
-            showToast('Sebagian poin gagal disimpan. Tarik ujian ke draft untuk mengubah poin.', 'error')
-            fetchExam()
+    // "Seimbangkan": bagi rata total poin (input admin, default 100) ke seluruh
+    // soal — largest-remainder 2 desimal (100/3 soal → 33.33 + 33.33 + 33.34).
+    const [balancing, setBalancing] = useState(false)
+    const handleBalancePoints = async (pointsPerQuestion: number[]) => {
+        setBalancing(true)
+        try {
+            const balanced = questions.map((q, idx) => ({ ...q, points: pointsPerQuestion[idx] }))
+            const results = await Promise.all(balanced.filter(q => q.id).map(q =>
+                fetch(`${examApi}/${examId}/questions`, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question_id: q.id, points: q.points })
+                })
+            ))
+            if (results.every(r => r.ok)) {
+                setQuestions(balanced)
+                showToast('Poin soal diseimbangkan', 'success')
+            } else {
+                showToast('Sebagian poin gagal disimpan. Tarik ujian ke draft untuk mengubah poin.', 'error')
+                fetchExam()
+            }
+        } finally {
+            setBalancing(false)
         }
     }
 
@@ -756,8 +778,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     </div>
                     <p className="text-sm text-text-secondary mt-1">
                         {isUlangan
-                            ? `${examSubject?.name || '-'} • ${examClass?.name || '-'}${examTeacherName ? ` • ${examTeacherName}` : ''} • ${questions.length} soal (${totalPoints} poin)`
-                            : `${exam.subject?.name} • ${exam.target_classes?.length || 0} kelas • ${questions.length} soal (${totalPoints} poin)`}
+                            ? `${examSubject?.name || '-'} • ${examClass?.name || '-'}${examTeacherName ? ` • ${examTeacherName}` : ''} • ${questions.length} soal (${formatScore(totalPoints)} poin)`
+                            : `${exam.subject?.name} • ${exam.target_classes?.length || 0} kelas • ${questions.length} soal (${formatScore(totalPoints)} poin)`}
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -766,8 +788,15 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                         {exam.is_active ? <><EyeOff className="w-4 h-4 mr-1" /> Tarik (Draft)</> : <><Eye className="w-4 h-4 mr-1" /> Publish</>}
                     </Button>
                     <div className="flex items-center gap-4 border-l border-secondary/20 pl-4">
+                        <BalancePointsControl
+                            count={questions.length}
+                            disabled={!!exam.is_active || !!exam.pending_publish}
+                            disabledReason={exam.is_active ? 'Soal terkunci saat aktif — tarik ke draft dulu' : 'Menunggu review — tarik ke draft untuk mengubah soal'}
+                            applying={balancing}
+                            onApply={handleBalancePoints}
+                        />
                         <div className="text-right">
-                            <p className={`text-2xl font-bold ${totalPoints > 100 ? 'text-red-500' : totalPoints === 100 ? 'text-green-500' : 'text-amber-500'}`}>{totalPoints}</p>
+                            <p className={`text-2xl font-bold ${totalPoints > 100 ? 'text-red-500' : totalPoints === 100 ? 'text-green-500' : 'text-amber-500'}`}>{formatScore(totalPoints)}</p>
                             <p className="text-xs text-text-secondary">Total Poin</p>
                         </div>
                         <div className="text-right">
@@ -783,9 +812,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
             {totalPoints !== 100 && questions.length > 0 && !exam.is_active && !exam.pending_publish && (
                 <div className={`px-4 py-3 rounded-xl flex items-center justify-between ${totalPoints > 100 ? 'bg-red-500/10 border border-red-200 dark:border-red-500/30' : 'bg-amber-500/10 border border-amber-200 dark:border-amber-500/30'}`}>
                     <span className={totalPoints > 100 ? 'text-red-600 dark:text-red-400 font-medium text-sm' : 'text-amber-600 dark:text-amber-400 font-medium text-sm'}>
-                        {totalPoints > 100 ? `⚠️ Total poin melebihi 100 (${totalPoints}). Kurangi poin beberapa soal.` : `ℹ️ Total poin: ${totalPoints}/100. Disarankan total = 100.`}
+                        {totalPoints > 100 ? `⚠️ Total poin melebihi 100 (${formatScore(totalPoints)}). Gunakan "Seimbangkan" atau kurangi poin beberapa soal.` : `ℹ️ Total poin: ${formatScore(totalPoints)}/100. Disarankan total = 100.`}
                     </span>
-                    <Button size="sm" variant="secondary" onClick={handleBalancePoints}>Seimbangkan Poin</Button>
                 </div>
             )}
 
@@ -931,7 +959,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                         </div>
                                         <div className="flex flex-col gap-3 items-end border-l border-secondary/10 pl-5">
                                             <div className="flex flex-col items-center">
-                                                <input type="number" value={q.points} onChange={(e) => { const v = parseInt(e.target.value) || 1; setQuestions(questions.map((qq, i) => i === idx ? { ...qq, points: v } : qq)) }} onBlur={async (e) => { if (q.id) { await fetch(`${examApi}/${examId}/questions`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: q.id, points: parseInt(e.target.value) || 1 }) }) } }} className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary" min={1} max={100} disabled={exam?.is_active} />
+                                                <input type="number" value={q.points} onChange={(e) => { const v = Math.round((parseFloat(e.target.value) || 0) * 100) / 100; setQuestions(questions.map((qq, i) => i === idx ? { ...qq, points: v } : qq)) }} onBlur={async (e) => { if (q.id) { await fetch(`${examApi}/${examId}/questions`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: q.id, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 }) }) } }} className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary" min={0.01} step={0.01} disabled={exam?.is_active} />
                                                 <span className="text-[10px] uppercase font-bold text-text-secondary mt-1">Poin</span>
                                             </div>
                                             <div className="w-full h-px bg-secondary/10 my-1"></div>
@@ -1167,7 +1195,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                     </thead>
                                     <tbody className="divide-y divide-secondary/10">
                                         {[...submissions].sort((a, b) => (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '')).map((sub: any, idx: number) => {
-                                            const percentage = sub.max_score > 0 ? Math.round((sub.total_score / sub.max_score) * 100) : 0
+                                            // pct MENTAH (round-2) — banding KKM pakai nilai asli (74.6 < 75 walau ≈75)
+                                            const percentage = sub.max_score > 0 ? round2((sub.total_score / sub.max_score) * 100) : 0
                                             const studentKkm = getStudentKkm(sub.student)
                                             return (
                                                 <tr key={sub.id} className="hover:bg-secondary/5">
@@ -1177,13 +1206,13 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                                         <span className="text-xs text-text-secondary ml-2">{sub.student?.nis}</span>
                                                     </td>
                                                     <td className="px-4 py-3 text-center font-medium text-sm">
-                                                        {sub.is_submitted ? `${sub.total_score}/${sub.max_score}` : '-'}
+                                                        {sub.is_submitted ? `${formatScore(sub.total_score)}/${formatScore(sub.max_score)}` : '-'}
                                                     </td>
                                                     <td className="px-4 py-3 text-center">
                                                         {sub.is_submitted ? (
                                                             <div className="flex flex-col items-center gap-0.5">
                                                                 <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${percentage >= studentKkm ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'}`}>
-                                                                    {percentage}
+                                                                    {formatScore(percentage)}
                                                                 </span>
                                                                 <span className="text-[10px] text-text-secondary font-medium">KKM: {studentKkm}</span>
                                                             </div>
@@ -1256,7 +1285,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                             <div className="bg-secondary/10 rounded-xl p-4 text-center">
                                 <p className="text-sm text-text-secondary dark:text-zinc-400">Nilai</p>
                                 <p className={`text-2xl font-bold ${getScoreColor(selectedSubmission.total_score, selectedSubmission.max_score, getStudentKkm(selectedSubmission.student)).split(' ')[0]}`}>
-                                    {selectedSubmission.total_score}/{selectedSubmission.max_score}
+                                    {formatScore(selectedSubmission.total_score)}/{formatScore(selectedSubmission.max_score)}
                                 </p>
                             </div>
                             <div className="bg-secondary/10 rounded-xl p-4 text-center">
@@ -1393,6 +1422,12 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                                             setPassageQuestions(u)
                                                         }}
                                                         textDirection={pq.text_direction || 'ltr'}
+                                                        gkGradingMode={pq.gk_grading_mode ?? 'PROPORTIONAL'}
+                                                        onGkGradingModeChange={(mode) => {
+                                                            const u = [...passageQuestions]
+                                                            u[pqIdx] = { ...u[pqIdx], gk_grading_mode: mode }
+                                                            setPassageQuestions(u)
+                                                        }}
                                                     />
                                                 </div>
                                             </div>
@@ -1425,6 +1460,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                     correctAnswer={manualForm.correct_answer}
                                     onChange={(newOptions, newCorrectAnswer) => setManualForm({ ...manualForm, options: newOptions, correct_answer: newCorrectAnswer })}
                                     textDirection={manualForm.text_direction || 'ltr'}
+                                    gkGradingMode={manualForm.gk_grading_mode ?? 'PROPORTIONAL'}
+                                    onGkGradingModeChange={(mode) => setManualForm({ ...manualForm, gk_grading_mode: mode })}
                                 />
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
@@ -1438,7 +1475,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                     </div>
                                     <div>
                                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Poin</label>
-                                        <input type="number" value={manualForm.points} onChange={(e) => setManualForm({ ...manualForm, points: parseInt(e.target.value) || 10 })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary font-bold text-center" min={1} />
+                                        <input type="number" value={manualForm.points} onChange={(e) => setManualForm({ ...manualForm, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary font-bold text-center" min={0.01} step={0.01} />
                                     </div>
                                 </div>
                                 {/* Tags (opsional) */}
@@ -1600,6 +1637,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                             correctAnswer={editQuestionForm.correct_answer}
                             onChange={(newOptions, newCorrectAnswer) => setEditQuestionForm({ ...editQuestionForm, options: newOptions, correct_answer: newCorrectAnswer })}
                             textDirection={editQuestionForm.text_direction || 'ltr'}
+                            gkGradingMode={editQuestionForm.gk_grading_mode ?? 'PROPORTIONAL'}
+                            onGkGradingModeChange={(mode) => setEditQuestionForm({ ...editQuestionForm, gk_grading_mode: mode })}
                         />
                         <div className="flex items-center gap-4 pb-2">
                             <div className="flex-1">
@@ -1616,12 +1655,13 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                             </div>
                             <div className="flex-1">
                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Poin Soal</label>
-                                <input 
-                                    type="number" 
+                                <input
+                                    type="number"
                                     className="w-full px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                                     value={editQuestionForm.points}
-                                    onChange={e => setEditQuestionForm({ ...editQuestionForm, points: Number(e.target.value) || 1 })}
-                                    min={1}
+                                    onChange={e => setEditQuestionForm({ ...editQuestionForm, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 })}
+                                    min={0.01}
+                                    step={0.01}
                                 />
                             </div>
                         </div>

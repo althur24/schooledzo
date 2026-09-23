@@ -1,6 +1,7 @@
 'use client'
 
 import { ClassOverview } from './AssessmentAnalytics'
+import { formatScore } from '@/lib/formatScore'
 import { TrendingUp, TrendingDown, Users, Target, Award, BarChart2 } from 'lucide-react'
 
 interface ClassOverviewCardsProps {
@@ -12,28 +13,28 @@ export default function ClassOverviewCards({ data }: ClassOverviewCardsProps) {
     const cards = [
         {
             label: 'Rata-Rata',
-            value: `${data.avgRawScore}/${ms}`,
+            value: `${formatScore(data.avgRawScore)}/${formatScore(ms)}`,
             icon: <BarChart2 className="w-5 h-5" />,
             color: 'bg-blue-50 text-blue-600 border-blue-200',
             iconBg: 'bg-blue-100'
         },
         {
             label: 'Nilai Tertinggi',
-            value: `${data.highestRawScore}/${ms}`,
+            value: `${formatScore(data.highestRawScore)}/${formatScore(ms)}`,
             icon: <TrendingUp className="w-5 h-5" />,
             color: 'bg-emerald-50 text-emerald-600 border-emerald-200',
             iconBg: 'bg-emerald-100'
         },
         {
             label: 'Nilai Terendah',
-            value: `${data.lowestRawScore}/${ms}`,
+            value: `${formatScore(data.lowestRawScore)}/${formatScore(ms)}`,
             icon: <TrendingDown className="w-5 h-5" />,
             color: 'bg-rose-50 text-rose-600 border-rose-200',
             iconBg: 'bg-rose-100'
         },
         {
             label: 'Median',
-            value: `${data.medianRaw}/${ms}`,
+            value: `${formatScore(data.medianRaw)}/${formatScore(ms)}`,
             icon: <Target className="w-5 h-5" />,
             color: 'bg-violet-50 text-violet-600 border-violet-200',
             iconBg: 'bg-violet-100'
@@ -47,7 +48,7 @@ export default function ClassOverviewCards({ data }: ClassOverviewCardsProps) {
         },
         {
             label: data.kkm ? `Lulus (KKM ${data.kkm})` : 'Std. Deviasi',
-            value: data.kkm ? `${data.passRate.toFixed(1)}%` : data.stdDev.toFixed(1),
+            value: data.kkm ? `${formatScore(data.passRate)}%` : formatScore(data.stdDev),
             icon: <Award className="w-5 h-5" />,
             color: data.kkm
                 ? 'bg-teal-50 text-teal-600 border-teal-200'

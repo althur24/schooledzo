@@ -9,6 +9,7 @@ import { PageHeader, EmptyState } from '@/components/ui'
 import ExpandableText from '@/components/ExpandableText'
 import { Loader2, GraduationCap, BookOpen } from 'lucide-react'
 import { Document, TimeCircle, Danger, Play, TickSquare, Chart, Calendar } from 'react-iconly'
+import { formatScore } from '@/lib/formatScore'
 
 interface Exam {
     id: string
@@ -342,7 +343,7 @@ export default function SiswaUlanganPage() {
                                                             </p>
                                                         ) : (
                                                             <p className="text-green-600 dark:text-green-400 font-bold text-sm">
-                                                                Nilai: {submission.total_score} / {submission.max_score}
+                                                                Nilai: {formatScore(submission.total_score)} / {formatScore(submission.max_score)}
                                                             </p>
                                                         )}
                                                     </div>
@@ -457,7 +458,7 @@ export default function SiswaUlanganPage() {
                                                             </p>
                                                         ) : (
                                                             <p className="text-green-600 dark:text-green-400 font-bold text-sm">
-                                                                Nilai: {submission.total_score} / {submission.max_score}
+                                                                Nilai: {formatScore(submission.total_score)} / {formatScore(submission.max_score)}
                                                             </p>
                                                         )}
                                                     </div>

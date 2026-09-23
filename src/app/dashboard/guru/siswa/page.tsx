@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Card from '@/components/ui/Card'
 import { PageHeader, Button, EmptyState } from '@/components/ui'
+import { round2, formatScore } from '@/lib/formatScore'
 import {
     Users, TrendingUp, Award,
     Download, Loader2, ChevronRight, Search,
@@ -69,10 +70,10 @@ function SiswaPageContent() {
         router.push(`/dashboard/guru/siswa?class_id=${classId}`)
     }
 
-    // Calculate average for a subject's scores
+    // Calculate average for a subject's scores — round-2 (desimal utuh)
     const calcAvg = (scores: number[]) => {
         if (scores.length === 0) return null
-        return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+        return round2(scores.reduce((a, b) => a + b, 0) / scores.length)
     }
 
     // Calculate overall average for a student across all subjects
@@ -85,7 +86,7 @@ function SiswaPageContent() {
             if (avg !== null) subjectAvgs.push(avg)
         })
         if (subjectAvgs.length === 0) return null
-        return Math.round(subjectAvgs.reduce((a, b) => a + b, 0) / subjectAvgs.length)
+        return round2(subjectAvgs.reduce((a, b) => a + b, 0) / subjectAvgs.length)
     }
 
     // Build export table data (headers + rows)
@@ -107,7 +108,8 @@ function SiswaPageContent() {
                 const s = studentGrade.subjects[subj.id]
                 const allScores = [...s.tugas_scores, ...s.kuis_scores, ...s.ulangan_scores]
                 const avg = calcAvg(allScores)
-                return avg !== null ? avg.toString() : '-'
+                // Number (round-2) agar Excel bisa menghitung — bukan string berkoma
+                return avg !== null ? round2(avg) : '-'
             })
 
             return [
@@ -115,7 +117,7 @@ function SiswaPageContent() {
                 student.nis || '-',
                 student.user?.full_name || student.user?.username || '-',
                 ...subjectScores,
-                overall !== null ? overall.toString() : '-'
+                overall !== null ? round2(overall) : '-'
             ]
         })
 
@@ -212,7 +214,7 @@ function SiswaPageContent() {
     }).filter((v: any): v is number => v !== null)
 
     const classAvg = allOveralls.length > 0
-        ? Math.round(allOveralls.reduce((a, b) => a + b, 0) / allOveralls.length)
+        ? round2(allOveralls.reduce((a, b) => a + b, 0) / allOveralls.length)
         : 0
     const avgKkm = subjects.length > 0 ? Math.round(subjects.reduce((sum: number, s: any) => sum + (s.kkm || 75), 0) / subjects.length) : 75
     const tuntasCount = allOveralls.filter(v => v >= avgKkm).length
@@ -339,7 +341,7 @@ function SiswaPageContent() {
                             <TrendingUp className="w-5 h-5 text-purple-600 dark:text-purple-400" />
                         </div>
                         <div>
-                            <div className="text-xl md:text-2xl font-bold text-purple-600 dark:text-purple-400">{classAvg || '-'}</div>
+                            <div className="text-xl md:text-2xl font-bold text-purple-600 dark:text-purple-400">{classAvg ? formatScore(classAvg) : '-'}</div>
                             <div className="text-xs text-text-secondary">Rata-rata Kelas</div>
                         </div>
                     </div>
@@ -432,12 +434,12 @@ function SiswaPageContent() {
                                             }
                                             return (
                                                 <td key={subj.id} className={`px-4 py-3 text-center text-sm font-bold ${getScoreColor(avg, subj.kkm)} ${getScoreBg(avg, subj.kkm)} transition-colors`}>
-                                                    {avg !== null ? avg : '-'}
+                                                    {avg !== null ? formatScore(avg) : '-'}
                                                 </td>
                                             )
                                         })}
                                         <td className={`px-4 py-3 text-center text-sm font-extrabold ${getScoreColor(overall, avgKkm)}`}>
-                                            {overall !== null ? overall : '-'}
+                                            {overall !== null ? formatScore(overall) : '-'}
                                         </td>
                                         <td className="px-4 py-3 text-center">
                                             <ChevronRight className="w-4 h-4 text-text-secondary group-hover:text-primary transition-colors" />

@@ -10,6 +10,7 @@ import {
 } from '@react-pdf/renderer'
 import { latexToText } from './latexToText'
 import MixedText from './MixedText'
+import { formatScore, round2 } from '@/lib/formatScore'
 import type {
     AnalyticsData,
     QuestionAnalysisItem,
@@ -472,7 +473,7 @@ function CoverPage({ data, meta }: { data: AnalyticsData; meta: ExamAnalyticsMet
                 <InfoCell label="Tanggal Pelaksanaan" value={dateRangeText(meta)} />
                 <InfoCell label="Durasi" value={meta.durationMinutes ? `${meta.durationMinutes} menit` : '—'} />
                 <InfoCell label="Jumlah Soal" value={`${data.totalQuestions} soal`} />
-                <InfoCell label="Skor Maksimum" value={`${o.maxScore}`} />
+                <InfoCell label="Skor Maksimum" value={formatScore(o.maxScore)} />
                 <InfoCell label="KKM" value={o.kkm !== null && o.kkm !== undefined ? `${o.kkm}` : '—'} />
                 <InfoCell label="Peserta Terdaftar" value={`${o.totalStudents} siswa`} />
                 <InfoCell label="Mengumpulkan" value={`${o.submitted} siswa`} />
@@ -481,12 +482,12 @@ function CoverPage({ data, meta }: { data: AnalyticsData; meta: ExamAnalyticsMet
             <Text style={[styles.sectionTitle, { marginTop: 18 }]}>Ringkasan Statistik</Text>
             <Text style={styles.sectionTitleSmall}>Nilai dalam persen (skor mentah di dalam kurung)</Text>
             <View style={styles.statGrid}>
-                <StatCard value={`${o.avgScore}`} label={`Rata-rata (${o.avgRawScore}/${o.maxScore})`} />
-                <StatCard value={`${o.median}`} label={`Median (${o.medianRaw})`} />
-                <StatCard value={`${o.highestScore}`} label={`Tertinggi (${o.highestRawScore})`} />
-                <StatCard value={`${o.lowestScore}`} label={`Terendah (${o.lowestRawScore})`} />
-                <StatCard value={`${o.stdDev}`} label="Simpangan Baku" />
-                <StatCard value={`${o.passRate}%`} label="Ketuntasan (sesuai KKM)" />
+                <StatCard value={formatScore(o.avgScore)} label={`Rata-rata (${formatScore(o.avgRawScore)}/${formatScore(o.maxScore)})`} />
+                <StatCard value={formatScore(o.median)} label={`Median (${formatScore(o.medianRaw)})`} />
+                <StatCard value={formatScore(o.highestScore)} label={`Tertinggi (${formatScore(o.highestRawScore)})`} />
+                <StatCard value={formatScore(o.lowestScore)} label={`Terendah (${formatScore(o.lowestRawScore)})`} />
+                <StatCard value={formatScore(o.stdDev)} label="Simpangan Baku" />
+                <StatCard value={`${formatScore(o.passRate)}%`} label="Ketuntasan (sesuai KKM)" />
                 <StatCard value={`${o.submitted}`} label="Mengumpulkan" />
                 <StatCard value={`${notSubmitted}`} label="Belum Mengumpulkan" />
             </View>
@@ -501,10 +502,10 @@ function CoverPage({ data, meta }: { data: AnalyticsData; meta: ExamAnalyticsMet
                 </View>
                 <View style={styles.passLegendRow}>
                     <Text style={{ fontSize: 8, color: C.green, fontWeight: 700 }}>
-                        Tuntas: {data.studentRanking.filter(s => o.kkm == null || s.percentage >= o.kkm).length} siswa ({o.passRate}%)
+                        Tuntas: {data.studentRanking.filter(s => o.kkm == null || s.percentage >= o.kkm).length} siswa ({formatScore(o.passRate)}%)
                     </Text>
                     <Text style={{ fontSize: 8, color: C.red, fontWeight: 700 }}>
-                        Belum Tuntas: {data.studentRanking.filter(s => o.kkm != null && s.percentage < o.kkm).length} siswa ({Math.round((100 - o.passRate) * 10) / 10}%)
+                        Belum Tuntas: {data.studentRanking.filter(s => o.kkm != null && s.percentage < o.kkm).length} siswa ({round2(100 - o.passRate)}%)
                     </Text>
                 </View>
             </View>
@@ -587,7 +588,7 @@ function DistributionPage({ data, meta }: { data: AnalyticsData; meta: ExamAnaly
                     Catatan Interpretasi
                 </Text>
                 <Text style={{ fontSize: 8, color: C.sub, lineHeight: 1.5 }}>
-                    Rata-rata kelas {data.classOverview.avgScore}% dengan simpangan baku {data.classOverview.stdDev}.
+                    Rata-rata kelas {formatScore(data.classOverview.avgScore)}% dengan simpangan baku {formatScore(data.classOverview.stdDev)}.
                     {data.classOverview.stdDev > 20
                         ? ' Sebaran nilai lebar — kemampuan siswa sangat beragam, pertimbangkan pembelajaran berdiferensiasi.'
                         : ' Sebaran nilai relatif homogen.'}
@@ -626,7 +627,7 @@ function QuestionRow({ q }: { q: QuestionAnalysisItem }) {
     } else {
         metaLine = (
             <Text style={styles.qMeta}>
-                Rata-rata skor: {q.avgScore}/{q.maxPoints} (jawaban non-objektif)
+                Rata-rata skor: {formatScore(q.avgScore)}/{formatScore(q.maxPoints)} (jawaban non-objektif)
             </Text>
         )
     }
@@ -640,7 +641,7 @@ function QuestionRow({ q }: { q: QuestionAnalysisItem }) {
             </View>
             <Text style={styles.qType}>{typeLabel}</Text>
             <Text style={styles.qPts}>{q.maxPoints}</Text>
-            <Text style={styles.qRate}>{Math.round(q.correctRate)}%</Text>
+            <Text style={styles.qRate}>{formatScore(q.correctRate)}%</Text>
             <Text style={[styles.qCat, { color: band.color }]}>{band.label}</Text>
         </View>
     )
@@ -691,9 +692,9 @@ function RankingRow({ s, rank, kkm, showViolations }: {
             <Text style={styles.rNo}>{rank}</Text>
             <MixedText text={s.name} style={styles.rName} />
             <Text style={styles.rNis}>{s.nis || '—'}</Text>
-            <Text style={styles.rScore}>{s.score}/{s.maxScore}</Text>
+            <Text style={styles.rScore}>{formatScore(s.score)}/{formatScore(s.maxScore)}</Text>
             <Text style={[styles.rPct, { color: passed ? C.green : C.red }]}>
-                {Math.round(s.percentage)}
+                {formatScore(s.percentage)}
             </Text>
             <Text style={styles.rDur}>{fmtDuration(s.duration)}</Text>
             {showViolations && (
@@ -774,7 +775,7 @@ function FailingPage({ failing, meta, kkm }: {
                     {failing.map((s, i) => (
                         <MixedText
                             key={`m-${s.nis}-${i}`}
-                            text={`${i > 0 ? ', ' : ''}${s.name} (${Math.round(s.percentage)})`}
+                            text={`${i > 0 ? ', ' : ''}${s.name} (${formatScore(s.percentage)})`}
                             style={{ fontSize: 9, color: C.ink }}
                         />
                     ))}

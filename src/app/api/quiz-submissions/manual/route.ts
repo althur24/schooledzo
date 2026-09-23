@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { logGradeChange } from '@/lib/gradeHistory'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { parseScoreInput, formatScore } from '@/lib/formatScore'
 
 // POST input nilai manual untuk kuis OFFLINE (dilaksanakan di luar LMS).
 // Sengaja terpisah dari POST /api/quiz-submissions (hot path ujian online:
@@ -23,9 +24,10 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
         }
 
-        const numScore = parseInt(score)
-        if (isNaN(numScore) || numScore < 0 || numScore > 100) {
-            return NextResponse.json({ error: 'Nilai harus antara 0 dan 100' }, { status: 400 })
+        // Desimal sah (87.5) — parseScoreInput menerima titik/koma, round 2
+        const numScore = parseScoreInput(score)
+        if (numScore === null || numScore < 0 || numScore > 100) {
+            return NextResponse.json({ error: 'Nilai harus angka antara 0 dan 100' }, { status: 400 })
         }
 
         // Verifikasi kuis + kepemilikan guru
@@ -122,7 +124,7 @@ export async function POST(request: NextRequest) {
                     user_id: student.user_id,
                     type: 'NILAI_KELUAR',
                     title: `Nilai Keluar: ${quiz.title}`,
-                    message: `${subjectName} — Nilai: ${numScore}/100`,
+                    message: `${subjectName} — Nilai: ${formatScore(numScore)}/100`,
                     link: '/dashboard/siswa/nilai'
                 })
             }

@@ -5,6 +5,7 @@ import { resolveKkm } from '@/lib/resolveKkm'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { mergeRemedialScores } from '@/lib/remedialScore'
+import { round2 } from '@/lib/formatScore'
 
 // batchedIn per 100 id (batas URL) + fetchAllRows per chunk: satu chunk 100 id
 // bisa mengandung >1000 baris yang otherwise terpotong diam-diam.
@@ -326,7 +327,8 @@ export async function GET(request: NextRequest) {
                 const subj = ta ? unwrap(ta.subject) : null
                 if (subj && subjectScores[subj.id]) {
                     const final = mergeRemedialScores(scores)
-                    if (final !== null) subjectScores[subj.id].kuis_scores.push(Math.round(final))
+                    // round-2: nilai desimal (87.5) utuh dari sumber — jangan dibulatkan
+                    if (final !== null) subjectScores[subj.id].kuis_scores.push(round2(final))
                 }
             })
 
@@ -356,7 +358,7 @@ export async function GET(request: NextRequest) {
                 const subj = ta ? unwrap(ta.subject) : null
                 if (subj && subjectScores[subj.id]) {
                     const final = mergeRemedialScores(scores)
-                    if (final !== null) subjectScores[subj.id].ulangan_scores.push(Math.round(final))
+                    if (final !== null) subjectScores[subj.id].ulangan_scores.push(round2(final))
                 }
             })
 
@@ -382,7 +384,7 @@ export async function GET(request: NextRequest) {
             officialGroups.forEach(({ scores, oe }) => {
                 const final = mergeRemedialScores(scores)
                 if (final === null) return
-                const score = Math.round(final)
+                const score = round2(final)
                 if (subjectScores[oe.subject_id]) {
                     if (oe.exam_type === 'UTS') {
                         subjectScores[oe.subject_id].uts_scores.push(score)

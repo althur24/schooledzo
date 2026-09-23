@@ -8,6 +8,7 @@ import { useSchoolLabels } from '@/contexts/LabelsContext'
 import dynamic from 'next/dynamic'
 import SmartText from '@/components/SmartText'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
+import { round2, formatScore } from '@/lib/formatScore'
 // Dynamic imports for heavy components
 const PreviewModal = dynamic(() => import('@/components/PreviewModal'), { ssr: false })
 const RapihAIModal = dynamic(() => import('@/components/RapihAIModal'), { ssr: false })
@@ -22,6 +23,7 @@ import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import TagInput from '@/components/TagInput'
 import BankQuestionPicker from '@/components/BankQuestionPicker'
+import BalancePointsControl from '@/components/BalancePointsControl'
 import InlineQuestionTags from '@/components/InlineQuestionTags'
 import { detectTextDirection } from '@/lib/textDirection'
 import { PageHeader, Button, Modal, EmptyState, Toast, type ToastType } from '@/components/ui'
@@ -45,6 +47,8 @@ interface QuizQuestion {
     admin_review?: any
     content_format?: 'html' | 'plain'
     tags?: string[] | null
+    /** Mode penilaian Ganda Kompleks (hanya relevan untuk MULTIPLE_ANSWER) */
+    gk_grading_mode?: 'PROPORTIONAL' | 'ALL_OR_NOTHING' | null
 }
 
 interface Quiz {
@@ -151,7 +155,8 @@ function EditQuizPageInner() {
         order_index: 0,
         teacher_hots_claim: false,
         text_direction: 'ltr',
-        tags: []
+        tags: [],
+        gk_grading_mode: 'PROPORTIONAL'
     })
 
     // Tag suggestions dari bank soal guru (untuk autocomplete input tag)
@@ -173,8 +178,10 @@ function EditQuizPageInner() {
     }])
 
     // Calculate total points
-    const totalPoints = questions.reduce((sum, q) => sum + (q.points || 0), 0)
-    const getDefaultPoints = () => Math.floor(100 / (questions.length + 1))
+    // Round 2 desimal — poin soal kini bisa desimal (hasil "Seimbangkan" 100/30 = 3.33)
+    const totalPoints = Math.round(questions.reduce((sum, q) => sum + (q.points || 0), 0) * 100) / 100
+    // Default poin soal baru: round-2 (3 soal → 25, bukan floor 33+33+33=99)
+    const getDefaultPoints = () => round2(100 / (questions.length + 1))
 
 
 
@@ -535,7 +542,8 @@ function EditQuizPageInner() {
                         passage_audio_url: passageAudioUrl || null,
                         teacher_hots_claim: q.teacher_hots_claim || false,
                         text_direction: q.text_direction || 'ltr',
-                        content_format: 'html'
+                        content_format: 'html',
+                        gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined
                     }))
                 const res = await fetch(`/api/quizzes/${quizId}/questions`, {
                     method: 'POST',
@@ -608,7 +616,8 @@ function EditQuizPageInner() {
                     order_index: 0,
                     teacher_hots_claim: false,
                     text_direction: 'ltr',
-                    tags: []
+                    tags: [],
+                    gk_grading_mode: 'PROPORTIONAL'
                 })
                 setMode('list')
             }
@@ -625,6 +634,30 @@ function EditQuizPageInner() {
         if (!confirm('Hapus soal ini?')) return
         await fetch(`/api/quizzes/${quizId}/questions?question_id=${questionId}`, { method: 'DELETE' })
         fetchQuiz()
+    }
+
+    // "Seimbangkan": bagi rata total poin ke seluruh soal (largest-remainder,
+    // 2 desimal — 100/3 soal → 33.33 + 33.33 + 33.34). PUT per soal lalu refetch.
+    const [balancing, setBalancing] = useState(false)
+    const handleBalancePoints = async (pointsPerQuestion: number[]) => {
+        setBalancing(true)
+        try {
+            await Promise.all(questions.map((q, i) =>
+                q.id
+                    ? fetch(`/api/quizzes/${quizId}/questions`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ question_id: q.id, points: pointsPerQuestion[i] })
+                    })
+                    : Promise.resolve()
+            ))
+            await fetchQuiz()
+            showToast('Poin soal diseimbangkan', 'success')
+        } catch (e) {
+            showToast('Gagal menyeimbangkan poin — coba lagi')
+        } finally {
+            setBalancing(false)
+        }
     }
 
     const handleSaveEdit = async () => {
@@ -648,7 +681,8 @@ function EditQuizPageInner() {
                     content_format: 'html',
                     passage_text: editForm.passage_text || null,
                     passage_audio_url: (editForm as any).passage_audio_url || null,
-                    tags: editForm.tags || []
+                    tags: editForm.tags || [],
+                    gk_grading_mode: editForm.question_type === 'MULTIPLE_ANSWER' ? (editForm.gk_grading_mode ?? 'PROPORTIONAL') : undefined
                 })
             })
             setEditingQuestionId(null)
@@ -702,6 +736,8 @@ function EditQuizPageInner() {
                     passage_audio_url: q.passage_audio_url || null,
                     teacher_hots_claim: q.teacher_hots_claim || false,
                     tags: q.tags || null,
+                    // Mode penilaian GK ikut dari bank soal (default PROPORTIONAL)
+                    gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined,
                     // Inherit approved status from bank soal (skip re-review)
                     bank_status: q.status
                 }))
@@ -734,7 +770,8 @@ function EditQuizPageInner() {
                 order_index: questions.length + idx,
                 passage_text: q.passage_text || null,
                 teacher_hots_claim: q.teacher_hots_claim || false,
-                tags: q.tags || null
+                tags: q.tags || null,
+                gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined
             }))
 
             const res = await fetch(`/api/quizzes/${quizId}/questions`, {
@@ -1109,9 +1146,16 @@ function EditQuizPageInner() {
                             </Button>
                         )}
                         <div className="flex items-center gap-4">
+                            <BalancePointsControl
+                                count={questions.length}
+                                disabled={!!quiz?.is_active || !!quiz?.pending_publish}
+                                disabledReason={quiz?.is_active ? 'Soal terkunci saat aktif — tarik ke draft dulu' : 'Tarik ke draft untuk mengubah soal'}
+                                applying={balancing}
+                                onApply={handleBalancePoints}
+                            />
                             <div className="text-right">
                                 <p className={`text-2xl font-bold ${totalPoints > 100 ? 'text-red-400' : totalPoints === 100 ? 'text-green-400' : 'text-amber-400'}`}>
-                                    {totalPoints}
+                                    {formatScore(totalPoints)}
                                 </p>
                                 <p className="text-xs text-text-secondary dark:text-zinc-400">Total Poin</p>
                             </div>
@@ -1191,48 +1235,24 @@ function EditQuizPageInner() {
             )}
 
             {/* Points Warning — hanya saat draft: poin soal terkunci saat kuis
-                aktif (integritas penilaian) dan saat menunggu review */}
+                aktif (integritas penilaian) dan saat menunggu review.
+                Tombol "Seimbangkan" versi integer lama DIHAPUS — header sudah
+                punya BalancePointsControl (largest-remainder 2 desimal, total
+                PERSIS 100; versi lama Math.floor bisa menghasilkan 99). */}
             {totalPoints !== 100 && questions.length > 0 && !quiz?.is_active && !quiz?.pending_publish && (
                 <div className={`px-4 py-3 rounded-xl flex items-center justify-between ${totalPoints > 100 ? 'bg-red-500/20 border border-red-500/30' : 'bg-amber-500/20 border border-amber-500/30'}`}>
                     <div className="flex items-center gap-2">
                         <span>{totalPoints > 100 ? <Danger set="bold" primaryColor="currentColor" size={20} /> : <InfoCircle set="bold" primaryColor="currentColor" size={20} />}</span>
                         <span className={totalPoints > 100 ? 'text-red-400' : 'text-amber-400'}>
                             {totalPoints > 100
-                                ? `Total poin melebihi 100 (${totalPoints}). Kurangi poin beberapa soal.`
-                                : `Total poin: ${totalPoints}/100. Disarankan total = 100.`
+                                ? `Total poin melebihi 100 (${formatScore(totalPoints)}). Kurangi poin beberapa soal.`
+                                : `Total poin: ${formatScore(totalPoints)}/100. Disarankan total = 100.`
                             }
                         </span>
                     </div>
-                    <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={async () => {
-                            const pointPerQuestion = Math.floor(100 / questions.length)
-                            const remainder = 100 - (pointPerQuestion * questions.length)
-                            const balanced = questions.map((q, idx) => ({
-                                ...q,
-                                points: pointPerQuestion + (idx < remainder ? 1 : 0)
-                            }))
-                            // Simpan semua ke server dulu; UI hanya diubah bila semua
-                            // berhasil (dahulu fire-and-forget — UI bisa menampilkan
-                            // poin "seimbang" palsu padahal server gagal).
-                            const results = await Promise.all(balanced.filter(q => q.id).map(q =>
-                                fetch(`/api/quizzes/${quizId}/questions`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ question_id: q.id, points: q.points })
-                                })
-                            ))
-                            if (results.every(r => r.ok)) {
-                                setQuestions(balanced)
-                            } else {
-                                setAlertInfo({ type: 'error', title: 'Gagal', message: 'Sebagian poin gagal disimpan. Coba lagi.' })
-                                fetchQuiz()
-                            }
-                        }}
-                    >
-                        Seimbangkan Poin
-                    </Button>
+                    <span className="text-xs text-text-secondary">
+                        Gunakan <strong>Seimbangkan</strong> di header (total poin → dibagi rata otomatis)
+                    </span>
                 </div>
             )}
 
@@ -1596,7 +1616,8 @@ function EditQuizPageInner() {
                                                 type="number"
                                                 value={q.points}
                                                 onChange={(e) => {
-                                                    const newPoints = parseInt(e.target.value) || 1
+                                                    // Poin desimal sah (mis. 3.33 per soal hasil "Seimbangkan")
+                                                    const newPoints = Math.round((parseFloat(e.target.value) || 0) * 100) / 100
                                                     const updated = questions.map((question, i) =>
                                                         i === idx ? { ...question, points: newPoints } : question
                                                     )
@@ -1612,8 +1633,8 @@ function EditQuizPageInner() {
                                                     }
                                                 }}
                                                 className="w-14 px-2 py-1 bg-secondary/5 border border-secondary/30 rounded text-text-main dark:text-white text-center text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                                                min={1}
-                                                max={100}
+                                                min={0.01}
+                                                step={0.01}
                                                 disabled={quiz?.is_active}
                                             />
                                             <span className="text-xs text-text-secondary dark:text-zinc-500">poin</span>
@@ -1839,6 +1860,8 @@ function EditQuizPageInner() {
                                         correctAnswer={editForm.correct_answer}
                                         onChange={(opts, correct) => setEditForm({ ...editForm, options: opts, correct_answer: correct })}
                                         textDirection={editForm.text_direction}
+                                        gkGradingMode={editForm.gk_grading_mode ?? 'PROPORTIONAL'}
+                                        onGkGradingModeChange={(mode) => setEditForm({ ...editForm, gk_grading_mode: mode })}
                                     />
 
                             <div className="flex items-center gap-4">
@@ -1856,12 +1879,13 @@ function EditQuizPageInner() {
                                 </div>
                                 <div className="flex-1">
                                     <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Poin Soal</label>
-                                    <input 
-                                        type="number" 
+                                    <input
+                                        type="number"
                                         className="w-full px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                                         value={editForm.points}
-                                        onChange={e => setEditForm({ ...editForm, points: Number(e.target.value) || 1 })}
-                                        min={1}
+                                        onChange={e => setEditForm({ ...editForm, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 })}
+                                        min={0.01}
+                                        step={0.01}
                                     />
                                 </div>
                             </div>
@@ -2112,6 +2136,12 @@ function EditQuizPageInner() {
                                                             setPassageQuestions(updated)
                                                         }}
                                                         textDirection={pq.text_direction || 'ltr'}
+                                                        gkGradingMode={pq.gk_grading_mode ?? 'PROPORTIONAL'}
+                                                        onGkGradingModeChange={(mode) => {
+                                                            const updated = [...passageQuestions]
+                                                            updated[pqIdx] = { ...updated[pqIdx], gk_grading_mode: mode }
+                                                            setPassageQuestions(updated)
+                                                        }}
                                                     />
                                                 </div>
 
@@ -2183,6 +2213,8 @@ function EditQuizPageInner() {
                                     correctAnswer={manualForm.correct_answer}
                                     onChange={(newOptions, newCorrectAnswer) => setManualForm({ ...manualForm, options: newOptions, correct_answer: newCorrectAnswer })}
                                     textDirection={manualForm.text_direction || 'ltr'}
+                                    gkGradingMode={manualForm.gk_grading_mode ?? 'PROPORTIONAL'}
+                                    onGkGradingModeChange={(mode) => setManualForm({ ...manualForm, gk_grading_mode: mode })}
                                 />
                                 </div>
 
@@ -2205,9 +2237,10 @@ function EditQuizPageInner() {
                                         <input
                                             type="number"
                                             value={manualForm.points}
-                                            onChange={(e) => setManualForm({ ...manualForm, points: parseInt(e.target.value) || 10 })}
+                                            onChange={(e) => setManualForm({ ...manualForm, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 })}
                                             className="w-full px-3 py-2 bg-secondary/5 border border-secondary/30 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                            min={1}
+                                            min={0.01}
+                                            step={0.01}
                                         />
                                     </div>
                                 </div>

@@ -4,6 +4,7 @@ import { useEffect, useState, use } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Printer, ArrowLeft, GraduationCap, School, MapPin, Calendar, User, FileText } from 'lucide-react'
 import { Button } from '@/components/ui'
+import { round2, formatScore } from '@/lib/formatScore'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 interface Student {
@@ -19,7 +20,7 @@ interface Grade {
     id: string
     subject_id: string
     subject: { name: string }
-    grade_type: 'TUGAS' | 'KUIS' | 'ULANGAN'
+    grade_type: 'TUGAS' | 'KUIS' | 'ULANGAN' | 'UTS' | 'UAS'
     score: number
 }
 
@@ -29,9 +30,13 @@ interface SubjectSummary {
     tugas_scores: number[]
     kuis_scores: number[]
     ulangan_scores: number[]
-    tugas_avg: number
-    kuis_avg: number
-    ulangan_avg: number
+    uts_scores: number[]
+    uas_scores: number[]
+    tugas_avg: number | null
+    kuis_avg: number | null
+    ulangan_avg: number | null
+    uts_avg: number | null
+    uas_avg: number | null
     final_score: number
     predicate: string
 }
@@ -91,9 +96,13 @@ export default function RaporPage({ params }: { params: Promise<{ id: string }> 
                     tugas_scores: [],
                     kuis_scores: [],
                     ulangan_scores: [],
-                    tugas_avg: 0,
-                    kuis_avg: 0,
-                    ulangan_avg: 0,
+                    uts_scores: [],
+                    uas_scores: [],
+                    tugas_avg: null,
+                    kuis_avg: null,
+                    ulangan_avg: null,
+                    uts_avg: null,
+                    uas_avg: null,
                     final_score: 0,
                     predicate: '-'
                 }
@@ -102,17 +111,44 @@ export default function RaporPage({ params }: { params: Promise<{ id: string }> 
             if (grade.grade_type === 'TUGAS') subjects[grade.subject_id].tugas_scores.push(grade.score)
             else if (grade.grade_type === 'KUIS') subjects[grade.subject_id].kuis_scores.push(grade.score)
             else if (grade.grade_type === 'ULANGAN') subjects[grade.subject_id].ulangan_scores.push(grade.score)
+            // UTS/UAS: sebelumnya DIBUANG diam-diam (tidak ada cabang) — nilai
+            // ujian resmi tidak pernah masuk "Nilai Akhir" rapor.
+            else if (grade.grade_type === 'UTS') subjects[grade.subject_id].uts_scores.push(grade.score)
+            else if (grade.grade_type === 'UAS') subjects[grade.subject_id].uas_scores.push(grade.score)
         })
 
         const summaryArray = Object.values(subjects).map(subj => {
-            const calcAvg = (scores: number[]) => scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0
+            // Avg per kategori: null bila kategori kosong (bukan 0 — 0 berbobot
+            // membuat mapel yang hanya punya ulangan anjlok ke predikat E)
+            const calcAvg = (scores: number[]): number | null => scores.length > 0
+                ? scores.reduce((a, b) => a + b, 0) / scores.length
+                : null
 
             subj.tugas_avg = calcAvg(subj.tugas_scores)
             subj.kuis_avg = calcAvg(subj.kuis_scores)
             subj.ulangan_avg = calcAvg(subj.ulangan_scores)
+            subj.uts_avg = calcAvg(subj.uts_scores)
+            subj.uas_avg = calcAvg(subj.uas_scores)
 
-            // Weight: 30% Tugas, 30% Kuis, 40% Ulangan
-            subj.final_score = (subj.tugas_avg * 0.3) + (subj.kuis_avg * 0.3) + (subj.ulangan_avg * 0.4)
+            // Bobot dasar: 30% Tugas, 30% Kuis, 40% Ulangan (UTS/UAS digabung
+            // ke kategori ujian sebagai ulangan berbobot). Kategori yang KOSONG
+            // dikecualikan dan bobotnya dinormalisasi ke kategori yang ada —
+            // mapel tanpa tugas tidak dihukum 30%×0.
+            const weights: Array<[number | null, number]> = [
+                [subj.tugas_avg, 0.3],
+                [subj.kuis_avg, 0.3],
+                [subj.ulangan_avg, 0.4],
+            ]
+            // Kategori UTS/UAS hanya berbobot bila ada nilainya (distribusi merata
+            // dari sisa bobot ulangan supaya total tetap masuk akal).
+            if (subj.uts_avg !== null) weights.push([subj.uts_avg, 0.4 / 3])
+            if (subj.uas_avg !== null) weights.push([subj.uas_avg, 0.4 / 3])
+
+            const present = weights.filter(([avg]) => avg !== null) as Array<[number, number]>
+            const totalWeight = present.reduce((sum, [, w]) => sum + w, 0)
+            subj.final_score = totalWeight > 0
+                ? round2(present.reduce((sum, [avg, w]) => sum + avg * w, 0) / totalWeight)
+                : 0
 
             // Predicate
             if (subj.final_score >= 90) subj.predicate = 'A'
@@ -160,8 +196,10 @@ export default function RaporPage({ params }: { params: Promise<{ id: string }> 
     }
 
     // Calculate Overall Details
+    // Round-2 + formatScore (koma id-ID) — GPA rapor dulu toFixed(1): "87.3"
+    // padahal 87.25, dan pakai titik desimal.
     const totalScore = summary.reduce((acc, curr) => acc + curr.final_score, 0)
-    const gpa = summary.length > 0 ? (totalScore / summary.length).toFixed(1) : "0.0"
+    const gpa = summary.length > 0 ? formatScore(round2(totalScore / summary.length)) : '-'
 
     return (
         <div className="min-h-screen bg-slate-100 dark:bg-slate-900 p-8 print:p-0 print:bg-white font-sans text-slate-900">
@@ -290,6 +328,8 @@ export default function RaporPage({ params }: { params: Promise<{ id: string }> 
                                     <th className="px-4 py-3 text-center w-24">{labels.tugas}</th>
                                     <th className="px-4 py-3 text-center w-24">{labels.kuis}</th>
                                     <th className="px-4 py-3 text-center w-24">{labels.ulangan}</th>
+                                    <th className="px-4 py-3 text-center w-24">{labels.uts}</th>
+                                    <th className="px-4 py-3 text-center w-24">{labels.uas}</th>
                                     <th className="px-4 py-3 text-center w-24 bg-emerald-50/50 print:bg-transparent font-bold text-emerald-800 print:text-black">Nilai Akhir</th>
                                     <th className="px-4 py-3 text-center w-20 font-bold">Predikat</th>
                                 </tr>
@@ -299,11 +339,13 @@ export default function RaporPage({ params }: { params: Promise<{ id: string }> 
                                     <tr key={subj.subject_id} className="hover:bg-slate-50/80 transition-colors print:hover:bg-transparent">
                                         <td className="px-4 py-3 text-center text-slate-500">{idx + 1}</td>
                                         <td className="px-4 py-3 font-medium text-slate-900">{subj.subject_name}</td>
-                                        <td className="px-4 py-3 text-center text-slate-600">{Math.round(subj.tugas_avg)}</td>
-                                        <td className="px-4 py-3 text-center text-slate-600">{Math.round(subj.kuis_avg)}</td>
-                                        <td className="px-4 py-3 text-center text-slate-600">{Math.round(subj.ulangan_avg)}</td>
+                                        <td className="px-4 py-3 text-center text-slate-600">{formatScore(subj.tugas_avg)}</td>
+                                        <td className="px-4 py-3 text-center text-slate-600">{formatScore(subj.kuis_avg)}</td>
+                                        <td className="px-4 py-3 text-center text-slate-600">{formatScore(subj.ulangan_avg)}</td>
+                                        <td className="px-4 py-3 text-center text-slate-600">{formatScore(subj.uts_avg)}</td>
+                                        <td className="px-4 py-3 text-center text-slate-600">{formatScore(subj.uas_avg)}</td>
                                         <td className="px-4 py-3 text-center font-bold text-emerald-700 bg-emerald-50/30 print:bg-transparent print:text-black">
-                                            {Math.round(subj.final_score)}
+                                            {formatScore(subj.final_score)}
                                         </td>
                                         <td className="px-4 py-3 text-center">
                                             <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold

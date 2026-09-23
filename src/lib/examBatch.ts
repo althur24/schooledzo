@@ -93,6 +93,7 @@ function questionFingerprint(q: any): string {
         q.passage_text ?? null,
         q.image_url ?? null,
         q.status ?? null,
+        q.gk_grading_mode ?? null,
     ])
 }
 
@@ -104,7 +105,7 @@ async function questionsSignature(
 ): Promise<{ count: number; fingerprint: string } | null> {
     const rows = await fetchAllRows(supabaseAdmin
         .from(questionsTable)
-        .select('order_index, question_text, question_type, options, correct_answer, points, difficulty, passage_text, image_url, status')
+        .select('order_index, question_text, question_type, options, correct_answer, points, difficulty, passage_text, image_url, status, gk_grading_mode')
         .eq(fkColumn, targetId)
         .order('id'))
     const fps = rows.map(questionFingerprint).sort()

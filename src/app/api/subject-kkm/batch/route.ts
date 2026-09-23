@@ -21,6 +21,13 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid payload' }, { status: 400 })
         }
 
+        // KKM = kontrak integer 0-100 (paritas PUT) — validasi seluruh batch
+        for (const item of kkm_data) {
+            if (typeof item?.kkm !== 'number' || !Number.isInteger(item.kkm) || item.kkm < 0 || item.kkm > 100) {
+                return NextResponse.json({ error: `KKM harus bilangan bulat 0-100 (diterima: ${item?.kkm})` }, { status: 400 })
+            }
+        }
+
         const upsertData = kkm_data.map((item: any) => ({
             subject_id,
             school_level: item.school_level,

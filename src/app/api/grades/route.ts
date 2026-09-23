@@ -5,6 +5,7 @@ import { tenantMismatch } from '@/lib/tenantGuard'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { logGradeChange } from '@/lib/gradeHistory'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { parseScoreInput, formatScore, round2 } from '@/lib/formatScore'
 import { mergeRemedialScores } from '@/lib/remedialScore'
 
 // Create admin client to bypass RLS
@@ -200,7 +201,7 @@ export async function GET(request: NextRequest) {
                         policy: quiz?.remedial_score_policy,
                         cap: quiz?.remedial_max_score,
                         grade_type: 'KUIS',
-                        score: Math.round(score * 10) / 10,
+                        score: round2(score),
                         subject: { name: subject?.name || '-' },
                         graded_at: qs.submitted_at
                     }
@@ -225,7 +226,7 @@ export async function GET(request: NextRequest) {
                 const { is_remedial: _ir, policy: _p, cap: _c, ...clean } = original
                 // graded_at = tanggal pengerjaan remedial bila ada (perilaku lama),
                 // selain itu tanggal ujian asli.
-                return { ...clean, score: final !== null ? Math.round(final * 10) / 10 : original.score, graded_at: (remedial ?? original).graded_at }
+                return { ...clean, score: final !== null ? round2(final) : original.score, graded_at: (remedial ?? original).graded_at }
             })
             allGrades.push(...mergedQuizzes)
 
@@ -244,7 +245,7 @@ export async function GET(request: NextRequest) {
                         policy: exam?.remedial_score_policy,
                         cap: exam?.remedial_max_score,
                         grade_type: 'ULANGAN',
-                        score: Math.round(score * 10) / 10,
+                        score: round2(score),
                         subject: { name: subject?.name || '-' },
                         graded_at: es.submitted_at
                     }
@@ -265,7 +266,7 @@ export async function GET(request: NextRequest) {
                 const remedial = group.find(m => m.is_remedial)
                 const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
                 const { is_remedial: _ir, policy: _p, cap: _c, ...clean } = original
-                return { ...clean, score: final !== null ? Math.round(final * 10) / 10 : original.score, graded_at: (remedial ?? original).graded_at }
+                return { ...clean, score: final !== null ? round2(final) : original.score, graded_at: (remedial ?? original).graded_at }
             })
             allGrades.push(...mergedExams)
 
@@ -303,6 +304,13 @@ export async function GET(request: NextRequest) {
             if (studentId) {
                 officialExamQuery = officialExamQuery.eq('student_id', studentId)
             }
+            // Filter tahun ajaran — PARITAS tugas/kuis/ulangan di atas. Tanpa ini
+            // UTS/UAS SEMUA tahun ikut ter-averaging ke rekap tahun terpilih
+            // (siswa ikut UTS tahun lama → nilai tahun ini terkontaminasi).
+            // all_years=true (admin lintas tahun) tetap tak difilter.
+            if (filterYearId) {
+                officialExamQuery = officialExamQuery.eq('exam.academic_year_id', filterYearId)
+            }
             // order('id') wajib sebelum fetchAllRows — paginasi range tanpa
             // order stabil bisa melewatkan/duplikasi baris diam-diam
             officialExamQuery = officialExamQuery.order('id')
@@ -324,7 +332,7 @@ export async function GET(request: NextRequest) {
                         policy: exam?.remedial_score_policy,
                         cap: exam?.remedial_max_score,
                         grade_type: exam?.exam_type || 'UTS', // 'UTS' or 'UAS'
-                        score: Math.round(score * 10) / 10,
+                        score: round2(score),
                         subject: { name: subject?.name || '-' },
                         graded_at: os.submitted_at
                     }
@@ -344,7 +352,7 @@ export async function GET(request: NextRequest) {
                 const remedial = group.find(m => m.is_remedial)
                 const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
                 const { is_remedial: _ir, policy: _p, cap: _c, ...clean } = original
-                return { ...clean, score: final !== null ? Math.round(final * 10) / 10 : original.score, graded_at: (remedial ?? original).graded_at }
+                return { ...clean, score: final !== null ? round2(final) : original.score, graded_at: (remedial ?? original).graded_at }
             })
             allGrades.push(...mergedOfficial)
 
@@ -381,9 +389,10 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
         }
 
-        const numScore = parseInt(score)
-        if (isNaN(numScore) || numScore < 0 || numScore > 100) {
-            return NextResponse.json({ error: 'Nilai harus antara 0 dan 100' }, { status: 400 })
+        // Desimal sah (87.5) — parseScoreInput menerima titik/koma, round 2
+        const numScore = parseScoreInput(score)
+        if (numScore === null || numScore < 0 || numScore > 100) {
+            return NextResponse.json({ error: 'Nilai harus angka antara 0 dan 100' }, { status: 400 })
         }
 
         // H2 Security Fix: Verify this teacher owns the teaching assignment
@@ -541,7 +550,7 @@ export async function POST(request: NextRequest) {
                     user_id: studentData.user_id,
                     type: 'NILAI_KELUAR',
                     title: `Nilai Keluar: ${assignmentTitle}`,
-                    message: `${subjectName} - Nilai: ${numScore}`,
+                    message: `${subjectName} - Nilai: ${formatScore(numScore)}`,
                     link: '/dashboard/siswa/nilai'
                 })
             }

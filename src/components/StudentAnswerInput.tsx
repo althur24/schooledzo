@@ -1,5 +1,6 @@
 import React from 'react'
 import SmartText from '@/components/SmartText'
+import { parseAnswerLetters } from '@/lib/questionTypeUtils'
 
 interface StudentAnswerInputProps {
     question: {
@@ -17,14 +18,12 @@ export default function StudentAnswerInput({ question, value, onChange, onChange
     const dir = question.text_direction || 'ltr'
     const isRtl = dir === 'rtl'
 
-    // Parse MULTIPLE_ANSWER value as JSON array
-    let selectedSet = new Set<string>()
-    if (question.question_type === 'MULTIPLE_ANSWER' && value) {
-        try {
-            const parsed = JSON.parse(value)
-            if (Array.isArray(parsed)) selectedSet = new Set(parsed)
-        } catch {}
-    }
+    // Parse MULTIPLE_ANSWER value via parseAnswerLetters (sumber yang sama dengan
+    // grading) — jawaban tersimpan selalu JSON array dari toggle, tapi data lama
+    // / hasil import bisa format lain; yang penting pilihan siswa ter-render benar.
+    const selectedSet = new Set<string>(
+        question.question_type === 'MULTIPLE_ANSWER' ? parseAnswerLetters(value) : []
+    )
 
     const toggleMultipleAnswer = (letter: string) => {
         const newSet = new Set(selectedSet)

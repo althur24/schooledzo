@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
+import { round2, parseScoreInput, formatScore } from '@/lib/formatScore'
 import { PageHeader, Card, Button, StatsCard, EmptyState, Modal } from '@/components/ui'
 import { Chart, User, TickSquare, TimeCircle, Activity, Search, ArrowRight, Document, Discovery, Download, Paper, Edit, Plus } from 'react-iconly'
 import { GraduationCap } from 'lucide-react'
@@ -343,21 +344,22 @@ export default function NilaiPage() {
 
         // Quiz grades
         quizSubmissions.filter(qs => qs.student_id === studentId && qs.is_graded).forEach(qs => {
-            grades.push(Math.round((qs.total_score / qs.max_score) * 100))
+            grades.push(round2((qs.total_score / qs.max_score) * 100))
         })
 
         // Exam grades
         examSubmissions.filter(es => es.student?.id === studentId).forEach(es => {
-            grades.push(Math.round((es.total_score / es.max_score) * 100))
+            grades.push(round2((es.total_score / es.max_score) * 100))
         })
 
         // Official exam (UTS/UAS) grades
         officialExamSubs.filter(os => os.student_id === studentId && os.is_graded && os.max_score > 0).forEach(os => {
-            grades.push(Math.round((os.total_score / os.max_score) * 100))
+            grades.push(round2((os.total_score / os.max_score) * 100))
         })
 
         if (grades.length === 0) return null
-        return Math.round(grades.reduce((sum, g) => sum + g, 0) / grades.length)
+        // Rata-rata round-2 — nilai desimal tidak dibulatkan ke integer
+        return round2(grades.reduce((sum, g) => sum + g, 0) / grades.length)
     }
 
     // Export to Excel (proper .xlsx)
@@ -391,11 +393,11 @@ export default function NilaiPage() {
             })
             const kuisGrades = quizzes.map(q => {
                 const qs = quizSubmissions.find(qs => qs.student_id === student.id && qs.quiz.id === q.id)
-                return qs?.is_graded ? Math.round((qs.total_score / qs.max_score) * 100) : ''
+                return qs?.is_graded ? round2((qs.total_score / qs.max_score) * 100) : ''
             })
             const ulanganGrades = exams.map(e => {
                 const es = examSubmissions.find(es => es.student?.id === student.id && es.exam.id === e.id)
-                return es ? Math.round((es.total_score / es.max_score) * 100) : ''
+                return es ? round2((es.total_score / es.max_score) * 100) : ''
             })
             const ulanganOfflineGrades = ulanganAssignments.map(a => {
                 const sub = allSubmissions.find(s => s.student?.id === student.id && s.assignment?.id === a.id)
@@ -403,11 +405,11 @@ export default function NilaiPage() {
             })
             const utsGrades = utsExams.map(oe => {
                 const os = officialExamSubs.find(s => s.student_id === student.id && s.exam_id === oe.id)
-                return os?.is_graded && os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : ''
+                return os?.is_graded && os.max_score > 0 ? round2((os.total_score / os.max_score) * 100) : ''
             })
             const uasGrades = uasExams.map(oe => {
                 const os = officialExamSubs.find(s => s.student_id === student.id && s.exam_id === oe.id)
-                return os?.is_graded && os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : ''
+                return os?.is_graded && os.max_score > 0 ? round2((os.total_score / os.max_score) * 100) : ''
             })
             const avg = calculateAverage(student.id)
 
@@ -532,7 +534,8 @@ export default function NilaiPage() {
         const drafts: Record<string, string> = {}
         students.forEach(student => {
             const qs = quizSubmissions.find(q => q.student_id === student.id && q.quiz.id === quizId)
-            drafts[student.id] = qs?.is_graded ? Math.round((qs.total_score / qs.max_score) * 100).toString() : ''
+            // Prefill round-2 (87.5 utuh, bukan Math.round → 88)
+            drafts[student.id] = qs?.is_graded ? String(round2((qs.total_score / qs.max_score) * 100)) : ''
         })
         setDraftScores(drafts)
         setEditingColumnId(null)
@@ -553,22 +556,22 @@ export default function NilaiPage() {
             // yang sama akan memicu notifikasi duplikat & menimpa graded_at.
             const entries = Object.entries(draftScores).filter(([studentId, v]) => {
                 if (v === '') return false
-                const num = parseInt(v)
-                if (isNaN(num)) return false
+                const num = parseScoreInput(v)
+                if (num === null) return false
                 const sub = allSubmissions.find(s => s.student?.id === studentId && s.assignment?.id === editingColumnId)
                 const current = sub?.grade?.[0]?.score
-                return current === undefined || current !== num
+                return current === undefined || round2(current) !== num
             })
             const invalid = entries.filter(([, v]) => {
-                const num = parseInt(v)
-                return num < 0 || num > 100
+                const num = parseScoreInput(v)
+                return num === null || num < 0 || num > 100
             })
             if (invalid.length > 0) {
                 alert(`${invalid.length} nilai di luar rentang 0-100 dilewati.`)
             }
             const valid = entries.filter(([, v]) => {
-                const num = parseInt(v)
-                return num >= 0 && num <= 100
+                const num = parseScoreInput(v)
+                return num !== null && num >= 0 && num <= 100
             })
             if (valid.length === 0) {
                 setEditingColumnId(null)
@@ -582,7 +585,7 @@ export default function NilaiPage() {
                     body: JSON.stringify({
                         assignment_id: editingColumnId,
                         student_id: studentId,
-                        score: parseInt(v)
+                        score: parseScoreInput(v)
                     })
                 }).then(res => {
                     if (!res.ok) throw new Error('Gagal menyimpan nilai')
@@ -607,10 +610,10 @@ export default function NilaiPage() {
             // Hanya kirim nilai yang BERUBAH atau BARU (pola sama seperti kolom tugas)
             const entries = Object.entries(draftScores).filter(([studentId, v]) => {
                 if (v === '') return false
-                const num = parseInt(v)
-                if (isNaN(num) || num < 0 || num > 100) return false
+                const num = parseScoreInput(v)
+                if (num === null || num < 0 || num > 100) return false
                 const qs = quizSubmissions.find(q => q.student_id === studentId && q.quiz.id === editingQuizId)
-                const current = qs?.is_graded ? Math.round((qs.total_score / qs.max_score) * 100) : undefined
+                const current = qs?.is_graded ? round2((qs.total_score / qs.max_score) * 100) : undefined
                 return current === undefined || current !== num
             })
             if (entries.length === 0) {
@@ -624,7 +627,7 @@ export default function NilaiPage() {
                     body: JSON.stringify({
                         quiz_id: editingQuizId,
                         student_id: studentId,
-                        score: parseInt(v)
+                        score: parseScoreInput(v)
                     })
                 }).then(res => {
                     if (!res.ok) throw new Error('Gagal menyimpan nilai')
@@ -647,7 +650,7 @@ export default function NilaiPage() {
     // Perbaikan: Hindari pembagian dengan 0 yang menghasilkan NaN
     const studentsWithGradesCount = students.filter(s => calculateAverage(s.id) !== null).length;
     const classAverage = studentsWithGradesCount > 0
-        ? Math.round(students.map(s => calculateAverage(s.id)).filter(a => a !== null).reduce((sum, a) => sum + (a as number), 0) / studentsWithGradesCount)
+        ? round2(students.map(s => calculateAverage(s.id)).filter(a => a !== null).reduce((sum, a) => sum + (a as number), 0) / studentsWithGradesCount)
         : 0
 
     // Filter teaching assignments by search query
@@ -936,6 +939,7 @@ export default function NilaiPage() {
                                                                                 type="number"
                                                                                 min={0}
                                                                                 max={100}
+                                                                                step={0.01}
                                                                                 value={draftScores[student.id] ?? ''}
                                                                                 onChange={(e) => setDraftScores({ ...draftScores, [student.id]: e.target.value })}
                                                                                 className="w-16 px-2 py-1.5 text-center border border-primary/40 rounded-lg bg-white dark:bg-surface-dark text-text-main dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-primary"
@@ -946,7 +950,7 @@ export default function NilaiPage() {
                                                                                 className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
                                                                                 title="Klik untuk detail"
                                                                             >
-                                                                                {score}
+                                                                                {formatScore(score)}
                                                                             </button>
                                                                         ) : sub ? (
                                                                             <span className="text-amber-500 flex justify-center"><TimeCircle set="bold" primaryColor="currentColor" size={16} /></span>
@@ -965,17 +969,18 @@ export default function NilaiPage() {
                                                                                 type="number"
                                                                                 min={0}
                                                                                 max={100}
+                                                                                step={0.01}
                                                                                 value={draftScores[student.id] ?? ''}
                                                                                 onChange={(e) => setDraftScores({ ...draftScores, [student.id]: e.target.value })}
                                                                                 className="w-16 px-2 py-1.5 text-center border border-primary/40 rounded-lg bg-white dark:bg-surface-dark text-text-main dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-primary"
                                                                             />
                                                                         ) : qs?.is_graded ? (
                                                                             <button
-                                                                                onClick={() => setCellDetail({ title: q.title, category: labels.kuis, studentName: student.user.full_name, nis: student.nis, score: Math.round((qs.total_score / qs.max_score) * 100), date: qs.submitted_at || null, source: 'QUIZ', refId: q.id, studentId: student.id })}
+                                                                                onClick={() => setCellDetail({ title: q.title, category: labels.kuis, studentName: student.user.full_name, nis: student.nis, score: round2((qs.total_score / qs.max_score) * 100), date: qs.submitted_at || null, source: 'QUIZ', refId: q.id, studentId: student.id })}
                                                                                 className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
                                                                                 title="Klik untuk detail"
                                                                             >
-                                                                                {Math.round((qs.total_score / qs.max_score) * 100)}
+                                                                                {formatScore(round2((qs.total_score / qs.max_score) * 100))}
                                                                             </button>
                                                                         ) : qs ? (
                                                                             <span className="text-amber-500 flex justify-center"><TimeCircle set="bold" primaryColor="currentColor" size={16} /></span>
@@ -991,11 +996,11 @@ export default function NilaiPage() {
                                                                     <td key={e.id} className="px-4 py-4 text-center">
                                                                         {es ? (
                                                                             <button
-                                                                                onClick={() => setCellDetail({ title: e.title, category: labels.ulangan, studentName: student.user.full_name, nis: student.nis, score: Math.round((es.total_score / es.max_score) * 100), date: es.submitted_at || null })}
+                                                                                onClick={() => setCellDetail({ title: e.title, category: labels.ulangan, studentName: student.user.full_name, nis: student.nis, score: round2((es.total_score / es.max_score) * 100), date: es.submitted_at || null })}
                                                                                 className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
                                                                                 title="Klik untuk detail"
                                                                             >
-                                                                                {Math.round((es.total_score / es.max_score) * 100)}
+                                                                                {formatScore(round2((es.total_score / es.max_score) * 100))}
                                                                             </button>
                                                                         ) : (
                                                                             <span className="text-text-secondary/30">-</span>
@@ -1013,6 +1018,7 @@ export default function NilaiPage() {
                                                                                 type="number"
                                                                                 min={0}
                                                                                 max={100}
+                                                                                step={0.01}
                                                                                 value={draftScores[student.id] ?? ''}
                                                                                 onChange={(e) => setDraftScores({ ...draftScores, [student.id]: e.target.value })}
                                                                                 className="w-16 px-2 py-1.5 text-center border border-primary/40 rounded-lg bg-white dark:bg-surface-dark text-text-main dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-primary"
@@ -1023,7 +1029,7 @@ export default function NilaiPage() {
                                                                                 className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
                                                                                 title="Klik untuk detail"
                                                                             >
-                                                                                {score}
+                                                                                {formatScore(score)}
                                                                             </button>
                                                                         ) : (
                                                                             <span className="text-text-secondary/30">-</span>
@@ -1037,11 +1043,11 @@ export default function NilaiPage() {
                                                                     <td key={oe.id} className="px-4 py-4 text-center">
                                                                         {os?.is_graded ? (
                                                                             <button
-                                                                                onClick={() => setCellDetail({ title: oe.title, category: labels.uts, studentName: student.user.full_name, nis: student.nis, score: os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0, date: os.submitted_at || null })}
+                                                                                onClick={() => setCellDetail({ title: oe.title, category: labels.uts, studentName: student.user.full_name, nis: student.nis, score: os.max_score > 0 ? round2((os.total_score / os.max_score) * 100) : 0, date: os.submitted_at || null })}
                                                                                 className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
                                                                                 title="Klik untuk detail"
                                                                             >
-                                                                                {os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0}
+                                                                                {os.max_score > 0 ? formatScore(round2((os.total_score / os.max_score) * 100)) : 0}
                                                                             </button>
                                                                         ) : os ? (
                                                                             <span className="text-amber-500 flex justify-center"><TimeCircle set="bold" primaryColor="currentColor" size={16} /></span>
@@ -1057,11 +1063,11 @@ export default function NilaiPage() {
                                                                     <td key={oe.id} className="px-4 py-4 text-center">
                                                                         {os?.is_graded ? (
                                                                             <button
-                                                                                onClick={() => setCellDetail({ title: oe.title, category: labels.uas, studentName: student.user.full_name, nis: student.nis, score: os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0, date: os.submitted_at || null })}
+                                                                                onClick={() => setCellDetail({ title: oe.title, category: labels.uas, studentName: student.user.full_name, nis: student.nis, score: os.max_score > 0 ? round2((os.total_score / os.max_score) * 100) : 0, date: os.submitted_at || null })}
                                                                                 className="text-text-main dark:text-white font-bold hover:text-primary hover:underline transition-colors cursor-pointer"
                                                                                 title="Klik untuk detail"
                                                                             >
-                                                                                {os.max_score > 0 ? Math.round((os.total_score / os.max_score) * 100) : 0}
+                                                                                {os.max_score > 0 ? formatScore(round2((os.total_score / os.max_score) * 100)) : 0}
                                                                             </button>
                                                                         ) : os ? (
                                                                             <span className="text-amber-500 flex justify-center"><TimeCircle set="bold" primaryColor="currentColor" size={16} /></span>
@@ -1381,7 +1387,7 @@ export default function NilaiPage() {
                             </div>
                             <div>
                                 <p className="text-xs text-text-secondary uppercase tracking-wider font-bold mb-1">Nilai</p>
-                                <p className="text-2xl font-black text-primary">{cellDetail.score ?? '-'}</p>
+                                <p className="text-2xl font-black text-primary">{cellDetail.score != null ? formatScore(cellDetail.score) : '-'}</p>
                             </div>
                         </div>
                         {cellDetail.date && (

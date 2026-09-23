@@ -10,6 +10,7 @@ import {
     RotateCcw, ChevronDown as ChevronDownIcon
 } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { round2, formatScore } from '@/lib/formatScore'
 
 interface StudentProgress {
     student_id: string
@@ -476,7 +477,8 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
 
                                         <td className="p-4 text-center">
                                             {student.status === 'submitted' && student.total_score !== null && student.max_score ? (() => {
-                                                const pctGrade = Math.round((student.total_score / student.max_score) * 100)
+                                                // pct MENTAH (round-2) — banding KKM dari nilai asli
+                                                const pctGrade = round2((student.total_score / student.max_score) * 100)
                                                 const kkm = getKkm(student.class_name)
                                                 return (
                                                     <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${
@@ -484,7 +486,7 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
                                                         : pctGrade >= kkm - 15 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'
                                                         : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'
                                                     }`}>
-                                                        {pctGrade}
+                                                        {formatScore(pctGrade)}
                                                         {!student.is_graded && <span className="ml-1 text-[10px] opacity-60">*</span>}
                                                     </span>
                                                 )

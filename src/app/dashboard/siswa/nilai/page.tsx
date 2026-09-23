@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
+import { formatScore } from '@/lib/formatScore'
 import { Chart, Game, Edit, TimeCircle, ArrowLeft, Document } from 'react-iconly'
 
 // Interfaces
@@ -294,7 +295,7 @@ export default function SiswaNilaiPage() {
                         </div>
                         {qs.is_graded ? (
                             <span className={`px-3 py-1 rounded-full font-bold text-sm ${getScoreColor(qs.total_score, qs.max_score)}`}>
-                                {qs.total_score ?? 0}/{qs.max_score ?? 0}
+                                {formatScore(qs.total_score ?? 0)}/{formatScore(qs.max_score ?? 0)}
                             </span>
                         ) : (
                             <span className="px-3 py-1 bg-secondary/10 text-text-secondary rounded-full text-sm font-medium flex items-center gap-1">
@@ -326,7 +327,7 @@ export default function SiswaNilaiPage() {
                         </div>
                         {sub.grade && sub.grade.length > 0 ? (
                             <span className={`px-3 py-1 rounded-full font-bold text-sm ml-4 ${getScoreColor(sub.grade[0].score)}`}>
-                                {sub.grade[0].score ?? 0}
+                                {formatScore(sub.grade[0].score ?? 0)}
                             </span>
                         ) : (
                             <span className="px-3 py-1 bg-secondary/10 text-text-secondary rounded-full text-sm font-medium ml-4 flex items-center gap-1">
@@ -368,7 +369,7 @@ export default function SiswaNilaiPage() {
                                     )}
                                 </div>
                                 <span className={`px-3 py-1 rounded-full font-bold text-sm ${getScoreColor(item.total_score, item.max_score)}`}>
-                                    {item.total_score ?? 0}/{item.max_score ?? 0}
+                                    {formatScore(item.total_score ?? 0)}/{formatScore(item.max_score ?? 0)}
                                 </span>
                             </div>
                         )
@@ -385,7 +386,7 @@ export default function SiswaNilaiPage() {
                                 </div>
                                 {item.grade && item.grade.length > 0 ? (
                                     <span className={`px-3 py-1 rounded-full font-bold text-sm ml-4 ${getScoreColor(item.grade[0].score)}`}>
-                                        {item.grade[0].score}
+                                        {formatScore(item.grade[0].score)}
                                     </span>
                                 ) : (
                                     <span className="px-3 py-1 bg-secondary/10 text-text-secondary rounded-full text-sm font-medium ml-4 flex items-center gap-1">
@@ -420,7 +421,7 @@ export default function SiswaNilaiPage() {
                             <p className="text-xs text-text-secondary dark:text-zinc-400">{new Date(item.submitted_at).toLocaleDateString('id-ID')}</p>
                         </div>
                         <span className={`px-3 py-1 rounded-full font-bold text-sm ${getScoreColor(item.total_score, item.max_score)}`}>
-                            {item.total_score ?? 0}/{item.max_score ?? 0}
+                            {formatScore(item.total_score ?? 0)}/{formatScore(item.max_score ?? 0)}
                         </span>
                     </div>
                 ))}

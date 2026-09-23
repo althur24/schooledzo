@@ -239,6 +239,11 @@ export async function POST(
             for (const q of body) {
                 const v = validateCorrectAnswer(q.question_type || 'MULTIPLE_CHOICE', q.correct_answer, q.options)
                 if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
+                // M7 (paritas exams): poin finite >= 0.01 — desimal sah
+                const pts = q.points ?? 10
+                if (typeof pts !== 'number' || !Number.isFinite(pts) || pts < 0.01 || pts > 10000) {
+                    return NextResponse.json({ error: `Poin soal harus angka >= 0.01 (diterima: ${pts})` }, { status: 400 })
+                }
             }
         }
 
@@ -260,6 +265,8 @@ export async function POST(
                 text_direction: q.text_direction || 'ltr',
                 content_format: q.content_format || 'plain',
                 tags: Array.isArray(q.tags) && q.tags.length > 0 ? q.tags : null,
+                // Mode penilaian GK — hanya relevan untuk MULTIPLE_ANSWER, sisanya pakai default
+                ...(q.question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: q.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL' } : {}),
                 // Set initial status: approved from bank, 'draft' for AI review, 'approved' if AI off
                 status: q.bank_status === 'approved' ? 'approved' : (aiEnabled ? 'draft' : 'approved')
             }))
@@ -347,6 +354,13 @@ export async function POST(
         const v = validateCorrectAnswer(question_type || 'MULTIPLE_CHOICE', correct_answer, options)
         if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
 
+        // M7 (paritas exams): poin finite >= 0.01 — desimal sah (3.33), nilai
+        // absurd (0/negatif/raksasa) merusak max_score & penilaian downstream.
+        const ptsSingle = points ?? 10
+        if (typeof ptsSingle !== 'number' || !Number.isFinite(ptsSingle) || ptsSingle < 0.01 || ptsSingle > 10000) {
+            return NextResponse.json({ error: `Poin soal harus angka >= 0.01 (diterima: ${ptsSingle})` }, { status: 400 })
+        }
+
         const { data, error } = await supabase
             .from('quiz_questions')
             .insert({
@@ -356,7 +370,7 @@ export async function POST(
                 options: options || null,
                 correct_answer: correct_answer || null,
                 difficulty: difficulty || 'MEDIUM',
-                points: points || 10,
+                points: ptsSingle,
                 order_index: order_index || 0,
                 image_url: image_url || null,
                 passage_text: passage_text || null,
@@ -365,6 +379,7 @@ export async function POST(
                 text_direction: body.text_direction || 'ltr',
                 content_format: content_format || 'plain',
                 tags: Array.isArray(tags) && tags.length > 0 ? tags : null,
+                ...(question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: body.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL' } : {}),
                 // Set initial status based on AI review setting
                 status: aiEnabled ? 'draft' : 'approved'
             })
@@ -507,7 +522,13 @@ export async function PUT(
         if (options !== undefined) updateData.options = options
         if (correct_answer !== undefined) updateData.correct_answer = correct_answer
         if (difficulty !== undefined) updateData.difficulty = difficulty
-        if (points !== undefined) updateData.points = points
+        // M7 (paritas exams): poin finite >= 0.01 — desimal sah
+        if (points !== undefined) {
+            if (typeof points !== 'number' || !Number.isFinite(points) || points < 0.01 || points > 10000) {
+                return NextResponse.json({ error: `Poin soal harus angka >= 0.01 (diterima: ${points})` }, { status: 400 })
+            }
+            updateData.points = points
+        }
         if (image_url !== undefined) updateData.image_url = image_url
         if (passage_text !== undefined) updateData.passage_text = passage_text
         if (passage_audio_url !== undefined) updateData.passage_audio_url = passage_audio_url
@@ -515,6 +536,9 @@ export async function PUT(
         if (text_direction !== undefined) updateData.text_direction = text_direction
         if (content_format !== undefined) updateData.content_format = content_format
         if (tags !== undefined) updateData.tags = Array.isArray(tags) && tags.length > 0 ? tags : null
+        if (body.gk_grading_mode === 'PROPORTIONAL' || body.gk_grading_mode === 'ALL_OR_NOTHING') {
+            updateData.gk_grading_mode = body.gk_grading_mode
+        }
 
         // Reset status & re-trigger HOTS hanya bila konten soal berubah.
         // Perubahan poin semata tidak menyentuh status (menghindari publish terblokir).

@@ -7,6 +7,7 @@ import { Card } from '@/components/ui'
 import ResetAttemptMenu from '@/components/exam/ResetAttemptMenu'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
+import { round2, formatScore } from '@/lib/formatScore'
 import {
     Loader2, ArrowLeft, GraduationCap, Users,
     CheckCircle, AlertTriangle, Clock, PlayCircle, RefreshCw,
@@ -470,7 +471,9 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
 
                                         <td className="p-4 text-center">
                                                 {student.status === 'submitted' && student.total_score !== null && student.max_score ? (() => {
-                                                    const pct = Math.round((student.total_score / student.max_score) * 100)
+                                                    // pct MENTAH (round-2) — banding KKM dari nilai asli,
+                                                    // bukan hasil pembulatan (74.6 < KKM 75 walau ≈75)
+                                                    const pct = round2((student.total_score / student.max_score) * 100)
                                                     const kkm = getKkm(student.class_name)
                                                     return (
                                                         <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${
@@ -478,7 +481,7 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
                                                             : pct >= kkm - 15 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'
                                                             : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'
                                                         }`}>
-                                                            {pct}
+                                                            {formatScore(pct)}
                                                             {!student.is_graded && <span className="ml-1 text-[10px] opacity-60">*</span>}
                                                         </span>
                                                     )

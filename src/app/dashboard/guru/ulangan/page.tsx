@@ -9,6 +9,7 @@ import Card from '@/components/ui/Card'
 import DailyExamCard from '@/components/exam/DailyExamCard'
 import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
+import { round2, formatScore } from '@/lib/formatScore'
 import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import TimeWindowFields from '@/components/TimeWindowFields'
@@ -634,13 +635,15 @@ export default function GuruUlanganPage() {
 
             const studentsWithScores = subs.map((sub: any) => {
                 const pct = sub.max_score > 0 ? (sub.total_score / sub.max_score) * 100 : 0
-                const score = Math.round(pct)
+                // Banding KKM pakai pct MENTAH — 74.6 tetap dianggap belum tuntas
+                // walau tampil 75 (keadilan di batas nilai)
+                const score = round2(pct)
                 return {
                     id: sub.student?.id,
                     name: sub.student?.user?.full_name || '-',
                     nis: sub.student?.nis || '-',
                     score,
-                    needsRemedial: score < kkm,
+                    needsRemedial: pct < kkm,
                     submitted: !!sub.is_submitted,
                 }
             }).filter((s: any) => s.id)
@@ -767,10 +770,11 @@ export default function GuruUlanganPage() {
                 if (sub && sub.max_score > 0) {
                     score = (sub.total_score / sub.max_score) * 100
                 }
+                // isBelowKKM dari nilai mentah; tampilan round-2 (desimal utuh)
                 const isBelowKKM = score < kkm
                 return {
                     ...s,
-                    score: Math.round(score),
+                    score: round2(score),
                     isBelowKKM
                 }
             })
@@ -1365,7 +1369,7 @@ export default function GuruUlanganPage() {
                                                     <span className="font-medium text-text-main dark:text-white">{student.name}</span>
                                                 </div>
                                                 <div className={`px-2 py-1 rounded text-xs font-bold ${student.needsRemedial ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'}`}>
-                                                    Nilai: {student.score}
+                                                    Nilai: {formatScore(student.score)}
                                                 </div>
                                             </div>
                                         )
@@ -1624,7 +1628,7 @@ export default function GuruUlanganPage() {
                                                     <span className="font-medium text-text-main dark:text-white">{student.user.full_name}</span>
                                                 </div>
                                                 <div className={`px-2 py-1 rounded text-xs font-bold ${student.isBelowKKM ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'}`}>
-                                                    Nilai: {student.score}
+                                                    Nilai: {formatScore(student.score)}
                                                 </div>
                                             </div>
                                         )

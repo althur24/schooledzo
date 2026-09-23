@@ -9,6 +9,7 @@ import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/Remedial
 import DailyExamCard from '@/components/exam/DailyExamCard'
 import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
+import { round2, formatScore } from '@/lib/formatScore'
 import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
 import { Plus, ChevronDown } from 'react-iconly'
 import { Loader2, Activity, Edit3, Trash2, GraduationCap, BarChart3, Copy, RefreshCw } from 'lucide-react'
@@ -1424,9 +1425,9 @@ function AdminUtsUasPageInner() {
                                                 </div>
                                                 <div className="text-right">
                                                     <div className={`font-bold text-sm ${student.needsRemedial ? 'text-red-500' : 'text-emerald-500'}`}>
-                                                        {student.score} / {student.max_score}
+                                                        {formatScore(student.score)} / {formatScore(student.max_score)}
                                                     </div>
-                                                    <div className="text-[10px] text-text-secondary">Nilai: {student.pct.toFixed(1)}</div>
+                                                    <div className="text-[10px] text-text-secondary">Nilai: {formatScore(round2(student.pct))}</div>
                                                 </div>
                                             </label>
                                         ))}
