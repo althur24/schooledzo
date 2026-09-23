@@ -8,6 +8,12 @@
  * Sends a one-time notification to all relevant subject teachers.
  * Uses a unique notification `link` per exam to avoid duplicates.
  *
+ * DOES NOT touch `is_active` — ujian yang sudah berakhir tetap published
+ * supaya badge admin/guru menampilkan "Selesai" (bukan "Draft"), paritas
+ * dengan tabel exams (ulangan). Jangan tambahkan auto-deactivate lagi:
+ * getOfficialExamStatus mengecek is_active SEBELUM waktu, jadi ujian
+ * yang dimatikan di sini tidak bisa pernah tampil "Selesai".
+ *
  * This is a fire-and-forget helper — call it from GET /api/official-exams
  * so it triggers whenever admin/guru opens the UTS/UAS page.
  */
@@ -101,14 +107,6 @@ export async function checkEndedOfficialExams(schoolId: string): Promise<void> {
             )
 
             console.log(`[NOTIF] Sent exam-ended notifications for ${exam.title} to ${teacherUserIds.length} teachers`)
-
-            // Auto-deactivate the exam
-            await supabase
-                .from('official_exams')
-                .update({ is_active: false })
-                .eq('id', exam.id)
-            
-            console.log(`[EXAM] Deactivated ended official exam: ${exam.title}`)
         }
     } catch (error) {
         console.error('Error in checkEndedOfficialExams:', error)

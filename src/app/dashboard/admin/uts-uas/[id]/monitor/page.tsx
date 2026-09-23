@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { round2, formatScore } from '@/lib/formatScore'
+import { getOfficialExamStatus } from '@/lib/exam'
 
 interface StudentProgress {
     student_id: string
@@ -38,6 +39,7 @@ interface MonitorData {
         subject_name: string
         start_time: string
         duration_minutes: number
+        window_end_time?: string | null
         total_questions: number
         is_active: boolean
         max_violations: number
@@ -211,6 +213,11 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
     }
 
     const { exam, summary, students } = data
+
+    // Badge LIVE hanya saat jendela waktu benar-benar berjalan — is_active
+    // tetap true setelah ujian selesai (sweeper tidak lagi menonaktifkan),
+    // jadi cek is_active saja akan menampilkan "LIVE" palsu di ujian selesai.
+    const isExamLive = getOfficialExamStatus(exam).isLive
     
     // Sort logic: 'working' first, then 'submitted', then 'not_started'
     // Within 'working', sort by highest answered count
@@ -283,7 +290,7 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
                             </span>
                         )}
                         <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
-                        {exam.is_active && (
+                        {isExamLive && (
                             <span className="flex items-center gap-1.5 px-3 py-1 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse shadow-lg shadow-red-500/20">
                                 <span className="w-2 h-2 rounded-full bg-white relative">
                                     <span className="absolute inset-0 rounded-full bg-white animate-ping"></span>

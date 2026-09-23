@@ -22,6 +22,7 @@ import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import BalancePointsControl from '@/components/BalancePointsControl'
 import { round2, formatScore } from '@/lib/formatScore'
+import { getExamStatus } from '@/lib/exam'
 import TagInput from '@/components/TagInput'
 import BankQuestionPicker from '@/components/BankQuestionPicker'
 import InlineQuestionTags from '@/components/InlineQuestionTags'
@@ -750,6 +751,10 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         return <div className="text-center py-20 text-text-secondary">Ujian tidak ditemukan</div>
     }
 
+    // isDone = published & jendela waktu sudah lewat — ujian selesai tidak
+    // boleh dipublish/ditarik lagi (tarik akan membalik status ke "Draft").
+    const examStatus = getExamStatus(exam)
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -784,9 +789,11 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 </div>
                 <div className="flex items-center gap-3">
                     <Button variant="secondary" onClick={() => setShowPreview(true)} disabled={questions.length === 0}><Eye className="w-4 h-4 mr-1" /> Preview</Button>
-                    <Button onClick={handleToggleActive} loading={saving} className={exam.is_active ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}>
-                        {exam.is_active ? <><EyeOff className="w-4 h-4 mr-1" /> Tarik (Draft)</> : <><Eye className="w-4 h-4 mr-1" /> Publish</>}
-                    </Button>
+                    {!examStatus.isDone && (
+                        <Button onClick={handleToggleActive} loading={saving} className={exam.is_active ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}>
+                            {exam.is_active ? <><EyeOff className="w-4 h-4 mr-1" /> Tarik (Draft)</> : <><Eye className="w-4 h-4 mr-1" /> Publish</>}
+                        </Button>
+                    )}
                     <div className="flex items-center gap-4 border-l border-secondary/20 pl-4">
                         <BalancePointsControl
                             count={questions.length}
