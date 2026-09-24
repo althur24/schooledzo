@@ -5,6 +5,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch, notFound, resolveQuizSchoolId } from '@/lib/tenantGuard'
 
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
+import { gkMaxPicks } from '@/lib/questionTypeUtils'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
@@ -116,7 +117,13 @@ export async function GET(
             }
 
             if (!hasSubmitted) {
-                data.questions = data.questions.map(({ correct_answer, ...rest }: any) => rest)
+                // Batas pilihan GK = jumlah kunci — dihitung SEBELUM kunci di-strip;
+                // hanya jumlahnya yang dikirim (kunci tidak bocor). UI siswa memblokir
+                // pilihan ke-(N+1) supaya over-pick tidak mungkin.
+                data.questions = data.questions.map(({ correct_answer, ...rest }: any) => {
+                    const cap = gkMaxPicks(rest.question_type, correct_answer)
+                    return cap ? { ...rest, gk_max_picks: cap } : rest
+                })
             }
         }
 

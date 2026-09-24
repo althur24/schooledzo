@@ -12,6 +12,8 @@ export interface RunnerQuestion {
     passage_text?: string | null
     passage_audio_url?: string | null
     text_direction?: 'ltr' | 'rtl'
+    /** Batas pilihan GK = jumlah kunci (inject API siswa; null = tanpa batas). */
+    gk_max_picks?: number | null
 }
 
 /**

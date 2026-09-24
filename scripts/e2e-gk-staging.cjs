@@ -16,6 +16,10 @@
  *  [C] Guru koreksi: PUT nilai isian desimal → total ter-update.
  *  [D] Guru buat ulangan + GK; siswa start+autosave+submit; monitor RPC
  *      (skor desimal) + analytics quiz/exam (tidak 500, distribusi benar).
+ *  [Q] GK batas pilihan: gk_max_picks = jumlah kunci ter-inject di 4 rute
+ *      siswa (quiz /questions + embed, exam, official exam) + penalti pick
+ *      salah PROPORTIONAL: 2 kunci + pilih 3 (2 benar) → 50%; select-all →
+ *      (M-N)/M; bypass over-pick via API tetap kena penalti.
  *
  * Cleanup penuh di akhir (semua baris ber-prefix ltgk2_).
  */
@@ -993,6 +997,122 @@ async function main() {
             await supabase.from('exam_submissions').delete().eq('id', pSubId)
             await supabase.from('exam_questions').delete().eq('exam_id', examP.id)
             await supabase.from('exams').delete().eq('id', examP.id)
+        }
+
+        // ═══ [Q] GK: BATAS PILIHAN = JUMLAH KUNCI + PENALTI PICK SALAH ═══
+        // Keluhan guru 2026-09-25: siswa memilih lebih banyak dari jumlah kunci
+        // dan 2-benar-dari-3-pick dapat poin PENUH (select-all = penuh pasti).
+        // Fix dua sisi: (1) API siswa meng-inject gk_max_picks = jumlah kunci
+        // saat kunci di-strip (UI memblokir pilihan ke-N+1); (2) rumus
+        // PROPORTIONAL = (benar − salah)/M × poin, min 0 — bypass API tetap
+        // kena penalti.
+        console.log('\n═══ [Q] GK: cap gk_max_picks di 4 rute + penalti pick salah ══')
+        {
+            // ── Q1: kuis — cap ter-inject di GET /questions & embed /api/quizzes/[id] ──
+            const { data: quizQ } = await api('POST', '/api/quizzes', {
+                title: 'ltgk2_Kuis Cap GK', teaching_assignment_id: ta.id,
+                available_from: iso(-1), deadline: iso(48), duration_minutes: 30,
+            }, guru)
+            const qQs = [
+                { question_text: 'Q1 GK 2 kunci', question_type: 'MULTIPLE_ANSWER', options: ['a', 'b', 'c', 'd'], correct_answer: '["A","C"]', points: 10, order_index: 0 },
+                { question_text: 'Q1 GK 2 kunci (kedua)', question_type: 'MULTIPLE_ANSWER', options: ['a', 'b', 'c', 'd'], correct_answer: '["A","C"]', points: 10, order_index: 1 },
+                { question_text: 'Q1 GK 3 kunci', question_type: 'MULTIPLE_ANSWER', options: ['a', 'b', 'c', 'd'], correct_answer: '["A","B","D"]', points: 10, order_index: 2 },
+            ]
+            const { status: qInsSt, data: qIns } = await api('POST', `/api/quizzes/${quizQ.id}/questions`, qQs, guru)
+            check('Q1a: kuis cap GK dibuat', qInsSt === 200 || qInsSt === 201, qIns)
+            await supabase.from('quiz_questions').update({ status: 'approved' }).eq('quiz_id', quizQ.id)
+            await ensurePublished('quizzes', quizQ.id, 'quiz_questions', 'quiz_id', guru)
+
+            // GET /api/quizzes/[id]/questions sebagai siswa — kunci ter-strip + cap ter-inject
+            const qGet = await api('GET', `/api/quizzes/${quizQ.id}/questions`, null, siswa)
+            const qList = qGet.data
+            check('Q1b: route /questions — kunci ter-strip utk siswa', qGet.status === 200 && Array.isArray(qList) && qList.every(q => q.correct_answer === undefined), qList?.[0])
+            check('Q1c: route /questions — gk_max_picks = jumlah kunci (2, 2, 3)',
+                qList?.[0]?.gk_max_picks === 2 && qList?.[1]?.gk_max_picks === 2 && qList?.[2]?.gk_max_picks === 3,
+                qList?.map(q => q.gk_max_picks))
+
+            // GET /api/quizzes/[id] (embed) — jalur yang dipakai halaman kuis siswa
+            const qEmbed = await api('GET', `/api/quizzes/${quizQ.id}`, null, siswa)
+            const embedQs = qEmbed.data?.questions
+            check('Q1d: embed /api/quizzes/[id] — kunci ter-strip + gk_max_picks ter-inject',
+                Array.isArray(embedQs) && embedQs.length === 3 && embedQs.every(q => q.correct_answer === undefined && q.gk_max_picks),
+                embedQs?.map(q => q.gk_max_picks))
+
+            // ── Q2: submit over-pick LANGSUNG via API (bypass cap UI) → penalti server ──
+            // S1 persis skenario guru: 2 kunci, pilih 3, 2 benar → (2-1)/2×10 = 5 (dulu 10 PENUH)
+            // S2 select-all vs 2 kunci: (2-2)/2×10 = 0 (exploit penuh MATI)
+            // S3 select-all vs 3 kunci: (3-1)/3×10 = 6.67
+            const { status: qSubSt, data: qSub } = await api('POST', '/api/quiz-submissions', {
+                quiz_id: quizQ.id, submit: true,
+                answers: [
+                    { question_id: qIns[0].id, answer: '["A","C","B"]' },
+                    { question_id: qIns[1].id, answer: '["A","B","C","D"]' },
+                    { question_id: qIns[2].id, answer: '["A","B","C","D"]' },
+                ],
+            }, siswa)
+            check('Q2a: submit over-pick diterima (dinilai, bukan ditolak)', qSubSt === 200, qSubSt)
+            const qaByQ = Object.fromEntries((qSub.answers || []).map(a => [a.question_id, a]))
+            check('Q2b: 2 kunci + pilih 3 (2 benar) → 5, is_correct false (dulu 10 PENUH — skenario guru)',
+                qaByQ[qIns[0].id]?.score === 5 && qaByQ[qIns[0].id]?.is_correct === false, qaByQ[qIns[0].id])
+            check('Q2c: select-all vs 2 kunci → 0 (exploit penuh MATI)',
+                qaByQ[qIns[1].id]?.score === 0 && qaByQ[qIns[1].id]?.is_correct === false, qaByQ[qIns[1].id])
+            check('Q2d: select-all vs 3 kunci → 6.67 = (3-1)/3×10',
+                qaByQ[qIns[2].id]?.score === 6.67, qaByQ[qIns[2].id])
+            check('Q2e: total = 11.67 (5+0+6.67, round-2)', qSub.total_score === 11.67, qSub.total_score)
+
+            // cleanup kuis cap
+            await supabase.from('quiz_submissions').delete().eq('quiz_id', quizQ.id)
+            await supabase.from('quiz_questions').delete().eq('quiz_id', quizQ.id)
+            await supabase.from('quizzes').delete().eq('id', quizQ.id)
+
+            // ── Q3: ulangan — cap ter-inject di GET /api/exams/[id]/questions ──
+            const { data: examQ3 } = await api('POST', '/api/exams', {
+                title: 'ltgk2_Exam Cap GK', teaching_assignment_id: ta.id,
+                start_time: iso(0), duration_minutes: 60, is_randomized: false,
+                show_results_immediately: true,
+            }, guru)
+            const e3Qs = [
+                { question_text: 'Q3 GK 2 kunci', question_type: 'MULTIPLE_ANSWER', options: ['a', 'b', 'c', 'd'], correct_answer: '["A","C"]', points: 4, order_index: 0 },
+                { question_text: 'Q3 PG', question_type: 'MULTIPLE_CHOICE', options: ['a', 'b'], correct_answer: 'A', points: 6, order_index: 1 },
+            ]
+            const { status: e3St, data: e3Ins } = await api('POST', `/api/exams/${examQ3.id}/questions`, { questions: e3Qs }, guru)
+            check('Q3a: exam cap GK dibuat', e3St === 200 || e3St === 201, e3Ins)
+            await supabase.from('exam_questions').update({ status: 'approved' }).eq('exam_id', examQ3.id)
+            await ensurePublished('exams', examQ3.id, 'exam_questions', 'exam_id', guru)
+            const e3Get = await api('GET', `/api/exams/${examQ3.id}/questions`, null, siswa)
+            const e3List = e3Get.data
+            check('Q3b: GET soal ulangan siswa — kunci ter-strip + gk_max_picks=2 utk GK, PG tanpa cap',
+                e3Get.status === 200 && Array.isArray(e3List) && e3List[0]?.correct_answer === undefined && e3List[0]?.gk_max_picks === 2 && e3List[1]?.gk_max_picks === undefined,
+                e3List?.map(q => ({ t: q.question_type, cap: q.gk_max_picks })))
+
+            // cleanup exam cap
+            await supabase.from('exam_questions').delete().eq('exam_id', examQ3.id)
+            await supabase.from('exams').delete().eq('id', examQ3.id)
+
+            // ── Q4: UTS/UAS — cap ter-inject di GET /api/official-exams/[id]/questions ──
+            const { data: oeQ } = await api('POST', '/api/official-exams', {
+                exam_type: 'UTS', title: 'ltgk2_UTS Cap GK',
+                subject_id: SUBJECT, target_class_ids: [CLASS],
+                academic_year_id: YEAR, start_time: iso(0), duration_minutes: 60,
+                is_randomized: false, show_results_immediately: true,
+            }, guru)
+            const o4Qs = [
+                { question_text: 'Q4 GK 2 kunci', question_type: 'MULTIPLE_ANSWER', options: ['a', 'b', 'c', 'd'], correct_answer: '["A","C"]', points: 4, order_index: 0 },
+            ]
+            const { status: o4St, data: o4Ins } = await api('POST', `/api/official-exams/${oeQ.id}/questions`, { questions: o4Qs }, guru)
+            check('Q4a: UTS cap GK dibuat', o4St === 200 || o4St === 201, o4Ins)
+            await supabase.from('official_exam_questions').update({ status: 'approved' }).eq('exam_id', oeQ.id)
+            const { status: o4PubSt } = await api('PUT', `/api/official-exams/${oeQ.id}`, { is_active: true }, guru)
+            check('Q4b: publish UTS cap', o4PubSt === 200, o4PubSt)
+            const o4Get = await api('GET', `/api/official-exams/${oeQ.id}/questions`, null, siswa)
+            const o4List = o4Get.data
+            check('Q4c: GET soal UTS siswa — kunci ter-strip + gk_max_picks=2',
+                o4Get.status === 200 && Array.isArray(o4List) && o4List[0]?.correct_answer === undefined && o4List[0]?.gk_max_picks === 2,
+                o4List?.[0])
+
+            // cleanup UTS cap
+            await supabase.from('official_exam_questions').delete().eq('exam_id', oeQ.id)
+            await supabase.from('official_exams').delete().eq('id', oeQ.id)
         }
     } finally {
         // ═══ CLEANUP ═══

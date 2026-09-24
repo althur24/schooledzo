@@ -24,7 +24,8 @@ export function needsManualGrading(type: string | QuestionType): boolean {
  */
 /**
  * Mode penilaian Ganda Kompleks (kolom gk_grading_mode di tabel soal).
- * PROPORTIONAL (default): skor dibagi — benar N dari M kunci → N/M × poin.
+ * PROPORTIONAL (default): skor = (benar − salah)/M kunci × poin, min 0 —
+ * pick salah MENGURANGI skor (2 kunci + pilih 3 dengan 2 benar → 0, bukan full).
  * ALL_OR_NOTHING: jawaban harus persis sama dengan kunci, salah/kurang satu = 0.
  */
 export type GkGradingMode = 'PROPORTIONAL' | 'ALL_OR_NOTHING'
@@ -81,6 +82,19 @@ export function isCorrectOption(questionType: string, correctAnswer: string | nu
 
     // MULTIPLE_CHOICE: letter comparison — case-insensitive, paritas gradeAnswer
     return correctAnswer.toUpperCase() === letter
+}
+
+/**
+ * Batas jumlah pilihan Ganda Kompleks untuk siswa = jumlah kunci jawaban
+ * (permintaan guru 2026-09-25: siswa memilih sebanyak jumlah kunci, tidak lebih).
+ * Dipakai route API siswa (di-inject saat correct_answer di-strip) dan
+ * PreviewModal (preview 1:1 dengan siswa). Hanya JUMLAHNYA yang dikirim ke
+ * client — kunci tidak bocor.
+ */
+export function gkMaxPicks(questionType: string, correctAnswer: string | null | undefined): number | null {
+    if (questionType !== 'MULTIPLE_ANSWER') return null
+    const n = parseAnswerLetters(correctAnswer).length
+    return n > 0 ? n : null
 }
 
 /**
@@ -142,11 +156,15 @@ export function gradeAnswer(
                 return { isCorrect: exact, pointsEarned: exact ? maxPoints : 0 }
             }
 
-            // PROPORTIONAL (default): skor dibagi — benar N dari M kunci → N/M × poin.
-            // Tanpa penalti pick salah; penuh hanya bila set persis sama dengan kunci.
+            // PROPORTIONAL (default): skor = (benar − salah) / M kunci × poin, min 0.
+            // Pick salah mengurangi skor — sebelumnya (2 kunci + pilih 3 dengan 2 benar)
+            // dapat poin PENUH dan select-all = exploit poin penuh pasti (keluhan guru
+            // 2026-09-25: "jawaban yang bisa dijawab siswa seharusnya sesuai jumlah kunci").
             const correctPicks = studentSet.filter(l => correctSet.includes(l)).length
-            const score = Math.round((correctPicks / correctSet.length) * maxPoints * 100) / 100
-            const isCorrect = correctPicks === correctSet.length && studentSet.length === correctSet.length
+            const wrongPicks = studentSet.length - correctPicks
+            const rawScore = ((correctPicks - wrongPicks) / correctSet.length) * maxPoints
+            const score = Math.round(Math.max(0, rawScore) * 100) / 100
+            const isCorrect = correctPicks === correctSet.length && wrongPicks === 0
             return { isCorrect, pointsEarned: score }
         }
         case 'TRUE_FALSE': {

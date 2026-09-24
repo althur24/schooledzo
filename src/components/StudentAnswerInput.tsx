@@ -8,6 +8,12 @@ interface StudentAnswerInputProps {
         question_type: string
         options?: string[] | null
         text_direction?: 'ltr' | 'rtl' | null
+        /**
+         * Batas jumlah pilihan Ganda Kompleks = jumlah kunci (dari server,
+         * di-inject saat correct_answer di-strip). null = tanpa batas
+         * (data lama / preview tanpa kunci) — toggle perilaku lama.
+         */
+        gk_max_picks?: number | null
     }
     value: string | undefined
     onChange: (value: string) => void
@@ -54,17 +60,31 @@ export default function StudentAnswerInput({ question, value, onChange, onChange
     }
 
     if (question.question_type === 'MULTIPLE_ANSWER' && question.options) {
+        // Cap pilihan = jumlah kunci (permintaan guru: siswa memilih sebanyak jumlah
+        // kunci, tidak lebih). Opsi BELUM terpilih terkunci saat cap tercapai —
+        // opsi terpilih tetap bisa dibatalkan (draft lama yang melebihi cap pun
+        // masih bisa dikurangi, hanya tidak bisa ditambah).
+        const maxPicks = question.gk_max_picks ?? null
+        const atCap = maxPicks !== null && selectedSet.size >= maxPicks
         return (
             <div className="space-y-3">
-                <p className="text-xs text-text-secondary dark:text-slate-400 mb-2">Pilih semua jawaban yang benar (bisa lebih dari satu)</p>
+                <p className="text-xs text-text-secondary dark:text-slate-400 mb-2">
+                    {maxPicks !== null ? (
+                        <>Pilih {maxPicks} jawaban yang benar <span className="font-medium">({selectedSet.size}/{maxPicks} dipilih)</span></>
+                    ) : (
+                        'Pilih semua jawaban yang benar (bisa lebih dari satu)'
+                    )}
+                </p>
                 {question.options.map((opt, optIdx) => {
                     const letter = String.fromCharCode(65 + optIdx)
                     const isSelected = selectedSet.has(letter)
+                    const locked = !isSelected && atCap
                     return (
-                        <button 
-                            key={optIdx} 
-                            onClick={() => toggleMultipleAnswer(letter)} 
-                            className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}
+                        <button
+                            key={optIdx}
+                            onClick={() => toggleMultipleAnswer(letter)}
+                            disabled={locked}
+                            className={`w-full text-left px-3 py-2.5 md:px-4 md:py-3 rounded-xl border transition-all flex items-center ${isSelected ? 'bg-primary/10 border-primary text-text-main dark:text-white' : locked ? 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-400 cursor-not-allowed opacity-60' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600 text-text-secondary dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500'}`}
                         >
                             <span className={`inline-flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-lg ${isRtl ? 'ml-3' : 'mr-3'} font-bold flex-shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-gray-200 dark:bg-slate-600 text-text-secondary dark:text-slate-300'}`} dir="ltr">
                                 {isSelected ? '✓' : letter}

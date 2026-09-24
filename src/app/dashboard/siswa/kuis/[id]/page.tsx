@@ -21,6 +21,8 @@ interface QuizQuestion {
     passage_text?: string | null
     passage_audio_url?: string | null
     text_direction?: 'ltr' | 'rtl'
+    /** Batas pilihan GK = jumlah kunci (inject API saat kunci di-strip). */
+    gk_max_picks?: number | null
 }
 
 interface Quiz {

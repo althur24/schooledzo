@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
-import { validateCorrectAnswer } from '@/lib/questionTypeUtils'
+import { validateCorrectAnswer, gkMaxPicks } from '@/lib/questionTypeUtils'
 import { logError } from '@/lib/logError'
 import { canManageOfficialExam, getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
@@ -133,7 +133,13 @@ export async function GET(
             }
 
             if (!hasSubmitted) {
-                questions = questions.map(({ correct_answer, ...rest }: any) => rest)
+                // Batas pilihan GK = jumlah kunci — dihitung SEBELUM kunci di-strip;
+                // hanya jumlahnya yang dikirim (kunci tidak bocor). UI siswa memblokir
+                // pilihan ke-(N+1) supaya over-pick tidak mungkin.
+                questions = questions.map(({ correct_answer, ...rest }: any) => {
+                    const cap = gkMaxPicks(rest.question_type, correct_answer)
+                    return cap ? { ...rest, gk_max_picks: cap } : rest
+                })
             }
         }
 

@@ -9,6 +9,7 @@ import { ExamRunnerView, useExamPreviewState } from '@/components/exam/runner'
 import type { RunnerQuestion } from '@/components/exam/runner'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
+import { gkMaxPicks } from '@/lib/questionTypeUtils'
 import { Eye, X } from 'lucide-react'
 
 interface PreviewQuestion {
@@ -22,6 +23,8 @@ interface PreviewQuestion {
     passage_text?: string | null
     passage_audio_url?: string | null
     text_direction?: 'ltr' | 'rtl'
+    /** Kunci jawaban — hanya ada di data guru (sumber preview); dipakai menghitung cap GK. */
+    correct_answer?: string | null
 }
 
 interface PreviewModalProps {
@@ -121,7 +124,12 @@ function ExamPreviewContent({
     // Urutkan by order_index (kontrak preview sejak dulu) sebelum masuk runner —
     // siswa mengikuti question_order hasil randomization server, preview statis.
     const sorted = [...questions].sort((a, b) => a.order_index - b.order_index)
-    const runnerQuestions: RunnerQuestion[] = sorted.map((q, i) => ({ ...q, id: q.id || `preview-${i}` }))
+    // Cap pilihan GK dihitung dari kunci — preview 1:1 dengan siswa: guru melihat
+    // batas "X/N dipilih" yang sama dengan yang dialami siswa saat mengerjakan.
+    const runnerQuestions: RunnerQuestion[] = sorted.map((q, i) => {
+        const cap = gkMaxPicks(q.question_type, q.correct_answer)
+        return { ...q, id: q.id || `preview-${i}`, ...(cap ? { gk_max_picks: cap } : {}) }
+    })
     const state = useExamPreviewState(title, subjectName ?? '', durationMinutes, runnerQuestions, examLabel)
 
     return (
@@ -250,7 +258,7 @@ function KuisPreviewLayout({
                                                     )}
                                                     <div className="pl-12">
                                                         <StudentAnswerInput
-                                                            question={{ id: qId, question_type: q.question_type, options: q.options, text_direction: q.text_direction }}
+                                                            question={{ id: qId, question_type: q.question_type, options: q.options, text_direction: q.text_direction, gk_max_picks: gkMaxPicks(q.question_type, q.correct_answer) ?? undefined }}
                                                             value={answers[qId]}
                                                             onChange={(val) => setAnswers({ ...answers, [qId]: val })}
                                                             onChangeImmediate={(val) => setAnswers({ ...answers, [qId]: val })}
@@ -287,7 +295,7 @@ function KuisPreviewLayout({
                                     )}
                                     <div className="pl-12">
                                         <StudentAnswerInput
-                                            question={{ id: qId, question_type: q.question_type, options: q.options, text_direction: q.text_direction }}
+                                            question={{ id: qId, question_type: q.question_type, options: q.options, text_direction: q.text_direction, gk_max_picks: gkMaxPicks(q.question_type, q.correct_answer) ?? undefined }}
                                             value={answers[qId]}
                                             onChange={(val) => setAnswers({ ...answers, [qId]: val })}
                                             onChangeImmediate={(val) => setAnswers({ ...answers, [qId]: val })}
