@@ -63,7 +63,7 @@ export default function GuruKuisPage() {
         title: '',
         description: '',
         duration_minutes: 30,
-        is_randomized: true
+        is_randomized: false
     })
     const [hasDeadline, setHasDeadline] = useState(false)
     const [deadlineValue, setDeadlineValue] = useState('')
@@ -80,7 +80,7 @@ export default function GuruKuisPage() {
         title: '',
         description: '',
         duration_minutes: 30,
-        is_randomized: true
+        is_randomized: false
     })
     const [copyHasDeadline, setCopyHasDeadline] = useState(false)
     const [copyDeadlineValue, setCopyDeadlineValue] = useState('')
@@ -272,7 +272,7 @@ export default function GuruKuisPage() {
             }
 
             setShowCreate(false)
-            setForm({ teaching_assignment_ids: [], title: '', description: '', duration_minutes: 30, is_randomized: true })
+            setForm({ teaching_assignment_ids: [], title: '', description: '', duration_minutes: 30, is_randomized: false })
             setHasDeadline(false)
             setDeadlineValue('')
             setHasAvailableFrom(false)

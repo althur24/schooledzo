@@ -249,7 +249,7 @@ function EditExamPageInner() {
         schedule_mode: 'sync' as 'sync' | 'window',
         window_end_time: '',
         max_violations: 3,
-        is_randomized: true,
+        is_randomized: false,
         show_results_immediately: true
     })
     const [savingSettings, setSavingSettings] = useState(false)

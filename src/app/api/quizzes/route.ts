@@ -264,7 +264,7 @@ export async function POST(request: NextRequest) {
                 available_from: available_from || null,
                 teaching_assignment_id,
                 is_active: isOffline ? true : false,
-                is_randomized: is_randomized ?? true,
+                is_randomized: is_randomized ?? false,
                 is_remedial: is_remedial || false,
                 remedial_for_id: remedial_for_id || null,
                 allowed_student_ids: allowed_student_ids || null,

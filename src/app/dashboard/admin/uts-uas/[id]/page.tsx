@@ -174,7 +174,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     const [settingsForm, setSettingsForm] = useState({
         title: '', description: '', start_time: '',
         duration_minutes: 90, schedule_mode: 'sync' as 'sync' | 'window', window_end_time: '',
-        is_randomized: true, max_violations: 3,
+        is_randomized: false, max_violations: 3,
         show_results_immediately: true,
         target_class_ids: [] as string[]
     })
@@ -245,7 +245,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 duration_minutes: data.duration_minutes || 90,
                 schedule_mode: data.window_end_time ? 'window' : 'sync',
                 window_end_time: data.window_end_time ? new Date(new Date(data.window_end_time).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '',
-                is_randomized: data.is_randomized ?? true,
+                is_randomized: data.is_randomized ?? false,
                 show_results_immediately: data.show_results_immediately ?? true,
                 max_violations: data.max_violations || 3,
                 target_class_ids: data.target_class_ids || []

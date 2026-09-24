@@ -291,7 +291,7 @@ export async function POST(request: NextRequest) {
                 start_time,
                 duration_minutes: duration_minutes || 90,
                 window_end_time: window_end_time || null,
-                is_randomized: is_randomized ?? true,
+                is_randomized: is_randomized ?? false,
                 max_violations: max_violations || 3,
                 target_class_ids,
                 created_by: user.id,

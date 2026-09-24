@@ -104,7 +104,7 @@ export default function GuruUlanganPage() {
         duration_minutes: 60,
         schedule_mode: 'sync' as 'sync' | 'window',
         window_end_time: '',
-        is_randomized: true,
+        is_randomized: false,
         max_violations: 3,
         show_results_immediately: true
     })
@@ -135,7 +135,7 @@ export default function GuruUlanganPage() {
         duration_minutes: 60,
         schedule_mode: 'sync' as 'sync' | 'window',
         window_end_time: '',
-        is_randomized: true,
+        is_randomized: false,
         max_violations: 3,
         show_results_immediately: true
     })
@@ -292,7 +292,7 @@ export default function GuruUlanganPage() {
             duration_minutes: 60,
             schedule_mode: 'sync',
             window_end_time: '',
-            is_randomized: true,
+            is_randomized: false,
             max_violations: 3,
             show_results_immediately: true
         })

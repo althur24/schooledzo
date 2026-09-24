@@ -158,7 +158,7 @@ function AdminUtsUasPageInner() {
         duration_minutes: 90,
         schedule_mode: 'sync' as 'sync' | 'window',
         window_end_time: '',
-        is_randomized: true,
+        is_randomized: false,
         max_violations: 3,
         show_results_immediately: true,
         target_class_ids: [] as string[]
@@ -342,7 +342,7 @@ function AdminUtsUasPageInner() {
                     duration_minutes: 90,
                     schedule_mode: 'sync',
                     window_end_time: '',
-                    is_randomized: true,
+                    is_randomized: false,
                     max_violations: 3,
                     show_results_immediately: true,
                     target_class_ids: []
@@ -388,7 +388,7 @@ function AdminUtsUasPageInner() {
                     duration_minutes: 90,
                     schedule_mode: 'sync',
                     window_end_time: '',
-                    is_randomized: true,
+                    is_randomized: false,
                     max_violations: 3,
                     show_results_immediately: true,
                     target_class_ids: []
