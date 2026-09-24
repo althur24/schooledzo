@@ -29,8 +29,13 @@ export async function GET(request: NextRequest) {
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        // Fire-and-forget: check for ended exams and notify teachers
-        if (schoolId) {
+        // Fire-and-forget: check for ended exams and notify teachers.
+        // Hanya GURU/ADMIN — siswa tidak membutuhkan notifikasi guru, dan
+        // burst siswa membuka halaman list sebelum masuk ujian (jam 07:30)
+        // tidak boleh menyalakan helper ini (root cause CPU 100% 24 Sep:
+        // tiap GET siswa menjalankan loop dedup ±98 ujian berakhir).
+        // SUPER_ADMIN otomatis ter-exclude via schoolId null.
+        if (schoolId && (user.role === 'GURU' || user.role === 'ADMIN')) {
             checkEndedOfficialExams(schoolId).catch(err =>
                 console.error('checkEndedOfficialExams error:', err)
             )

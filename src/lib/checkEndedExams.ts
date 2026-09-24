@@ -14,15 +14,48 @@
  * getOfficialExamStatus mengecek is_active SEBELUM waktu, jadi ujian
  * yang dimatikan di sini tidak bisa pernah tampil "Selesai".
  *
+ * BIAYA (pelajaran CPU 100% 24 Sep 2026): helper ini dulunya loop
+ * per-ujian-berakhir dengan SATU query dedup notifications per iterasi
+ * (seq-scan tanpa index) — dipicu SETIAP GET /api/official-exams termasuk
+ * oleh siswa. Set ujian berakhir-aktif tumbuh permanen (98+), burst siswa
+ * jam UTS mem-pin DB. Sekarang:
+ *   1. Route hanya memanggil untuk GURU/ADMIN (siswa tak butuh notif guru).
+ *   2. Throttle in-process per sekolah (TTL 10 mnt) — refresh halaman tidak
+ *      menghajar ulang.
+ *   3. Dedup BATCH: satu query .in('link', semuaLink) untuk semua kandidat.
+ *   4. Hanya ujian yang berakhir <= 7 hari (lebih tua dari itu notifikasi
+ *      sudah tidak relevan — korban reaktivasi lama keluar dari loop
+ *      selamanya).
+ *
  * This is a fire-and-forget helper — call it from GET /api/official-exams
  * so it triggers whenever admin/guru opens the UTS/UAS page.
  */
 
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { batchedIn } from '@/lib/batchedIn'
+
+/** Throttle per sekolah — halaman list dibuka berkali-kali per menit. */
+const CHECK_THROTTLE_MS = 10 * 60 * 1000
+const lastRunBySchool = new Map<string, number>()
+
+/**
+ * Ujian berakhir lebih tua dari ini tidak diproses. Tanpa batas, daftar
+ * kandidat tumbuh permanen (ujian aktif tidak pernah dinonaktifkan lagi)
+ * — tradeoff disengaja: notifikasi "selesai" >7 hari sudah tidak relevan.
+ */
+const MAX_ENDED_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
 export async function checkEndedOfficialExams(schoolId: string): Promise<void> {
     try {
+        // Throttle di depan (sinkron, sebelum await apa pun) supaya GET
+        // serentak tidak lolos semua sebelum run pertama selesai. Kalau run
+        // ini gagal, retry berikutnya menunggu TTL — dapat diterima untuk
+        // notifikasi kosmetik.
+        const lastRun = lastRunBySchool.get(schoolId) ?? 0
+        if (Date.now() - lastRun < CHECK_THROTTLE_MS) return
+        lastRunBySchool.set(schoolId, Date.now())
+
         const labels = await getMenuLabelsForSchool(schoolId)
         const now = new Date()
 
@@ -35,13 +68,15 @@ export async function checkEndedOfficialExams(schoolId: string): Promise<void> {
 
         if (!activeExams || activeExams.length === 0) return
 
-        // Filter exams whose end time has passed
-        // (mode jendela → jam tutup; mode serentak → start + durasi)
+        // Filter exams whose end time has passed — tapi hanya yang berakhir
+        // <= 7 hari (mode jendela → jam tutup; mode serentak → start + durasi)
+        const nowMs = now.getTime()
         const endedExams = activeExams.filter(exam => {
-            const endTime = exam.window_end_time
+            const endTimeMs = exam.window_end_time
                 ? new Date(exam.window_end_time).getTime()
-                : new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60 * 1000)
-            return now > endTime
+                : new Date(new Date(exam.start_time).getTime() + exam.duration_minutes * 60 * 1000).getTime()
+            const age = nowMs - endTimeMs
+            return age > 0 && age <= MAX_ENDED_AGE_MS
         })
 
         if (endedExams.length === 0) return
@@ -56,21 +91,25 @@ export async function checkEndedOfficialExams(schoolId: string): Promise<void> {
 
         if (!activeYear) return
 
-        for (const exam of endedExams) {
-            // Check if notification already sent for this exam (deduplicate by link).
-            // Dua format: link lama `/hasil` (halaman sudah dihapus, konsolidasi ke
-            // editor shared) dan link baru deep-link `#hasil` — tanpa cek keduanya,
-            // notifikasi dobel terkirim untuk ujian yang sudah dinotifikasi era link lama.
-            const notifLink = `/dashboard/guru/uts-uas/${exam.id}#hasil`
-            const legacyNotifLink = `/dashboard/guru/uts-uas/${exam.id}/hasil`
-            const { data: existingNotif } = await supabase
+        // Dedup BATCH — satu query (pecah per 100 link via batchedIn) untuk
+        // semua kandidat, menggantikan satu query per ujian (seq-scan
+        // notifications × 98 ujian = root cause CPU 100%). Dua format link:
+        // `#hasil` (kini) dan `/hasil` (legacy halaman lama).
+        const notifLink = (examId: string) => `/dashboard/guru/uts-uas/${examId}#hasil`
+        const legacyNotifLink = (examId: string) => `/dashboard/guru/uts-uas/${examId}/hasil`
+        const allLinks = endedExams.flatMap(exam => [notifLink(exam.id), legacyNotifLink(exam.id)])
+        const existingNotifs = await batchedIn<{ link: string }>('link', allLinks, chunk =>
+            supabase
                 .from('notifications')
-                .select('id')
+                .select('link')
                 .eq('type', 'UJIAN_SELESAI')
-                .in('link', [notifLink, legacyNotifLink])
-                .limit(1)
+                .in('link', chunk)
+        )
+        const notifiedLinks = new Set(existingNotifs.map(n => n.link))
 
-            if (existingNotif && existingNotif.length > 0) continue // Already notified
+        for (const exam of endedExams) {
+            // Skip jika notifikasi sudah terkirim (cek batch di atas)
+            if (notifiedLinks.has(notifLink(exam.id)) || notifiedLinks.has(legacyNotifLink(exam.id))) continue
 
             // Find teachers who teach this subject in target classes
             if (!exam.target_class_ids?.length) continue
@@ -84,17 +123,18 @@ export async function checkEndedOfficialExams(schoolId: string): Promise<void> {
 
             if (!assignments || assignments.length === 0) continue
 
+            type TaRow = { teacher?: Array<{ user_id?: string }> | { user_id?: string } }
             const teacherUserIds = [...new Set(
-                assignments.map((a: any) => {
+                (assignments as TaRow[]).map(a => {
                     const t = Array.isArray(a.teacher) ? a.teacher[0] : a.teacher
                     return t?.user_id
-                }).filter(Boolean)
+                }).filter((uid): uid is string => typeof uid === 'string')
             )]
 
             if (teacherUserIds.length === 0) continue
 
             const examLabel = exam.exam_type === 'UTS' ? labels.uts : labels.uas
-            const subjectName = (exam.subject as any)?.name || ''
+            const subjectName = (exam.subject as { name?: string } | null | undefined)?.name || ''
 
             await supabase.from('notifications').insert(
                 teacherUserIds.map(uid => ({
@@ -102,7 +142,7 @@ export async function checkEndedOfficialExams(schoolId: string): Promise<void> {
                     type: 'UJIAN_SELESAI',
                     title: `✅ ${examLabel} Selesai: ${exam.title}`,
                     message: `${subjectName} — Ujian telah berakhir. Silakan cek hasil dan koreksi essay siswa.`,
-                    link: notifLink
+                    link: notifLink(exam.id)
                 }))
             )
 
