@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { needsManualGrading } from '@/lib/questionTypeUtils'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { enrollmentClassAt, EnrollmentInterval } from '@/lib/enrollmentClassAt'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { getAnswerStats } from '@/lib/monitorAnswerStats'
 import { resolveWindowExpiry, isSweepDue, endsAtIso } from '@/lib/examExpiry'
@@ -107,17 +108,28 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        // 4. Fetch students enrolled in the allowed target classes (year-aware).
-        //    target_class_ids are unique per academic year, and enrollment records persist
-        //    after promotion/graduation — so this returns the correct roster even for past
-        //    exams. students.class_id (current) would drop students who have since moved up.
+        // 4. Fetch enrollment rows di kelas target yang diizinkan (year-aware).
+        //    target_class_ids unik per tahun ajaran dan baris enrollment bertahan
+        //    setelah promosi/lulus — jadi ujian tahun lama tetap dapat roster benar
+        //    (students.class_id alias kelas SAAT INI akan menghilangkan siswa yang
+        //    sejak itu naik kelas).
+        //    Kelas siswa untuk exam ini = baris enrollment yang berlaku saat exam
+        //    dimulai (interval enrolled_at..ended_at, helper enrollmentClassAt) —
+        //    siswa yang pindah kelas mid-year tampil di kelas barunya dan TIDAK
+        //    tampil sebagai "belum mulai" di kelas lamanya. Dedup first-wins lama
+        //    pernah salah memakai baris TRANSFERRED_OUT (bug 24 Sep 2026).
         // fetchAllRows: roster seangkatan/sekolah bisa >1000 baris — query biasa
-        // terpotong diam-diam pada limit 1000 baris PostgREST
-        const rosterEnrollments = await fetchAllRows(
+        // terpotong diam-diam pada limit 1000 baris PostgREST; .order('id')
+        // wajib agar paginasi stabil.
+        interface RosterRow extends EnrollmentInterval {
+            student?: { id: string; nis: string | null; user?: unknown } | { id: string; nis: string | null; user?: unknown }[] | null
+            class?: unknown
+        }
+        const rosterEnrollments = await fetchAllRows<RosterRow>(
             supabase
                 .from('student_enrollments')
                 .select(`
-                    class_id,
+                    class_id, status, enrolled_at, ended_at, created_at, updated_at,
                     student:students!student_enrollments_student_id_fkey(
                         id, nis,
                         user:users!students_user_id_fkey(full_name)
@@ -125,20 +137,32 @@ export async function GET(request: NextRequest) {
                     class:classes!student_enrollments_class_id_fkey(id, name)
                 `)
                 .in('class_id', allowedClassIds)
+                .order('id')
         )
 
-        const seenStudent = new Set<string>()
-        const students: any[] = []
+        // Kelompokkan baris per siswa, lalu pilih kelas yang berlaku saat ujian
+        // dimulai. null = siswa sudah keluar dari semua kelas target sebelum
+        // ujian dimulai → bukan anggota roster, tidak dirender.
+        const rowsByStudent = new Map<string, RosterRow[]>()
         for (const e of (rosterEnrollments || [])) {
-            const s = e.student as any
-            if (!s || seenStudent.has(s.id)) continue
-            seenStudent.add(s.id)
+            const s = Array.isArray(e.student) ? e.student[0] : e.student
+            if (!s) continue
+            if (!rowsByStudent.has(s.id)) rowsByStudent.set(s.id, [])
+            rowsByStudent.get(s.id)!.push(e)
+        }
+
+        const students: any[] = []
+        for (const rows of rowsByStudent.values()) {
+            const picked = enrollmentClassAt(rows, exam.start_time)
+            if (!picked) continue
+            const s = Array.isArray(picked.student) ? picked.student[0] : picked.student
+            if (!s) continue
             students.push({
                 id: s.id,
                 nis: s.nis,
-                class_id: e.class_id,
+                class_id: picked.class_id,
                 user: s.user,
-                class: e.class
+                class: picked.class
             })
         }
 

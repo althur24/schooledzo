@@ -10,6 +10,7 @@ import { forceCloseOfficialSubmission } from '@/lib/autoCloseExpired'
 import { getTeacherScope, canTeachStudentSubmission } from '@/lib/teacherScope'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { batchedIn } from '@/lib/batchedIn'
+import { enrollmentClassAt, EnrollmentInterval } from '@/lib/enrollmentClassAt'
 import { mergeViolations, IncomingViolation } from '@/lib/violationBatch'
 import { logGradeChange } from '@/lib/gradeHistory'
 
@@ -164,6 +165,9 @@ export async function GET(request: NextRequest) {
 
         // Additional class filter — resolve the student's class IN THE EXAM'S YEAR via
         // enrollment (not current class_id), so filtering works for past exams too.
+        // Kelas yang dipakai = baris enrollment yang berlaku saat ujian TS dimulai
+        // (enrollmentClassAt) — siswa pindah kelas mid-year dinilai di kelas yang
+        // benar, bukan kelas acak dari baris enrollment terakhir (nondeterministik).
         if (classId) {
             const studentIds = [...new Set(result.map((s: any) => s.student_id))]
             const examYears = new Set<string>()
@@ -176,19 +180,22 @@ export async function GET(request: NextRequest) {
                 'student_id', studentIds,
                 (chunk) => supabase
                     .from('student_enrollments')
-                    .select('student_id, class_id, academic_year_id')
+                    .select('student_id, class_id, academic_year_id, status, enrolled_at, ended_at, created_at, updated_at')
                     .in('student_id', chunk)
                     .in('academic_year_id', examYears.size ? [...examYears] : ['00000000-0000-0000-0000-000000000000'])
             )
-            const studentYearClass = new Map<string, string>()
-            enrollments.forEach((e: any) =>
-                studentYearClass.set(`${e.student_id}|${e.academic_year_id}`, e.class_id)
-            )
+            const rowsByStudentYear = new Map<string, EnrollmentInterval[]>()
+            ;(enrollments || []).forEach((e: any) => {
+                const key = `${e.student_id}|${e.academic_year_id}`
+                if (!rowsByStudentYear.has(key)) rowsByStudentYear.set(key, [])
+                rowsByStudentYear.get(key)!.push(e)
+            })
             result = result.filter((sub: any) => {
                 const ex: any = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
                 const year = ex?.academic_year_id
-                const sc = year ? studentYearClass.get(`${sub.student_id}|${year}`) : undefined
-                return sc === classId
+                const rows = year ? rowsByStudentYear.get(`${sub.student_id}|${year}`) : undefined
+                const match = rows ? enrollmentClassAt(rows, ex?.start_time) : null
+                return match?.class_id === classId
             })
         }
 

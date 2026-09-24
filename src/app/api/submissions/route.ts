@@ -122,11 +122,14 @@ export async function GET(request: NextRequest) {
             let missingStudents: any[] = []
             
             if (classId && yearId) {
+                // Hanya enrollment ACTIVE: siswa yang pindah kelas mid-year tidak
+                // tampil sebagai "belum mengumpulkan" di kelas lamanya
                 const { data: enrollments } = await supabase
                     .from('student_enrollments')
                     .select('student:students(id, nis, user:users!students_user_id_fkey(full_name))')
                     .eq('class_id', classId)
                     .eq('academic_year_id', yearId)
+                    .eq('status', 'ACTIVE')
                 
                 const submittedIds = new Set(data.map((s: any) => s.student_id))
                 

@@ -1,5 +1,12 @@
 # LMS YPP — Catatan Workflow
 
+## Atribusi Kelas Historis = Interval Enrollment (2026-09-24)
+
+- Baris `student_enrollments` = INTERVAL keanggotaan: ACTIVE `[enrolled_at, ∞)`; PROMOTED/GRADUATED/RETAINED/TRANSFERRED_OUT `[enrolled_at, ended_at)` (kontrak RPC `move_student_to_class`/`promote_students_batch`: `ended_at` lama == `enrolled_at` baru).
+- Untuk jawab "siswa ada di kelas mana saat ujian X dimulai" → **WAJIB `enrollmentClassAt(rows, exam.start_time)`** (`src/lib/enrollmentClassAt.ts`) — JANGAN dedup first-wins atas baris enrollment (bug Monitor Live 24 Sep 2026: Kaila pindah 1A→2A tampil "XI KMP 1A") dan jangan pakai `students.class_id` untuk ujian historis. Helper juga menormalkan timestamp naive (kolom enrollment = `timestamp` tanpa offset, PostgREST kirim tanpa suffix → wajib dibaca sebagai UTC, bukan waktu lokal).
+- Terpasang di: monitor UTS/UAS, filter kelas daftar koreksi UTS/UAS, atribusi kelas UTS/UAS di class-grades. Daftar "belum mengumpulkan" tugas & monitor ulangan: cukup filter `status=ACTIVE`.
+- Query roster multi-kelas ujian serentak WAJIB `.order('id')` sebelum `fetchAllRows` (paginasi stabil + hasil deterministik).
+
 ## Seed Demo SSA (production, 2026-09-22)
 
 - `node scripts/seed-demo-ssa.cjs` — isi data demo "full experience" di sekolah SSA (tahun aktif 2029/2030, kelas X IPA 1/2): 48 siswa baru (top-up 28/kelas), 3 guru × 2 TA, tugas+nilai+audit `grade_history`+revisi, kuis (objektif/koreksi manual/remedial CAP & HIGHEST), ulangan selesai + **Ulangan Harian 2 LIVE utk Monitor Live**, UTS resmi, bank soal, materi, jadwal, pengumuman, notifikasi. Idempotent (UUID deterministik prefix `5e5a`, re-run aman).

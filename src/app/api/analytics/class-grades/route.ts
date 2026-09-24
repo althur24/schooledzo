@@ -5,6 +5,7 @@ import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { mergeRemedialScores } from '@/lib/remedialScore'
 import { round2 } from '@/lib/formatScore'
+import { enrollmentClassAt, EnrollmentInterval } from '@/lib/enrollmentClassAt'
 
 // M2: Service Role Key required — analytics needs cross-table reads that RLS blocks for anon role.
 // Access restricted to ADMIN only.
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest) {
             ? await fetchAllRows(
                 supabase
                     .from('student_enrollments')
-                    .select('student_id, class_id')
+                    .select('student_id, class_id, status, enrolled_at, ended_at, created_at, updated_at')
                     .eq('academic_year_id', academicYearId)
                     .in('class_id', yearClassIds)
                     .order('id')
@@ -79,14 +80,17 @@ export async function GET(request: NextRequest) {
             : []
 
         // classRoster: class_id -> Set(student_id) enrolled in that class this year
-        // studentClassByYear: student_id -> class_id (for official-exam attribution)
+        // (tugas/kuis/ulangan dinilai di kelas TA-nya — historis per item).
+        // enrollmentByStudent: student_id -> baris interval (atribusi UTS/UAS
+        // per kelas yang berlaku SAAT ujian dimulai, bukan last-wins acak).
         const classRoster = new Map<string, Set<string>>()
-        const studentClassByYear = new Map<string, string>()
+        const enrollmentByStudent = new Map<string, EnrollmentInterval[]>()
         ;(enrollments || []).forEach((e: any) => {
             if (!e.class_id || !e.student_id) return
             if (!classRoster.has(e.class_id)) classRoster.set(e.class_id, new Set())
             classRoster.get(e.class_id)!.add(e.student_id)
-            studentClassByYear.set(e.student_id, e.class_id)
+            if (!enrollmentByStudent.has(e.student_id)) enrollmentByStudent.set(e.student_id, [])
+            enrollmentByStudent.get(e.student_id)!.push(e)
         })
 
         // Get teaching assignments for this academic year (scoped by school via academic_year)
@@ -171,7 +175,7 @@ export async function GET(request: NextRequest) {
         // (is_remedial + remedial_for_id + policy/cap dibutuhkan untuk merge nilai remedial)
         const { data: officialExams } = await supabase
             .from('official_exams')
-            .select('id, subject_id, target_class_ids, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score, exam_type')
+            .select('id, subject_id, target_class_ids, start_time, is_remedial, remedial_for_id, remedial_score_policy, remedial_max_score, exam_type')
             .eq('school_id', schoolId)
             .eq('academic_year_id', academicYearId)
 
@@ -386,9 +390,14 @@ export async function GET(request: NextRequest) {
             const baseExam = officialExams?.find(oe => oe.id === baseExamId)
             if (!baseExam) return
 
-            // Resolve the student's class IN THIS YEAR (not their current class), so a
-            // student who has since moved up is still attributed to the right class.
-            const studentClass = studentClassByYear.get(studentId)
+            // Resolve the student's class IN THIS YEAR at the time the base exam
+            // started (enrollmentClassAt — interval enrolled_at..ended_at), so a
+            // student who has since moved up / pindah kelas mid-year tetap
+            // teratribusi ke kelas yang benar (deterministik, bukan last-wins).
+            const studentRows = enrollmentByStudent.get(studentId)
+            const studentClass = studentRows
+                ? enrollmentClassAt(studentRows, baseExam.start_time)?.class_id
+                : null
             if (!studentClass) return
 
             // Only process if the student's class that year is among the exam's target classes

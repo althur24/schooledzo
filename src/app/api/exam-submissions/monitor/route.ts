@@ -221,6 +221,7 @@ export async function GET(request: NextRequest) {
                 `)
                 .eq('class_id', m.classId)
                 .eq('status', 'ACTIVE')
+                .order('id')
             // Filter tahun hanya saat TA punya academic_year_id — eq('') akan
             // mengosongkan roster diam-diam pada data lama yang NULL
             if (m.academicYearId) {
