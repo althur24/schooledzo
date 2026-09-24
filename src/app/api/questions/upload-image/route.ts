@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { presignR2PutUrl, publicR2Url, safeFileExt } from '@/lib/r2'
+
+// Presign upload gambar soal/opsi ke Cloudflare R2 (pola /api/materials/upload):
+// client PUT langsung ke R2. Validasi ukuran 5MB pindah ke client
+// (uploadQuestionImage di src/lib/questionImage.ts). File lama tetap
+// disajikan dari Supabase Storage (URL tersimpan penuh di DB).
+
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 
 export async function POST(request: NextRequest) {
     try {
@@ -12,59 +19,33 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const formData = await request.formData()
-        const file = formData.get('file') as File
+        const { filename, contentType } = await request.json()
 
-        if (!file) {
+        if (!filename) {
             return NextResponse.json({ error: 'File diperlukan' }, { status: 400 })
         }
 
-        // Validate file type
-        const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
-        if (!allowedTypes.includes(file.type)) {
+        // Paritas dengan route lama: tipe yang tak dikenal browser ditolak
+        if (!contentType || !ALLOWED_IMAGE_TYPES.includes(contentType)) {
             return NextResponse.json({ error: 'Format file tidak didukung. Gunakan JPG, PNG, GIF, atau WebP.' }, { status: 400 })
         }
 
-        // Validate file size (max 5MB)
-        const maxSize = 5 * 1024 * 1024
-        if (file.size > maxSize) {
-            return NextResponse.json({ error: 'Ukuran file maksimal 5MB' }, { status: 400 })
-        }
-
-        // Generate unique filename with school isolation
+        // Generate unique key with school isolation
         const timestamp = Date.now()
-        const ext = file.name.split('.').pop()
+        const ext = safeFileExt(filename, 'jpg')
         const schoolPrefix = schoolId || 'global'
-        const filename = `question-images/${schoolPrefix}/${timestamp}-${Math.random().toString(36).substring(7)}.${ext}`
+        const key = `question-images/${schoolPrefix}/${timestamp}-${Math.random().toString(36).substring(7)}.${ext}`
 
-        // Convert to buffer
-        const arrayBuffer = await file.arrayBuffer()
-        const buffer = Buffer.from(arrayBuffer)
-
-        // Upload to Supabase Storage
-        const { data, error } = await supabase.storage
-            .from('uploads')
-            .upload(filename, buffer, {
-                contentType: file.type,
-                upsert: false
-            })
-
-        if (error) {
-            console.error('Upload error:', error)
-            return NextResponse.json({ error: 'Gagal upload file' }, { status: 500 })
-        }
-
-        // Get public URL
-        const { data: urlData } = supabase.storage
-            .from('uploads')
-            .getPublicUrl(filename)
+        const signedUrl = await presignR2PutUrl(key, contentType)
 
         return NextResponse.json({
-            url: urlData.publicUrl,
-            filename: filename
+            url: publicR2Url(key),
+            path: key,
+            filename: key,
+            signedUrl
         })
     } catch (error) {
-        console.error('Error uploading question image:', error)
+        console.error('Error presigning question image upload:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
     }
 }

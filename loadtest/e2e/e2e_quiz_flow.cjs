@@ -225,15 +225,22 @@ async function main() {
 
     // ---------- 9. [D] KOREKSI MANUAL + NOTIFIKASI NILAI_KELUAR ----------
     console.log('[9] Koreksi manual essay + notifikasi Nilai Keluar')
-    const gradedAnswers = submitBody.answers.map(a =>
-        a.question_id === qIds['Essay'] ? { ...a, answer: a.answer || '-', is_correct: null, score: 20 > 20 ? 10 : 10, feedback: 'Jawaban cukup' } : a
-    )
+    // Esai belum ada di answers (siswa hanya mengirim 2 MC) — koreksi guru
+    // menambah baris nilai esai. total_score sengaja INKONSISTEN (35) untuk
+    // membuktikan rekonsiliasi server-side K2: total dihitung ulang dari
+    // jumlah skor jawaban ter-clamp, payload client tidak dipercaya (paritas
+    // exam-submissions / official-exam-submissions).
+    const gradedAnswers = [
+        ...submitBody.answers,
+        { question_id: qIds['Essay'], answer: 'esai siswa', is_correct: null, score: 10, feedback: 'Jawaban cukup' },
+    ]
     const gradeRes = await api(`/api/quiz-submissions/${sub1Id}`, guruTok, {
-        method: 'PUT', body: JSON.stringify({ answers: gradedAnswers, total_score: 30, is_graded: true }),
+        method: 'PUT', body: JSON.stringify({ answers: gradedAnswers, total_score: 35, is_graded: true }),
     })
     check('Grading PUT sukses', gradeRes.status === 200, `status ${gradeRes.status}`)
     const { data: subGraded } = await supabase.from('quiz_submissions').select('total_score, is_graded').eq('id', sub1Id).single()
-    check('Nilai tersimpan (30/40, is_graded=true)', subGraded?.total_score === 30 && subGraded?.is_graded === true, `total=${subGraded?.total_score}`)
+    // MC benar 10 + MC salah 0 + esai 10 = 20 (bukan 35 dari client)
+    check('Nilai direkonsiliasi server (20/40, is_graded=true) — total client 35 diabaikan', subGraded?.total_score === 20 && subGraded?.is_graded === true, `total=${subGraded?.total_score}`)
     await new Promise(r => setTimeout(r, 500))
     const { count: nilaiNotif } = await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', siswaA.user.id).eq('type', 'NILAI_KELUAR')
     check('Notifikasi NILAI_KELUAR terkirim saat koreksi selesai', (nilaiNotif || 0) === 1, `count=${nilaiNotif}`)

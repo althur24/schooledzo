@@ -4,8 +4,8 @@
  *
  * - processCroppedImage: crop area (koordinat px pada gambar hasil rotasi)
  *   → canvas → batasi dimensi → kompresi → File siap upload.
- * - uploadQuestionImage: POST ke /api/questions/upload-image (endpoint yang
- *   sudah ada, tidak diubah).
+ * - uploadQuestionImage: presign via /api/questions/upload-image lalu PUT
+ *   langsung ke Cloudflare R2 (file tidak transit server).
  */
 
 export interface CropArea {
@@ -114,21 +114,39 @@ export async function processCroppedImage(
 }
 
 /**
- * Upload gambar soal ke endpoint yang sudah ada.
- * Melempar Error dengan pesan server bila gagal.
+ * Upload gambar soal: presign via /api/questions/upload-image lalu PUT
+ * langsung ke R2 (file tidak transit server). Melempar Error dengan pesan
+ * server bila gagal.
  */
-export async function uploadQuestionImage(file: File): Promise<{ url: string; filename: string }> {
-    const formData = new FormData()
-    formData.append('file', file)
+const MAX_UPLOAD_SIZE = 5 * 1024 * 1024 // paritas batas 5MB route lama
 
-    const res = await fetch('/api/questions/upload-image', {
+export async function uploadQuestionImage(file: File): Promise<{ url: string; filename: string }> {
+    if (file.size > MAX_UPLOAD_SIZE) {
+        throw new Error('Ukuran file maksimal 5MB')
+    }
+
+    const signRes = await fetch('/api/questions/upload-image', {
         method: 'POST',
-        body: formData
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, contentType: file.type })
     })
 
-    if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
+    if (!signRes.ok) {
+        const data = await signRes.json().catch(() => ({}))
         throw new Error(data.error || 'Gagal upload gambar')
     }
-    return res.json()
+
+    const { signedUrl, url, filename } = await signRes.json()
+
+    const putRes = await fetch(signedUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file
+    })
+
+    if (!putRes.ok) {
+        throw new Error(`Gagal upload gambar (status ${putRes.status})`)
+    }
+
+    return { url, filename }
 }

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { presignR2PutUrl, publicR2Url, safeFileExt } from '@/lib/r2'
+
+// Presign upload file jawaban tugas siswa ke Cloudflare R2 (pola
+// /api/materials/upload): client PUT langsung ke R2 dengan progress — file
+// tidak transit server. Validasi ukuran 10MB tetap di client (FileUpload).
+// File lama tetap disajikan dari Supabase Storage (URL tersimpan penuh di DB).
 
 // Strict tanpa fallback anon (selaras src/lib/supabase.ts): fail-fast bila env hilang.
 // Route ini juga membaca tabel students — anon kini diblokir RLS.
@@ -26,8 +32,6 @@ const ALLOWED_MIME_TYPES = [
     'application/vnd.openxmlformats-officedocument.presentationml.presentation'
 ]
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
-
 export async function POST(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
@@ -38,69 +42,45 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const formData = await request.formData()
-        const file = formData.get('file') as File | null
+        const { filename, contentType } = await request.json()
 
-        if (!file) {
+        if (!filename) {
             return NextResponse.json({ error: 'File required' }, { status: 400 })
         }
 
-        if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-            return NextResponse.json({ error: `Tipe file tidak didukung: ${file.type}. Gunakan PDF, Gambar, atau Dokumen Office.` }, { status: 400 })
-        }
-
-        if (file.size > MAX_FILE_SIZE) {
-            return NextResponse.json({ error: 'File terlalu besar. Maksimal 10MB.' }, { status: 400 })
+        // Paritas dengan route lama: tipe yang tak dikenal browser ditolak
+        if (!contentType || !ALLOWED_MIME_TYPES.includes(contentType)) {
+            return NextResponse.json({ error: `Tipe file tidak didukung: ${contentType || '(kosong)'}. Gunakan PDF, Gambar, atau Dokumen Office.` }, { status: 400 })
         }
 
         // Generate distinctive path with school and student isolation
-        const fileExt = file.name.split('.').pop() || 'pdf'
+        const fileExt = safeFileExt(filename, 'pdf')
         const uniqueId = Math.random().toString(36).substring(2, 15)
         const timestamp = Date.now()
         const schoolPrefix = schoolId || 'global'
-        
+
         // Get student id for folder structure
         const { data: student } = await supabase
             .from('students')
             .select('id')
             .eq('user_id', user.id)
             .single()
-            
+
         const studentFolder = student ? student.id : 'unknown'
-        
+
         const storagePath = `${schoolPrefix}/tugas/${studentFolder}/${timestamp}-${uniqueId}.${fileExt}`
 
-        // Convert File to Buffer for server-side upload
-        const arrayBuffer = await file.arrayBuffer()
-        const buffer = Buffer.from(arrayBuffer)
-
-        const { error } = await supabase.storage
-            .from('submissions')
-            .upload(storagePath, buffer, {
-                contentType: file.type,
-                upsert: false
-            })
-
-        if (error) {
-            console.error('Submission Upload Error:', error)
-            return NextResponse.json({ error: error.message }, { status: 500 })
-        }
-
-        // Generate public URL for viewing
-        const { data: publicUrlData } = supabase.storage
-            .from('submissions')
-            .getPublicUrl(storagePath)
+        const signedUrl = await presignR2PutUrl(storagePath, contentType)
 
         return NextResponse.json({
-            url: publicUrlData.publicUrl,
+            url: publicR2Url(storagePath),
+            path: storagePath,
             filename: storagePath,
-            originalName: file.name,
-            size: file.size,
-            type: file.type
+            signedUrl
         })
 
-    } catch (error: any) {
-        console.error('Submission Upload Error:', error)
+    } catch (error: unknown) {
+        console.error('Submission Upload Presign Error:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })
     }
 }

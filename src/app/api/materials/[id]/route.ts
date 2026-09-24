@@ -3,6 +3,41 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch, notFound } from '@/lib/tenantGuard'
 import { archivedYearResponse } from '@/lib/academicYear'
+import { R2_PUBLIC_BASE_URL, deleteR2Object } from '@/lib/r2'
+
+// Best-effort: hapus file PDF materi dari storage. Upload baru ada di R2,
+// file lama di Supabase Storage bucket materials. Gagal hapus file tidak
+// membatalkan penghapusan materi (object yatim lebih aman daripada row hidup
+// tanpa file).
+//
+// Guard file-bersama: POST /api/materials menerima content_url arbitrary —
+// dua row bisa sah menunjuk URL yang sama (duplikat manual). File hanya
+// dihapus bila TIDAK ada row lain yang mereferensikannya.
+async function cleanupMaterialFile(contentUrl: string | null | undefined) {
+    if (!contentUrl) return
+    try {
+        const { count } = await supabase
+            .from('materials')
+            .select('id', { count: 'exact', head: true })
+            .eq('content_url', contentUrl)
+        if ((count || 0) > 0) return // masih dipakai row lain — jangan hapus file
+
+        if (contentUrl.startsWith(`${R2_PUBLIC_BASE_URL}/`)) {
+            const key = decodeURIComponent(contentUrl.substring(R2_PUBLIC_BASE_URL.length + 1))
+            if (key) await deleteR2Object(key)
+            return
+        }
+        const marker = '/storage/v1/object/public/materials/'
+        const idx = contentUrl.indexOf(marker)
+        if (idx === -1) return
+        const storagePath = decodeURIComponent(contentUrl.substring(idx + marker.length))
+        if (storagePath) {
+            await supabase.storage.from('materials').remove([storagePath])
+        }
+    } catch (err) {
+        console.error('Error cleaning up material file:', err)
+    }
+}
 
 // DELETE material
 export async function DELETE(
@@ -24,6 +59,8 @@ export async function DELETE(
             .from('materials')
             .select(`
                 id,
+                type,
+                content_url,
                 teaching_assignment:teaching_assignments(
                     teacher:teachers(user_id, school_id),
                     academic_year:academic_years(status)
@@ -61,6 +98,11 @@ export async function DELETE(
             .eq('id', id)
 
         if (error) throw error
+
+        // File PDF hanya di-upload untuk type PDF — cleanup setelah row hilang
+        if (material.type === 'PDF') {
+            await cleanupMaterialFile(material.content_url)
+        }
 
         return NextResponse.json({ success: true })
     } catch (error) {

@@ -49,13 +49,26 @@ export default function FileUpload({
     }
 
     const uploadFile = async (file: File) => {
-        const formData = new FormData()
-        formData.append('file', file)
+        // Sign upload (R2 presigned PUT) lalu PUT langsung dengan progress —
+        // file tidak transit server. Metadata attachment diambil dari File lokal.
+        const signRes = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: file.name, contentType: file.type })
+        })
+
+        if (!signRes.ok) {
+            const errData = await signRes.json().catch(() => ({}))
+            throw new Error(errData.error || 'Upload gagal')
+        }
+
+        const { signedUrl, url } = await signRes.json()
 
         return new Promise<SubmissionAttachment>((resolve, reject) => {
             const xhr = new XMLHttpRequest()
-            xhr.open('POST', uploadUrl)
-            
+            xhr.open('PUT', signedUrl)
+            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream')
+
             xhr.upload.onprogress = (event) => {
                 if (event.lengthComputable) {
                     const percentComplete = Math.round((event.loaded / event.total) * 100)
@@ -64,30 +77,20 @@ export default function FileUpload({
             }
 
             xhr.onload = () => {
-                if (xhr.status === 200) {
-                    try {
-                        const data = JSON.parse(xhr.responseText)
-                        resolve({
-                            url: data.url,
-                            name: data.originalName,
-                            type: data.type,
-                            size: data.size
-                        })
-                    } catch (e) {
-                        reject(new Error('Format respons tidak valid'))
-                    }
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve({
+                        url,
+                        name: file.name,
+                        type: file.type,
+                        size: file.size
+                    })
                 } else {
-                    try {
-                        const errData = JSON.parse(xhr.responseText)
-                        reject(new Error(errData.error || 'Upload gagal'))
-                    } catch (e) {
-                        reject(new Error('Gagal mengunggah file'))
-                    }
+                    reject(new Error(`Gagal mengunggah file (status ${xhr.status})`))
                 }
             }
 
             xhr.onerror = () => reject(new Error('Kesalahan jaringan saat upload'))
-            xhr.send(formData)
+            xhr.send(file)
         })
     }
 

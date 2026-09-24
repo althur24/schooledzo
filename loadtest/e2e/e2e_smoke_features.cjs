@@ -7,8 +7,16 @@
  * Skenario (fixture mandiri STG01, dibersihkan di akhir):
  *  [1]  Login per role via /api/auth/login (password fixture nyata, bcrypt)
  *  [2]  Materi rantai penuh: sign upload → PUT R2 (presigned) → create → scope kelas
- *       siswa & TA guru → public URL → DELETE → hilang
- *  [3]  Upload tugas online + audio (route strict service-key)
+ *       siswa & TA guru → public URL → DELETE → hilang + object R2 ikut terhapus
+ *  [2g] Guard file-bersama: 2 materi 1 content_url — hapus 1 file tetap hidup,
+ *       hapus semua baru file terhapus
+ *  [3]  Upload presign R2: tugas siswa + audio + gambar soal (sign JSON → PUT
+ *       langsung ke R2; role guard + validasi MIME paritas route lama)
+ *  [3d] Sanitasi ekstensi jahat → key R2 tetap bersih
+ *  [3e] Logo sekolah: upload R2 server-side → URL BARU per upload (anti
+ *       stale-cache CDN) → object lama terhapus + schools.logo_url ter-update
+ *  [3f] Passage: audio R2 → PUT ganti audio (object lama terhapus) → DELETE
+ *       passage (audio terhapus) + IDOR guard guru lain → 403
  *  [4]  Jadwal: admin POST schedule+entries → siswa GET student-schedule scoped
  *  [5]  Bank soal: guru POST → GET scope → PUT edit → DELETE
  *  [6]  Pengumuman: admin POST → siswa GET
@@ -33,11 +41,10 @@ let server = null
 const created = {
     users: [], teachers: [], students: [], sessions: [], classes: [],
     subjects: [], tas: [], materials: [], quizzes: [], questions: [],
-    submissions: [], enrollments: [], notifications: [],
+    submissions: [], enrollments: [], notifications: [], schools: [],
     exams: [], examQuestions: [], examSubmissions: [], examAnswers: [],
     officialExams: [], officialQuestions: [], officialSubmissions: [], officialAnswers: [],
-    schedules: [], announcements: [], questionBank: [],
-    storagePaths: [],
+    schedules: [], announcements: [], questionBank: [], passages: [],
     r2Keys: [],
 }
 const results = []
@@ -46,6 +53,31 @@ function check(name, cond, detail = '') {
     console.log(`  ${cond ? '✓' : '✗ FAIL'} — ${name}${detail ? ` (${detail})` : ''}`)
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+
+/**
+ * GET public URL R2 dengan retry untuk 524/timeout transient (edge Cloudflare
+ * sesekali timeout padahal object ada — terbukti saat pengembangan). 4xx tidak
+ * di-retry: 404 = object memang hilang (jawaban final). Return status akhir.
+ *
+ * Ini membuat asersi deterministik:
+ *  - "alive"  : pubStatus(url) === 200
+ *  - "terhapus": pubStatus(url) === 404 (bukan sekadar !== 200 — 524 sesaat
+ *    tidak boleh dihitung sebagai "terhapus")
+ */
+async function pubStatus(url, tries = 3) {
+    let last = 0
+    for (let i = 0; i < tries; i++) {
+        try {
+            const res = await fetch(url)
+            if (res.status < 500) return res.status
+            last = res.status
+        } catch (e) {
+            last = 0 // network error — treat seperti transient
+        }
+        if (i < tries - 1) await sleep(700)
+    }
+    return last
+}
 
 async function main() {
     const runId = Date.now() % 100000
@@ -160,13 +192,9 @@ async function main() {
             check('PUT file ke R2 (presigned URL) → 200', false, `fetch error: ${e.message} | cause: ${e.cause?.message || e.cause?.code || '?'}`)
         }
         if (sign.path) created.r2Keys.push(sign.path)
-        try {
-            const pub = await fetch(sign.publicUrl)
-            publicOk = pub.status === 200
-            check('public URL materi R2 bisa dibaca (paritas publicR2Url)', publicOk, `status ${pub.status}`)
-        } catch (e) {
-            check('public URL materi R2 bisa dibaca (paritas publicR2Url)', false, `fetch error: ${e.message} | cause: ${e.cause?.message || e.cause?.code || '?'}`)
-        }
+        const pubStat = await pubStatus(sign.publicUrl)
+        publicOk = pubStat === 200
+        check('public URL materi R2 bisa dibaca (paritas publicR2Url)', publicOk, `status ${pubStat}`)
     } else {
         check('PUT file ke R2 (presigned URL) → 200', false, 'sign gagal')
         check('public URL materi R2 bisa dibaca (paritas publicR2Url)', false, 'sign gagal')
@@ -202,48 +230,257 @@ async function main() {
     // 2e. Guru scope: guru A tidak melihat materi TA guru B
     const matGuruA = await (await api('/api/materials', tokGuruA)).json().catch(() => null)
     check('guru A tidak melihat materi TA guru B', (Array.isArray(matGuruA) ? matGuruA : []).every(m => m.teaching_assignment?.id !== taB.id))
-    // 2f. DELETE → hilang dari daftar siswa
+    // 2f. DELETE → hilang dari daftar siswa + file R2 ikut terhapus (cleanup)
     if (matA?.id) {
         const delRes = await api(`/api/materials/${matA.id}`, tokGuruA, { method: 'DELETE' })
         check('DELETE /api/materials/[id] → 200', delRes.status === 200, `status ${delRes.status}`)
         const after = await (await api('/api/materials', tokSiswaA)).json().catch(() => null)
         check('materi terhapus hilang dari daftar siswa', !(Array.isArray(after) ? after : []).some(m => m.id === matA.id))
+        // Cleanup file PDF: object R2 dihapus route → origin 404.
+        // Query param = cache key unik → bypass cache edge Cloudflare
+        // (custom domain R2 di-cache per ekstensi; fetch 2b tadi mengisi cache).
+        if (sign?.publicUrl && putOk) {
+            const pubAfter = await pubStatus(`${sign.publicUrl}?cek_hapus=${Date.now()}`)
+            check('object R2 materi terhapus dari storage (origin mati, bypass cache CDN)', pubAfter === 404, `status ${pubAfter}`)
+        }
     }
 
-    // ════════ [3] UPLOAD TUGAS ONLINE + AUDIO ════════
-    console.log('[3] Upload tugas online & audio (route strict service-key)')
-    // Route ini menerima FormData dengan field 'file' (server-side upload).
-    // PENTING: JANGAN set Content-Type untuk FormData (fetch yang generate multipart
-    // boundary) — makeApi default JSON header justru merusaknya.
+    // 2g. GUARD FILE-BERSAMA: dua materi menunjuk content_url sama — hapus satu,
+    // file TIDAK boleh ikut terhapus (row lain masih memakainya); hapus dua-duanya,
+    // file baru terhapus. POST /api/materials menerima content_url arbitrary
+    // (duplikat manual sah) — cleanup wajib cek referensi dulu.
     {
-        const postForm = (path, token, fd) => fetch(`${BASE}${path}`, {
-            method: 'POST',
-            headers: { Cookie: `session_token=${token}` },
-            body: fd,
+        const postMateri = async (tok, title, contentUrl, taId) => {
+            const r = await api('/api/materials', tok, {
+                method: 'POST',
+                body: JSON.stringify({ title, type: 'PDF', content_url: contentUrl, teaching_assignment_id: taId }),
+            })
+            const j = await r.json().catch(() => null)
+            return Array.isArray(j?.items) ? j.items[0] : (Array.isArray(j) ? j[0] : j)
+        }
+        const signG = await api('/api/materials/upload', tokGuruA, {
+            method: 'POST', body: JSON.stringify({ filename: 'materi-bersama.pdf', contentType: 'application/pdf' }),
         })
-        const fd = new FormData()
-        fd.append('file', new Blob([Buffer.from('smoke-tugas-jpg')], { type: 'image/jpeg' }), 'tugas-smoke.jpg')
-        let tugasRes = await postForm('/api/submissions/upload', tokSiswaA, fd)
-        let tugasBody = await tugasRes.json().catch(() => null)
-        const tugasOk = tugasRes.status === 200 && !!tugasBody?.url
-        check('POST /api/submissions/upload (FormData) → 200 + url', tugasOk, `status ${tugasRes.status} ${JSON.stringify(tugasBody)?.slice(0, 150)}`)
-        if (tugasBody?.url) {
-            const path = tugasBody.url.split('/object/public/submissions/')[1]
-            if (path) created.storagePaths.push('submissions:' + path)
+        const signGBody = await signG.json().catch(() => null)
+        let guardUrlOk = false
+        if (signGBody?.signedUrl) {
+            const putG = await fetch(signGBody.signedUrl, { method: 'PUT', headers: { 'Content-Type': 'application/pdf' }, body: Buffer.from('%PDF-bersama') })
+            guardUrlOk = putG.status === 200
+            created.r2Keys.push(signGBody.path)
+        }
+        check('2g: upload file bersama → PUT 200', guardUrlOk, `sign=${signG.status}`)
+        const matX = await postMateri(tokGuruA, `${U} Materi Bersama 1`, signGBody?.publicUrl, taA.id)
+        const matY = await postMateri(tokGuruA, `${U} Materi Bersama 2`, signGBody?.publicUrl, taA.id)
+        check('2g: dua materi file sama terbuat', !!matX?.id && !!matY?.id, `x=${!!matX?.id} y=${!!matY?.id}`)
+        if (matX?.id) created.materials.push(matX.id)
+        if (matY?.id) created.materials.push(matY.id)
+        if (matX?.id && matY?.id && signGBody?.publicUrl) {
+            const delX = await api(`/api/materials/${matX.id}`, tokGuruA, { method: 'DELETE' })
+            check('2g: DELETE materi pertama → 200', delX.status === 200, `status ${delX.status}`)
+            const g1 = await pubStatus(`${signGBody.publicUrl}?cek_g1=${Date.now()}`)
+            check('2g: file MASIH hidup (dipakai materi kedua — guard jalan)', g1 === 200, `status ${g1}`)
+            const delY = await api(`/api/materials/${matY.id}`, tokGuruA, { method: 'DELETE' })
+            check('2g: DELETE materi kedua → 200', delY.status === 200, `status ${delY.status}`)
+            const g2 = await pubStatus(`${signGBody.publicUrl}?cek_g2=${Date.now()}`)
+            check('2g: file terhapus setelah referensi terakhir hilang', g2 === 404, `status ${g2}`)
+        }
+    }
+
+    // ════════ [3] UPLOAD TUGAS ONLINE + AUDIO (PRESIGN R2) ════════
+    console.log('[3] Upload tugas online & audio (presign JSON → PUT R2)')
+    // Semua route upload non-materi kini presign (pola /api/materials/upload):
+    // client PUT langsung ke R2 — file tidak transit server.
+    {
+        // 3a. Tugas siswa: sign → PUT → public URL hidup
+        const signTugasRes = await api('/api/submissions/upload', tokSiswaA, {
+            method: 'POST', body: JSON.stringify({ filename: 'tugas-smoke.jpg', contentType: 'image/jpeg' }),
+        })
+        const signTugas = await signTugasRes.json().catch(() => null)
+        check('POST /api/submissions/upload sign (JSON) → 200 + signedUrl', signTugasRes.status === 200 && !!signTugas?.signedUrl, `status ${signTugasRes.status} ${JSON.stringify(signTugas)?.slice(0, 150)}`)
+        if (signTugas?.signedUrl) {
+            try {
+                const put = await fetch(signTugas.signedUrl, { method: 'PUT', headers: { 'Content-Type': 'image/jpeg' }, body: Buffer.from('smoke-tugas-jpg') })
+                check('PUT tugas ke R2 (presigned URL) → 200', put.status === 200, `status ${put.status}`)
+            } catch (e) {
+                check('PUT tugas ke R2 (presigned URL) → 200', false, `fetch error: ${e.message}`)
+            }
+            const pubTugas = await pubStatus(signTugas.url)
+            check('public URL tugas R2 bisa dibaca', pubTugas === 200, `status ${pubTugas}`)
+            if (signTugas.path) created.r2Keys.push(signTugas.path)
+        }
+        // Role guard paritas route lama: GURU tidak boleh presign upload tugas siswa
+        const signTugasTolak = await api('/api/submissions/upload', tokGuruA, {
+            method: 'POST', body: JSON.stringify({ filename: 'x.jpg', contentType: 'image/jpeg' }),
+        })
+        check('POST /api/submissions/upload oleh GURU → 401', signTugasTolak.status === 401, `status ${signTugasTolak.status}`)
+
+        // 3b. Audio listening guru: sign → PUT
+        const signAudioRes = await api('/api/audio/upload', tokGuruA, {
+            method: 'POST', body: JSON.stringify({ filename: 'audio-smoke.mp3', contentType: 'audio/mpeg' }),
+        })
+        const signAudio = await signAudioRes.json().catch(() => null)
+        check('POST /api/audio/upload sign (JSON) → 200 + signedUrl', signAudioRes.status === 200 && !!signAudio?.signedUrl, `status ${signAudioRes.status} ${JSON.stringify(signAudio)?.slice(0, 150)}`)
+        if (signAudio?.signedUrl) {
+            try {
+                const put = await fetch(signAudio.signedUrl, { method: 'PUT', headers: { 'Content-Type': 'audio/mpeg' }, body: Buffer.from('smoke-audio-mp3') })
+                check('PUT audio ke R2 (presigned URL) → 200', put.status === 200, `status ${put.status}`)
+            } catch (e) {
+                check('PUT audio ke R2 (presigned URL) → 200', false, `fetch error: ${e.message}`)
+            }
+            if (signAudio.path) created.r2Keys.push(signAudio.path)
+        }
+        // Validasi MIME paritas route lama: tipe tak dikenal ditolak
+        const signAudioBad = await api('/api/audio/upload', tokGuruA, {
+            method: 'POST', body: JSON.stringify({ filename: 'x.exe', contentType: 'application/x-msdownload' }),
+        })
+        check('POST /api/audio/upload tipe tak didukung → 400', signAudioBad.status === 400, `status ${signAudioBad.status}`)
+
+        // 3c. Gambar soal: sign → PUT (dipakai uploadQuestionImage untuk
+        // QuestionImageUpload / QuestionOptionsEditor / RichTextEditor)
+        const signImgRes = await api('/api/questions/upload-image', tokGuruA, {
+            method: 'POST', body: JSON.stringify({ filename: 'soal-smoke.jpg', contentType: 'image/jpeg' }),
+        })
+        const signImg = await signImgRes.json().catch(() => null)
+        check('POST /api/questions/upload-image sign (JSON) → 200 + signedUrl', signImgRes.status === 200 && !!signImg?.signedUrl, `status ${signImgRes.status} ${JSON.stringify(signImg)?.slice(0, 150)}`)
+        if (signImg?.signedUrl) {
+            try {
+                const put = await fetch(signImg.signedUrl, { method: 'PUT', headers: { 'Content-Type': 'image/jpeg' }, body: Buffer.from('smoke-soal-jpg') })
+                check('PUT gambar soal ke R2 (presigned URL) → 200', put.status === 200, `status ${put.status}`)
+            } catch (e) {
+                check('PUT gambar soal ke R2 (presigned URL) → 200', false, `fetch error: ${e.message}`)
+            }
+            const pubImg = await pubStatus(`${signImg.url}?cek=${Date.now()}`)
+            check('public URL gambar soal R2 bisa dibaca', pubImg === 200, `status ${pubImg}`)
+            if (signImg.filename) created.r2Keys.push(signImg.filename)
+        }
+        // Validasi MIME gambar paritas route lama
+        const signImgBad = await api('/api/questions/upload-image', tokGuruA, {
+            method: 'POST', body: JSON.stringify({ filename: 'x.pdf', contentType: 'application/pdf' }),
+        })
+        check('POST /api/questions/upload-image tipe non-gambar → 400', signImgBad.status === 400, `status ${signImgBad.status}`)
+
+        // 3d. Sanitasi ekstensi jahat: "file.mp3/x" → key tetap bersih (fallback ext)
+        const signJahat = await api('/api/audio/upload', tokGuruA, {
+            method: 'POST', body: JSON.stringify({ filename: 'jahat.mp3/../../logos/x', contentType: 'audio/mpeg' }),
+        })
+        const jahat = await signJahat.json().catch(() => null)
+        const jahatBersih = signJahat.status === 200 && !!jahat?.path?.match(/\/audio\/\d+-[a-z0-9]+\.[a-z0-9]{1,8}$/)
+        check('ekstensi jahat disanitasi → key R2 bersih', jahatBersih, `path=${jahat?.path}`)
+        if (jahat?.path) created.r2Keys.push(jahat.path)
+    }
+
+    // ════════ [3e] LOGO SEKOLAH (server-side R2 + anti stale-cache CDN) ════════
+    console.log('[3e] Logo sekolah: upload R2 → URL baru per upload → object lama terhapus')
+    {
+        const schoolFix = await mustInsert(supabase, 'schools', { name: `${U} Logo School`, code: `LG${runId}`, school_level: 'SMP' }, 'school logo fixture')
+        created.schools.push(schoolFix.id)
+
+        const superUser = await mustInsert(supabase, 'users', { username: `${U}_super`, full_name: `${U} Super`, password_hash: passHash, role: 'SUPER_ADMIN', school_id: null }, 'user super')
+        created.users.push(superUser.id)
+        const tokSuper = (await mustInsert(supabase, 'sessions', { user_id: superUser.id, token: `${U}_tok_super`, expires_at: new Date(Date.now() + 86400e3).toISOString() }, 'session super')).token
+        created.sessions.push(tokSuper)
+
+        const postLogo = (pngBody) => {
+            const fd = new FormData()
+            fd.append('logo', new Blob([Buffer.from(pngBody)], { type: 'image/png' }), `logo-${runId}.png`)
+            return fetch(`${BASE}/api/schools/${schoolFix.id}/logo`, {
+                method: 'POST',
+                headers: { Cookie: `session_token=${tokSuper}` },
+                body: fd,
+            })
         }
 
-        const mkAudioFd = () => {
-            const f = new FormData()
-            f.append('file', new Blob([Buffer.from('smoke-audio-mp3')], { type: 'audio/mpeg' }), 'audio-smoke.mp3')
-            return f
+        // Upload pertama
+        const logo1Res = await postLogo('PNG-logo-1')
+        const logo1 = await logo1Res.json().catch(() => null)
+        const logo1Ok = logo1Res.status === 200 && !!logo1?.logo_url?.startsWith(process.env.R2_PUBLIC_BASE_URL + '/')
+        check('POST logo (SUPER_ADMIN) → 200 + logo_url R2', logo1Ok, `status ${logo1Res.status} ${logo1?.logo_url || ''}`)
+        if (logo1?.logo_url) {
+            const key = logo1.logo_url.substring((process.env.R2_PUBLIC_BASE_URL + '/').length)
+            created.r2Keys.push(decodeURIComponent(key))
+            const pubLogo = await pubStatus(`${logo1.logo_url}?cek=${Date.now()}`)
+            check('object logo R2 bisa dibaca', pubLogo === 200, `status ${pubLogo}`)
         }
-        let audioRes = await postForm('/api/audio/upload', tokGuruA, mkAudioFd())
-        let audioBody = await audioRes.json().catch(() => null)
-        const audioOk = audioRes.status === 200 && !!audioBody?.url
-        check('POST /api/audio/upload (FormData) → 200 + url', audioOk, `status ${audioRes.status} ${JSON.stringify(audioBody)?.slice(0, 150)}`)
-        if (audioBody?.url) {
-            const path = audioBody.url.split('/object/public/materials/')[1]
-            if (path) created.storagePaths.push('materials:' + path)
+
+        // Role guard paritas route lama: ADMIN biasa → 403
+        const logoTolak = await fetch(`${BASE}/api/schools/${schoolFix.id}/logo`, {
+            method: 'POST',
+            headers: { Cookie: `session_token=${tokAdmin}` },
+            body: (() => { const fd = new FormData(); fd.append('logo', new Blob([Buffer.from('x')], { type: 'image/png' }), 'x.png'); return fd })(),
+        })
+        check('POST logo oleh ADMIN → 403', logoTolak.status === 403, `status ${logoTolak.status}`)
+
+        // Upload kedua → URL BARU (cache-bust CDN) + object lama dihapus
+        const logo2Res = await postLogo('PNG-logo-2')
+        const logo2 = await logo2Res.json().catch(() => null)
+        check('upload logo kedua → logo_url BARU (anti stale-cache CDN)', logo2Res.status === 200 && !!logo2?.logo_url && logo2.logo_url !== logo1?.logo_url, `status ${logo2Res.status}`)
+        if (logo2?.logo_url) {
+            const key = logo2.logo_url.substring((process.env.R2_PUBLIC_BASE_URL + '/').length)
+            created.r2Keys.push(decodeURIComponent(key))
+        }
+        // schools.logo_url kini menunjuk logo baru
+        const { data: schoolAfter } = await supabase.from('schools').select('logo_url').eq('id', schoolFix.id).single()
+        check('schools.logo_url ter-update ke logo baru', schoolAfter?.logo_url === logo2?.logo_url, `db=${schoolAfter?.logo_url?.slice(-20)} resp=${logo2?.logo_url?.slice(-20)}`)
+        if (logo1?.logo_url) {
+            const pubOld = await pubStatus(`${logo1.logo_url}?cek_hapus=${Date.now()}`)
+            check('object logo PERTAMA terhapus dari R2 (origin, bypass cache)', pubOld === 404, `status ${pubOld}`)
+        }
+    }
+
+    // ════════ [3f] PASSAGES: audio R2 → ganti audio (lama terhapus) → DELETE ════════
+    console.log('[3f] Passage: audio R2, replace, delete, IDOR guard, cleanup object')
+    {
+        const signAudio = async (label) => {
+            const r = await api('/api/audio/upload', tokGuruA, {
+                method: 'POST', body: JSON.stringify({ filename: `passage-${label}.mp3`, contentType: 'audio/mpeg' }),
+            })
+            const b = await r.json().catch(() => null)
+            if (b?.signedUrl) {
+                await fetch(b.signedUrl, { method: 'PUT', headers: { 'Content-Type': 'audio/mpeg' }, body: Buffer.from(`passage-audio-${label}`) })
+                if (b.path) created.r2Keys.push(b.path)
+            }
+            return b
+        }
+        const audioA = await signAudio('a')
+        const audioB = await signAudio('b')
+        check('3f: dua audio R2 ter-upload', !!audioA?.url && !!audioB?.url, `a=${!!audioA?.url} b=${!!audioB?.url}`)
+
+        const mkQ = (n) => ({ question_text: `Pertanyaan ${n}`, question_type: 'MULTIPLE_CHOICE', options: ['A', 'B'], correct_answer: 'A' })
+        const createRes = await api('/api/passages', tokGuruA, {
+            method: 'POST',
+            body: JSON.stringify({
+                title: `${U} Passage R2`, passage_text: 'Teks bacaan uji cleanup audio R2',
+                subject_id: subject.id, audio_url: audioA?.url, questions: [mkQ(1), mkQ(2)],
+            }),
+        })
+        const passage = await createRes.json().catch(() => null)
+        check('3f: POST /api/passages (audio R2) → 200', createRes.status === 200 && !!passage?.id, `status ${createRes.status}`)
+        if (passage?.id) created.passages.push(passage.id)
+
+        // IDOR: guru B tidak boleh menghapus passage guru A
+        if (passage?.id) {
+            const idor = await api(`/api/passages?id=${passage.id}`, tokGuruB, { method: 'DELETE' })
+            check('3f: DELETE passage oleh guru lain → 403', idor.status === 403, `status ${idor.status}`)
+        }
+
+        // Ganti audio → object lama terhapus (cleanup fire-and-forget: beri jeda)
+        if (passage?.id) {
+            const putRes = await api(`/api/passages?id=${passage.id}`, tokGuruA, {
+                method: 'PUT',
+                body: JSON.stringify({ title: `${U} Passage R2`, passage_text: 'Teks bacaan uji cleanup audio R2', audio_url: audioB?.url }),
+            })
+            check('3f: PUT passage ganti audio → 200', putRes.status === 200, `status ${putRes.status}`)
+            await sleep(800)
+            const aStat = await pubStatus(`${audioA.url}?cek_p1=${Date.now()}`)
+            const bStat = await pubStatus(`${audioB.url}?cek_p2=${Date.now()}`)
+            check('3f: audio LAMA terhapus dari R2 saat diganti', aStat === 404, `status ${aStat}`)
+            check('3f: audio BARU tetap hidup', bStat === 200, `status ${bStat}`)
+
+            const delRes = await api(`/api/passages?id=${passage.id}`, tokGuruA, { method: 'DELETE' })
+            check('3f: DELETE passage → 200', delRes.status === 200, `status ${delRes.status}`)
+            await sleep(800)
+            const bStat2 = await pubStatus(`${audioB.url}?cek_p3=${Date.now()}`)
+            check('3f: audio passage terhapus dari R2 saat passage dihapus', bStat2 === 404, `status ${bStat2}`)
         }
     }
 
@@ -482,12 +719,7 @@ async function cleanup() {
     console.log('\ncleanup...')
     const del = (t, ids) => ids.length ? supabase.from(t).delete().in('id', ids) : Promise.resolve()
     const delBy = (t, col, ids) => ids.length ? supabase.from(t).delete().in(col, ids) : Promise.resolve()
-    // storage objects (prefix bucket per jenis: audio → materials Supabase, tugas → submissions)
-    for (const p of created.storagePaths) {
-        if (p.startsWith('materials:')) await supabase.storage.from('materials').remove([p.slice(9)]).catch(() => { })
-        else if (p.startsWith('submissions:')) await supabase.storage.from('submissions').remove([p.slice(11)]).catch(() => { })
-    }
-    // R2 objects (upload materi via presigned PUT ke Cloudflare R2)
+    // R2 objects (semua upload via presigned PUT ke Cloudflare R2)
     if (created.r2Keys.length && process.env.R2_ACCESS_KEY_ID) {
         const { S3Client, DeleteObjectsCommand } = require('@aws-sdk/client-s3')
         const r2 = new S3Client({
@@ -516,6 +748,8 @@ async function cleanup() {
     await del('schedules', created.schedules)
     await del('announcements', created.announcements)
     await del('question_bank', created.questionBank)
+    await delBy('question_bank', 'passage_id', created.passages)
+    await del('question_passages', created.passages)
     await del('materials', created.materials)
     for (const uid of created.users) await supabase.from('notifications').delete().eq('user_id', uid)
     await del('sessions', created.sessions)
@@ -526,6 +760,7 @@ async function cleanup() {
     await del('classes', created.classes)
     await del('subjects', created.subjects)
     await del('users', created.users)
+    await del('schools', created.schools)
     console.log('cleanup selesai')
 }
 

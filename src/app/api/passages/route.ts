@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
+import { R2_PUBLIC_BASE_URL, deleteR2Object } from '@/lib/r2'
 
 const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,7 +13,13 @@ const supabase = createClient(
 async function deleteAudioFromStorage(audioUrl: string | null | undefined) {
     if (!audioUrl) return
     try {
-        // Extract path from public URL: .../storage/v1/object/public/materials/PATH
+        // File baru: URL publik R2 → hapus object R2
+        if (audioUrl.startsWith(`${R2_PUBLIC_BASE_URL}/`)) {
+            const key = decodeURIComponent(audioUrl.substring(R2_PUBLIC_BASE_URL.length + 1))
+            if (key) await deleteR2Object(key)
+            return
+        }
+        // File lama: URL publik Supabase Storage → hapus dari bucket materials
         const marker = '/storage/v1/object/public/materials/'
         const idx = audioUrl.indexOf(marker)
         if (idx === -1) return

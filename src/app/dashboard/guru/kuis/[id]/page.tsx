@@ -2026,17 +2026,25 @@ function EditQuizPageInner() {
                                                     }
                                                     setUploadingAudio(true)
                                                     try {
-                                                        const formData = new FormData()
-                                                        formData.append('file', file)
-                                                        const res = await fetch('/api/audio/upload', {
+                                                        // Sign upload → PUT langsung ke R2 (file tidak transit server)
+                                                        const signRes = await fetch('/api/audio/upload', {
                                                             method: 'POST',
-                                                            body: formData
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({ filename: file.name, contentType: file.type })
                                                         })
-                                                        if (!res.ok) {
-                                                            const err = await res.json()
+                                                        if (!signRes.ok) {
+                                                            const err = await signRes.json().catch(() => ({}))
                                                             throw new Error(err.error || 'Upload gagal')
                                                         }
-                                                        const { url } = await res.json()
+                                                        const { signedUrl, url } = await signRes.json()
+                                                        const putRes = await fetch(signedUrl, {
+                                                            method: 'PUT',
+                                                            headers: { 'Content-Type': file.type },
+                                                            body: file
+                                                        })
+                                                        if (!putRes.ok) {
+                                                            throw new Error(`Gagal upload audio (status ${putRes.status})`)
+                                                        }
                                                         setPassageAudioUrl(url)
                                                     } catch (err: any) {
                                                         console.error('Audio upload error:', err)

@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
+import { putR2Object, publicR2Url, deleteR2Object, safeFileExt, R2_PUBLIC_BASE_URL } from '@/lib/r2'
 
 /**
  * POST /api/schools/[id]/logo
- * Upload school logo (SUPER_ADMIN only)
- * Accepts multipart/form-data with 'logo' file field
+ * Upload school logo (SUPER_ADMIN only) — file kecil (maks 2MB) tetap transit
+ * server, disimpan ke Cloudflare R2. Accepts multipart/form-data with 'logo'
+ * file field.
+ *
+ * Key SELALU unik per upload (bukan overwrite): custom domain R2 di-cache
+ * Cloudflare per ekstensi file — URL sama akan menyajikan logo LAMA sampai
+ * edge TTL habis. URL baru = cache key baru = logo langsung terlihat.
+ * Object lama dihapus best-effort setelah row ter-update.
  */
 export async function POST(
     request: NextRequest,
@@ -39,26 +46,27 @@ export async function POST(
             return NextResponse.json({ error: 'Ukuran file maksimal 2MB' }, { status: 400 })
         }
 
-        const ext = file.name.split('.').pop() || 'png'
-        const storagePath = `logos/${schoolId}.${ext}`
+        const ext = safeFileExt(file.name, 'png')
+        const storagePath = `logos/${schoolId}/${Date.now()}-${Math.random().toString(36).substring(2, 10)}.${ext}`
 
-        // Upload to Supabase storage
+        // Ambil logo lama SEBELUM update row (untuk cleanup object setelahnya)
+        const { data: schoolRow } = await supabase
+            .from('schools')
+            .select('logo_url')
+            .eq('id', schoolId)
+            .single()
+        const oldLogoUrl = schoolRow?.logo_url || null
+
+        // Upload to R2
         const buffer = Buffer.from(await file.arrayBuffer())
-        const { error: uploadError } = await supabase.storage
-            .from('uploads')
-            .upload(storagePath, buffer, {
-                contentType: file.type,
-                upsert: true // overwrite existing logo
-            })
+        try {
+            await putR2Object(storagePath, buffer, file.type)
+        } catch (uploadError) {
+            console.error('Error uploading logo to R2:', uploadError)
+            return NextResponse.json({ error: 'Gagal upload logo' }, { status: 500 })
+        }
 
-        if (uploadError) throw uploadError
-
-        // Get public URL
-        const { data: urlData } = supabase.storage
-            .from('uploads')
-            .getPublicUrl(storagePath)
-
-        const logo_url = urlData.publicUrl
+        const logo_url = publicR2Url(storagePath)
 
         // Update school record
         const { error: updateError } = await supabase
@@ -67,6 +75,17 @@ export async function POST(
             .eq('id', schoolId)
 
         if (updateError) throw updateError
+
+        // Best-effort: hapus object logo lama di R2 (URL Supabase lama dibiarkan —
+        // bucket uploads masih dipakai file lama lain). Gagal hapus ≠ gagal upload.
+        if (oldLogoUrl && oldLogoUrl.startsWith(`${R2_PUBLIC_BASE_URL}/`)) {
+            const oldKey = decodeURIComponent(oldLogoUrl.substring(R2_PUBLIC_BASE_URL.length + 1))
+            if (oldKey) {
+                deleteR2Object(oldKey).catch(err => {
+                    console.error('Gagal hapus logo R2 lama:', err)
+                })
+            }
+        }
 
         return NextResponse.json({ logo_url })
     } catch (error) {
