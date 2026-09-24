@@ -265,10 +265,12 @@ export default function SiswaUlanganPage() {
                                 {officialExams.map((exam) => {
                                     const { status, label, color, icon: StatusIcon } = getOfficialExamStatus(exam)
                                     const submission = officialSubmissions.find(s => s.exam_id === exam.id)
-                                    // Tombol tidak disembunyikan berdasar jam HP (rawan salah jika jam ngaco):
-                                    // selama belum terkumpulkan, tampilkan tombol — server yang menolak
-                                    // dengan pesan jelas jika memang belum dibuka / sudah berakhir.
-                                    const canStart = status !== 'submitted' && status !== 'expired_open'
+                                    // Tombol aktif hanya saat benar-benar bisa dikerjakan ('available' /
+                                    // 'in_progress'). 'scheduled' & 'ended' tampil DISABLED — keluhan guru:
+                                    // ujian sudah lewat masa tapi tombol "Mulai Ujian" tetap tampil aktif.
+                                    // Status dievaluasi tiap detik dari jam HP; server tetap gate otoritatif
+                                    // bila jam device meleset.
+                                    const canStart = status === 'available' || status === 'in_progress'
 
                                     return (
                                         <div key={exam.id} className="bg-white dark:bg-surface-dark border-2 border-indigo-300 dark:border-indigo-500/40 rounded-xl p-4 md:p-5 hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-500/10 transition-all">
@@ -350,7 +352,7 @@ export default function SiswaUlanganPage() {
                                                 )}
 
                                                 <div className="mt-auto pt-2">
-                                                    {canStart && (
+                                                    {canStart ? (
                                                         <Link
                                                             href={`/dashboard/siswa/uts-uas/${exam.id}`}
                                                             className="w-full block text-center px-5 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30 hover:scale-[1.02] transition-all"
@@ -360,7 +362,36 @@ export default function SiswaUlanganPage() {
                                                                 {status === 'in_progress' ? 'Lanjutkan Ujian' : 'Mulai Ujian'}
                                                             </div>
                                                         </Link>
-                                                    )}
+                                                    ) : status === 'scheduled' || status === 'ended' ? (
+                                                        <button
+                                                            type="button"
+                                                            disabled
+                                                            className="w-full block text-center px-5 py-3 bg-secondary/10 text-text-secondary dark:text-slate-400 rounded-xl font-bold cursor-not-allowed"
+                                                        >
+                                                            <div className="flex items-center justify-center gap-2">
+                                                                <TimeCircle set="bold" primaryColor="currentColor" size={20} />
+                                                                {status === 'scheduled' ? 'Belum Dibuka' : 'Waktu Sudah Berakhir'}
+                                                            </div>
+                                                        </button>
+                                                    ) : status === 'expired_open' ? (
+                                                        <Link
+                                                            href={`/dashboard/siswa/uts-uas/${exam.id}`}
+                                                            className="w-full block text-center px-5 py-3 bg-secondary/80 text-text-main dark:text-white rounded-xl font-bold hover:bg-secondary transition-all"
+                                                        >
+                                                            <div className="flex items-center justify-center gap-2">
+                                                                <Chart set="bold" primaryColor="currentColor" size={20} /> Lihat Hasil
+                                                            </div>
+                                                        </Link>
+                                                    ) : status === 'submitted' ? (
+                                                        <Link
+                                                            href={`/dashboard/siswa/uts-uas/${exam.id}/hasil`}
+                                                            className="w-full block text-center px-5 py-3 bg-secondary/10 text-primary-dark dark:text-primary rounded-xl font-bold hover:bg-secondary/20 transition-colors"
+                                                        >
+                                                            <div className="flex items-center justify-center gap-2">
+                                                                <Chart set="bold" primaryColor="currentColor" size={20} /> Lihat Detail Hasil
+                                                            </div>
+                                                        </Link>
+                                                    ) : null}
                                                 </div>
                                             </div>
                                         </div>
@@ -385,10 +416,12 @@ export default function SiswaUlanganPage() {
                                 {exams.map((exam) => {
                                     const { status, label, color, icon: StatusIcon } = getExamStatus(exam)
                                     const submission = submissions.find(s => s.exam_id === exam.id)
-                                    // Tombol tidak disembunyikan berdasar jam HP (rawan salah jika jam ngaco):
-                                    // selama belum terkumpulkan, tampilkan tombol — server yang menolak
-                                    // dengan pesan jelas jika memang belum dibuka / sudah berakhir.
-                                    const canStart = status !== 'submitted' && status !== 'expired_open'
+                                    // Tombol aktif hanya saat benar-benar bisa dikerjakan ('available' /
+                                    // 'in_progress'). 'scheduled' & 'ended' tampil DISABLED — keluhan guru:
+                                    // ujian sudah lewat masa tapi tombol "Mulai" tetap tampil aktif.
+                                    // Status dievaluasi tiap detik dari jam HP; server tetap gate otoritatif
+                                    // bila jam device meleset.
+                                    const canStart = status === 'available' || status === 'in_progress'
 
                                     return (
                                         <div key={exam.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-4 md:p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all cursor-pointer">
@@ -465,7 +498,7 @@ export default function SiswaUlanganPage() {
                                                 )}
 
                                                 <div className="mt-auto pt-2">
-                                                    {canStart && (
+                                                    {canStart ? (
                                                         <Link
                                                             href={`/dashboard/siswa/ulangan/${exam.id}`}
                                                             className="w-full block text-center px-5 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl font-bold shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30 hover:scale-[1.02] transition-all"
@@ -475,6 +508,17 @@ export default function SiswaUlanganPage() {
                                                                 {status === 'in_progress' ? `Lanjutkan ${labels.ulangan}` : `Mulai ${labels.ulangan}`}
                                                             </div>
                                                         </Link>
+                                                    ) : (status === 'scheduled' || status === 'ended') && (
+                                                        <button
+                                                            type="button"
+                                                            disabled
+                                                            className="w-full block text-center px-5 py-3 bg-secondary/10 text-text-secondary dark:text-slate-400 rounded-xl font-bold cursor-not-allowed"
+                                                        >
+                                                            <div className="flex items-center justify-center gap-2">
+                                                                <TimeCircle set="bold" primaryColor="currentColor" size={20} />
+                                                                {status === 'scheduled' ? 'Belum Dibuka' : 'Waktu Sudah Berakhir'}
+                                                            </div>
+                                                        </button>
                                                     )}
                                                     {status === 'expired_open' && (
                                                         <Link
