@@ -321,7 +321,7 @@ export default function QuestionOptionsEditor({
                     <p className="text-xs text-text-secondary mt-2">
                         {gkGradingMode === 'ALL_OR_NOTHING'
                             ? 'Jawaban harus persis sama dengan kunci. Salah pilih satu atau kurang satu = 0 poin.'
-                            : 'Skor dihitung proporsional: benar N dari M kunci → N/M × poin soal. Contoh: benar 1 dari 3 kunci pada soal 10 poin = 3,33.'}
+                            : 'Skor proporsional: (benar − salah) / jumlah kunci × poin soal, minimum 0 — pilihan salah mengurangi skor. Contoh: 3 kunci, siswa benar 2 + salah 1 pada soal 10 poin = 3,33. Siswa hanya bisa memilih maksimal sebanyak jumlah kunci.'}
                     </p>
                 </div>
             )}

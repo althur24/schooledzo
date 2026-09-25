@@ -1060,6 +1060,22 @@ async function main() {
                 qaByQ[qIns[2].id]?.score === 6.67, qaByQ[qIns[2].id])
             check('Q2e: total = 11.67 (5+0+6.67, round-2)', qSub.total_score === 11.67, qSub.total_score)
 
+            // ── Q5: NILAI GURU — skor over-pick terbaca benar di view koreksi guru & hasil siswa ──
+            // GET /api/quiz-submissions/[id] = sumber data halaman koreksi guru (guru/kuis/[id]/hasil/[sid]).
+            const gDet = await api('GET', `/api/quiz-submissions/${qSub.id}`, null, guru)
+            const gAns = gDet.data?.answers || []
+            const gByQ = Object.fromEntries(gAns.map(a => [a.question_id, a]))
+            check('Q5a: GET koreksi guru 200 + 3 answers terbawa', gDet.status === 200 && gAns.length === 3, gDet.status)
+            check('Q5b: view koreksi guru — over-pick skor 5/0/6.67 (rumus baru, bukan 10/10/10)',
+                gByQ[qIns[0].id]?.score === 5 && gByQ[qIns[1].id]?.score === 0 && gByQ[qIns[2].id]?.score === 6.67,
+                gAns.map(a => a.score))
+            check('Q5c: view koreksi guru — total 11.67 + is_correct false utk over-pick (parsial ≠ benar)',
+                gDet.data?.total_score === 11.67 && gByQ[qIns[0].id]?.is_correct === false, { total: gDet.data?.total_score, s1: gByQ[qIns[0].id] })
+            // GET hasil siswa — konsisten dgn yang guru lihat
+            const sHasil = await api('GET', `/api/quiz-submissions?quiz_id=${quizQ.id}&student_id=${student.id}`, null, siswa)
+            check('Q5d: hasil siswa — total 11.67 konsisten dgn view guru',
+                Array.isArray(sHasil.data) && sHasil.data[0]?.total_score === 11.67, sHasil.data?.[0]?.total_score)
+
             // cleanup kuis cap
             await supabase.from('quiz_submissions').delete().eq('quiz_id', quizQ.id)
             await supabase.from('quiz_questions').delete().eq('quiz_id', quizQ.id)
