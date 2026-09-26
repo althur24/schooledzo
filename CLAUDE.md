@@ -110,7 +110,7 @@ REST API Supabase (PostgREST) **memotong hasil query diam-diam di 1000 baris** (
 - Query tabel yang bisa >1000 baris (students, submissions, grades, dll) **wajib** dibungkus `fetchAllRows` (`src/lib/fetchAllRows.ts`).
 - `.in(kolom, ids)` dengan ratusan id **wajib** `batchedIn` (`src/lib/batchedIn.ts`, belah per 100 id — batas URL 16KB).
 - Kombinasi keduanya (`batchedIn` + `fetchAllRows` per chunk) jika satu chunk bisa >1000 baris — pola `batchedFetchAll` di `src/app/api/dashboard/guru/warnings/route.ts`.
-- Query berisiko tapi tanpa `.order()` harus diberi order + tiebreaker unik (mis. `.order('id')`) sebelum dibungkus `fetchAllRows` — paginasi tanpa order stabil bisa melewatkan/duplikat baris.
+- Query berisiko tapi tanpa `.order()` harus diberi order + tiebreaker unik (mis. `.order('id')`) sebelum dibungkus `fetchAllRows` — paginasi tanpa order stabil bisa melewatkan/duplikat baris. **Bukti nyata (25 Sep 2026, Fisika XI KMP 1)**: query jawaban analytics tanpa order → 610 baris duplikat intermitten, 59/102 siswa bolong di heatmap (siswa nilai 100 tampak 11/25); run berikutnya normal — tanpa ORDER BY tiap halaman range-loop = eksekusi terpisah yang urutannya ikut execution plan per koneksi pooler. Fix: `.order('id')` di 2 route analytics + 4 jalur latent (notif enrollments UTS/UAS ×2, cascade delete, broadcast announcement) — e2e `scripts/e2e-analytics-pagination-staging.cjs` (45 siswa × 25 soal multi-halaman, 5× poll).
 - Aman tanpa helper: query dengan `.single()`/`.maybeSingle()`, filter `.eq('id', ...)`, atau tabel yang pasti kecil (classes, subjects, academic_years, schools).
 
 ## Ruang Ujian = ExamRunner (WAJIB — jangan divergen lagi)

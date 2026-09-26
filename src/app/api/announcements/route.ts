@@ -115,7 +115,10 @@ export async function POST(req: NextRequest) {
             }
 
             // fetchAllRows: sekolah besar punya >1000 siswa — query biasa terpotong
-            // diam-diam dan sebagian siswa tidak menerima notifikasi pengumuman
+            // diam-diam dan sebagian siswa tidak menerima notifikasi pengumuman.
+            // .order('id') wajib: paginasi tanpa order stabil dobel/melewatkan
+            // baris intermitten (siswa terlewat dari broadcast).
+            studentsQuery = studentsQuery.order('id')
             const students = await fetchAllRows(studentsQuery)
 
             if (students && students.length > 0) {

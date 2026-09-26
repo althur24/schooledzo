@@ -126,7 +126,12 @@ export async function GET(
 
         // 4) Fetch all answers (normalized table)
         // batchedIn per 100 submission id (batas URL) + fetchAllRows per chunk:
-        // 100 submission × puluhan soal bisa >1000 baris jawaban per chunk
+        // 100 submission × puluhan soal bisa >1000 baris jawaban per chunk.
+        // .order('id') WAJIB sebelum fetchAllRows: tanpa order stabil, halaman
+        // range-loop bisa dobel/melewatkan baris (urutan antar halaman ikut
+        // execution plan per koneksi) → heatmap/analitik soal kehilangan
+        // jawaban siswa secara intermitten (bug Fisika XI 25 Sep: 59/102
+        // siswa bolong, 610 baris duplikat).
         const submissionIds = allSubmissions.map(s => s.id)
         const allAnswers: any[] = await batchedIn(
             'submission_id', submissionIds,
@@ -136,6 +141,7 @@ export async function GET(
                         .from('official_exam_answers')
                         .select('submission_id, question_id, answer, is_correct, points_earned')
                         .in('submission_id', chunk)
+                        .order('id')
                 ),
                 error: null
             })

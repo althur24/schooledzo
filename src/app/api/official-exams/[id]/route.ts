@@ -211,13 +211,16 @@ export async function PUT(
 
                     // 1. Student Notifications
                     // fetchAllRows: UTS seangkatan/sekolah bisa >1000 enrollment — query
-                    // biasa terpotong diam-diam dan sebagian siswa tidak dinotifikasi
+                    // biasa terpotong diam-diam dan sebagian siswa tidak dinotifikasi.
+                    // .order('id') wajib: paginasi tanpa order stabil dobel/melewatkan
+                    // baris intermitten (siswa terlewat dari notifikasi).
                     const enrollments = await fetchAllRows(
                         supabase
                             .from('student_enrollments')
                             .select('student:students(user_id)')
                             .eq('academic_year_id', activeYear.id)
                             .in('class_id', data.target_class_ids)
+                            .order('id')
                     )
 
                     if (enrollments && enrollments.length > 0) {
@@ -322,13 +325,16 @@ export async function PUT(
                     .single()
 
                 if (activeYear) {
-                    // fetchAllRows: sama seperti notif aktivasi — roster >1000 terpotong diam-diam
+                    // fetchAllRows: sama seperti notif aktivasi — roster >1000 terpotong
+                    // diam-diam. .order('id') wajib: paginasi tanpa order stabil
+                    // dobel/melewatkan baris intermitten (siswa terlewat).
                     const enrollments = await fetchAllRows(
                         supabase
                             .from('student_enrollments')
                             .select('student:students(user_id)')
                             .eq('academic_year_id', activeYear.id)
                             .in('class_id', data.target_class_ids)
+                            .order('id')
                     )
 
                     const userIds = [...new Set(
@@ -395,11 +401,14 @@ export async function DELETE(
         //    (query biasa terpotong diam-diam); delete di-batch per 100 id karena satu
         //    .in() dengan ribuan id overflow URL. Error TIDAK boleh ditelan — answers
         //    yang tersisa membuat delete submissions gagal (FK constraint).
+        //    .order('id') wajib: submission terlewat oleh paginasi tak stabil =
+        //    answers orphan → delete submissions gagal FK → ujian setengah terhapus.
         const subs = await fetchAllRows<{ id: string }>(
             supabase
                 .from('official_exam_submissions')
                 .select('id')
                 .eq('exam_id', id)
+                .order('id')
         )
         const subIds = subs.map(s => s.id)
         for (let i = 0; i < subIds.length; i += IN_BATCH_SIZE) {
