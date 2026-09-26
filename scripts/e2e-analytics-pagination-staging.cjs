@@ -77,6 +77,7 @@ async function api(path, cookie) {
 
 async function cleanupAll() {
     // like '%e2pg_%' — tangkap prefix emoji ("📢 e2pg_...") yang tak cocok pola 'e2pg_%'
+    await supabase.from('announcements').delete().like('title', '%e2pg%')
     await supabase.from('notifications').delete().like('title', '%e2pg_%')
     for (const [answersT, subsT, examT, id] of [
         ['official_exam_answers', 'official_exam_submissions', 'official_exams', EX_OFFICIAL],
