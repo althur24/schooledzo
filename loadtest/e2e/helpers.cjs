@@ -139,8 +139,21 @@ function makeApi(baseUrl) {
 /**
  * Spawn `next start` dengan process group sendiri (detached), sehingga bisa
  * dimatikan penuh (npx + child next) TANPA pkill yang bisa membunuh proses lain.
+ *
+ * SERVER_LOG=<path> (opsional): pipe stdout/stderr server ke file — dipakai
+ * untuk diagnosis load test (error server-side tak terlihat bila stdio ignore).
  */
 function spawnServer(cwd, port, stdio = 'ignore') {
+    if (process.env.SERVER_LOG) {
+        const fs = require('fs')
+        try { fs.mkdirSync(require('path').dirname(process.env.SERVER_LOG), { recursive: true }) } catch { }
+        const fd = fs.openSync(process.env.SERVER_LOG, 'a')
+        return require('child_process').spawn('npx', ['next', 'start', '-p', String(port)], {
+            cwd,
+            detached: true,
+            stdio: ['ignore', fd, fd],
+        })
+    }
     return require('child_process').spawn('npx', ['next', 'start', '-p', String(port)], {
         cwd,
         detached: true,

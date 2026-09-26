@@ -14,16 +14,25 @@
  * (IP_FAIL_LIMIT=200).
  *
  * Jalankan: ENV_FILE=.env.staging N_STUDENTS=1000 node loadtest/e2e/load_login.cjs
+ *
+ * LOAD_BASE (opsional): target server REMOTE (mis. deployment Railway staging)
+ * — tanpa spawn `next start` lokal. Fixture tetap dibuat di DB ENV_FILE;
+ * assertServerDb memverifikasi target menunjuk DB yang sama (anti salah target).
+ * Jalankan: ENV_FILE=.env.staging LOAD_BASE=https://app.up.railway.app ...
  */
 require('./helpers.cjs').loadEnvGuarded()
 const { createClient } = require('@supabase/supabase-js')
 const http = require('http')
+const https = require('https')
 const bcrypt = require('bcrypt')
 const { spawnServer, stopServerSafe, waitPortUp, assertServerDb, nStudents } = require('./helpers.cjs')
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 const PORT = 3100
-const BASE = `http://localhost:${PORT}`
+// LOAD_BASE → remote (HTTPS via node:https, socket tak terbatas — paritas
+// pengukuran konkurensi dengan mode lokal). Tanpa LOAD_BASE → spawn lokal.
+const REMOTE_BASE = process.env.LOAD_BASE || null
+const BASE = REMOTE_BASE || `http://localhost:${PORT}`
 const N = nStudents(1000)
 const PASSWORD = 'LoginBench123!'
 // WAVE_MS: sebar mulai login dalam window ini (default 30 dtk — 1000 manusia
@@ -34,16 +43,19 @@ const WAVE_MS = process.env.SYNC === '1' ? 0 : parseInt(process.env.WAVE_MS || '
 const pct = (arr, p) => { if (!arr.length) return -1; const s = [...arr].sort((a, b) => a - b); return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))]) }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
-// HTTP POST via node:http dengan socket tak terbatas — fetch/undici punya
+// HTTP POST via node:http(s) dengan socket tak terbatas — fetch/undici punya
 // perilaku pool internal yang membiaskan pengukuran konkurensi setinggi ini.
 const httpAgent = new http.Agent({ keepAlive: false, maxSockets: Infinity })
+const httpsAgent = new https.Agent({ keepAlive: false, maxSockets: Infinity })
 function httpPost(path, body) {
     return new Promise((resolve) => {
         const t0 = Date.now()
         const payload = JSON.stringify(body)
-        const req = http.request({
-            host: '127.0.0.1', port: PORT, path, method: 'POST',
-            agent: httpAgent,
+        const url = new URL(BASE)
+        const isTls = url.protocol === 'https:'
+        const req = (isTls ? https : http).request({
+            host: url.hostname, port: url.port || (isTls ? 443 : 80), path, method: 'POST',
+            agent: isTls ? httpsAgent : httpAgent,
             headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
         }, (res) => {
             let raw = ''
@@ -87,10 +99,14 @@ async function main() {
     })), 'users')
 
     // ---- server ----
-    server = spawnServer(process.cwd(), PORT)
-    await waitPortUp(BASE)
-    await assertServerDb(BASE, true)
-    console.log(`server up (staging) — ${N} login serentak dari 1 IP...`)
+    await assertServerDb(BASE, !!(process.env.ENV_FILE || '').includes('staging'))
+    if (REMOTE_BASE) {
+        console.log(`target remote: ${BASE} — ${N} login serentak dari 1 IP...`)
+    } else {
+        server = spawnServer(process.cwd(), PORT)
+        await waitPortUp(BASE)
+        console.log(`server up (staging) — ${N} login serentak dari 1 IP...`)
+    }
 
     // ---- monitor /api/ping selama burst (deteksi event loop terblok) ----
     const pings = []
@@ -184,7 +200,7 @@ process.env.LL_PREFIX = `ll${runId}`
 main()
     .catch(e => { console.error('ERROR:', e.message); process.exitCode = 1 })
     .finally(async () => {
-        await stopServerSafe(server, BASE)
+        if (!REMOTE_BASE) await stopServerSafe(server, BASE)
         await cleanup()
         process.exit(process.exitCode || 0)
     })

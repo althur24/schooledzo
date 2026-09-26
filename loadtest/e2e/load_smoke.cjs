@@ -16,14 +16,23 @@ const { assertMin, mustInsert, spawnServer, stopServerSafe, waitPortUp } = requi
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 const PORT = 3100
-const BASE = `http://localhost:${PORT}`
+// LOAD_BASE (opsional): target server REMOTE (mis. Railway staging) — tanpa
+// spawn lokal. Fixture tetap di DB ENV_FILE; assertServerDb memverifikasi
+// target menunjuk DB yang sama (anti salah target production).
+const REMOTE_BASE = process.env.LOAD_BASE || null
+const BASE = REMOTE_BASE || `http://localhost:${PORT}`
 const N_STUDENTS = require('./helpers.cjs').nStudents(50)
 const DURATION_MS = 60 * 1000      // lama fase mengerjakan
 const SAVE_EVERY = [2000, 5000]    // autosave tiap 2-5 dtk (lebih rapat dari produksi: smoke)
 const NOTIF_EVERY_MS = 15000
 
-const metrics = { save: [], notif: [], start: [], submit: [], monitor: [], errors: 0, total: 0, statusHist: {} }
+const metrics = { save: [], notif: [], start: [], submit: [], monitor: [], errors: 0, total: 0, statusHist: {}, statusByTag: {} }
 function record(bucket, ms) { metrics[bucket].push(ms) }
+function recordTagStatus(bucket, status) {
+    if (!bucket) return
+    metrics.statusByTag[bucket] = metrics.statusByTag[bucket] || {}
+    metrics.statusByTag[bucket][status] = (metrics.statusByTag[bucket][status] || 0) + 1
+}
 function pct(arr, p) { if (!arr.length) return -1; const s = [...arr].sort((a, b) => a - b); return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))]) }
 function fmtPct(arr, p) { return arr.length ? `${pct(arr, p)}ms` : 'n/a (n=0)' }
 
@@ -32,11 +41,13 @@ const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
 
 let server = null
 async function startServer() {
+    await require('./helpers.cjs').assertServerDb(BASE, !!(process.env.ENV_FILE || '').includes('staging'))
+    if (REMOTE_BASE) return
     server = spawnServer(process.cwd(), PORT)
     await waitPortUp(BASE)
-    await require('./helpers.cjs').assertServerDb(BASE, !!(process.env.ENV_FILE || '').includes('staging'))
 }
 async function stopServer() {
+    if (REMOTE_BASE) return
     // hanya membunuh process group milik sendiri — bukan pkill yang bisa kena proses lain
     await stopServerSafe(server, BASE)
     server = null
@@ -53,13 +64,15 @@ async function api(path, opts, token, bucket) {
         metrics.total++
         metrics.statusHist[res.status] = (metrics.statusHist[res.status] || 0) + 1
         if (res.status >= 500) metrics.errors++
-        if (bucket) record(bucket, ms)
+        if (bucket) { record(bucket, ms); recordTagStatus(bucket, res.status) }
         let body = null
         try { body = await res.json() } catch { }
         return { status: res.status, body }
     } catch (e) {
         metrics.total++; metrics.errors++
-        metrics.statusHist[`${e?.cause?.code || e?.code || 'fetch_error'}`] = (metrics.statusHist[`${e?.cause?.code || e?.code || 'fetch_error'}`] || 0) + 1
+        const code = `${e?.cause?.code || e?.code || 'fetch_error'}`
+        metrics.statusHist[code] = (metrics.statusHist[code] || 0) + 1
+        if (bucket) recordTagStatus(bucket, code)
         return { status: 0, body: null }
     }
 }
@@ -153,8 +166,15 @@ async function main() {
     await startServer()
     console.log('server up — mulai fase ujian 60 detik...')
 
-    // fase ujian: semua siswa berbarengan
-    const studentWork = async (u) => {
+    // fase ujian: semua siswa berbarengan.
+    // WAVE_MS (opsional, default 0 = serentak persis): sebar momen START dalam
+    // window ini — siswa nyata tidak pernah menekan "Mulai" di milidetik yang
+    // sama (login + navigasi makan waktu), dan accept-queue macOS (somaxconn
+    // 128) RST koneksi di atas ±230 herd serentak (mini-repro 2026-09-25).
+    // Pola yang sama dengan load_login.cjs (WAVE_MS default 30 dtk di sana).
+    const WAVE_MS = parseInt(process.env.WAVE_MS || '0', 10)
+    const studentWork = async (u, i) => {
+        if (WAVE_MS > 0) await sleep(Math.floor((i / N_STUDENTS) * WAVE_MS) + rand(0, Math.max(1, Math.floor(WAVE_MS / N_STUDENTS))))
         const start = await api('/api/official-exam-submissions', { method: 'POST', body: JSON.stringify({ exam_id: exam.id }) }, u.token, 'start')
         const subId = start.body?.id
         if (!subId) return
@@ -175,13 +195,14 @@ async function main() {
         await api('/api/official-exam-submissions', { method: 'PUT', body: JSON.stringify({ submission_id: subId, submit: true }) }, u.token, 'submit')
     }
 
-    await Promise.all([Promise.all(users.map(studentWork)), monitorWork].filter(Boolean))
+    await Promise.all([Promise.all(users.map((u, i) => studentWork(u, i))), monitorWork].filter(Boolean))
     await stopServer()
 
     const errRate = metrics.total ? (metrics.errors / metrics.total * 100).toFixed(2) : '0'
     console.log('\n===== HASIL SMOKE 50 VU =====')
     console.log(`total request : ${metrics.total} (error ${metrics.errors} = ${errRate}%)`)
     console.log(`histogram status: ${JSON.stringify(metrics.statusHist)}`)
+    console.log(`status per endpoint: ${JSON.stringify(metrics.statusByTag)}`)
     console.log(`start_exam    : n=${metrics.start.length} p50=${fmtPct(metrics.start, .5)} p95=${fmtPct(metrics.start, .95)}`)
     console.log(`save_answer   : n=${metrics.save.length} p50=${fmtPct(metrics.save, .5)} p95=${fmtPct(metrics.save, .95)}  (target p95<800)`)
     console.log(`notifications : n=${metrics.notif.length} p50=${fmtPct(metrics.notif, .5)} p95=${fmtPct(metrics.notif, .95)}  (target p95<300)`)

@@ -55,7 +55,10 @@ for (let q = 1; q <= 50; q++) {
 
 // Mode cepat (staging / CI): k6 run -e FAST=1 ... — ramp & hold dipersingkat
 // (total ±9 mnt, puncak 1000 VU tetap tercapai). Default: profil lengkap 22 mnt.
+// PEAK: override jumlah VU puncak (default 1000) — dipakai utk bracket diagnosis
+// kapasitas (mis. PEAK=500).
 const FAST = __ENV.FAST === '1'
+const PEAK = parseInt(__ENV.PEAK || String(TOTAL_USERS), 10)
 
 export const options = {
     scenarios: {
@@ -64,10 +67,10 @@ export const options = {
             startVUs: 0,
             stages: FAST
                 ? [
-                    { duration: '1m', target: 500 },   // naik cepat
-                    { duration: '2m', target: 1000 },  // puncak 1000 siswa
-                    { duration: '5m', target: 1000 },  // hold 1000 siswa
-                    { duration: '1m', target: 0 },     // turun
+                    { duration: '1m', target: Math.floor(PEAK / 2) }, // naik cepat
+                    { duration: '2m', target: PEAK },                // puncak
+                    { duration: '5m', target: PEAK },                // hold puncak
+                    { duration: '1m', target: 0 },                   // turun
                 ]
                 : [
                     { duration: '3m', target: 250 },   // pemanasan
@@ -141,7 +144,11 @@ let startFinished = false // true bila ujian sudah pernah disubmit / tak bisa mu
 let questionIds = null    // cache daftar id soal
 let submitted = false     // sudah submit final
 let examStartMs = 0       // kapan VU ini mulai (untuk timing submit)
-let lastNotifMs = 0       // terakhir polling notifikasi
+let nextNotifMs = 0       // jadwal poll notifikasi berikutnya (dengan jitter —
+                          // dashboard browser asli TIDAK poll dalam lockstep
+                          // 60 dtk serentak; tanpa jitter 1000 VU menghantam
+                          // endpoint notifikasi dalam burst tersinkronisasi
+                          // yang tidak merepresentasikan produksi)
 
 // ------------------------------------------------------------
 // ALUR UTAMA PER VU — meniru siswa mengerjakan TO
@@ -253,8 +260,8 @@ export default function () {
         })
     }
 
-    // 5) Polling notifikasi tiap ±60 detik (meniru dashboard siswa)
-    if (Date.now() - lastNotifMs >= 60000) {
+    // 5) Polling notifikasi ±60 detik + jitter ±15 dtk (meniru dashboard siswa)
+    if (Date.now() >= nextNotifMs) {
         const res = http.get(
             BASE_URL + '/api/notifications?limit=10',
             reqParams(token, 'notifications')
@@ -263,7 +270,7 @@ export default function () {
         check(res, {
             'notifications: status 200': (r) => r.status === 200,
         })
-        lastNotifMs = Date.now()
+        nextNotifMs = Date.now() + 60000 + randomIntBetween(-15000, 15000)
     }
 
     // 6) Jeda ala siswa: 15–30 detik antar aksi
