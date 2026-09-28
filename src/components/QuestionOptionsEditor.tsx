@@ -59,15 +59,15 @@ export default function QuestionOptionsEditor({
     if (questionType === 'SHORT_ANSWER') {
         return (
             <div>
-                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jawaban Benar</label>
-                <p className="text-xs text-text-secondary mb-2">Pisahkan beberapa variasi jawaban dengan koma (,). Contoh: fotosintesis, Fotosintesis</p>
+                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jawaban Benar (Panduan Koreksi)</label>
+                <p className="text-xs text-text-secondary mb-2">Jawaban isian singkat <strong>tidak dinilai otomatis</strong> — teks ini menjadi panduan Anda saat mengoreksi jawaban siswa di halaman koreksi. Pisahkan beberapa variasi jawaban dengan koma (,). Contoh: fotosintesis, Fotosintesis</p>
                 <textarea
                     value={correctAnswer || ''}
                     onChange={(e) => onChange(null, e.target.value)}
                     className={`w-full px-4 py-3 bg-secondary/5 border border-secondary/30 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary resize-none ${textDirection === 'rtl' ? 'text-right' : ''}`}
                     rows={2}
                     dir={textDirection}
-                    placeholder="Masukkan jawaban..."
+                    placeholder="Contoh: fotosintesis, Fotosintesis"
                 />
             </div>
         )

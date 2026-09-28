@@ -1,6 +1,6 @@
 import React from 'react'
 import SmartText from '@/components/SmartText'
-import { parseAnswerLetters } from '@/lib/questionTypeUtils'
+import { parseAnswerLetters, needsManualGrading } from '@/lib/questionTypeUtils'
 
 interface GradingAnswerDisplayProps {
     question: {
@@ -62,9 +62,14 @@ export default function GradingAnswerDisplay({ question, answer }: GradingAnswer
                 </div>
             </div>
 
-            {isCorrect === false && question.correct_answer && (
+            {(isCorrect === false || needsManualGrading(question.question_type)) && question.correct_answer && (
                 <div>
-                    <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">Kunci Jawaban</p>
+                    <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">
+                        {/* Isian singkat tidak dinilai otomatis & essay ber-rubrik —
+                            kunci tampil sebagai PANDUAN saat guru mengoreksi
+                            (isCorrect null = belum dinilai), bukan hanya saat salah. */}
+                        {question.question_type === 'ESSAY' ? 'Kunci / Rubrik' : 'Kunci Jawaban (Panduan Koreksi)'}
+                    </p>
                     <div className="font-medium text-green-600 dark:text-green-400">
                         {renderAnswer(question.correct_answer, true)}
                     </div>
