@@ -632,8 +632,17 @@ function EditQuizPageInner() {
 
     const handleDeleteQuestion = async (questionId: string) => {
         if (!confirm('Hapus soal ini?')) return
-        await fetch(`/api/quizzes/${quizId}/questions?question_id=${questionId}`, { method: 'DELETE' })
-        fetchQuiz()
+        try {
+            const res = await fetch(`/api/quizzes/${quizId}/questions?question_id=${questionId}`, { method: 'DELETE' })
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}))
+                setAlertInfo({ type: 'error', title: 'Gagal Menghapus', message: errData?.error || 'Soal gagal dihapus. Coba lagi.' })
+                return
+            }
+            fetchQuiz()
+        } catch {
+            setAlertInfo({ type: 'error', title: 'Gagal Menghapus', message: 'Soal gagal dihapus. Periksa koneksi internet lalu coba lagi.' })
+        }
     }
 
     // "Seimbangkan": bagi rata total poin ke seluruh soal (largest-remainder,
@@ -696,15 +705,34 @@ function EditQuizPageInner() {
     const handleBulkDelete = async () => {
         if (selectedQuestionIds.size === 0) return
         if (!confirm(`Hapus ${selectedQuestionIds.size} soal yang dipilih?`)) return
-
-        await Promise.all(
-            Array.from(selectedQuestionIds).map(qId =>
-                fetch(`/api/quizzes/${quizId}/questions?question_id=${qId}`, { method: 'DELETE' })
-            )
-        )
-        setSelectedQuestionIds(new Set())
-        setIsBulkSelectMode(false)
-        fetchQuiz()
+        try {
+            let failed = false
+            const deletedOk = new Set<string>()
+            for (const qId of selectedQuestionIds) {
+                const res = await fetch(`/api/quizzes/${quizId}/questions?question_id=${qId}`, { method: 'DELETE' })
+                if (!res.ok) {
+                    // Berhenti di soal pertama yang gagal — sebagian sudah terhapus,
+                    // selection DIPERTAHANKAN supaya guru bisa ulangi sisa-nya.
+                    const errData = await res.json().catch(() => ({}))
+                    setAlertInfo({ type: 'error', title: 'Gagal Menghapus', message: errData?.error || `Soal gagal dihapus (sisanya belum terhapus).` })
+                    failed = true
+                    break
+                }
+                deletedOk.add(qId)
+            }
+            if (!failed) {
+                setSelectedQuestionIds(new Set())
+                setIsBulkSelectMode(false)
+            } else {
+                // Buang ID yang sudah berhasil terhapus dari selection — tombol
+                // "Hapus N Soal" hanya menghitung soal yang benar-benar tersisa.
+                setSelectedQuestionIds(prev => new Set([...prev].filter(id => !deletedOk.has(id))))
+            }
+            fetchQuiz()
+        } catch (error) {
+            console.error('Bulk delete error:', error)
+            setAlertInfo({ type: 'error', title: 'Gagal Menghapus', message: 'Soal gagal dihapus. Periksa koneksi internet lalu coba lagi.' })
+        }
     }
 
     // Tambah soal terpilih dari Bank Soal ke kuis (dipanggil oleh BankQuestionPicker)
@@ -1637,10 +1665,10 @@ function EditQuizPageInner() {
                                                         })
                                                     }
                                                 }}
-                                                className="w-14 px-2 py-1 bg-secondary/5 border border-secondary/30 rounded text-text-main dark:text-white text-center text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                                                className="w-14 px-2 py-1 bg-secondary/5 border border-secondary/30 rounded text-text-main dark:text-white text-center text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-40 disabled:cursor-not-allowed"
                                                 min={0.01}
                                                 step={0.01}
-                                                disabled={quiz?.is_active}
+                                                disabled={!!quiz?.is_active || !!quiz?.pending_publish}
                                             />
                                             <span className="text-xs text-text-secondary dark:text-zinc-500">poin</span>
                                         </div>
@@ -1657,7 +1685,7 @@ function EditQuizPageInner() {
                                                     fetchQuiz()
                                                 }
                                             }}
-                                            disabled={quiz?.is_active}
+                                            disabled={!!quiz?.is_active || !!quiz?.pending_publish}
                                         />
 
                                         <button
@@ -1668,17 +1696,18 @@ function EditQuizPageInner() {
                                                     question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text)
                                                 })
                                             }}
-                                            className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors"
-                                            disabled={quiz?.is_active}
-                                            title="Edit soal"
+                                            className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                                            disabled={!!quiz?.is_active || !!quiz?.pending_publish}
+                                            title={quiz?.is_active ? 'Soal terkunci saat kuis aktif — tarik ke draft dulu' : quiz?.pending_publish ? 'Menunggu publish — tarik ke draft untuk mengubah soal' : 'Edit soal'}
                                         >
                                             <Edit set="bold" primaryColor="currentColor" size={20} />
                                         </button>
 
                                         <button
                                             onClick={() => q.id && handleDeleteQuestion(q.id)}
-                                            className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
-                                            disabled={quiz?.is_active}
+                                            className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                                            disabled={!!quiz?.is_active || !!quiz?.pending_publish}
+                                            title={quiz?.is_active ? 'Soal terkunci saat kuis aktif — tarik ke draft dulu' : quiz?.pending_publish ? 'Menunggu publish — tarik ke draft untuk menghapus soal' : 'Hapus soal'}
                                         >
                                             <Delete set="bold" primaryColor="currentColor" size={20} />
                                         </button>
