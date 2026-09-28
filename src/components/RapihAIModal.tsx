@@ -451,7 +451,9 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                 // "A dan C" tak terparse, PG tanpa opsi).
                 const validationErrors = results.map(q => {
                     if (!q.difficulty) return 'Belum dilabeli kesulitan'
-                    const v = validateCorrectAnswer(q.question_type, q.correct_answer, q.options)
+                    // Fallback IDENTIK dengan server (q.question_type || 'MULTIPLE_CHOICE')
+                    // supaya soal tanpa tipe dari AI tak lolos modal lalu ditolak 400.
+                    const v = validateCorrectAnswer(q.question_type || 'MULTIPLE_CHOICE', q.correct_answer, q.options)
                     if (!v.valid) return v.error || 'Format kunci jawaban belum sesuai'
                     return null
                 })

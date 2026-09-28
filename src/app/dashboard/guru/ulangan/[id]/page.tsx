@@ -937,6 +937,7 @@ function EditExamPageInner() {
         if (!confirm(`Hapus ${selectedQuestionIds.size} soal yang dipilih?`)) return
         try {
             let failed = false
+            const deletedOk = new Set<string>()
             for (const qId of selectedQuestionIds) {
                 const res = await fetch(`/api/exams/${examId}/questions?question_id=${qId}`, { method: 'DELETE' })
                 if (!res.ok) {
@@ -947,10 +948,15 @@ function EditExamPageInner() {
                     failed = true
                     break
                 }
+                deletedOk.add(qId)
             }
             if (!failed) {
                 setSelectedQuestionIds(new Set())
                 setIsBulkSelectMode(false)
+            } else {
+                // Buang ID yang sudah berhasil terhapus dari selection — tombol
+                // "Hapus N Soal" hanya menghitung soal yang benar-benar tersisa.
+                setSelectedQuestionIds(prev => new Set([...prev].filter(id => !deletedOk.has(id))))
             }
             fetchExam()
         } catch (error) {
