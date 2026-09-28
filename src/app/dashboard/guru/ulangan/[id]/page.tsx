@@ -857,8 +857,17 @@ function EditExamPageInner() {
 
     const handleDeleteQuestion = async (questionId: string) => {
         if (!confirm('Hapus soal ini?')) return
-        await fetch(`/api/exams/${examId}/questions?question_id=${questionId}`, { method: 'DELETE' })
-        fetchExam()
+        try {
+            const res = await fetch(`/api/exams/${examId}/questions?question_id=${questionId}`, { method: 'DELETE' })
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}))
+                setAlertInfo({ type: 'error', title: 'Gagal Menghapus', message: errData?.error || 'Soal gagal dihapus. Coba lagi.' })
+                return
+            }
+            fetchExam()
+        } catch {
+            setAlertInfo({ type: 'error', title: 'Gagal Menghapus', message: 'Soal gagal dihapus. Periksa koneksi internet lalu coba lagi.' })
+        }
     }
 
     // "Seimbangkan": bagi rata total poin ke seluruh soal (largest-remainder,
@@ -927,14 +936,26 @@ function EditExamPageInner() {
         if (selectedQuestionIds.size === 0) return
         if (!confirm(`Hapus ${selectedQuestionIds.size} soal yang dipilih?`)) return
         try {
+            let failed = false
             for (const qId of selectedQuestionIds) {
-                await fetch(`/api/exams/${examId}/questions?question_id=${qId}`, { method: 'DELETE' })
+                const res = await fetch(`/api/exams/${examId}/questions?question_id=${qId}`, { method: 'DELETE' })
+                if (!res.ok) {
+                    // Berhenti di soal pertama yang gagal — sebagian sudah terhapus,
+                    // selection DIPERTAHANKAN supaya guru bisa ulangi sisa-nya.
+                    const errData = await res.json().catch(() => ({}))
+                    setAlertInfo({ type: 'error', title: 'Gagal Menghapus', message: errData?.error || `Soal gagal dihapus (sisanya belum terhapus).` })
+                    failed = true
+                    break
+                }
             }
-            setSelectedQuestionIds(new Set())
-            setIsBulkSelectMode(false)
+            if (!failed) {
+                setSelectedQuestionIds(new Set())
+                setIsBulkSelectMode(false)
+            }
             fetchExam()
         } catch (error) {
             console.error('Bulk delete error:', error)
+            setAlertInfo({ type: 'error', title: 'Gagal Menghapus', message: 'Soal gagal dihapus. Periksa koneksi internet lalu coba lagi.' })
         }
     }
 
@@ -1177,8 +1198,10 @@ function EditExamPageInner() {
         )
     }
 
-    const handleSaveResults = async (results: ExamQuestion[]) => {
-        if (results.length === 0) return
+    // Return boolean untuk RapihAIModal: false = gagal → hasil ekstraksi
+    // dipertahankan di modal (tidak di-reset) supaya guru bisa coba lagi.
+    const handleSaveResults = async (results: ExamQuestion[]): Promise<boolean> => {
+        if (results.length === 0) return false
         setSaving(true)
         try {
             const newQuestions = results.map((q, idx) => ({
@@ -1210,15 +1233,17 @@ function EditExamPageInner() {
                     errData = { error: text }
                 }
                 console.error('Error saving AI questions:', errData, res.status)
-                setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: 'Gagal menyimpan soal: ' + (errData.error || 'Server error') })
-                return
+                setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: 'Gagal menyimpan soal: ' + (errData.error || 'Server error') + ' — soal hasil ekstraksi tetap ada, perbaiki lalu coba lagi.' })
+                return false
             }
 
             setMode('list')
             await fetchExam()
+            return true
         } catch (err) {
             console.error('Error saving AI results:', err)
-            setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: 'Gagal menyimpan soal. Cek koneksi internet.' })
+            setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: 'Gagal menyimpan soal. Cek koneksi internet — soal hasil ekstraksi tetap ada, silakan coba lagi.' })
+            return false
         } finally {
             setSaving(false)
         }
@@ -1998,10 +2023,10 @@ function EditExamPageInner() {
                                                             }
                                                         }
                                                     }}
-                                                    className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary"
+                                                    className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-40 disabled:cursor-not-allowed"
                                                     min={0.01}
                                                     step={0.01}
-                                                    disabled={exam?.is_active}
+                                                    disabled={!!exam?.is_active || !!exam?.pending_publish}
                                                 />
                                             </div>
                                             <span className="text-[10px] uppercase font-bold text-text-secondary mt-1">Poin</span>
@@ -2021,7 +2046,7 @@ function EditExamPageInner() {
                                                     fetchExam()
                                                 }
                                             }}
-                                            disabled={exam?.is_active}
+                                            disabled={!!exam?.is_active || !!exam?.pending_publish}
                                         />
 
                                         <button
@@ -2032,17 +2057,18 @@ function EditExamPageInner() {
                                                     question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text)
                                                 })
                                             }}
-                                            className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors"
-                                            disabled={exam?.is_active}
-                                            title="Edit soal"
+                                            className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                                            disabled={!!exam?.is_active || !!exam?.pending_publish}
+                                            title={exam?.is_active ? 'Soal terkunci saat ulangan aktif — tarik ke draft dulu' : exam?.pending_publish ? 'Menunggu publish — tarik ke draft untuk mengubah soal' : 'Edit soal'}
                                         >
                                             <Edit set="bold" primaryColor="currentColor" size={20} />
                                         </button>
 
                                         <button
                                             onClick={() => q.id && handleDeleteQuestion(q.id)}
-                                            className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
-                                            disabled={exam?.is_active}
+                                            className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                                            disabled={!!exam?.is_active || !!exam?.pending_publish}
+                                            title={exam?.is_active ? 'Soal terkunci saat ulangan aktif — tarik ke draft dulu' : exam?.pending_publish ? 'Menunggu publish — tarik ke draft untuk menghapus soal' : 'Hapus soal'}
                                         >
                                             <Delete set="bold" primaryColor="currentColor" size={20} />
                                         </button>

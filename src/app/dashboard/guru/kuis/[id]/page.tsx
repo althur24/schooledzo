@@ -756,8 +756,10 @@ function EditQuizPageInner() {
         }
     }
 
-    const handleSaveAIResults = async (results: QuizQuestion[]) => {
-        if (results.length === 0) return
+    // Return boolean untuk RapihAIModal: false = gagal → hasil ekstraksi
+    // dipertahankan di modal (tidak di-reset) supaya guru bisa coba lagi.
+    const handleSaveAIResults = async (results: QuizQuestion[]): Promise<boolean> => {
+        if (results.length === 0) return false
         setSaving(true)
         try {
             const newQuestions = results.map((q, idx) => ({
@@ -789,15 +791,17 @@ function EditQuizPageInner() {
                     errData = { error: text }
                 }
                 console.error('Error saving AI questions:', errData, res.status)
-                setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: 'Gagal menyimpan soal: ' + (errData.error || 'Server error') })
-                return
+                setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: 'Gagal menyimpan soal: ' + (errData.error || 'Server error') + ' — soal hasil ekstraksi tetap ada, perbaiki lalu coba lagi.' })
+                return false
             }
 
             setMode('list')
             await fetchQuiz()
+            return true
         } catch (err) {
             console.error('Error saving AI results:', err)
-            setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: 'Gagal menyimpan soal. Cek koneksi internet.' })
+            setAlertInfo({ type: 'error', title: 'Gagal Menyimpan', message: 'Gagal menyimpan soal. Cek koneksi internet — soal hasil ekstraksi tetap ada, silakan coba lagi.' })
+            return false
         } finally {
             setSaving(false)
         }

@@ -618,7 +618,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     }
 
     // Rapih AI save handlers
-    const handleRapihSaveToExam = async (results: any[]) => {
+    // Return boolean untuk RapihAIModal: false = gagal → hasil ekstraksi
+    // dipertahankan di modal (tidak di-reset) supaya bisa diperbaiki lalu retry.
+    const handleRapihSaveToExam = async (results: any[]): Promise<boolean> => {
         setRapihSaving(true)
         try {
             const newQuestions = results.map((q: any, idx: number) => ({
@@ -631,17 +633,29 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined
             }))
             const res = await postQuestions({ questions: newQuestions })
-            if (res.ok) { setSoalMode('list'); fetchQuestions() }
+            if (res.ok) {
+                setSoalMode('list')
+                fetchQuestions()
+                return true
+            }
+            const errData = await res.json().catch(() => ({}))
+            console.error('Error saving AI questions:', errData, res.status)
+            showToast('Gagal menyimpan soal: ' + (errData?.error || 'Server error') + ' — soal hasil ekstraksi tetap ada, perbaiki lalu coba lagi.', 'error')
+            return false
+        } catch (err) {
+            console.error('Error saving AI results:', err)
+            showToast('Gagal menyimpan soal. Cek koneksi internet — soal hasil ekstraksi tetap ada, silakan coba lagi.', 'error')
+            return false
         } finally { setRapihSaving(false) }
     }
 
-    const handleRapihSaveToBank = async (results: any[]) => {
+    const handleRapihSaveToBank = async (results: any[]): Promise<boolean> => {
         setRapihSaving(true)
         try {
             const subjectId = examSubject?.id || null
             const standalone = results.filter((q: any) => !q.passage_text)
             if (standalone.length > 0) {
-                await fetch('/api/question-bank', {
+                const res = await fetch('/api/question-bank', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(standalone.map((q: any) => ({
                         question_text: q.question_text, question_type: q.question_type,
@@ -650,7 +664,18 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                         gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined
                     })))
                 })
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}))
+                    console.error('Error saving AI questions to bank:', errData, res.status)
+                    showToast('Gagal menyimpan soal ke Bank Soal: ' + (errData?.error || 'Server error'), 'error')
+                    return false
+                }
             }
+            return true
+        } catch (err) {
+            console.error('Error saving AI results to bank:', err)
+            showToast('Gagal menyimpan soal ke Bank Soal. Cek koneksi internet.', 'error')
+            return false
         } finally { setRapihSaving(false) }
     }
 

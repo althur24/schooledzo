@@ -189,13 +189,13 @@ export async function POST(
         const questions = Array.isArray(body) ? body : (Array.isArray(body.questions) ? body.questions : [body])
 
         // Validate correct_answer for objective question types
-        for (const q of questions) {
+        for (const [qIdx, q] of questions.entries()) {
             const v = validateCorrectAnswer(q.question_type || 'MULTIPLE_CHOICE', q.correct_answer, q.options)
-            if (!v.valid) return NextResponse.json({ error: v.error }, { status: 400 })
+            if (!v.valid) return NextResponse.json({ error: `Soal no. ${qIdx + 1}: ${v.error}` }, { status: 400 })
             // M7 (paritas exams): poin finite >= 0.01 — desimal sah
             const pts = q.points ?? 10
             if (typeof pts !== 'number' || !Number.isFinite(pts) || pts < 0.01 || pts > 10000) {
-                return NextResponse.json({ error: `Poin soal harus angka >= 0.01 (diterima: ${pts})` }, { status: 400 })
+                return NextResponse.json({ error: `Soal no. ${qIdx + 1}: poin soal harus angka >= 0.01 (diterima: ${pts})` }, { status: 400 })
             }
         }
 

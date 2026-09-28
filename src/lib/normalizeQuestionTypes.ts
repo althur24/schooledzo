@@ -54,6 +54,25 @@ export function normalizeQuestionTypes(questions: RawQuestion[]): RawQuestion[] 
             }
         }
 
+        // ─── Rule 1b: TRUE_FALSE yang sudah benar tipenya ───
+        // Gemini kadang mengirim question_type TRUE_FALSE tapi options null/kosong
+        // dan kunci "Benar"/"true" (huruf kecil) — lolos normalize lama, ditolak
+        // validateCorrectAnswer server (400: "Jawaban harus BENAR atau SALAH").
+        // Paksa format kanonik: options ["Benar","Salah"] + kunci uppercase.
+        if (q.question_type === 'TRUE_FALSE') {
+            const ansLower = answer.toLowerCase()
+            if (['benar', 'true', 'b', 'betul'].includes(ansLower)) {
+                corrected.options = ['Benar', 'Salah']
+                corrected.correct_answer = 'BENAR'
+                return corrected
+            }
+            if (['salah', 'false', 's'].includes(ansLower)) {
+                corrected.options = ['Benar', 'Salah']
+                corrected.correct_answer = 'SALAH'
+                return corrected
+            }
+        }
+
         // Also detect from question text patterns even if AI didn't set options
         if (
             q.question_type === 'ESSAY' &&

@@ -836,8 +836,10 @@ export default function BankSoalPage() {
     }
 
     // ─── Rapih AI: simpan hasil AI langsung ke bank soal ───
-    const handleSaveAIToBank = async (results: any[]) => {
-        if (results.length === 0) return
+    // Return boolean untuk RapihAIModal: false = gagal → hasil ekstraksi
+    // dipertahankan di modal (tidak di-reset) supaya bisa diperbaiki lalu retry.
+    const handleSaveAIToBank = async (results: any[]): Promise<boolean> => {
+        if (results.length === 0) return false
         setSaving(true)
         try {
             // Separate passage questions from standalone questions
@@ -856,7 +858,7 @@ export default function BankSoalPage() {
 
             // Save standalone questions to question bank
             if (standaloneQuestions.length > 0) {
-                await fetch('/api/question-bank', {
+                const res = await fetch('/api/question-bank', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(standaloneQuestions.map(q => ({
@@ -871,11 +873,17 @@ export default function BankSoalPage() {
                         tags: q.tags || null
                     })))
                 })
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}))
+                    console.error('Error saving AI questions to bank:', errData, res.status)
+                    showToast('Gagal menyimpan soal: ' + (errData?.error || 'Server error') + ' — soal hasil ekstraksi tetap ada, perbaiki lalu coba lagi.', 'error')
+                    return false
+                }
             }
 
             // Save passage-based questions as passages
             for (const [passageText, pQuestions] of passageGroups) {
-                await fetch('/api/passages', {
+                const res = await fetch('/api/passages', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -893,14 +901,22 @@ export default function BankSoalPage() {
                         }))
                     })
                 })
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}))
+                    console.error('Error saving AI passage to bank:', errData, res.status)
+                    showToast('Gagal menyimpan bacaan: ' + (errData?.error || 'Server error') + ' — soal hasil ekstraksi tetap ada, perbaiki lalu coba lagi.', 'error')
+                    return false
+                }
             }
 
             await fetchData()
             setShowRapihAI(false)
             showToast('Soal berhasil disimpan ke Bank Soal!', 'success')
+            return true
         } catch (error) {
             console.error('Error saving AI results to bank:', error)
-            showToast('Gagal menyimpan soal ke Bank Soal')
+            showToast('Gagal menyimpan soal ke Bank Soal. Cek koneksi internet — soal hasil ekstraksi tetap ada, silakan coba lagi.', 'error')
+            return false
         } finally {
             setSaving(false)
         }

@@ -7,7 +7,7 @@ import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
 import TagInput from '@/components/TagInput'
-import { parseAnswerLetters } from '@/lib/questionTypeUtils'
+import { parseAnswerLetters, validateCorrectAnswer } from '@/lib/questionTypeUtils'
 
 interface AIQuestion {
     question_text: string
@@ -30,8 +30,8 @@ type RapihTab = 'clean' | 'generate' | 'upload'
 interface RapihAIModalProps {
     visible: boolean
     onClose: () => void
-    onSaveResults: (results: AIQuestion[]) => Promise<void>
-    onSaveToBank: (results: AIQuestion[]) => Promise<void>
+    onSaveResults: (results: AIQuestion[]) => Promise<boolean | void>
+    onSaveToBank: (results: AIQuestion[]) => Promise<boolean | void>
     saving: boolean
     targetLabel: string // "Kuis" or "Ulangan"
     aiReviewEnabled?: boolean
@@ -143,7 +143,9 @@ export default function RapihAIModal({
             }
         } catch (error) {
             console.error('Clean Error:', error)
-            setErrorMsg('Gagal merapikan soal. Coba lagi.')
+            setErrorMsg(error instanceof TypeError
+                ? 'Koneksi ke server terputus — periksa jaringan internet lalu coba lagi.'
+                : 'Gagal merapikan soal. Coba lagi.')
         } finally {
             setCleanLoading(false)
         }
@@ -174,7 +176,9 @@ export default function RapihAIModal({
             }
         } catch (error) {
             console.error('AI Generate Error:', error)
-            setErrorMsg('Gagal generate soal. Coba lagi.')
+            setErrorMsg(error instanceof TypeError
+                ? 'Koneksi ke server terputus — periksa jaringan internet lalu coba lagi.'
+                : 'Gagal generate soal. Coba lagi.')
         } finally {
             setAiLoading(false)
         }
@@ -201,7 +205,9 @@ export default function RapihAIModal({
             }
         } catch (error) {
             console.error('Upload Error:', error)
-            setErrorMsg('Gagal mengekstrak soal dari dokumen. Coba lagi.')
+            setErrorMsg(error instanceof TypeError
+                ? 'Koneksi ke server terputus saat mengunggah — periksa jaringan internet lalu coba lagi (file tidak perlu diubah).'
+                : 'Gagal mengekstrak soal dari dokumen. Coba lagi.')
         } finally {
             setUploadLoading(false)
         }
@@ -209,19 +215,24 @@ export default function RapihAIModal({
 
 
     const handleSave = async () => {
-        // Save ALL results (user deletes the ones they don't want)
-        await onSaveResults(results)
-        resetAll()
+        // Save ALL results (user deletes the ones they don't want).
+        // Hasil ekstraksi HANYA di-reset saat penyimpanan sukses — kegagalan
+        // (400 validasi server / jaringan putus) mempertahankan semua soal
+        // supaya guru tidak perlu upload/extract ulang dari nol.
+        const ok = await onSaveResults(results)
+        if (ok !== false) resetAll()
     }
 
     const handleSaveBank = async () => {
         if (savingBank || savedBank) return
         setSavingBank(true)
         try {
-            await onSaveToBank(results)
-            setSavedBank(true)
+            // Handler baru kontraknya return false saat gagal (tanpa throw);
+            // handler lama throw — kedua jalur tidak boleh menandai "tersimpan".
+            const ok = await onSaveToBank(results)
+            if (ok !== false) setSavedBank(true)
         } catch {
-            // error handled by parent
+            // error handled by parent (handler throw-based)
         } finally {
             setSavingBank(false)
         }
@@ -434,10 +445,18 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
 
             {/* Unified Review / Edit Step */}
             {hasResults && (() => {
-                // Validate ALL results since we save everything that isn't deleted
-                const unlabeledCount = results.filter(q => !q.difficulty).length
-                const unansweredMCCount = results.filter(q => q.question_type !== 'ESSAY' && !q.correct_answer).length
-                const allValid = unlabeledCount === 0 && unansweredMCCount === 0
+                // Validasi per-soal MEMAKAI FUNGSI YANG SAMA dengan server
+                // (validateCorrectAnswer) — mencegah payload ditolak 400 saat
+                // "Tambahkan N Soal" (mis. kunci TF "Benar" bukan "BENAR", GK
+                // "A dan C" tak terparse, PG tanpa opsi).
+                const validationErrors = results.map(q => {
+                    if (!q.difficulty) return 'Belum dilabeli kesulitan'
+                    const v = validateCorrectAnswer(q.question_type, q.correct_answer, q.options)
+                    if (!v.valid) return v.error || 'Format kunci jawaban belum sesuai'
+                    return null
+                })
+                const invalidCount = validationErrors.filter(Boolean).length
+                const allValid = invalidCount === 0
 
                 return (
                     <div className="space-y-3">
@@ -534,7 +553,7 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                             <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-lg">
                                 <span className="text-sm">⚠️</span>
                                 <span className="text-xs text-red-600 dark:text-red-400 font-medium">
-                                    {[unlabeledCount > 0 && `${unlabeledCount} soal belum dilabeli kesulitan`, unansweredMCCount > 0 && `${unansweredMCCount} soal belum ada kunci jawaban`].filter(Boolean).join(' • ')}. Lengkapi untuk bisa menyimpan.
+                                    {invalidCount} soal perlu diperbaiki sebelum bisa disimpan — periksa kartu yang disorot merah (klik ✏️ Edit untuk membetulkan).
                                 </span>
                             </div>
                         )}
@@ -542,6 +561,7 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                         <div className="max-h-[50vh] overflow-y-auto space-y-3 pr-1">
                             {results.map((q, idx) => {
                                 const showPassage = q.passage_text && (idx === 0 || results[idx - 1].passage_text !== q.passage_text)
+                                const validationError = validationErrors[idx]
 
                                 return (
                                     <div key={idx} className="space-y-2">
@@ -558,7 +578,7 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                             </div>
                                         )}
 
-                                        <div className={`rounded-lg p-4 border transition-all ${isSelectionMode && selected[idx] ? 'bg-red-50/50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30' : (!q.difficulty || (q.question_type !== 'ESSAY' && !q.correct_answer)) ? 'bg-red-50/50 dark:bg-red-500/5 border-red-200 dark:border-red-500/30' : 'bg-secondary/10 border-primary/30'}`}>
+                                        <div className={`rounded-lg p-4 border transition-all ${isSelectionMode && selected[idx] ? 'bg-red-50/50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30' : validationError ? 'bg-red-50/50 dark:bg-red-500/5 border-red-200 dark:border-red-500/30' : 'bg-secondary/10 border-primary/30'}`}>
                                             <div className="flex items-start gap-3">
                                                 {isSelectionMode && (
                                                     <input
@@ -757,9 +777,9 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                                             )}
                                                         </>
                                                     )}
-                                                    {/* Missing answer warning for auto-gradeable types */}
-                                                    {q.question_type !== 'ESSAY' && !q.correct_answer && (
-                                                        <p className="text-xs text-red-500 font-medium">⚠ Kunci jawaban belum diisi — klik Edit untuk mengisi</p>
+                                                    {/* Specific validation error — paritas pesan server */}
+                                                    {validationError && (
+                                                        <p className="text-xs text-red-500 font-medium">⚠ {validationError} — klik ✏️ Edit untuk membetulkan</p>
                                                     )}
                                                 </div>
                                             </div>
@@ -791,7 +811,7 @@ A. Jakarta  B. Bandung  C. Surabaya  D. Medan"
                                 className="flex-1"
                             >
                                 {saving ? 'Menyimpan...' : !allValid
-                                    ? `⚠ ${[unlabeledCount > 0 && `${unlabeledCount} Belum Dilabeli`, unansweredMCCount > 0 && `${unansweredMCCount} Soal Belum Ada Jawaban`].filter(Boolean).join(', ')}`
+                                    ? `⚠ ${invalidCount} Soal Perlu Diperbaiki`
                                     : `Tambahkan ${results.length} Soal ke ${targetLabel}`}
                             </Button>
                         </div>
