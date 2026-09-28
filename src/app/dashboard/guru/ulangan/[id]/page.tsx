@@ -1329,6 +1329,7 @@ function EditExamPageInner() {
         } catch (error) {
             console.error('Error saving to bank:', error)
             setAlertInfo({ type: 'error', title: 'Gagal', message: 'Gagal menyimpan ke Bank Soal.' })
+            return false // RapihAIModal: jangan tampilkan "Tersimpan" palsu
         }
     }
 
