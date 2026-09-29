@@ -1,5 +1,14 @@
 # LMS YPP — Catatan Workflow
 
+## Full E2E Package (30 Sep 2026, Railway staging @ 1e6278d — pasca-deploy fitur Tambah Waktu)
+
+- **Total 255 asersi remote + 32 suite lokal + load 1000 VU — SEMUA HIJAU**:
+  - Remote (E2E_BASE Railway staging): e2e-extend-time **26/26** (fitur baru) · e2e-gk **153/0** · analytics-pagination **23/0** · checkended **23/0** (seed 4 + phase1 14 + phase2 5 via TTL) · status-utsuas **30/0**.
+  - Sweep lokal 32 suite: **28 PASS** + 1 suite usang (audit_fixes K2e — identik baseline 29 Sep) + 3 production-only (SSA/CIS tak ada di staging DB, abort bersih) — hasil identik baseline.
+  - load_login 1000 VU remote: **1000/1000, p95 313ms**, ping zero-DB max 254ms, rate-limit negatif benar, cleanup bersih.
+  - Final: 0 fixture sisa, STG01 utuh, ping/schools 200 @ 0,11–0,19s.
+- **Pelajaran sekuensing (penyebab 1 fail awal status-utsuas 29/1)**: (1) JANGAN seed status-utsuas SEBELUM checkended phase2 — GET phase2 memicu checkEnded yang mengirimi notif ke SEMUA guru ber-TA mapel×kelas itu (termasuk guru fixture lain yang kebetulan hidup) → asersi "tidak dobel" bisa terganggu; urutan benar: phase2 → cleanup → seed status-utsuas → replikasi → run, dengan tidak ada sweep/aktivitas paralel ke sekolah yang sama; (2) fase `all` e2e-extend-time TIDAK auto-cleanup — jalankan `cleanup` setelahnya; (3) log sweep jangan di /tmp (ter-purge saat tool interrupt) — taruh di `.e2e-sweep-logs/` repo lalu hapus.
+
 ## Fitur "Tambah Waktu" Ulangan/UTS-UAS (29 Sep 2026) — BELUM di-push
 
 - **Alur**: Monitor Live (guru `ExamMonitorPage` + admin `admin/uts-uas/[id]/monitor` — dua halaman, SATU komponen `ExtEndTimeMenu`) → tombol "⏱ Tambah Waktu" → modal preset +5/+10/+15 + custom 1–120 + preview dampak → `POST /api/{exam,official-exam-submissions}/extend-time`. Guard: GURU pemilik/co-teacher ATAU ADMIN + tenant + tahun-aktif. Ulangan batch: `batch: true` → semua member.
