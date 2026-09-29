@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createAdminClient } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
@@ -8,11 +8,8 @@ import { round2 } from '@/lib/formatScore'
 import { enrollmentClassAt, EnrollmentInterval } from '@/lib/enrollmentClassAt'
 
 // M2: Service Role Key required — analytics needs cross-table reads that RLS blocks for anon role.
-// Access restricted to ADMIN only.
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Access restricted to ADMIN only. Client admin ber-hardening timeout (satu sumber: lib/supabase)
+const supabase = createAdminClient()
 
 // batchedIn per 100 id (batas URL) + fetchAllRows per chunk: satu chunk 100 id bisa
 // berisi >1000 baris (100 kuis × puluhan siswa) yang otherwise terpotong diam-diam.

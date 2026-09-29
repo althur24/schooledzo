@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createAdminClient } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { presignR2PutUrl, publicR2Url, safeFileExt } from '@/lib/r2'
 
@@ -8,14 +8,9 @@ import { presignR2PutUrl, publicR2Url, safeFileExt } from '@/lib/r2'
 // tidak transit server. Validasi ukuran 10MB tetap di client (FileUpload).
 // Upload baru ke R2, file lama tetap disajikan dari Supabase Storage.
 
-// Strict tanpa fallback anon (selaras src/lib/supabase.ts): fail-fast bila env hilang.
-if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY tidak ditemukan — upload butuh service key, jangan fallback ke anon.')
-}
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-)
+// Strict tanpa fallback anon (guard di dalam createAdminClient, selaras
+// src/lib/supabase.ts) + ber-hardening timeout.
+const supabase = createAdminClient()
 
 const ALLOWED_MIME_TYPES = [
     'image/jpeg',

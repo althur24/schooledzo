@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createAdminClient } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findTeachingAssignmentsOutsideSchool } from '@/lib/tenantGuard'
 import { archivedYearResponse } from '@/lib/academicYear'
@@ -7,10 +7,8 @@ import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // M2: Service Role Key required because app uses custom auth (not Supabase Auth),
 // so RLS policies depending on auth.uid() won't work. Role checks enforce authorization.
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Client admin ber-hardening timeout (satu sumber: lib/supabase)
+const supabase = createAdminClient()
 
 // GET all materials
 export async function GET(request: NextRequest) {

@@ -5,11 +5,9 @@ import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '
 import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
-import { createClient } from '@supabase/supabase-js'
+import { createAdminClient } from '@/lib/supabase'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-const supabase = createClient(supabaseUrl, supabaseServiceKey)
+const supabase = createAdminClient()
 
 /**
  * Batas soal sumber yang masih disalin — paritas guard runaway examBatch.ts

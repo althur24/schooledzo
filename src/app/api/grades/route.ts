@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createAdminClient } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch } from '@/lib/tenantGuard'
 import { fetchAllRows } from '@/lib/fetchAllRows'
@@ -8,11 +8,8 @@ import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { parseScoreInput, formatScore, round2 } from '@/lib/formatScore'
 import { mergeRemedialScores } from '@/lib/remedialScore'
 
-// Create admin client to bypass RLS
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Client admin ber-hardening timeout (satu sumber: lib/supabase)
+const supabase = createAdminClient()
 
 // GET all grades (for admin analytics/rekap nilai)
 export async function GET(request: NextRequest) {
