@@ -31,6 +31,7 @@
 
 import { supabaseAdmin as supabase } from './supabase'
 import { resolveWindowExpiry, type WindowParent, type WindowSubmission } from './examExpiry'
+import { fetchAllRows } from './fetchAllRows'
 
 export const EXTEND_MIN_MINUTES = 1
 export const EXTEND_MAX_MINUTES = 120
@@ -120,13 +121,17 @@ export async function extendTimeForExam(
     }
 
     // ── 2. Per-siswa: override semua yang sedang mengerjakan ────────
-    const { data: working, error: subsErr } = await supabase
-        .from(subsTable)
-        .select('id, started_at, timer_override_until')
-        .eq('exam_id', exam.id)
-        .eq('is_submitted', false)
-        .not('started_at', 'is', null)
-    if (subsErr) throw subsErr
+    // fetchAllRows + .order('id') (doktrin repo): submissions bisa >1000 baris
+    // (TO serentak) — PostgREST memotong diam-diam tanpa ini.
+    const working = await fetchAllRows<WindowSubmission & { id: string }>(
+        supabase
+            .from(subsTable)
+            .select('id, started_at, timer_override_until')
+            .eq('exam_id', exam.id)
+            .eq('is_submitted', false)
+            .not('started_at', 'is', null)
+            .order('id'),
+    )
 
     let extended = 0
     if (working && working.length > 0) {
