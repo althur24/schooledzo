@@ -47,6 +47,9 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
     const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null)
     const [examLabel, setExamLabel] = useState(config.fallbackLabel)
+    // "Tambah Waktu" guru: propagasi via ends_at di respons autosave —
+    // banner singkat di runner + patokan timer diperbarui (hanya memanjang).
+    const [timeExtension, setTimeExtension] = useState<{ minutes: number } | null>(null)
 
     // Label untuk pesan di dalam callback — pakai ref agar tidak stale closure
     const examLabelRef = useRef(config.fallbackLabel)
@@ -72,6 +75,13 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
     useEffect(() => {
         answersRef.current = answers
     }, [answers])
+
+    // Banner "waktu diperpanjang guru" hilang sendiri setelah 8 dtk
+    useEffect(() => {
+        if (!timeExtension) return
+        const t = setTimeout(() => setTimeExtension(null), 8_000)
+        return () => clearTimeout(t)
+    }, [timeExtension])
 
     // Resume State
     const [showResumeModal, setShowResumeModal] = useState(false)
@@ -346,6 +356,21 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     saveSyncedSnapshot(localAnswers)
                     setSaveStatus('saved')
                     setLastLatencyMs(performance.now() - t0)
+
+                    // Propagasi "Tambah Waktu" guru: respons membawa ends_at terkini.
+                    // Hanya boleh MEMANJANG (anti-abuse: respons salah/cacat tidak boleh
+                    // mempercepat habis waktu) — patokan server diperbarui tanpa reload,
+                    // timer countdown otomatis mengikuti (dihitung ulang tiap detik).
+                    const okBody = await res.json().catch(() => null)
+                    const newEnds = okBody?.ends_at ? new Date(okBody.ends_at).getTime() : null
+                    const oldEnds = endsAtRef.current
+                    if (newEnds !== null && Number.isFinite(newEnds)
+                        && oldEnds !== null && newEnds > oldEnds + 1_000) {
+                        endsAtRef.current = newEnds
+                        const addedMin = Math.max(1, Math.round((newEnds - Math.max(oldEnds, Date.now() + offsetMsRef.current)) / 60_000))
+                        setTimeExtension({ minutes: addedMin })
+                        setTimeLeft(computeRemaining())
+                    }
                 } else {
                     // Server menolak (5xx dsb.) → tetap error; retry loop akan mencoba lagi.
                     setSaveStatus('error')
@@ -932,6 +957,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         submitting,
         saveStatus,
         lastLatencyMs,
+        timeExtension,
         violationCount,
         showViolationWarning,
         isFullscreen,

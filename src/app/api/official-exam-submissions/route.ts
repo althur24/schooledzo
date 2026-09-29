@@ -932,7 +932,10 @@ export async function PUT(request: NextRequest) {
 
             return NextResponse.json({
                 violation_count: merged.count,
-                max_violations: maxViolations
+                max_violations: maxViolations,
+                // Batas efektif terkini — propagasi "Tambah Waktu" guru ke runner
+                // siswa yang sedang berjalan (tanpa reload).
+                ends_at: endsAtIso(writeExpiry)
             })
         }
 
@@ -1045,7 +1048,9 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json(responseData)
         }
 
-        return NextResponse.json({ success: true })
+        // ends_at: batas efektif terkini (termasuk timer_override "Tambah Waktu")
+        // — dipakai runner untuk memperbarui patokan timer saat guru memperpanjang.
+        return NextResponse.json({ success: true, ends_at: endsAtIso(writeExpiry) })
     } catch (error) {
         console.error('Error updating official exam submission:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

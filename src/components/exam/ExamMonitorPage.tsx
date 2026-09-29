@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Card } from '@/components/ui'
 import ResetAttemptMenu from '@/components/exam/ResetAttemptMenu'
+import ExtEndTimeMenu from '@/components/exam/ExtEndTimeMenu'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
 import { round2, formatScore } from '@/lib/formatScore'
@@ -314,6 +315,17 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
                 </div>
 
                 <div className="flex items-center gap-4 bg-white dark:bg-surface-dark px-4 py-3 rounded-2xl shadow-sm border border-secondary/20">
+                    <ExtEndTimeMenu
+                        endpoint={mode === 'ulangan' ? '/api/exam-submissions/extend-time' : '/api/official-exam-submissions/extend-time'}
+                        extraBody={{ exam_id: examId, ...(mode === 'ulangan' && batch ? { batch: true } : {}) }}
+                        workingCount={summary.working}
+                        notStartedCount={summary.not_started}
+                        submittedCount={summary.submitted}
+                        onResult={(ok, message) => {
+                            showToast(message, ok ? 'success' : 'error')
+                            if (ok) fetchMonitorData(true)
+                        }}
+                    />
                     <div className="text-right">
                         <p className="text-xs text-text-secondary font-medium">Update Terakhir</p>
                         <p className="text-sm font-bold text-text-main dark:text-white">

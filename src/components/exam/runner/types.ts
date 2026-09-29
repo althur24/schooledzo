@@ -101,6 +101,8 @@ export interface ExamRunnerState {
     submitting: boolean
     saveStatus: 'idle' | 'saving' | 'saved' | 'error'
     lastLatencyMs: number | null
+    /** Banner "Tambah Waktu" guru — aktif singkat setelah ends_at memanjang via autosave. */
+    timeExtension: { minutes: number } | null
     violationCount: number
     showViolationWarning: boolean
     isFullscreen: boolean

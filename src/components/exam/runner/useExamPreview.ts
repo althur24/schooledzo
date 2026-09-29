@@ -52,6 +52,7 @@ export function useExamPreviewState(
         submitting: false,
         saveStatus: 'idle',
         lastLatencyMs: null,
+        timeExtension: null,
         violationCount: 0,
         showViolationWarning: false,
         isFullscreen: true,

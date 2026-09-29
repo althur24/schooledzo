@@ -12,6 +12,7 @@ import {
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { round2, formatScore } from '@/lib/formatScore'
 import { getOfficialExamStatus } from '@/lib/exam'
+import ExtEndTimeMenu from '@/components/exam/ExtEndTimeMenu'
 
 interface StudentProgress {
     student_id: string
@@ -310,6 +311,17 @@ export default function AdminUtsUasMonitorPage({ params, searchParams }: {
                 </div>
 
                 <div className="flex items-center gap-4 bg-white dark:bg-surface-dark px-4 py-3 rounded-2xl shadow-sm border border-secondary/20">
+                    <ExtEndTimeMenu
+                        endpoint={isUlangan ? '/api/exam-submissions/extend-time' : '/api/official-exam-submissions/extend-time'}
+                        extraBody={{ exam_id: examId, ...(isBatch ? { batch: true } : {}) }}
+                        workingCount={summary.working}
+                        notStartedCount={summary.not_started}
+                        submittedCount={summary.submitted}
+                        onResult={(ok, message) => {
+                            showToast(message, ok ? 'success' : 'error')
+                            if (ok) fetchMonitorData(true)
+                        }}
+                    />
                     <div className="text-right">
                         <p className="text-xs text-text-secondary font-medium">Update Terakhir</p>
                         <p className="text-sm font-bold text-text-main dark:text-white">

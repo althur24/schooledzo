@@ -183,6 +183,13 @@ export function ExamRunnerView({ state, mode = 'live' }: ExamRunnerViewProps) {
                 </div>
             )}
 
+            {/* "Tambah Waktu" guru — patokan timer sudah diperbarui via autosave */}
+            {state.timeExtension && (
+                <div className="bg-emerald-600 text-white text-xs font-bold text-center py-1.5 w-full">
+                    ⏱️ Waktu pengerjaan diperpanjang {state.timeExtension.minutes} menit oleh guru — timer Anda sudah diperbarui
+                </div>
+            )}
+
             {/* Header */}
             <div className="bg-surface-light dark:bg-surface-dark border-b border-gray-200 dark:border-gray-700 p-3 md:p-4">
                 <div className="w-full flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
