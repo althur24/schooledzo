@@ -81,9 +81,14 @@ export default function QuizSubmissionsPage() {
 
             // Fetch students in this class — year-aware so a past quiz shows the
             // students who were enrolled then (not the current roster).
+            // as_of = waktu kuis dibuka (available_from, fallback created_at —
+            // tabel quizzes tidak punya start_time) → roster = anggota kelas saat
+            // kuis dibuka (interval enrollment, paritas Monitor Live); siswa yang
+            // pindah keluar sebelum kuis tidak muncul sebagai "belum mengerjakan".
             if (quizData.teaching_assignment?.class?.id) {
                 const taYear = (quizData.teaching_assignment as any)?.academic_year_id
-                const studentsRes = await fetch(`/api/students?class_id=${quizData.teaching_assignment.class.id}&enrollment_year_id=${taYear || ''}`)
+                const quizAnchor = encodeURIComponent(quizData.available_from || quizData.created_at || '')
+                const studentsRes = await fetch(`/api/students?class_id=${quizData.teaching_assignment.class.id}&enrollment_year_id=${taYear || ''}${quizAnchor ? `&as_of=${quizAnchor}` : ''}`)
                 const studentsData = await studentsRes.json()
                 setClassStudents(studentsData)
             }

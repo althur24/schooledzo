@@ -55,7 +55,7 @@ export async function PUT(
         // Get student with current user info (scoped by school)
         let studentQuery = supabase
             .from('students')
-            .select('user_id, parent_user_id, nis')
+            .select('user_id, parent_user_id, nis, class_id')
             .eq('id', id)
         if (schoolId) studentQuery = studentQuery.eq('school_id', schoolId)
         const { data: student } = await studentQuery.single()
@@ -198,9 +198,42 @@ export async function PUT(
             }
         }
 
+        // Pindah kelas via edit siswa WAJIB lewat RPC move_student_to_class —
+        // menulis students.class_id mentah tanpa enrollment menciptakan drift
+        // atribusi (monitor/panel/rekap membaca enrollment, bukan class_id) dan
+        // siswa akan "hilang" dari roster kelas mana pun. RPC menutup enrollment
+        // lama (TRANSFERRED_OUT) + membuka baris ACTIVE di kelas tujuan +
+        // sinkron students.class_id & school_level secara atomik.
+        if (class_id !== undefined && class_id !== student.class_id) {
+            if (!class_id) {
+                return NextResponse.json({ error: 'Kelas tidak bisa dikosongkan — gunakan fitur pindah kelas di halaman Kelas' }, { status: 400 })
+            }
+            // Validasi kelas tujuan milik sekolah caller (mirror move-class route)
+            if (schoolId) {
+                const { data: schoolYears } = await supabase
+                    .from('academic_years').select('id').eq('school_id', schoolId)
+                const yearIds = (schoolYears || []).map(y => y.id)
+                const { count } = await supabase
+                    .from('classes').select('id', { count: 'exact', head: true })
+                    .eq('id', class_id)
+                    .in('academic_year_id', yearIds.length ? yearIds : ['00000000-0000-0000-0000-000000000000'])
+                if (count !== 1) {
+                    return NextResponse.json({ error: 'Kelas tujuan tidak ditemukan di sekolah Anda' }, { status: 400 })
+                }
+            }
+            const { error: rpcError } = await supabase.rpc('move_student_to_class', {
+                p_student_id: id,
+                p_to_class_id: class_id,
+                p_school_id: schoolId || null,
+                p_notes: 'Pindah kelas via edit siswa (admin)'
+            })
+            if (rpcError) {
+                return NextResponse.json({ error: `Gagal memindahkan kelas: ${rpcError.message}` }, { status: 500 })
+            }
+        }
+
         // Update student fields
         if (nis !== undefined) studentUpdate.nis = nis
-        if (class_id !== undefined) studentUpdate.class_id = class_id
         if (gender !== undefined) studentUpdate.gender = gender === 'L' || gender === 'P' ? gender : null
         if (angkatan !== undefined) studentUpdate.angkatan = angkatan
         if (entry_year !== undefined) studentUpdate.entry_year = entry_year

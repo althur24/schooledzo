@@ -155,7 +155,9 @@ export default function GuruKuisPage() {
             const activeYear = Array.isArray(yearsData) ? yearsData.find((y: any) => y.is_active) : null
             if (activeYear) {
                 try {
-                    const studentsRes = await fetch(`/api/students?enrollment_year_id=${activeYear.id}`)
+                    // status=ACTIVE: hitungan "N siswa" kelas = anggota SAAT INI —
+                    // siswa yang pindah kelas tidak terhitung dobel di dua kelas.
+                    const studentsRes = await fetch(`/api/students?enrollment_year_id=${activeYear.id}&status=ACTIVE`)
                     const studentsData = await studentsRes.json()
                     const studentsArray = Array.isArray(studentsData) ? studentsData : []
                     const counts: Record<string, number> = {}
@@ -404,8 +406,13 @@ export default function GuruKuisPage() {
 
             if (!classId) throw new Error('Class ID missing')
 
+            // as_of = waktu kuis dibuka (available_from, fallback created_at) →
+            // kandidat remedial = anggota kelas saat kuis dasar diadakan
+            // (interval enrollment) — siswa yang pindah keluar sejak itu tidak
+            // ikut diremajakan.
+            const quizAnchor = quiz.available_from || quiz.created_at || ''
             const [studentsRes, subsRes] = await Promise.all([
-                fetch(`/api/students?class_id=${classId}&enrollment_year_id=${(quiz.teaching_assignment as any)?.academic_year_id || ''}`),
+                fetch(`/api/students?class_id=${classId}&enrollment_year_id=${(quiz.teaching_assignment as any)?.academic_year_id || ''}${quizAnchor ? `&as_of=${encodeURIComponent(quizAnchor)}` : ''}`),
                 fetch(`/api/quiz-submissions?quiz_id=${quiz.id}`)
             ])
             const studentsData = await studentsRes.json()

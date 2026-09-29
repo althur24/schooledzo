@@ -5,6 +5,7 @@ import { getSchoolContextOrError, isErrorResponse, getSchoolCode } from '@/lib/s
 import { tenantMismatch } from '@/lib/tenantGuard'
 import { logError } from '@/lib/logError'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { enrollmentClassAt, EnrollmentInterval } from '@/lib/enrollmentClassAt'
 
 // GET all students
 export async function GET(request: NextRequest) {
@@ -19,6 +20,7 @@ export async function GET(request: NextRequest) {
         const school_level = searchParams.get('school_level')
         const status = searchParams.get('status')
         const enrollment_year_id = searchParams.get('enrollment_year_id')
+        const as_of = searchParams.get('as_of')
         const user_id = searchParams.get('user_id')
 
         // SISWA hanya boleh membaca data dirinya sendiri — tanpa guard ini
@@ -55,9 +57,11 @@ export async function GET(request: NextRequest) {
                     status,
                     class_id,
                     academic_year_id,
+                    enrolled_at,
                     ended_at,
                     notes,
                     created_at,
+                    updated_at,
                     student:students!student_enrollments_student_id_fkey(
                         id,
                         nis,
@@ -96,7 +100,38 @@ export async function GET(request: NextRequest) {
 
             // fetchAllRows: .range(0, 4999) lama dipotong diam-diam PostgREST
             // di 1000 baris — roster >1000 siswa (PIIS ~1000) terpotong tanpa error.
-            const enrollments = await fetchAllRows(enrollQuery)
+            // Baris enrollment + embed student/class (paritas RosterRow monitor).
+            interface RosterEnrollmentRow extends EnrollmentInterval {
+                student?: { id: string; nis: string | null } | { id: string; nis: string | null }[] | null
+                enrollment_class?: unknown
+            }
+            let enrollments: RosterEnrollmentRow[] = await fetchAllRows(enrollQuery)
+
+            // as_of = atribusi kelas historis: pilih SATU baris enrollment per siswa
+            // yang intervalnya berlaku pada waktu itu (enrollmentClassAt — SATU sumber
+            // kebenaran, paritas fix Monitor Live 24 Sep 2026). Siswa yang intervalnya
+            // sudah tertutup SEBELUM as_of (TRANSFERRED_OUT/PROMOTED) tidak lagi
+            // dihitung sebagai anggota kelas itu — menutup bug "Kaila pindah 1A→2A
+            // masih muncul di panel Belum Mengerjakan 1A". Interval tertutup yang
+            // MASIH menutupi as_of (mis. PROMOTED tahun lalu untuk ujian historis)
+            // tetap lolos — panel hasil ujian lama tetap dapat roster benar.
+            // Tanpa as_of: perilaku lama (semua baris) — kontrak kenaikan-kelas,
+            // tahun-ajaran, dan rekap yang memang butuh seluruh riwayat.
+            if (as_of) {
+                const rowsByStudent = new Map<string, RosterEnrollmentRow[]>()
+                for (const e of (enrollments || [])) {
+                    const s = Array.isArray(e.student) ? e.student[0] : e.student
+                    if (!s) continue
+                    if (!rowsByStudent.has(s.id)) rowsByStudent.set(s.id, [])
+                    rowsByStudent.get(s.id)!.push(e)
+                }
+                const pickedRows: RosterEnrollmentRow[] = []
+                for (const rows of rowsByStudent.values()) {
+                    const picked = enrollmentClassAt(rows, as_of)
+                    if (picked) pickedRows.push(picked)
+                }
+                enrollments = pickedRows
+            }
 
             // Flatten and filter by school
             const result = (enrollments || [])

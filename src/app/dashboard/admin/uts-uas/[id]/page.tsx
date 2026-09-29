@@ -327,12 +327,19 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
 
     // Roster year-aware per kelas target — untuk panel "Belum Mengerjakan".
     // Official: loop semua kelas target (scoped TA exam); ulangan: satu kelas TA.
-    // Fetch ringan (1 request/kelas), hanya saat tab Hasil dibuka.
+    // as_of = waktu mulai ujian → roster = anggota kelas SAAT ujian dimulai
+    // (interval enrollment, paritas Monitor Live) — siswa yang pindah keluar
+    // sebelum ujian tidak lagi muncul sebagai "belum mengerjakan" di kelas
+    // lamanya (bug Kaila 1A→2A, 29 Sep 2026). Fetch ringan (1 request/kelas),
+    // hanya saat tab Hasil dibuka.
     useEffect(() => {
         if (activeTab !== 'hasil' || !exam) return
         const yearId = isUlangan
             ? (exam as any)?.teaching_assignment?.academic_year?.id
             : (exam as any)?.academic_year?.id
+        const examStart = exam.start_time
+            ? `&as_of=${encodeURIComponent(exam.start_time)}`
+            : ''
         const classList = isUlangan
             ? (exam.teaching_assignment?.class?.id
                 ? [{ id: exam.teaching_assignment.class.id, name: exam.teaching_assignment.class.name }]
@@ -343,7 +350,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
             classList
                 .filter((c: any) => c.id)
                 .map((c: any) =>
-                    fetch(`/api/students?class_id=${c.id}&enrollment_year_id=${yearId || ''}`)
+                    fetch(`/api/students?class_id=${c.id}&enrollment_year_id=${yearId || ''}${examStart}`)
                         .then(r => r.ok ? r.json() : [])
                         .then((d: any[]) => (Array.isArray(d) ? d : []).map((s: any) => ({
                             id: s.id,

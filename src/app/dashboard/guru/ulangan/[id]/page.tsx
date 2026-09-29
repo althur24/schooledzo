@@ -333,15 +333,21 @@ function EditExamPageInner() {
 
     // Roster year-aware untuk panel "Belum Mengerjakan": siswa yang terdaftar di
     // kelas ini pada tahun ajaran ulangan — bukan roster sekarang (siswa bisa
-    // sudah naik kelas). Batch mode: roster SEMUA kelas member (batch dibuat
-    // serentak di tahun ajaran yang sama → yearId exam ini berlaku untuk semua).
-    // Effect terpisah dari fetchExam agar tidak ikut terpanggil oleh auto-poll
-    // review AI (tiap 5 dtk) — cukup sekali per exam.
+    // sudah naik kelas). as_of = waktu mulai ulangan → roster = anggota kelas
+    // SAAT ulangan dimulai (interval enrollment, paritas Monitor Live) — siswa
+    // yang pindah keluar sebelum ulangan tidak muncul sebagai "belum
+    // mengerjakan" di kelas lamanya. Batch mode: roster SEMUA kelas member
+    // (batch dibuat serentak di tahun ajaran yang sama → yearId exam ini
+    // berlaku untuk semua). Effect terpisah dari fetchExam agar tidak ikut
+    // terpanggil oleh auto-poll review AI (tiap 5 dtk) — cukup sekali per exam.
     useEffect(() => {
         const ta = exam?.teaching_assignment
         const primaryClassId = ta?.class?.id
         if (!primaryClassId) return
         const yearId = ta?.academic_year?.id || ''
+        const examStart = exam?.start_time
+            ? `&as_of=${encodeURIComponent(exam.start_time)}`
+            : ''
         const memberClasses = [
             { memberId: examId, classId: primaryClassId, className: ta?.class?.name || '' },
             ...(exam?.batch_siblings || []).map(s => ({ memberId: s.id, classId: s.class_id || '', className: s.class_name })),
@@ -349,7 +355,7 @@ function EditExamPageInner() {
         let cancelled = false
         Promise.all(
             memberClasses.map(mc =>
-                fetch(`/api/students?class_id=${mc.classId}&enrollment_year_id=${yearId}`)
+                fetch(`/api/students?class_id=${mc.classId}&enrollment_year_id=${yearId}${examStart}`)
                     .then(r => r.ok ? r.json() : [])
                     .then((d: ClassStudent[]) => (Array.isArray(d) ? d : []).map(s => ({
                         ...s, memberId: mc.memberId, className: mc.className,

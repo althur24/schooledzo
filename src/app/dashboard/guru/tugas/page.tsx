@@ -94,7 +94,10 @@ export default function TugasPage() {
             const activeYear = Array.isArray(yearsData) ? yearsData.find((y: any) => y.is_active) : null
             if (activeYear) {
                 try {
-                    const studentsRes = await fetch(`/api/students?enrollment_year_id=${activeYear.id}`)
+                    // status=ACTIVE: hitungan "N siswa" kelas = anggota SAAT INI —
+                    // tanpa ini baris TRANSFERRED_OUT ikut terhitung sehingga kelas
+                    // asal + kelas tujuan sama-sama menghitung siswa yang pindah.
+                    const studentsRes = await fetch(`/api/students?enrollment_year_id=${activeYear.id}&status=ACTIVE`)
                     const studentsData = await studentsRes.json()
                     const studentsArray = Array.isArray(studentsData) ? studentsData : []
                     const counts: Record<string, number> = {}

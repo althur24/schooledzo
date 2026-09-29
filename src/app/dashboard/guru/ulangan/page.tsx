@@ -231,7 +231,9 @@ export default function GuruUlanganPage() {
             const activeYear = Array.isArray(yearsData) ? yearsData.find((y: any) => y.is_active) : null
             if (activeYear) {
                 try {
-                    const studentsRes = await fetch(`/api/students?enrollment_year_id=${activeYear.id}`)
+                    // status=ACTIVE: hitungan "N siswa" kelas = anggota SAAT INI —
+                    // siswa yang pindah kelas tidak terhitung dobel di dua kelas.
+                    const studentsRes = await fetch(`/api/students?enrollment_year_id=${activeYear.id}&status=ACTIVE`)
                     const studentsData = await studentsRes.json()
                     const studentsArray = Array.isArray(studentsData) ? studentsData : []
                     const counts: Record<string, number> = {}
@@ -761,8 +763,14 @@ export default function GuruUlanganPage() {
 
             if (!classId) throw new Error('Class ID missing')
 
+            // as_of = waktu mulai ulangan dasar → kandidat remedial = anggota
+            // kelas saat ulangan itu diadakan (interval enrollment) — siswa yang
+            // pindah keluar sejak itu tidak ikut diremajakan.
+            const examStart = exam?.start_time
+                ? `&as_of=${encodeURIComponent(exam.start_time)}`
+                : ''
             const [studentsRes, subsRes] = await Promise.all([
-                fetch(`/api/students?class_id=${classId}&enrollment_year_id=${(ta as any)?.academic_year_id || ''}`),
+                fetch(`/api/students?class_id=${classId}&enrollment_year_id=${(ta as any)?.academic_year_id || ''}${examStart}`),
                 fetch(`/api/exam-submissions?exam_id=${exam.id}&teacher_view=true`)
             ])
             const studentsData = await studentsRes.json()
