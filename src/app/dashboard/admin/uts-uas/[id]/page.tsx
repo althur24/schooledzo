@@ -1321,7 +1321,10 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                         />
                     )}
 
-                    {resultsLoading ? (
+                    {/* Spinner HANYA saat belum ada data (paritas guru) — saat re-fetch
+                        (auto-poll 10 dtk saat live / ganti filter kelas) tabel tetap tampil,
+                        tidak berkedip spinner→tabel→spinner */}
+                    {resultsLoading && submissions.length === 0 ? (
                         <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
                     ) : submissions.length === 0 ? (
                         <Card padding="p-4 md:p-8" className="text-center">
