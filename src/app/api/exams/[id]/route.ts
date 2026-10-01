@@ -302,28 +302,37 @@ export async function PUT(
             throw error
         }
 
-        // ── K3: jadwal batch dipaksa SERAGAM (paritas UTS/UAS) ──
-        // Prinsip desain: 1 batch = 1 jadwal (kelas paralel mengerjakan
-        // serentak). Guru yang butuh jadwal beda membuat batch lain. Bila PUT
-        // menyentuh field jadwal pada member batch → perubahan otomatis
-        // menular ke semua member (TANPA menyentuh is_active/pending_publish/
-        // results_released — itu tetap per-member). Field non-jadwal (judul,
-        // deskripsi, dll.) tetap per-member.
-        const TIMING_KEYS_EXAM = ['start_time', 'duration_minutes', 'window_end_time'] as const
-        const timingTouched = TIMING_KEYS_EXAM.some(k => (updateData as any)[k] !== undefined)
-        if (data?.batch_id && timingTouched) {
+        // ── K3: field batch dipaksa SERAGAM (paritas UTS/UAS) ──
+        // Prinsip desain: 1 batch = 1 pengaturan kelas paralel (siswa seangkatan
+        // mengerjakan kondisi yang sama). Guru yang butuh pengaturan beda membuat
+        // batch lain. Bila PUT menyentuh field batch pada member → perubahan
+        // otomatis menular ke semua member (TANPA menyentuh is_active/
+        // pending_publish/results_released — itu tetap per-member).
+        // BUG NYATA (TKA MTK PIIS 30 Sep 2026): max_violations TIDAK termasuk
+        // propagasi → guru set 5 di 1 member, 9 kelas lain tetap 3 → siswa
+        // dipaksa-submit di pelanggaran ke-3 padahal batas 5 → nilai 0.
+        // Kategori batch (wajib seragam): jadwal + aturan + tampilan hasil.
+        const BATCH_SYNC_KEYS_EXAM = [
+            'start_time', 'duration_minutes', 'window_end_time',   // jadwal
+            'max_violations', 'is_randomized',                      // aturan
+            'show_results_immediately',                              // tampilan
+        ] as const
+        const batchTouched = BATCH_SYNC_KEYS_EXAM.some(k => (updateData as any)[k] !== undefined)
+        if (data?.batch_id && batchTouched) {
             try {
-                const siblingTiming: Record<string, unknown> = {}
-                for (const k of TIMING_KEYS_EXAM) siblingTiming[k] = (updateData as any)[k]
+                const siblingSync: Record<string, unknown> = {}
+                for (const k of BATCH_SYNC_KEYS_EXAM) {
+                    if ((updateData as any)[k] !== undefined) siblingSync[k] = (updateData as any)[k]
+                }
                 const { error: timingErr } = await supabase
                     .from('exams')
-                    .update({ ...siblingTiming, updated_at: new Date().toISOString() })
+                    .update({ ...siblingSync, updated_at: new Date().toISOString() })
                     .eq('batch_id', data.batch_id)
                 if (timingErr) {
-                    console.error('[exam][batch-timing] gagal menular ke sibling:', timingErr)
+                    console.error('[exam][batch-sync] gagal menular ke sibling:', timingErr)
                 }
             } catch (timingError) {
-                console.error('[exam][batch-timing] error:', timingError)
+                console.error('[exam][batch-sync] error:', timingError)
             }
         }
 

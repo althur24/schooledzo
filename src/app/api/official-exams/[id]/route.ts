@@ -192,6 +192,35 @@ export async function PUT(
 
         if (error) throw error
 
+        // ── K3 paritas: field batch dipaksa SERAGAM ke sibling ──
+        // official_exams juga punya batch_id (lihat syncBatch di examBatch.ts).
+        // Sebelumnya PATCH official-exams TIDAK propager apa pun → guru set
+        // max_violations/durasi/is_randomized di 1 member batch, member lain
+        // tak ikut. Paritas exam-submissions: jadwal + aturan + tampilan hasil
+        // wajib seragam; is_active & results_released tetap per-member.
+        const BATCH_SYNC_KEYS_OFFICIAL = [
+            'start_time', 'duration_minutes', 'window_end_time',
+            'max_violations', 'is_randomized', 'show_results_immediately',
+        ] as const
+        const batchTouchedOfficial = BATCH_SYNC_KEYS_OFFICIAL.some(k => (updateData as any)[k] !== undefined)
+        if (data?.batch_id && batchTouchedOfficial) {
+            try {
+                const siblingSync: Record<string, unknown> = {}
+                for (const k of BATCH_SYNC_KEYS_OFFICIAL) {
+                    if ((updateData as any)[k] !== undefined) siblingSync[k] = (updateData as any)[k]
+                }
+                const { error: siblingErr } = await supabase
+                    .from('official_exams')
+                    .update({ ...siblingSync, updated_at: new Date().toISOString() })
+                    .eq('batch_id', data.batch_id)
+                if (siblingErr) {
+                    console.error('[official-exam][batch-sync] gagal menular ke sibling:', siblingErr)
+                }
+            } catch (siblingError) {
+                console.error('[official-exam][batch-sync] error:', siblingError)
+            }
+        }
+
         // If just activated, send notifications to all target students and teachers
         if (is_active === true && data) {
             try {

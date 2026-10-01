@@ -713,7 +713,7 @@ function EditExamPageInner() {
                 // member batch otomatis menular ke semua member — paritas UTS/UAS).
                 // Loop client lama menjadi no-op idempoten; toast tetap informatif.
                 if (applyScheduleToSiblings && (exam?.batch_siblings?.length || 0) > 0) {
-                    setToast({ message: `Jadwal diterapkan ke ${exam!.batch_siblings!.length + 1} kelas paralel`, type: 'success' })
+                    setToast({ message: `Jadwal, batas pelanggaran & tampilan hasil diterapkan ke ${exam!.batch_siblings!.length + 1} kelas paralel`, type: 'success' })
                 }
                 setShowEditSettings(false)
                 setApplyScheduleToSiblings(false)
@@ -3077,11 +3077,10 @@ function EditExamPageInner() {
                                 className="w-5 h-5 mt-0.5 rounded border-secondary/30 text-primary focus:ring-primary"
                             />
                             <label htmlFor="applyScheduleSiblings" className="text-sm cursor-pointer">
-                                <span className="font-medium text-text-main dark:text-white">Terapkan jadwal ini juga ke {exam!.batch_siblings!.length} kelas paralel</span>
+                                <span className="font-medium text-text-main dark:text-white">Terapkan ke {exam!.batch_siblings!.length} kelas paralel</span>
                                 <span className="block text-xs text-text-secondary mt-0.5">
                                     {exam!.batch_siblings!.map(s => s.class_name).join(', ')}
-                                    {' — jadwal batch selalu seragam otomatis (paritas UTS/UAS)'}
-                                    {exam?.is_active ? `; centang hanya mengubah tampilan pesan` : ''}
+                                    {' — jadwal, batas pelanggaran, acak soal & tampilan hasil batch selalu seragam otomatis (paritas UTS/UAS)'}
                                 </span>
                             </label>
                         </div>
