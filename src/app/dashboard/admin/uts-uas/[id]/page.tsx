@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, use, useCallback } from 'react'
+import { useEffect, useState, use, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
@@ -188,6 +188,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     const [resultsLoading, setResultsLoading] = useState(false)
     const [resultsClassFilter, setResultsClassFilter] = useState('')
     const [selectedSubmission, setSelectedSubmission] = useState<any | null>(null)
+    // Race guard fetchResults: id request terakhir yang boleh menulis state —
+    // respons request lama (poll tumpang-tindih saat jaringan lambat) dibuang.
+    const requestIdRef = useRef(0)
     // Roster per kelas target (year-aware) — untuk panel "Belum Mengerjakan".
     // memberId = exam member pemilik kelas tsb (ulangan batch: filter roster
     // per kelas memakai memberId, official: classId)
@@ -195,6 +198,10 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
 
     // AI Review setting
     const [aiReviewEnabled, setAiReviewEnabled] = useState(false)
+    // Tahun ajaran exam — primitif utk dep effect classes (hindari refetch per fetchExam)
+    const examYearId = isUlangan
+        ? (exam as any)?.teaching_assignment?.academic_year?.id
+        : (exam as any)?.academic_year?.id
 
     // Helpers
     // Round 2 desimal — poin soal kini bisa desimal (hasil "Seimbangkan" 100/30 = 3.33)
@@ -325,7 +332,10 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
             .then(r => r.json())
             .then(d => setAllClasses(Array.isArray(d) ? d : []))
             .catch(() => {})
-    }, [exam, isUlangan])
+        // Primitif saja: dep objek `exam` utuh memicu refetch identik setiap
+        // fetchExam() pasca-publish/share/settings — cukup id + tahun berubah
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [exam?.id, examYearId, isUlangan])
 
     // Deep-link #hasil (dari kartu list / redirect setelah koreksi) — setelah mount,
     // hash sudah pasti terbaca (initializer state berisiko race saat client-side nav)
@@ -334,6 +344,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     }, [])
 
     const fetchResults = useCallback(async () => {
+        // Race guard: increment id — hanya request dengan id terbaru yang boleh
+        // menulis submissions/spinner (respons lama dari poll tumpang-tindih dibuang)
+        const myId = ++requestIdRef.current
         setResultsLoading(true)
         try {
             // Ulangan batch: "Semua Kelas" = submission SEMUA member batch
@@ -349,9 +362,18 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
             }
             const res = await fetch(url)
             const data = await res.json()
-            setSubmissions(Array.isArray(data) ? data : [])
+            // Race guard: request lama (poll 10 dtk bisa tumpang-tindih saat
+            // jaringan lambat) tidak boleh menimpa hasil request yang lebih
+            // baru — tanpa ini data "berubah sendiri" sesaat di layar.
+            setSubmissions(prev => {
+                // prev === current state; bandingkan lewat ref request id
+                if (requestIdRef.current !== myId) return prev
+                return Array.isArray(data) ? data : []
+            })
         } catch (error) { console.error('Error:', error) }
-        finally { setResultsLoading(false) }
+        finally {
+            if (requestIdRef.current === myId) setResultsLoading(false)
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [examId, isUlangan, isBatchView, resultsClassFilter])
 
