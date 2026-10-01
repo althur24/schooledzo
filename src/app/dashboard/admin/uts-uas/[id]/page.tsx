@@ -198,6 +198,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
 
     // AI Review setting
     const [aiReviewEnabled, setAiReviewEnabled] = useState(false)
+    const [teachingAssignments, setTeachingAssignments] = useState<any[]>([])
+    const [batchMemberSaving, setBatchMemberSaving] = useState(false)
     // Tahun ajaran exam — primitif utk dep effect classes (hindari refetch per fetchExam)
     const examYearId = isUlangan
         ? (exam as any)?.teaching_assignment?.academic_year?.id
@@ -223,8 +225,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     // Opsi kelas: kelas exam ini + sibling, urut abjad (numeric: "Kelas 2" < "Kelas 10",
     // konsisten dengan dropdown monitor & hasil guru)
     const batchMembers = [
-        { id: examId, class_name: (exam as any)?.teaching_assignment?.class?.name || 'Kelas Ini' },
-        ...(exam?.batch_siblings || []).map(s => ({ id: s.id, class_name: s.class_name })),
+        { id: examId, class_id: (exam as any)?.teaching_assignment?.class?.id, class_name: (exam as any)?.teaching_assignment?.class?.name || 'Kelas Ini' },
+        ...(exam?.batch_siblings || []).map(s => ({ id: s.id, class_id: s.class_id, class_name: s.class_name })),
     ].sort((a, b) => a.class_name.localeCompare(b.class_name, 'id', { numeric: true, sensitivity: 'base' }))
 
     const getStudentKkm = (student: any, sub?: any) => {
@@ -782,6 +784,71 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         } finally { setRapihSaving(false) }
     }
 
+    const fetchTeachingAssignmentsIfNeeded = async () => {
+        if (teachingAssignments.length > 0) return
+        try {
+            const res = await fetch('/api/teaching-assignments')
+            const data = await res.json()
+            setTeachingAssignments(Array.isArray(data) ? data : [])
+        } catch (e) { console.error('Error fetching TA', e) }
+    }
+    useEffect(() => {
+        if (isUlangan && activeTab === 'pengaturan') fetchTeachingAssignmentsIfNeeded()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isUlangan, activeTab])
+
+    const handleAddBatchMember = async (classId: string, className: string) => {
+        if (!exam?.batch_id || batchMemberSaving) return
+        const subjectId = (exam as any)?.teaching_assignment?.subject?.id
+        if (!subjectId) { showToast('Mapel tidak ditemukan', 'error'); return }
+        await fetchTeachingAssignmentsIfNeeded()
+        const tas = teachingAssignments
+            .filter((ta: any) => {
+                const subj = Array.isArray(ta.subject) ? ta.subject[0] : ta.subject
+                const cl = Array.isArray(ta.class) ? ta.class[0] : ta.class
+                return subj?.id === subjectId && cl?.id === classId
+            })
+            .map((ta: any) => ({ id: ta.id, teacherName: (Array.isArray(ta.teacher?.user) ? ta.teacher.user[0]?.full_name : ta.teacher?.user?.full_name) || 'Tanpa Nama' }))
+            .sort((a: any, b: any) => a.teacherName.localeCompare(b.teacherName))
+        const anchor = tas[0]
+        if (!anchor) { showToast(`Kelas ${className} belum punya guru pengampu mapel ini`, 'error'); return }
+        setBatchMemberSaving(true)
+        try {
+            const localDate = new Date(settingsForm.start_time || Date.now())
+            const res = await fetch('/api/exams', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    teaching_assignment_id: anchor.id, title: settingsForm.title || exam.title,
+                    description: settingsForm.description ?? exam.description ?? null,
+                    start_time: localDate.toISOString(),
+                    duration_minutes: settingsForm.duration_minutes || exam.duration_minutes,
+                    window_end_time: settingsForm.schedule_mode === 'window' && settingsForm.window_end_time ? new Date(settingsForm.window_end_time).toISOString() : null,
+                    is_randomized: settingsForm.is_randomized, max_violations: settingsForm.max_violations,
+                    show_results_immediately: settingsForm.show_results_immediately,
+                    duplicate_from_exam_id: examId, duplicate_questions: true, batch_id: exam.batch_id,
+                })
+            })
+            if (res.ok) { showToast(`Kelas ${className} ditambahkan ke batch`, 'success'); await fetchExam() }
+            else { const err = await res.json().catch(() => null); showToast(err?.error || 'Gagal menambah kelas', 'error') }
+        } finally { setBatchMemberSaving(false) }
+    }
+
+    const handleRemoveBatchMember = async (memberId: string, className: string) => {
+        if (memberId === examId) { showToast('Gunakan hapus ujian dari daftar untuk menghapus kelas ini', 'warning'); return }
+        if (batchMemberSaving) return
+        try {
+            const r = await fetch(`${submissionsApi}?exam_id=${memberId}`)
+            if (r.ok) { const subs = await r.json(); if (Array.isArray(subs) && subs.length > 0) { showToast(`Tidak bisa hapus ${className}: sudah ada ${subs.length} submission. Tarik ujian ke draft & hapus jawaban dulu.`, 'error'); return } }
+        } catch { }
+        if (!confirm(`Hapus kelas ${className} dari batch ini? Soal & data kelas ini akan dihapus (member lain tak terpengaruh).`)) return
+        setBatchMemberSaving(true)
+        try {
+            const res = await fetch(`${examApi}/${memberId}`, { method: 'DELETE' })
+            if (res.ok) { showToast(`Kelas ${className} dihapus dari batch`, 'success'); await fetchExam() }
+            else { const err = await res.json().catch(() => null); showToast(err?.error || 'Gagal menghapus kelas', 'error') }
+        } finally { setBatchMemberSaving(false) }
+    }
+
     // Save settings
     const handleSaveSettings = async () => {
         setSettingsSaving(true)
@@ -1216,6 +1283,61 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                             })}
                         </div>
                     </div>
+                    )}
+
+                    {/* Kelola Kelas Paralel (batch) — ulangan yang sudah punya batch.
+                        Admin sesuaikan kelas SEBELUM publish: tambah (auto-cocok guru
+                        pengampu mapel×kelas, salin soal) / hapus member (guard: tak
+                        boleh ada submission). Saat aktif semua dikunci. */}
+                    {isUlangan && isBatchView && (
+                        <div className="p-4 rounded-xl border border-secondary/20 bg-secondary/5 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <label className="block text-sm font-bold text-text-main dark:text-white">Kelas Paralel (Batch)</label>
+                                    <p className="text-xs text-text-secondary mt-0.5">
+                                        {exam.is_active ? 'Member tak bisa diubah saat ujian aktif.' : `Sesuaikan kelas sebelum publish. ${batchMembers.length} kelas saat ini.`}
+                                    </p>
+                                </div>
+                                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">{batchMembers.length} kelas</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {batchMembers.map(m => (
+                                    <span key={m.id} className={`inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 rounded-full text-xs font-bold ${m.id === examId ? 'bg-primary/10 text-primary' : 'bg-white dark:bg-surface-dark text-text-main dark:text-white border border-secondary/20'}`}>
+                                        {m.class_name}
+                                        {m.id === examId ? <span className="text-[10px] text-text-secondary ml-0.5">(ini)</span> : (
+                                            <button onClick={() => handleRemoveBatchMember(m.id, m.class_name)} disabled={exam.is_active || batchMemberSaving}
+                                                title={exam.is_active ? 'Tarik ujian ke draft untuk menghapus member' : 'Hapus dari batch'}
+                                                className="ml-1 w-5 h-5 inline-flex items-center justify-center rounded-full hover:bg-red-500/20 text-text-secondary hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">×</button>
+                                        )}
+                                    </span>
+                                ))}
+                            </div>
+                            {(() => {
+                                const memberClassIds = new Set(batchMembers.map(m => m.class_id).filter(Boolean))
+                                const subjectId = (exam as any)?.teaching_assignment?.subject?.id
+                                const candidates = allClasses.filter(c => !memberClassIds.has(c.id))
+                                if (candidates.length === 0) return <p className="text-xs text-text-secondary">Semua kelas tahun ajaran ini sudah jadi member batch.</p>
+                                return (
+                                    <div>
+                                        <p className="text-xs font-bold text-text-secondary mb-1.5">Tambah kelas (auto-cocok guru pengampu):</p>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {candidates.map(c => {
+                                                const hasTa = teachingAssignments.some((ta: any) => {
+                                                    const subj = Array.isArray(ta.subject) ? ta.subject[0] : ta.subject
+                                                    const cl = Array.isArray(ta.class) ? ta.class[0] : ta.class
+                                                    return subj?.id === subjectId && cl?.id === c.id
+                                                })
+                                                return (
+                                                    <button key={c.id} onClick={() => handleAddBatchMember(c.id, c.name)} disabled={exam.is_active || batchMemberSaving || !hasTa}
+                                                        title={!hasTa ? 'Belum ada guru pengampu mapel ini untuk kelas tersebut' : 'Tambah ke batch'}
+                                                        className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all ${hasTa && !exam.is_active ? 'border-dashed border-primary/40 text-primary hover:bg-primary/10' : 'border-secondary/20 text-text-secondary/40 cursor-not-allowed'}`}>+ {c.name}</button>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                )
+                            })()}
+                        </div>
                     )}
 
                     <div className="pt-4 border-t border-secondary/10">
