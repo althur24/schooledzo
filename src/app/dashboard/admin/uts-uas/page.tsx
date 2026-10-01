@@ -644,8 +644,10 @@ function AdminUtsUasPageInner() {
         } else {
             setShowDuplicate(true)
             // Ulangan BIASA multi-kelas: daftar TA dibutuhkan untuk mencocokkan
-            // guru pengampu per kelas target saat submit (paritas alur create)
-            if (source === 'ulangan') fetchTeachingAssignmentsIfNeeded()
+            // guru pengampu per kelas target saat submit (paritas alur create).
+            // Await — kalau fire-and-forget, admin yang klik terlalu cepat
+            // mendapat "tidak ada pengampu" palsu (TA masih kosong).
+            if (source === 'ulangan') await fetchTeachingAssignmentsIfNeeded()
         }
     }
 
@@ -727,6 +729,9 @@ function AdminUtsUasPageInner() {
                     // create): resolve TA anchor pengampu mapel×kelas per kelas
                     // target — kelas tanpa pengampu di-skip dengan laporan.
                     const subjectId = ulanganSubjectId(duplicateExam)
+                    // Retry guard: TA bisa gagal termuat saat open modal (jaringan)
+                    // — jangan biarkan semua kelas dianggap "tanpa pengampu".
+                    if (teachingAssignments.length === 0) await fetchTeachingAssignmentsIfNeeded()
                     const matched = duplicateForm.target_class_ids.map(classId => {
                         const cls = classes.find(c => c.id === classId)
                         const tas = teachingAssignments
