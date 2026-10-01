@@ -144,8 +144,8 @@ function AdminUtsUasPageInner() {
     // Toast & confirm dialog
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
     const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null)
-    const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-        setToast({ message, type })
+    const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
+        setToast({ message, type: type === 'warning' ? 'error' : type })
         setTimeout(() => setToast(null), 3000)
     }
 
@@ -435,7 +435,7 @@ function AdminUtsUasPageInner() {
                 : `Hapus ${labels.ulangan} ini? Semua soal dan submission akan dihapus.`,
             onConfirm: async () => {
                 const failedClasses: string[] = []
-                await Promise.all(members.map(async (m: any) => {
+                await Promise.all(members.map(async (m) => {
                     try {
                         const res = await fetch(`/api/exams/${m.id}`, { method: 'DELETE' })
                         if (!res.ok) failedClasses.push(first(ulanganTA(m)?.class)?.name || m.title)
@@ -477,12 +477,22 @@ function AdminUtsUasPageInner() {
 
         const defaultTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
 
-        // Prefill kelas target (khusus ujian resmi): HANYA kelas tahun ajaran
+        // Prefill kelas target (BIASA & REMEDIAL): HANYA kelas tahun ajaran
         // aktif. Kelas sumber dari tahun lampau/sekolah lain tidak di-prefill —
         // tampilkan sebagai peringatan agar admin tahu persis apa yang dibuang
         // (bukan dibuang diam-diam), dan biarkan admin memilih ulang kelas.
+        // - Official: target_class_ids exam sumber.
+        // - Ulangan: kelas member batch (atau kelas sumber tunggal) — duplikasi
+        //   ulangan kini multi-kelas (paritas duplikasi UTS/UAS): admin memilih
+        //   kelas target, sistem mencocokkan TA anchor per kelas saat submit.
         let prefillTargetIds: string[] = (exam.target_class_ids as string[]) || []
-        if (source === 'official' && prefillTargetIds.length > 0) {
+        if (source === 'ulangan') {
+            const members = group?.isBatch ? group.members : [exam]
+            prefillTargetIds = members
+                .map(m => first(ulanganTA(m)?.class)?.id)
+                .filter((id): id is string => !!id)
+        }
+        if (prefillTargetIds.length > 0) {
             const activeIds = new Set(classes.map(c => c.id))
             const kept = prefillTargetIds.filter(id => activeIds.has(id))
             const droppedIds = prefillTargetIds.filter(id => !activeIds.has(id))
@@ -519,44 +529,70 @@ function AdminUtsUasPageInner() {
             setShowDuplicate(true)
             try {
                 if (source === 'ulangan') {
-                    // Ulangan: submissions dari /api/exam-submissions; kelas dari teaching_assignment
-                    const res = await fetch(`/api/exam-submissions?exam_id=${exam.id}`)
-                    if (res.ok) {
-                        const submissions = await res.json()
-                        const ta = ulanganTA(exam)
-                        const subject = Array.isArray(ta?.subject) ? ta?.subject[0] : ta?.subject
-                        const cls = Array.isArray(ta?.class) ? ta?.class[0] : ta?.class
-                        const baseKkm = subject?.kkm || 75
-                        let granularKkms: any[] = []
-                        try {
-                            const kkmRes = await fetch(`/api/subject-kkm?subject_id=${subject?.id}`)
-                            if (kkmRes.ok) granularKkms = await kkmRes.json()
-                        } catch (e) {
-                            console.error('Failed to fetch granular KKM', e)
-                        }
-                        let studentKkm = baseKkm
+                    // Ulangan: kandidat remedial = ROSTER PENUH kelas member
+                    // (paritas guru — siswa tak submit ikut, skor 0, interval
+                    // enrollment as_of=start_time), digabung skor submission.
+                    // REMEDIAL dibuat per kelas member: remedial_for_id = exam
+                    // member itu sendiri → constraint TA sumber terpenuhi alami.
+                    const members = (group?.isBatch ? group.members : [exam]) as any[]
+                    const ta = ulanganTA(exam)
+                    const subject = Array.isArray(ta?.subject) ? ta?.subject[0] : ta?.subject
+                    const yearId = ta?.academic_year_id || ''
+                    const baseKkm = subject?.kkm || 75
+                    let granularKkms: any[] = []
+                    try {
+                        const kkmRes = await fetch(`/api/subject-kkm?subject_id=${subject?.id}`)
+                        if (kkmRes.ok) granularKkms = await kkmRes.json()
+                    } catch (e) {
+                        console.error('Failed to fetch granular KKM', e)
+                    }
+                    const resolveKkm = (cls: any) => {
                         if (cls?.school_level && cls?.grade_level) {
                             const granular = granularKkms.find((k: any) => k.school_level === cls.school_level && k.grade_level === cls.grade_level)
-                            if (granular) studentKkm = granular.kkm
+                            if (granular) return granular.kkm
                         }
-                        const studentsList = (Array.isArray(submissions) ? submissions : [])
-                            .filter((sub: any) => sub.is_submitted)
-                            .map((sub: any) => {
-                                const pct = (sub.total_score || 0) / (sub.max_score || 1) * 100
-                                return {
-                                    id: sub.student?.id,
-                                    name: sub.student?.user?.full_name,
-                                    nis: sub.student?.nis,
-                                    score: sub.total_score,
-                                    max_score: sub.max_score,
-                                    pct,
-                                    needsRemedial: pct < studentKkm,
-                                    kkmApplied: studentKkm
-                                }
-                            })
-                        setRemedialStudents(studentsList)
-                        setSelectedStudentIds(studentsList.filter((s: any) => s.needsRemedial).map((s: any) => s.id))
+                        return baseKkm
                     }
+                    const lists = await Promise.all(members.map(async (m: any) => {
+                        const mTa = ulanganTA(m)
+                        const cls = Array.isArray(mTa?.class) ? mTa?.class[0] : mTa?.class
+                        if (!cls?.id) return []
+                        const examStart = m.start_time ? `&as_of=${encodeURIComponent(m.start_time)}` : ''
+                        const [rosterRes, subsRes] = await Promise.all([
+                            fetch(`/api/students?class_id=${cls.id}&enrollment_year_id=${yearId}${examStart}`),
+                            fetch(`/api/exam-submissions?exam_id=${m.id}`)
+                        ])
+                        const roster = rosterRes.ok ? await rosterRes.json() : []
+                        const subs = subsRes.ok ? await subsRes.json() : []
+                        const scoreByStudent = new Map<string, any>()
+                            ; (Array.isArray(subs) ? subs : []).forEach((sub) => {
+                                const sid = sub.student?.id || sub.student_id
+                                if (sid && !scoreByStudent.has(sid)) scoreByStudent.set(sid, sub)
+                            })
+                        const kkm = resolveKkm(cls)
+                        return (Array.isArray(roster) ? roster : []).map((s) => {
+                            const sub = scoreByStudent.get(s.id)
+                            const score = sub?.is_submitted ? (sub.total_score || 0) : 0
+                            const maxScore = sub?.is_submitted ? (sub.max_score || 1) : 1
+                            const pct = score / maxScore * 100
+                            return {
+                                id: s.id,
+                                name: s.user?.full_name || '',
+                                nis: s.nis || '',
+                                score,
+                                max_score: sub?.is_submitted ? (sub.max_score || 0) : 0,
+                                pct,
+                                needsRemedial: pct < kkm,
+                                kkmApplied: kkm,
+                                classId: cls.id,
+                                className: cls.name,
+                                memberExamId: m.id
+                            }
+                        })
+                    }))
+                    const studentsList = lists.flat()
+                    setRemedialStudents(studentsList)
+                    setSelectedStudentIds(studentsList.filter((s) => s.needsRemedial).map((s) => s.id))
                 } else {
                     const res = await fetch(`/api/official-exam-submissions?exam_id=${exam.id}`)
                     if (res.ok) {
@@ -607,25 +643,15 @@ function AdminUtsUasPageInner() {
             }
         } else {
             setShowDuplicate(true)
+            // Ulangan BIASA multi-kelas: daftar TA dibutuhkan untuk mencocokkan
+            // guru pengampu per kelas target saat submit (paritas alur create)
+            if (source === 'ulangan') fetchTeachingAssignmentsIfNeeded()
         }
     }
 
-    // Ganti kelas sumber di modal duplikasi/remedial ulangan batch — input yang
-    // sudah diedit admin (judul/jadwal/durasi) dipertahankan, daftar member
-    // juga dipertahankan (handleOpenDuplicate me-resetnya ke [exam]).
-    const switchDuplicateMember = async (member: any) => {
-        const membersSnapshot = duplicateMembers
-        const snapshot = { ...duplicateForm }
-        await handleOpenDuplicate(member, duplicateMode, 'ulangan')
-        setDuplicateMembers(membersSnapshot)
-        setDuplicateForm(prev => ({
-            ...prev,
-            title: snapshot.title,
-            start_time: snapshot.start_time,
-            duration_minutes: snapshot.duration_minutes,
-            window_end_time: snapshot.window_end_time,
-        }))
-    }
+    // Ganti kelas sumber di modal duplikasi/remedial ulangan batch TIDAK DIPERLUKAN
+    // lagi: duplikasi & remedial ulangan kini multi-kelas (kelas target di-prefill
+    // dari member batch, TA dicocokkan otomatis per kelas saat submit).
 
     const handleDuplicate = async () => {
         if (!duplicateExam) return
@@ -633,44 +659,133 @@ function AdminUtsUasPageInner() {
         try {
             const localDate = new Date(duplicateForm.start_time)
             let newExam: any = null
+            let toastShown = false
 
             if (duplicateSource === 'ulangan') {
-                // Ulangan (tabel exams): create baru + salin soal via POST /api/exams
-                const ta = ulanganTA(duplicateExam)
                 const isRemedial = duplicateMode === 'REMEDIAL'
-                const payload: any = {
-                    teaching_assignment_id: ta?.id,
-                    title: duplicateForm.title,
-                    description: duplicateExam.description,
-                    start_time: localDate.toISOString(),
-                    duration_minutes: duplicateForm.duration_minutes,
-                    window_end_time: duplicateForm.schedule_mode === 'window' && duplicateForm.window_end_time
-                        ? new Date(duplicateForm.window_end_time).toISOString()
-                        : null,
-                    is_randomized: duplicateExam.is_randomized,
-                    max_violations: duplicateExam.max_violations,
-                    show_results_immediately: duplicateExam.show_results_immediately ?? true,
-                    duplicate_from_exam_id: duplicateExam.id,
-                    duplicate_questions: isRemedial ? ulanganRemedialMethod === 'ASLI' : true
-                }
                 if (isRemedial) {
-                    payload.is_remedial = true
-                    payload.remedial_for_id = duplicateExam.id
-                    payload.allowed_student_ids = selectedStudentIds
-                    payload.remedial_score_policy = remedialPolicy.policy
-                    if (remedialPolicy.policy === 'CAP') payload.remedial_max_score = remedialPolicy.cap
-                }
-                const res = await fetch('/api/exams', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                })
-                if (res.ok) {
-                    newExam = await res.json()
+                    // REMEDIAL ulangan multi-kelas: satu remedial PER kelas member
+                    // yang punya siswa terpilih — remedial_for_id = exam member itu
+                    // sendiri (constraint TA sumber di server terpenuhi alami),
+                    // siswa terpilih di-group per member exam.
+                    const selected = remedialStudents.filter((s) => selectedStudentIds.includes(s.id))
+                    const byMember = new Map<string, any[]>()
+                    selected.forEach((s) => {
+                        const key = s.memberExamId || duplicateExam.id
+                        if (!byMember.has(key)) byMember.set(key, [])
+                        byMember.get(key)!.push(s)
+                    })
+                    const targets = duplicateMembers.filter((m) => (byMember.get(m.id) || []).length > 0)
+                    if (targets.length === 0) {
+                        showToast('Pilih minimal satu siswa remedial', 'error')
+                        return
+                    }
+                    const results = await Promise.allSettled(targets.map((m) => {
+                        const ta = ulanganTA(m)
+                        const payload: any = {
+                            teaching_assignment_id: ta?.id,
+                            title: duplicateForm.title,
+                            description: duplicateExam.description,
+                            start_time: localDate.toISOString(),
+                            duration_minutes: duplicateForm.duration_minutes,
+                            window_end_time: duplicateForm.schedule_mode === 'window' && duplicateForm.window_end_time
+                                ? new Date(duplicateForm.window_end_time).toISOString()
+                                : null,
+                            is_randomized: duplicateExam.is_randomized,
+                            max_violations: duplicateExam.max_violations,
+                            show_results_immediately: duplicateExam.show_results_immediately ?? true,
+                            is_remedial: true,
+                            remedial_for_id: m.id,
+                            allowed_student_ids: (byMember.get(m.id) || []).map((s) => s.id),
+                            remedial_score_policy: remedialPolicy.policy,
+                            ...(remedialPolicy.policy === 'CAP' ? { remedial_max_score: remedialPolicy.cap } : {}),
+                            duplicate_questions: ulanganRemedialMethod === 'ASLI'
+                        }
+                        return fetch('/api/exams', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        }).then(r => {
+                            if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                            return r.json()
+                        })
+                    }))
+                    const okResults = results.filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+                    if (okResults.length === 0) {
+                        const firstErr = results.find(r => r.status === 'rejected') as PromiseRejectedResult | undefined
+                        const reason = firstErr?.reason as { message?: string } | undefined
+                        showToast(reason?.message ? `Gagal membuat remedial (${reason.message})` : `Gagal membuat remedial ${labels.ulangan}`, 'error')
+                        return
+                    }
+                    newExam = okResults[0].value
+                    if (okResults.length < targets.length) {
+                        showToast(`Remedial dibuat di ${okResults.length} kelas; GAGAL di ${targets.length - okResults.length} kelas — ulangi dari daftar`, 'warning')
+                        toastShown = true
+                    }
                 } else {
-                    const err = await res.json().catch(() => null)
-                    showToast(err?.error || `Gagal menduplikasi ${labels.ulangan}`, 'error')
-                    return
+                    // BIASA ulangan multi-kelas (paritas duplikasi UTS/UAS & alur
+                    // create): resolve TA anchor pengampu mapel×kelas per kelas
+                    // target — kelas tanpa pengampu di-skip dengan laporan.
+                    const subjectId = ulanganSubjectId(duplicateExam)
+                    const matched = duplicateForm.target_class_ids.map(classId => {
+                        const cls = classes.find(c => c.id === classId)
+                        const tas = teachingAssignments
+                            .filter((ta) => {
+                                const subj = Array.isArray(ta.subject) ? ta.subject[0] : ta.subject
+                                const cl = Array.isArray(ta.class) ? ta.class[0] : ta.class
+                                return subj?.id === subjectId && cl?.id === classId
+                            })
+                            .map((ta) => ({
+                                id: ta.id,
+                                teacherName: (Array.isArray(ta.teacher?.user) ? ta.teacher.user[0]?.full_name : ta.teacher?.user?.full_name) || 'Tanpa Nama'
+                            }))
+                            // Anchor deterministik: nama guru terkecil (paritas alur create)
+                            .sort((a, b) => a.teacherName.localeCompare(b.teacherName))
+                        return { classId, className: cls?.name || "-", anchor: tas[0] }
+                    })
+                    const withTeachers = matched.filter(m => m.anchor)
+                    const skipped = matched.filter(m => !m.anchor)
+                    if (withTeachers.length === 0) {
+                        showToast('Tidak ada kelas terpilih yang memiliki guru pengampu untuk mapel ini.', 'error')
+                        return
+                    }
+                    const batchId = withTeachers.length > 1 ? crypto.randomUUID() : null
+                    const results = await Promise.allSettled(withTeachers.map(m =>
+                        fetch('/api/exams', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                teaching_assignment_id: m.anchor.id,
+                                title: duplicateForm.title,
+                                description: duplicateExam.description,
+                                start_time: localDate.toISOString(),
+                                duration_minutes: duplicateForm.duration_minutes,
+                                window_end_time: duplicateForm.schedule_mode === 'window' && duplicateForm.window_end_time
+                                    ? new Date(duplicateForm.window_end_time).toISOString()
+                                    : null,
+                                is_randomized: duplicateExam.is_randomized,
+                                max_violations: duplicateExam.max_violations,
+                                show_results_immediately: duplicateExam.show_results_immediately ?? true,
+                                duplicate_from_exam_id: duplicateExam.id,
+                                duplicate_questions: true,
+                                batch_id: batchId
+                            })
+                        }).then(r => {
+                            if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                            return r.json()
+                        })
+                    ))
+                    const okResults = results.filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+                    if (okResults.length === 0) {
+                        showToast(`Gagal menduplikasi ${labels.ulangan}. Silakan coba lagi.`, 'error')
+                        return
+                    }
+                    newExam = okResults[0].value
+                    const parts: string[] = [`${okResults.length} ${labels.ulangan} berhasil diduplikasi`]
+                    if (skipped.length > 0) parts.push(`${skipped.length} kelas di-skip karena belum ada guru pengampu mapel ini: ${skipped.map(s => s.className).join(', ')}`)
+                    if (okResults.length < withTeachers.length) parts.push(`${withTeachers.length - okResults.length} kelas GAGAL dibuat — ulangi dari daftar untuk kelas tsb`)
+                    showToast(parts.join(' — '), 'success')
+                    toastShown = true
                 }
             } else {
                 const payload = {
@@ -706,8 +821,16 @@ function AdminUtsUasPageInner() {
             }
 
             setShowDuplicate(false)
-            showToast(duplicateMode === 'REMEDIAL' ? 'Ujian remedial berhasil dibuat' : 'Ujian berhasil diduplikasi', 'success')
-            router.push(`/dashboard/admin/uts-uas/${newExam.id}${duplicateSource === 'ulangan' ? '?type=ulangan' : ''}`)
+            // Ulangan multi-kelas: toast sudah dipancarkan di atas — hindari dobel;
+            // tetap arahkan ke exam pertama (list menampilkan kartu batch).
+            if (!toastShown) {
+                showToast(duplicateMode === 'REMEDIAL' ? 'Ujian remedial berhasil dibuat' : 'Ujian berhasil diduplikasi', 'success')
+            }
+            if (newExam?.id) {
+                router.push(`/dashboard/admin/uts-uas/${newExam.id}${duplicateSource === 'ulangan' ? '?type=ulangan' : ''}`)
+            } else {
+                fetchUlangan()
+            }
         } catch (e) {
             showToast('Terjadi kesalahan', 'error')
         } finally {
@@ -764,6 +887,10 @@ function AdminUtsUasPageInner() {
         if (filterSubject && ulanganSubjectId(e) !== filterSubject) return false
         return true
     })
+
+    // Remedial ulangan multi-kelas: jumlah kelas berbeda di daftar siswa —
+    // >1 = tampilkan badge kelas per baris siswa
+    const remedialClassCount = new Set(remedialStudents.map((s: any) => s.className).filter(Boolean)).size
 
     // A3: grouping batch multi-kelas → 1 card per batch (key grup mengandung
     // mapel, jadi filter mapel sebelum grouping ekuivalen dengan sesudah).
@@ -987,7 +1114,9 @@ function AdminUtsUasPageInner() {
                                 },
                                 {
                                     label: 'Lihat Hasil',
-                                    show: isActive && !isLive,
+                                    // Paritas guru: tampil juga saat LIVE — tab Hasil admin
+                                    // kini auto-poll 10 dtk (progres pengumpulan real-time)
+                                    show: isActive,
                                     icon: <BarChart3 className="w-4 h-4" />,
                                     onClick: () => router.push(`/dashboard/admin/uts-uas/${exam.id}?type=ulangan#hasil`),
                                 },
@@ -1269,30 +1398,9 @@ function AdminUtsUasPageInner() {
                             </div>
                         </div>
 
-                        {/* Batch multi-kelas: duplikasi/remedial ulangan per kelas — pilih kelas sumber */}
-                        {duplicateSource === 'ulangan' && duplicateMembers.length > 1 && (
-                            <div>
-                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas Sumber</label>
-                                <select
-                                    value={duplicateExam.id}
-                                    onChange={(e) => {
-                                        const m = duplicateMembers.find(x => x.id === e.target.value)
-                                        if (m) switchDuplicateMember(m)
-                                    }}
-                                    disabled={remedialLoading}
-                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
-                                >
-                                    {duplicateMembers.map((m: any) => (
-                                        <option key={m.id} value={m.id}>{first(ulanganTA(m)?.class)?.name || '-'}</option>
-                                    ))}
-                                </select>
-                                <p className="text-xs text-text-secondary mt-1">
-                                    {duplicateMode === 'REMEDIAL'
-                                        ? 'Remedial dibuat per kelas — pilih kelas untuk melihat siswanya.'
-                                        : `Duplikasi ${labels.ulangan.toLowerCase()} mengikuti kelas sumber yang dipilih.`}
-                                </p>
-                            </div>
-                        )}
+                        {/* Kelas target multi-kelas — official & ulangan (paritas:
+                            ulangan kini bisa diduplikasi/remedial ke banyak kelas;
+                            TA pengampu dicocokkan otomatis per kelas saat submit) */}
 
                         {/* Title */}
                         <div>
@@ -1306,13 +1414,22 @@ function AdminUtsUasPageInner() {
                             />
                         </div>
 
-                        {/* Target Classes (ujian resmi) — sebelumnya prefill tersembunyi
-                            dari exam sumber; kini eksplisit & bisa diedit */}
-                        {duplicateSource === 'official' && (
+                        {/* Kelas Target — official (semua mode) & ulangan BIASA
+                            (sebelumnya prefill tersembunyi dari exam sumber; kini
+                            eksplisit & bisa diedit). Ulangan BIASA multi-kelas: TA
+                            pengampu dicocokkan otomatis per kelas saat submit —
+                            kelas tanpa pengampu di-skip. Ulangan REMEDIAL: kelas
+                            implisit per member (ikut kelas exam sumbernya). */}
+                        {(duplicateSource === 'official' || duplicateMode === 'BIASA') && (
                             <div>
                                 <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
                                     Kelas Target ({duplicateForm.target_class_ids.length} terpilih)
                                 </label>
+                                {duplicateSource === 'ulangan' && duplicateMode === 'BIASA' && (
+                                    <p className="mb-2 text-xs text-text-secondary">
+                                        {labels.ulangan} dibuat atas nama guru pengampu mapel ini di setiap kelas terpilih — kelas tanpa pengampu otomatis di-skip.
+                                    </p>
+                                )}
                                 {droppedDuplicateClasses.length > 0 && (
                                     <div className="mb-3 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-700 dark:text-amber-300">
                                         <span className="font-bold">{droppedDuplicateClasses.length} kelas dari ujian sumber tidak ikut disalin</span> karena bukan kelas tahun ajaran aktif:{' '}
@@ -1428,7 +1545,7 @@ function AdminUtsUasPageInner() {
                                     </div>
                                 ) : remedialStudents.length === 0 ? (
                                     <div className="p-4 bg-secondary/5 rounded-xl text-center text-sm text-text-secondary">
-                                        Belum ada data pengumpulan untuk ujian ini.
+                                        Belum ada siswa di kelas {labels.ulangan.toLowerCase()} ini.
                                     </div>
                                 ) : (
                                     <div className="max-h-60 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
@@ -1445,7 +1562,10 @@ function AdminUtsUasPageInner() {
                                                 />
                                                 <div className="flex-1 min-w-0">
                                                     <div className="font-bold text-sm text-text-main dark:text-white truncate">{student.name}</div>
-                                                    <div className="text-xs text-text-secondary">NIS: {student.nis}</div>
+                                                    <div className="text-xs text-text-secondary">
+                                                        NIS: {student.nis}
+                                                        {remedialClassCount > 1 && student.className && <span className="ml-2 font-bold text-primary">{student.className}</span>}
+                                                    </div>
                                                 </div>
                                                 <div className="text-right">
                                                     <div className={`font-bold text-sm ${student.needsRemedial ? 'text-red-500' : 'text-emerald-500'}`}>
@@ -1469,7 +1589,7 @@ function AdminUtsUasPageInner() {
                                 onClick={handleDuplicate}
                                 loading={duplicating}
                                 disabled={!duplicateForm.title || !duplicateForm.start_time
-                                    || (duplicateSource === 'official' && duplicateForm.target_class_ids.length === 0)
+                                    || (duplicateMode === 'BIASA' && duplicateForm.target_class_ids.length === 0)
                                     || (duplicateMode === 'REMEDIAL' && selectedStudentIds.length === 0)}
                                 className="flex-1"
                             >

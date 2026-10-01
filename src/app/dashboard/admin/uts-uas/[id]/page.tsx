@@ -53,6 +53,9 @@ interface ExamDetail {
     allowed_student_ids?: string[] | null
     // Mode ulangan (tabel exams) — bentuk data berbeda dari official_exams
     pending_publish?: boolean
+    batch_id?: string | null
+    /** Kelas paralel dalam batch yang sama (API — ADMIN melihat semua sibling se-sekolah) */
+    batch_siblings?: { id: string; class_id?: string; class_name: string }[]
     teaching_assignment?: {
         id: string
         teacher?: { id: string; user?: { full_name: string } }
@@ -185,8 +188,10 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     const [resultsLoading, setResultsLoading] = useState(false)
     const [resultsClassFilter, setResultsClassFilter] = useState('')
     const [selectedSubmission, setSelectedSubmission] = useState<any | null>(null)
-    // Roster per kelas target (year-aware) — untuk panel "Belum Mengerjakan"
-    const [classRoster, setClassRoster] = useState<{ id: string; name: string; nis: string; classId: string; className: string }[]>([])
+    // Roster per kelas target (year-aware) — untuk panel "Belum Mengerjakan".
+    // memberId = exam member pemilik kelas tsb (ulangan batch: filter roster
+    // per kelas memakai memberId, official: classId)
+    const [classRoster, setClassRoster] = useState<{ id: string; name: string; nis: string; classId: string; className: string; memberId: string }[]>([])
 
     // AI Review setting
     const [aiReviewEnabled, setAiReviewEnabled] = useState(false)
@@ -205,10 +210,29 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     // untuk ulangan ambil via teaching_assignment → academic_years
     const examYearName = isUlangan ? (exam as any)?.teaching_assignment?.academic_year?.name : (exam as any)?.academic_year?.name
 
-    const getStudentKkm = (student: any) => {
+    // Mode batch ulangan (paritas guru): exam ini bagian batch multi-kelas dengan
+    // sibling yang terlihat — tab hasil menampilkan SEMUA kelas member.
+    const isBatchView = isUlangan && !!(exam?.batch_id && (exam?.batch_siblings?.length || 0) > 0)
+    // Opsi kelas: kelas exam ini + sibling, urut abjad (numeric: "Kelas 2" < "Kelas 10",
+    // konsisten dengan dropdown monitor & hasil guru)
+    const batchMembers = [
+        { id: examId, class_name: (exam as any)?.teaching_assignment?.class?.name || 'Kelas Ini' },
+        ...(exam?.batch_siblings || []).map(s => ({ id: s.id, class_name: s.class_name })),
+    ].sort((a, b) => a.class_name.localeCompare(b.class_name, 'id', { numeric: true, sensitivity: 'base' }))
+
+    const getStudentKkm = (student: any, sub?: any) => {
         const baseKkm = examSubject?.kkm || 75;
         // Ulangan: satu kelas per TA; official: cari kelas dari student.class_id
-        const studentClass = isUlangan ? examClass : allClasses.find(c => c.id === student?.class_id);
+        let studentClass = isUlangan ? examClass : allClasses.find(c => c.id === student?.class_id);
+        // Ulangan batch: kelas per baris dari embed exam member (setiap member
+        // = 1 kelas berbeda jenjang → KKM granular harus mengikuti kelas baris)
+        if (isUlangan && isBatchView && sub) {
+            const ex = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
+            const ta = Array.isArray(ex?.teaching_assignment) ? ex.teaching_assignment[0] : ex?.teaching_assignment
+            const cls = Array.isArray(ta?.class) ? ta.class[0] : ta?.class
+            const clsObj = Array.isArray(cls) ? cls[0] : cls
+            if (clsObj?.id) studentClass = allClasses.find(c => c.id === clsObj.id) || studentClass
+        }
         if (studentClass && studentClass.school_level && studentClass.grade_level) {
             const granular = granularKkms.find((k: any) => k.school_level === studentClass.school_level && k.grade_level === studentClass.grade_level);
             if (granular) return granular.kkm;
@@ -289,8 +313,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     // Kelas di-scope ke tahun ajaran exam — tanpa ini, kelas senama dari tahun
     // ajaran lain (hasil fitur Salin Kelas saat pergantian tahun) tampil dobel
     // di picker Kelas Target & filter Hasil. Menunggu exam termuat karena tahun
-    // ajaran hanya diketahui dari data exam; mode ulangan tidak memakai
-    // allClasses (kelas dari teaching_assignment), jadi tidak terdampak.
+    // ajaran hanya diketahui dari data exam; mode ulangan single-kelas tidak
+    // memakai allClasses (kelas dari teaching_assignment), tapi mode batch
+    // memakainya untuk KKM granular per kelas member.
     useEffect(() => {
         const examYear = isUlangan
             ? (exam as any)?.teaching_assignment?.academic_year?.id
@@ -308,25 +333,44 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         if (window.location.hash === '#hasil') setActiveTab('hasil')
     }, [])
 
-    const fetchResults = async () => {
+    const fetchResults = useCallback(async () => {
         setResultsLoading(true)
         try {
-            // API exams tidak punya filter class_id — ulangan satu kelas per TA, cukup fetch semua
-            let url = `${submissionsApi}?exam_id=${examId}`
-            if (!isUlangan && resultsClassFilter) url += `&class_id=${resultsClassFilter}`
+            // Ulangan batch: "Semua Kelas" = submission SEMUA member batch
+            // (tenant-guarded server-side); kelas spesifik = exam member tsb.
+            // Official: class_id filter tetap seperti sebelumnya.
+            // (API exams tidak punya filter class_id — ulangan satu kelas per TA)
+            let url: string
+            if (isUlangan && isBatchView && !resultsClassFilter) {
+                url = `${submissionsApi}?batch_id=${exam?.batch_id}`
+            } else {
+                url = `${submissionsApi}?exam_id=${resultsClassFilter || examId}`
+                if (!isUlangan && resultsClassFilter) url += `&class_id=${resultsClassFilter}`
+            }
             const res = await fetch(url)
             const data = await res.json()
             setSubmissions(Array.isArray(data) ? data : [])
         } catch (error) { console.error('Error:', error) }
         finally { setResultsLoading(false) }
-    }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [examId, isUlangan, isBatchView, resultsClassFilter])
 
     useEffect(() => {
         if (activeTab === 'hasil') fetchResults()
-    }, [activeTab, resultsClassFilter])
+    }, [activeTab, fetchResults])
+
+    // Auto-poll 10 dtk saat ujian aktif (paritas guru): admin bisa memantau
+    // pengumpulan real-time dari tab Hasil — polling berhenti saat ujian
+    // selesai/ditarik, dan hanya untuk mode ulangan (official tetap fetch manual).
+    useEffect(() => {
+        if (activeTab !== 'hasil' || !isUlangan || !exam?.is_active) return
+        const interval = setInterval(fetchResults, 10000)
+        return () => clearInterval(interval)
+    }, [activeTab, isUlangan, exam?.is_active, fetchResults])
 
     // Roster year-aware per kelas target — untuk panel "Belum Mengerjakan".
-    // Official: loop semua kelas target (scoped TA exam); ulangan: satu kelas TA.
+    // Official: loop semua kelas target (scoped TA exam); ulangan: kelas TA +
+    // SEMUA sibling batch (paritas guru).
     // as_of = waktu mulai ujian → roster = anggota kelas SAAT ujian dimulai
     // (interval enrollment, paritas Monitor Live) — siswa yang pindah keluar
     // sebelum ujian tidak lagi muncul sebagai "belum mengerjakan" di kelas
@@ -341,25 +385,27 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
             ? `&as_of=${encodeURIComponent(exam.start_time)}`
             : ''
         const classList = isUlangan
-            ? (exam.teaching_assignment?.class?.id
-                ? [{ id: exam.teaching_assignment.class.id, name: exam.teaching_assignment.class.name }]
-                : [])
-            : (exam.target_classes || [])
+            ? [
+                { memberId: examId, classId: (exam as any)?.teaching_assignment?.class?.id, className: (exam as any)?.teaching_assignment?.class?.name || '' },
+                ...(exam?.batch_siblings || []).map(s => ({ memberId: s.id, classId: s.class_id, className: s.class_name })),
+            ]
+            : (exam.target_classes || []).map(c => ({ memberId: examId, classId: c.id, className: c.name }))
         let cancelled = false
         Promise.all(
             classList
-                .filter((c: any) => c.id)
-                .map((c: any) =>
-                    fetch(`/api/students?class_id=${c.id}&enrollment_year_id=${yearId || ''}${examStart}`)
+                .filter(c => c.classId)
+                .map(c =>
+                    fetch(`/api/students?class_id=${c.classId}&enrollment_year_id=${yearId || ''}${examStart}`)
                         .then(r => r.ok ? r.json() : [])
-                        .then((d: any[]) => (Array.isArray(d) ? d : []).map((s: any) => ({
+                        .then(d => (Array.isArray(d) ? d : []).map(s => ({
                             id: s.id,
                             name: s.user?.full_name || '',
                             nis: s.nis || '',
-                            classId: c.id,
-                            className: c.name,
+                            classId: c.classId,
+                            className: c.className,
+                            memberId: c.memberId,
                         })))
-                        .catch(() => [] as { id: string; name: string; nis: string; classId: string; className: string }[])
+                        .catch(() => [] as { id: string; name: string; nis: string; classId: string; className: string; memberId: string }[])
                 )
         ).then(lists => {
             if (!cancelled) setClassRoster(lists.flat())
@@ -398,18 +444,38 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     }
 
 
+    // Nama kelas per baris submission — ulangan batch dari embed exam member
+    // (setiap member = 1 kelas); mode lain dari kelas exam ini / kelas siswa.
+    const submissionClassName = (sub: any): string => {
+        if (isUlangan) {
+            if (!isBatchView) return examClass?.name || '-'
+            const ex = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
+            const ta = ex?.teaching_assignment
+            const cls = Array.isArray(ta) ? ta[0]?.class : ta?.class
+            const clsObj = Array.isArray(cls) ? cls[0] : cls
+            return clsObj?.name || '-'
+        }
+        return allClasses.find(c => c.id === sub.student?.class_id)?.name || '-'
+    }
+
     const handleDownloadExcel = () => {
         if (!exam || submissions.length === 0) return
 
-        const sortedSubmissions = [...submissions].sort((a: any, b: any) =>
-            (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '', 'id')
-        )
+        const sortedSubmissions = [...submissions].sort((a: any, b: any) => {
+            // Ulangan batch: kelompokkan per kelas dulu supaya rekap per kelas rapat
+            if (isBatchView) {
+                const clsA = submissionClassName(a)
+                const clsB = submissionClassName(b)
+                if (clsA !== clsB) return clsA.localeCompare(clsB, 'id')
+            }
+            return (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '', 'id')
+        })
 
         const formattedData = sortedSubmissions.map((sub: any, index: number) => {
             const maxScore = sub.max_score || 1
             // Persentase round-2 (desimal utuh di export)
             const percentage = round2((sub.total_score / maxScore) * 100)
-            
+
             let status = 'Mengerjakan'
             if (sub.is_submitted) {
                 status = sub.is_graded ? 'Selesai' : 'Perlu Koreksi'
@@ -419,7 +485,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 'No': index + 1,
                 'Nama Siswa': sub.student?.user?.full_name || '-',
                 'NIS': sub.student?.nis || '-',
-                'Kelas': isUlangan ? (examClass?.name || '-') : (allClasses.find(c => c.id === sub.student?.class_id)?.name || '-'),
+                'Kelas': submissionClassName(sub),
                 'Skor': `${sub.total_score || 0}/${sub.max_score || 0}`,
                 'Nilai': percentage,
                 'Pelanggaran': sub.violation_count || 0,
@@ -429,7 +495,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         })
 
         const ws = XLSX.utils.json_to_sheet(formattedData)
-        
+
         // Auto-width columns
         const colWidths = [
             { wch: 5 },  // No
@@ -448,12 +514,20 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         const wb = XLSX.utils.book_new()
         XLSX.utils.book_append_sheet(wb, ws, "Hasil_Ujian")
 
-        const filterClassName = resultsClassFilter
-            ? (isUlangan ? examClass?.name : allClasses.find(c => c.id === resultsClassFilter)?.name)?.replace(/ /g, '_') || 'Filter'
-            : 'Semua_Kelas'
+        // Nama file mengikuti filter kelas — ulangan batch: nama member terpilih /
+        // Semua_Kelas (paritas guru); official: seperti sebelumnya.
+        const filterClassName = isUlangan
+            ? (isBatchView
+                ? (resultsClassFilter
+                    ? (batchMembers.find(m => m.id === resultsClassFilter)?.class_name || 'Filter')
+                    : 'Semua_Kelas')
+                : (examClass?.name || '-'))
+            : (resultsClassFilter
+                ? (allClasses.find(c => c.id === resultsClassFilter)?.name || 'Filter')
+                : 'Semua_Kelas')
 
-        const fileName = `Hasil_${isUlangan ? labels.ulangan : (exam.exam_type === 'UTS' ? labels.uts : labels.uas)}_${exam.title.replace(/ /g, '_')}_${filterClassName}.xlsx`
-        
+        const fileName = `Hasil_${isUlangan ? labels.ulangan : (exam.exam_type === 'UTS' ? labels.uts : labels.uas)}_${exam.title.replace(/ /g, '_')}_${filterClassName.replace(/ /g, '_')}.xlsx`
+
         XLSX.writeFile(wb, fileName)
     }
 
@@ -726,22 +800,33 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         } finally { setSettingsSaving(false) }
     }
 
-    // Share results
+    // Share results — ulangan batch: PUT ke SEMUA member (paritas guru, tanpa ini
+    // hanya representative yang dibagikan dan siswa kelas lain tidak melihat nilainya)
     const handleShareResults = async () => {
-        if (!confirm('Apakah Anda yakin ingin membagikan hasil ke siswa sekarang? Siswa akan bisa melihat nilai mereka.')) return
-        
+        const memberIds = (isUlangan && isBatchView)
+            ? [examId, ...((exam as any)?.batch_siblings || []).map((s: any) => s.id)]
+            : [examId]
+        if (!confirm(memberIds.length > 1
+            ? `Apakah Anda yakin ingin membagikan hasil ke siswa SEMUA ${memberIds.length} kelas sekarang? Siswa akan bisa melihat nilai mereka.`
+            : 'Apakah Anda yakin ingin membagikan hasil ke siswa sekarang? Siswa akan bisa melihat nilai mereka.')) return
+
         try {
-            const res = await fetch(`${examApi}/${examId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ results_released: true })
-            })
-            if (res.ok) {
-                showToast('Hasil ujian telah dibagikan ke siswa.', 'success')
-                fetchExam() // Refresh to update button visibility
-            } else {
+            const results = await Promise.allSettled(memberIds.map(id =>
+                fetch(`${examApi}/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ results_released: true })
+                }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r })
+            ))
+            const failed = results.filter(r => r.status !== 'fulfilled').length
+            if (failed === 0) {
+                showToast(`Hasil ujian telah dibagikan ke siswa${memberIds.length > 1 ? ` ${memberIds.length} kelas` : ''}.`, 'success')
+            } else if (failed === memberIds.length) {
                 throw new Error('Gagal membagikan hasil')
+            } else {
+                showToast(`Hasil dibagikan di ${memberIds.length - failed} kelas; gagal di ${failed} kelas. Coba ulangi.`, 'warning')
             }
+            fetchExam() // Refresh to update button visibility
         } catch (error: any) {
             showToast(error.message, 'error')
         }
@@ -1124,29 +1209,46 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 <div className="space-y-4">
                     {/* Class/Action Bar */}
                     <div className="flex justify-between items-center bg-white dark:bg-surface-dark border border-secondary/20 p-3 rounded-xl shadow-sm">
-                        <div className="flex gap-3 items-center">
-                            {/* Ulangan: satu kelas per TA — filter kelas tidak relevan */}
-                            {!isUlangan && (
+                        <div className="flex gap-3 items-center flex-wrap">
+                            {/* Filter kelas: official multi-kelas, atau ulangan BATCH
+                                (opsi = member batch, paritas guru). Ulangan single-kelas:
+                                satu kelas per TA — filter tidak relevan. */}
+                            {(!isUlangan || isBatchView) && (
                                 <select
                                     value={resultsClassFilter}
                                     onChange={(e) => setResultsClassFilter(e.target.value)}
                                     className="px-4 py-2 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary text-sm font-bold"
+                                    title="Filter kelas"
                                 >
                                     <option value="">Semua Kelas</option>
-                                    {[...(exam.target_classes || [])]
-                                        .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }))
-                                        .map(c => (
-                                        <option key={c.id} value={c.id}>{c.name}</option>
-                                    ))}
+                                    {isUlangan
+                                        ? batchMembers.map(m => (
+                                            <option key={m.id} value={m.id}>{m.class_name}</option>
+                                        ))
+                                        : [...(exam.target_classes || [])]
+                                            .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }))
+                                            .map(c => (
+                                                <option key={c.id} value={c.id}>{c.name}</option>
+                                            ))}
                                 </select>
+                            )}
+                            {isUlangan && exam.is_active && (
+                                <span className="flex items-center gap-1.5 text-xs font-bold text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-500/20 px-2.5 py-1 rounded-full">
+                                    <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                                    </span>
+                                    Live
+                                </span>
                             )}
                             <span className="text-sm font-medium text-text-secondary border-l border-secondary/20 pl-3">{submissions.length} submission</span>
                         </div>
                         <div className="flex items-center gap-2">
                             {submissions.length > 0 && (
                                 <PDFDownloadButton
-                                    assessmentId={examId}
+                                    assessmentId={(isUlangan && isBatchView && resultsClassFilter) ? resultsClassFilter : examId}
                                     assessmentType={isUlangan ? 'exam' : 'official-exam'}
+                                    batchId={(isUlangan && isBatchView && !resultsClassFilter) ? ((exam as any)?.batch_id || undefined) : undefined}
                                     classId={!isUlangan ? (resultsClassFilter || undefined) : undefined}
                                     meta={{
                                         typeLabel: isUlangan
@@ -1155,7 +1257,11 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                         title: exam?.title || '',
                                         subjectName: examSubject?.name || '',
                                         className: isUlangan
-                                            ? (examClass?.name || '')
+                                            ? (isBatchView
+                                                ? (resultsClassFilter
+                                                    ? (batchMembers.find(m => m.id === resultsClassFilter)?.class_name || '')
+                                                    : `Semua Kelas (${batchMembers.length})`)
+                                                : (examClass?.name || ''))
                                             : (resultsClassFilter
                                                 ? (allClasses.find(c => c.id === resultsClassFilter)?.name
                                                     || exam?.target_classes?.find(c => c.id === resultsClassFilter)?.name
@@ -1187,25 +1293,30 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     </div>
 
                     {/* Siswa belum mengerjakan — roster year-aware, dikelompokkan
-                        per kelas saat "Semua Kelas" (official multi-kelas) */}
+                        per kelas saat "Semua Kelas" (official multi-kelas / ulangan batch) */}
                     <NotSubmittedPanel
                         students={(() => {
                             const anyAttemptStudentIds = submissions.map((s: any) => s.student?.id || s.student_id)
-                            const rosterInView = (!isUlangan && resultsClassFilter)
-                                ? classRoster.filter(s => s.classId === resultsClassFilter)
-                                : classRoster
+                            const rosterInView = isUlangan
+                                ? (isBatchView && resultsClassFilter)
+                                    ? classRoster.filter(s => s.memberId === resultsClassFilter)
+                                    : classRoster
+                                : (resultsClassFilter
+                                    ? classRoster.filter(s => s.classId === resultsClassFilter)
+                                    : classRoster)
                             return rosterInView
                                 .filter(s => s.id && !anyAttemptStudentIds.includes(s.id))
                                 .sort((a, b) => a.name.localeCompare(b.name, 'id'))
                         })()}
-                        groupByClass={!isUlangan && !resultsClassFilter}
+                        groupByClass={!resultsClassFilter && (!isUlangan || isBatchView)}
                     />
 
                     {/* Analytics Dashboard */}
                     {submissions.length > 0 && (
                         <AssessmentAnalytics
-                            assessmentId={examId}
+                            assessmentId={(isUlangan && isBatchView && resultsClassFilter) ? resultsClassFilter : examId}
                             assessmentType={isUlangan ? 'exam' : 'official-exam'}
+                            batchId={(isUlangan && isBatchView && !resultsClassFilter) ? ((exam as any)?.batch_id || undefined) : undefined}
                             classId={!isUlangan ? (resultsClassFilter || undefined) : undefined}
                         />
                     )}
@@ -1225,6 +1336,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                         <tr>
                                             <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white whitespace-nowrap">No</th>
                                             <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white min-w-[200px]">Nama Siswa</th>
+                                            {isBatchView && <th className="px-4 py-3 text-left text-xs font-bold text-text-main dark:text-white whitespace-nowrap">Kelas</th>}
                                             <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white whitespace-nowrap">Skor</th>
                                             <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white whitespace-nowrap">Nilai</th>
                                             <th className="px-4 py-3 text-center text-xs font-bold text-text-main dark:text-white whitespace-nowrap">Durasi</th>
@@ -1238,7 +1350,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                         {[...submissions].sort((a, b) => (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '')).map((sub: any, idx: number) => {
                                             // pct MENTAH (round-2) — banding KKM pakai nilai asli (74.6 < 75 walau ≈75)
                                             const percentage = sub.max_score > 0 ? round2((sub.total_score / sub.max_score) * 100) : 0
-                                            const studentKkm = getStudentKkm(sub.student)
+                                            const studentKkm = getStudentKkm(sub.student, sub)
                                             return (
                                                 <tr key={sub.id} className="hover:bg-secondary/5">
                                                     <td className="px-4 py-3 text-sm text-text-secondary">{idx + 1}</td>
@@ -1246,6 +1358,11 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                                         {sub.student?.user?.full_name || '-'}
                                                         <span className="text-xs text-text-secondary ml-2">{sub.student?.nis}</span>
                                                     </td>
+                                                    {isBatchView && (
+                                                        <td className="px-4 py-3">
+                                                            <span className="text-xs font-bold text-text-secondary bg-secondary/10 px-2 py-1 rounded-full whitespace-nowrap">{submissionClassName(sub)}</span>
+                                                        </td>
+                                                    )}
                                                     <td className="px-4 py-3 text-center font-medium text-sm">
                                                         {sub.is_submitted ? `${formatScore(sub.total_score)}/${formatScore(sub.max_score)}` : '-'}
                                                     </td>
@@ -1286,7 +1403,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                                     <td className="px-4 py-3 text-center">
                                                         {sub.is_submitted ? (
                                                             <div className="flex items-center justify-center gap-2">
-                                                                <Link href={`${basePath}/${examId}/hasil/${sub.id}${typeParam}`}>
+                                                                {/* Batch: submission bisa milik sibling — buka halaman
+                                                                    koreksi exam member pemiliknya (paritas guru) */}
+                                                                <Link href={`${basePath}/${sub.exam_id || examId}/hasil/${sub.id}${typeParam}`}>
                                                                     <Button size="sm" variant={sub.is_graded ? 'ghost' : 'primary'} className={!sub.is_graded ? 'bg-gradient-to-r from-blue-600 to-cyan-600' : ''}>
                                                                         {sub.is_graded ? 'Lihat' : 'Koreksi'}
                                                                     </Button>
@@ -1325,7 +1444,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-secondary/10 rounded-xl p-4 text-center">
                                 <p className="text-sm text-text-secondary dark:text-zinc-400">Nilai</p>
-                                <p className={`text-2xl font-bold ${getScoreColor(selectedSubmission.total_score, selectedSubmission.max_score, getStudentKkm(selectedSubmission.student)).split(' ')[0]}`}>
+                                <p className={`text-2xl font-bold ${getScoreColor(selectedSubmission.total_score, selectedSubmission.max_score, getStudentKkm(selectedSubmission.student, selectedSubmission)).split(' ')[0]}`}>
                                     {formatScore(selectedSubmission.total_score)}/{formatScore(selectedSubmission.max_score)}
                                 </p>
                             </div>
