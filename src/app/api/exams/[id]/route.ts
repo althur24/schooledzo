@@ -94,9 +94,11 @@ export async function GET(
         // SISWA: jangan bocorkan allowed_student_ids (daftar "siapa yang
         // remedial") — paritas GET /api/quizzes/[id] & list /api/exams yang
         // sudah strip; jalur detail exam ini sebelumnya terlewat (bocor via
-        // inspect network saat siswa membuka halaman remedial).
+        // inspect network saat siswa membuka halaman remedial). batch_siblings
+        // juga tidak dikirim (daftar kelas paralel sekolah bukan miliknya).
         if (user.role === 'SISWA') {
             delete (data as any).allowed_student_ids
+            return NextResponse.json(data)
         }
 
         return NextResponse.json({ ...data, batch_siblings: batchSiblings })
