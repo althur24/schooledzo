@@ -1594,7 +1594,12 @@ function AdminUtsUasPageInner() {
                                 onClick={handleDuplicate}
                                 loading={duplicating}
                                 disabled={!duplicateForm.title || !duplicateForm.start_time
-                                    || (duplicateMode === 'BIASA' && duplicateForm.target_class_ids.length === 0)
+                                    // Kelas target wajib: official (semua mode — endpoint duplicate
+                                    // memakainya, kosong = diam-diam fallback ke kelas sumber) &
+                                    // ulangan BIASA multi-kelas. Ulangan REMEDIAL tidak (kelas
+                                    // implisit per member exam sumbernya).
+                                    || (duplicateSource === 'official' && duplicateForm.target_class_ids.length === 0)
+                                    || (duplicateSource === 'ulangan' && duplicateMode === 'BIASA' && duplicateForm.target_class_ids.length === 0)
                                     || (duplicateMode === 'REMEDIAL' && selectedStudentIds.length === 0)}
                                 className="flex-1"
                             >
