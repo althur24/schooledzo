@@ -785,12 +785,17 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     }
 
     const fetchTeachingAssignmentsIfNeeded = async () => {
-        if (teachingAssignments.length > 0) return
+        if (teachingAssignments.length > 0) return teachingAssignments
         try {
             const res = await fetch('/api/teaching-assignments')
             const data = await res.json()
-            setTeachingAssignments(Array.isArray(data) ? data : [])
-        } catch (e) { console.error('Error fetching TA', e) }
+            const arr = Array.isArray(data) ? data : []
+            setTeachingAssignments(arr)
+            return arr
+        } catch (e) {
+            console.error('Error fetching TA', e)
+            return []
+        }
     }
     useEffect(() => {
         if (isUlangan && activeTab === 'pengaturan') fetchTeachingAssignmentsIfNeeded()
@@ -801,8 +806,10 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         if (!exam?.batch_id || batchMemberSaving) return
         const subjectId = (exam as any)?.teaching_assignment?.subject?.id
         if (!subjectId) { showToast('Mapel tidak ditemukan', 'error'); return }
-        await fetchTeachingAssignmentsIfNeeded()
-        const tas = teachingAssignments
+        // Gunakan data FRESH dari return value — state React belum ter-update
+        // dalam closure saat setTeachingAssignments dipanggil (bug stale state)
+        const taList = await fetchTeachingAssignmentsIfNeeded()
+        const tas = (taList.length ? taList : teachingAssignments)
             .filter((ta: any) => {
                 const subj = Array.isArray(ta.subject) ? ta.subject[0] : ta.subject
                 const cl = Array.isArray(ta.class) ? ta.class[0] : ta.class
