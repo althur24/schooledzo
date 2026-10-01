@@ -850,6 +850,77 @@ export async function PUT(request: NextRequest) {
             }, { status: 409 })
         }
 
+        // ── UPSERT JAWABAN (dipindah ke SEBELUM blok pelanggaran) ──
+        // Paritas exam-submissions: draft offline yang datang bersama
+        // flush pelanggaran harus tersimpan SEBELUM force-submit merekap
+        // skor — anti kasus nilai 0 padahal draft ada (TKA MTK PIIS).
+        // Handle saving answers
+        if (answers && Array.isArray(answers) && answers.length > 0) {
+            // Soal dari cache in-memory (TTL 10 mnt) — tanpa ini setiap autosave mem-fetch ulang seluruh soal
+            const allQuestions = await getExamQuestionsForGrading('official_exam_questions', currentSubmission.exam_id)
+
+            const questionMap = new Map(allQuestions.map(q => [q.id, q]))
+
+            // Buang jawaban dengan question_id yang tidak ada di ujian ini —
+            // tanpa filter, id arbitrer (ujian lain/script) jadi junk rows dan
+            // meng-inflate answered_count di Monitor Live via RPC count.
+            // Filter juga menyelamatkan draft basi yang sah: jawaban soal yang
+            // dihapus guru (draft lama di localStorage siswa) lolos tanpa blokir.
+            const validAnswers = answers.filter((ans: { question_id: string }) => questionMap.has(ans.question_id))
+
+            // Cap payload SETELAH filter junk: jumlah jawaban valid tidak mungkin
+            // melebihi jumlah soal — array raksasa (script/spam/retry agresif)
+            // memakan bandwidth & pool DB saat 1000 siswa serentak. Cap sebelum
+            // filter akan memblokir submit sah dengan draft basi (regresi N1).
+            if (validAnswers.length > questionMap.size) {
+                return NextResponse.json({ error: 'Payload jawaban melebihi jumlah soal' }, { status: 400 })
+            }
+
+            // Grade answers — KECUALI tipe manual (isian/essay): simpan jawaban
+            // saja, nilai menunggu guru (paritas kuis + exam-submissions; tanpa
+            // ini isian dinilai otomatis → jawaban format-spasi-bedad salah 0).
+            const gradedAnswers = validAnswers.map((ans: { question_id: string; answer: string }) => {
+                const question = questionMap.get(ans.question_id)!
+
+                if (needsManualGrading(question.question_type)) {
+                    return {
+                        submission_id,
+                        question_id: ans.question_id,
+                        answer: ans.answer,
+                        is_correct: null,
+                        points_earned: null
+                    }
+                }
+
+                const graded = gradeAnswer(
+                    question.question_type,
+                    ans.answer,
+                    question.correct_answer,
+                    question.options,
+                    question.points || 10,
+                    question.gk_grading_mode ?? 'PROPORTIONAL'
+                )
+
+                return {
+                    submission_id,
+                    question_id: ans.question_id,
+                    answer: ans.answer,
+                    is_correct: graded.isCorrect,
+                    points_earned: graded.pointsEarned
+                }
+            })
+
+            if (gradedAnswers.length > 0) {
+                const { error: upsertError } = await supabase
+                    .from('official_exam_answers')
+                    .upsert(gradedAnswers, {
+                        onConflict: 'submission_id,question_id'
+                    })
+
+                if (upsertError) throw upsertError
+            }
+        }
+
         // Handle violation logging — tunggal (legacy `violation`) atau batch
         // (`violations` = queue pelanggaran dari client yang offline; timestamp
         // kejadian asli client dipertahankan & di-clamp, lihat violationBatch.ts)
@@ -937,73 +1008,6 @@ export async function PUT(request: NextRequest) {
                 // siswa yang sedang berjalan (tanpa reload).
                 ends_at: endsAtIso(writeExpiry)
             })
-        }
-
-        // Handle saving answers
-        if (answers && Array.isArray(answers) && answers.length > 0) {
-            // Soal dari cache in-memory (TTL 10 mnt) — tanpa ini setiap autosave mem-fetch ulang seluruh soal
-            const allQuestions = await getExamQuestionsForGrading('official_exam_questions', currentSubmission.exam_id)
-
-            const questionMap = new Map(allQuestions.map(q => [q.id, q]))
-
-            // Buang jawaban dengan question_id yang tidak ada di ujian ini —
-            // tanpa filter, id arbitrer (ujian lain/script) jadi junk rows dan
-            // meng-inflate answered_count di Monitor Live via RPC count.
-            // Filter juga menyelamatkan draft basi yang sah: jawaban soal yang
-            // dihapus guru (draft lama di localStorage siswa) lolos tanpa blokir.
-            const validAnswers = answers.filter((ans: { question_id: string }) => questionMap.has(ans.question_id))
-
-            // Cap payload SETELAH filter junk: jumlah jawaban valid tidak mungkin
-            // melebihi jumlah soal — array raksasa (script/spam/retry agresif)
-            // memakan bandwidth & pool DB saat 1000 siswa serentak. Cap sebelum
-            // filter akan memblokir submit sah dengan draft basi (regresi N1).
-            if (validAnswers.length > questionMap.size) {
-                return NextResponse.json({ error: 'Payload jawaban melebihi jumlah soal' }, { status: 400 })
-            }
-
-            // Grade answers — KECUALI tipe manual (isian/essay): simpan jawaban
-            // saja, nilai menunggu guru (paritas kuis + exam-submissions; tanpa
-            // ini isian dinilai otomatis → jawaban format-spasi-bedad salah 0).
-            const gradedAnswers = validAnswers.map((ans: { question_id: string; answer: string }) => {
-                const question = questionMap.get(ans.question_id)!
-
-                if (needsManualGrading(question.question_type)) {
-                    return {
-                        submission_id,
-                        question_id: ans.question_id,
-                        answer: ans.answer,
-                        is_correct: null,
-                        points_earned: null
-                    }
-                }
-
-                const graded = gradeAnswer(
-                    question.question_type,
-                    ans.answer,
-                    question.correct_answer,
-                    question.options,
-                    question.points || 10,
-                    question.gk_grading_mode ?? 'PROPORTIONAL'
-                )
-
-                return {
-                    submission_id,
-                    question_id: ans.question_id,
-                    answer: ans.answer,
-                    is_correct: graded.isCorrect,
-                    points_earned: graded.pointsEarned
-                }
-            })
-
-            if (gradedAnswers.length > 0) {
-                const { error: upsertError } = await supabase
-                    .from('official_exam_answers')
-                    .upsert(gradedAnswers, {
-                        onConflict: 'submission_id,question_id'
-                    })
-
-                if (upsertError) throw upsertError
-            }
         }
 
         // Handle final submission

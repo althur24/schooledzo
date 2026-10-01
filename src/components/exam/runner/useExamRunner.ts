@@ -215,12 +215,25 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         if (!sub || sub.is_submitted) return
         if (pendingViolationsRef.current.length === 0) return
         try {
+            // SERTAKAN draft jawaban lokal dalam request pelanggaran — sabuk
+            // pengaman tambahan di luar urutan await handleOnline: jalur
+            // force-submit pelanggaran di server kini meng-upsert jawaban
+            // request-nya SEBELUM merekap skor (fix #1), sehingga jawaban
+            // yang belum pernah tersinkron pun ikut terselamatkan saat
+            // force-submit dipicu. Tanpa ini, force-submit tetap merekap
+            // dari exam_answers server yang mungkin kosong (kasus nyata:
+            // TKA MTK PIIS 30 Sep 2026 → nilai 0).
+            const localAnswers = loadAnswersFromLocal()
+            const answersArray = Object.keys(localAnswers).length > 0
+                ? Object.entries(localAnswers).map(([question_id, answer]) => ({ question_id, answer: String(answer) }))
+                : undefined
             const res = await fetch(configRef.current.submissionApi, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     submission_id: sub.id,
                     violations: pendingViolationsRef.current,
+                    ...(answersArray ? { answers: answersArray } : {}),
                 })
             })
             const data = await res.json().catch(() => null)
@@ -257,7 +270,16 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
 
     // Sync local answers to server when reconnected
     useEffect(() => {
-        const handleOnline = () => {
+        // URUTAN WAJIB: sinkronisasi jawaban DULU, baru flush pelanggaran.
+        // Sebelumnya keduanya dipanggil paralel tanpa await → pelanggaran
+        // bisa menang race dan memicu force-submit server SEBELUM jawaban
+        // tersimpan → rekap skor dari exam_answers server yang kosong →
+        // nilai 0 padahal draft ada (kasus TKA MTK PIIS 30 Sep 2026).
+        // Dengan await di sini, jawaban selalu masuk duluan; jalur force-submit
+        // pelanggaran (yang kini meng-upsert jawaban request-nya juga, lihat
+        // exam-submissions/official-exam-submissions PUT) merekap termasuk
+        // jawaban yang baru saja disinkronkan.
+        const handleOnline = async () => {
             // Halaman gagal dimuat saat offline → muat ulang begitu koneksi kembali
             if (loadFailedRef.current) {
                 setLoadError(null)
@@ -266,8 +288,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 startExam()
                 return
             }
-            syncLocalToServer()
-            flushPendingViolations()
+            await syncLocalToServer()
+            await flushPendingViolations()
         }
 
         if (typeof window !== 'undefined') {
