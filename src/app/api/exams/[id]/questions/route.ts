@@ -8,6 +8,7 @@ import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncQuestionsToBank } from '@/lib/questionBankSync'
 import { canManageExamCoTaught, getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 import { syncDraftExamQuestions } from '@/lib/examBatch'
+import { resolveWindowExpiry } from '@/lib/examExpiry'
 import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
@@ -128,7 +129,18 @@ export async function GET(
             }
         }
 
-        // C2 Security Fix: Strip correct_answer for students unless exam is already submitted
+        // C2 Security Fix + H2 (audit): strip correct_answer untuk SISWA.
+        // Siswa yang BELUM submit tidak boleh melihat kunci (C2). Siswa yang
+        // SUDAH submit juga DITAHAN sampai jendela ujian tertutup — keputusan
+        // produk "tahan kunci s/d jam tutup" (paritas exam-submissions/[id]
+        // examKeysWindow): menutup kolusi "submit cepat → ambil kunci via GET
+        // questions → bagikan ke teman yang masih mengerjakan". Kunci terbuka
+        // setelah endAt efektif (resolveWindowExpiry — satu sumber kebenaran,
+        // termasuk timer_override_until dari fitur Tambah Waktu/Hard Reset).
+        // Gap paritas isHidden (review audit): pintu /questions juga hormati
+        // setting hasil — show_results_immediately=false & belum results_released
+        // = kunci tetap ditahan walau jendela sudah tutup (paritas pintu
+        // detail submission: isHidden), seragam di semua pintu keluar soal.
         if (user.role === 'SISWA') {
             const { data: student } = await supabase
                 .from('students')
@@ -137,17 +149,42 @@ export async function GET(
                 .single()
 
             let hasSubmitted = false
+            let examKeysWindow = true
+            let resultsGate = true
             if (student) {
                 const { data: submission } = await supabase
                     .from('exam_submissions')
-                    .select('is_submitted')
+                    .select('is_submitted, started_at, timer_override_until')
                     .eq('exam_id', id)
                     .eq('student_id', student.id)
                     .single()
                 hasSubmitted = !!submission?.is_submitted
+
+                if (hasSubmitted) {
+                    const { data: examWin } = await supabase
+                        .from('exams')
+                        .select('start_time, duration_minutes, window_end_time, show_results_immediately, results_released')
+                        .eq('id', id)
+                        .single()
+                    const expiry = resolveWindowExpiry(
+                        {
+                            start_time: examWin?.start_time ?? null,
+                            duration_minutes: examWin?.duration_minutes ?? null,
+                            window_end_time: examWin?.window_end_time ?? null,
+                        },
+                        {
+                            started_at: submission?.started_at ?? null,
+                            timer_override_until: submission?.timer_override_until ?? null,
+                        },
+                    )
+                    examKeysWindow = !expiry.limited || Date.now() > expiry.endAt
+                    const showImmediately = examWin?.show_results_immediately ?? true
+                    const isReleased = examWin?.results_released || false
+                    resultsGate = showImmediately || isReleased
+                }
             }
 
-            if (!hasSubmitted) {
+            if (!hasSubmitted || !examKeysWindow || !resultsGate) {
                 // Batas pilihan GK = jumlah kunci — dihitung SEBELUM kunci di-strip;
                 // hanya jumlahnya yang dikirim (kunci tidak bocor). UI siswa memblokir
                 // pilihan ke-(N+1) supaya over-pick tidak mungkin.

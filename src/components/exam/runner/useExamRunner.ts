@@ -36,6 +36,10 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
     const [timeLeft, setTimeLeft] = useState<number | null>(0)
     const [loading, setLoading] = useState(true)
     const [submitting, setSubmitting] = useState(false)
+    // Synchronous guard: mencegah race timer 00:00 + 15s retry memanggil
+    // handleSubmit bersamaan (React state async → bisa miss double-click).
+    // submittingRef.current = true langsung visible tanpa tunggu re-render.
+    const submittingRef = useRef(false)
     const [showConfirmSubmit, setShowConfirmSubmit] = useState(false)
     const [showOfflineTimeoutModal, setShowOfflineTimeoutModal] = useState(false)
     const [violationCount, setViolationCount] = useState(0)
@@ -251,6 +255,17 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 pendingViolationsRef.current = []
                 persistViolationQueue()
                 if (typeof data?.violation_count === 'number') setViolationCount(data.violation_count)
+
+                // Fix 6: Propagasi "Tambah Waktu" via jalur pelanggaran — respons
+                // membawa ends_at, perbarui patokan timer (hanya memanjang).
+                const freshEnds = data?.ends_at ? new Date(data.ends_at).getTime() : null
+                if (freshEnds !== null && Number.isFinite(freshEnds)
+                    && endsAtRef.current !== null && freshEnds > endsAtRef.current + 1_000) {
+                    endsAtRef.current = freshEnds
+                    const addedMin = Math.max(1, Math.round((freshEnds - (Date.now() + offsetMsRef.current)) / 60_000))
+                    setTimeExtension({ minutes: addedMin })
+                    setTimeLeft(computeRemaining())
+                }
             }
             // 5xx: biarkan queue untuk retry berikutnya
         } catch {
@@ -341,9 +356,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     question_id, answer
                 }))
 
-                // Kedaluwarsa dinilai dari patokan server (ends_at + offset), bukan jam HP mentah
-                const isTimeUp = endsAtRef.current !== null && (Date.now() + offsetMsRef.current) >= endsAtRef.current
-
+                // Fix 2+5: isTimeUp lama dihapus — keputusan auto-submit
+                // di delegasi ke handleSubmit(true) yang melakukan probe.
                 const t0 = performance.now()
                 const res = await fetch(configRef.current.submissionApi, {
                     method: 'PUT',
@@ -351,7 +365,10 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     body: JSON.stringify({
                         submission_id: submissionRef.current.id,
                         answers: answersArray,
-                        ...(isTimeUp && { submit: true })
+                        // Fix 2+5: JANGAN sertakan submit:true berdasarkan isTimeUp STALE —
+                        // guru mungkin sudah extend tapi client belum menerima ends_at baru.
+                        // Keputusan auto-submit di delegasi ke handleSubmit(true) yang
+                        // melakukan probe (lihat di bawah) — syncLocalToServer hanya simpan.
                     })
                 })
 
@@ -366,9 +383,6 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 const alreadySubmitted = res.status === 400
                     && (errBody?.code === 'ANSWERS_RESCUED' || errBody?.error === 'Already submitted')
                 if (res.status === 409 || alreadySubmitted) {
-                    clearLocalAnswers()
-                    router.replace(configRef.current.resultRoute(examId))
-                } else if (isTimeUp && res.ok) {
                     clearLocalAnswers()
                     router.replace(configRef.current.resultRoute(examId))
                 } else if (res.ok) {
@@ -392,6 +406,18 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                         const addedMin = Math.max(1, Math.round((newEnds - Math.max(oldEnds, Date.now() + offsetMsRef.current)) / 60_000))
                         setTimeExtension({ minutes: addedMin })
                         setTimeLeft(computeRemaining())
+                    }
+
+                    // Fix 2: Cek isTimeUp FRESH (setelah ends_at mungkin diperbarui di
+                    // atas) — bukan stale yang dihitung sebelum fetch. Kalau guru sudah
+                    // extend, ends_at baru > now → isTimeUpFresh = false → lanjut
+                    // mengerjakan. Kalau benar-benar habis → delegasi ke handleSubmit
+                    // yang melakukan probe (mencegah force-submit saat extend belum
+                    // tersampaikan).
+                    const isTimeUpFresh = endsAtRef.current !== null
+                        && (Date.now() + offsetMsRef.current) >= endsAtRef.current
+                    if (isTimeUpFresh) {
+                        handleSubmit(true)
                     }
                 } else {
                     // Server menolak (5xx dsb.) → tetap error; retry loop akan mencoba lagi.
@@ -909,7 +935,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
 
     // Submit exam
     const handleSubmit = async (auto = false) => {
-        if (!submission || submitting) return
+        if (!submission || submittingRef.current) return
+        submittingRef.current = true
         setSubmitting(true)
         setShowOfflineTimeoutModal(false)
 
@@ -918,6 +945,46 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             const answersArray = Object.entries(answersRef.current).map(([question_id, answer]) => ({
                 question_id, answer
             }))
+
+            // Fix 1: Saat auto-submit (timer 00:00 atau syncLocalToServer mendeteksi
+            // waktu habis), lakukan PROBE dulu — simpan jawaban TANPA submit, lalu
+            // cek ends_at dari respons. Kalau guru sudah extend (ends_at > now) →
+            // perbarui patokan timer dan LANJUT mengerjakan (jangan submit).
+            // Kalau server konfirmasi waktu benar-benar habis (409 force-close atau
+            // ends_at ≤ now) → lanjutkan ke submit normal.
+            if (auto) {
+                const probeRes = await fetch(configRef.current.submissionApi, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        submission_id: submission.id,
+                        answers: answersArray,
+                        // TIDAK ada submit:true — cuma simpan + dapat ends_at segar
+                    })
+                })
+                const probeBody = await probeRes.json().catch(() => null)
+                const freshEnds = probeBody?.ends_at ? new Date(probeBody.ends_at).getTime() : null
+
+                if (probeRes.ok && freshEnds !== null
+                    && freshEnds > Date.now() + offsetMsRef.current + 1_000) {
+                    // Guru sudah extend — timer naik, lanjut mengerjakan
+                    endsAtRef.current = freshEnds
+                    const addedMin = Math.max(1, Math.round((freshEnds - (Date.now() + offsetMsRef.current)) / 60_000))
+                    setTimeExtension({ minutes: addedMin })
+                    setTimeLeft(computeRemaining())
+                    setSubmitting(false)
+                    return // Jangan submit — siswa masih punya waktu
+                }
+                if (probeRes.status === 409) {
+                    // Server sudah force-close (jawaban terselamatkan via K1 rescue)
+                    clearLocalAnswers()
+                    router.replace(configRef.current.resultRoute(examId))
+                    setSubmitting(false)
+                    return
+                }
+                // Probe OK tapi ends_at ≤ now → waktu benar-benar habis
+                // Lanjut ke submit normal di bawah
+            }
 
             const res = await fetch(configRef.current.submissionApi, {
                 method: 'PUT',
@@ -950,6 +1017,12 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             // perangkat lain") bila ada; fallback ke pesan generik.
             alert(error instanceof Error && error.message ? error.message : `Gagal mengumpulkan ${examLabelRef.current}`)
         } finally {
+            // finally tetap dieksekusi walau try `return` dini (jalur extend di
+            // 00:00 / 409 force-close) — tanpa reset ini submittingRef terkunci
+            // true selamanya dan tombol submit + auto-submit mati sampai reload.
+            // Aman: submit ganda saat sukses ditangani server (400 Already submitted,
+            // sudah di-whitelist di atas).
+            submittingRef.current = false
             setSubmitting(false)
         }
     }

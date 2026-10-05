@@ -138,6 +138,12 @@ export default function ExtEndTimeMenu({
                         {submittedCount > 0 && (
                             <p className="text-blue-600/70 dark:text-blue-400/70">Siswa yang sudah terkirim otomatis tidak bisa diperpanjang — gunakan menu Reset per siswa.</p>
                         )}
+                        {workingCount === 0 && (
+                            <p className="text-amber-600 dark:text-amber-400 font-bold mt-1">⚠ Tidak ada siswa yang sedang mengerjakan — tambahan waktu hanya membuka kembali kesempatan mulai untuk siswa yang belum mulai.</p>
+                        )}
+                        {workingCount > 0 && workingCount <= 2 && submittedCount > workingCount && (
+                            <p className="text-amber-600 dark:text-amber-400 font-bold mt-1">⚠ Mayoritas siswa sudah mengumpulkan — tambahan waktu hanya berlaku untuk {workingCount} siswa yang masih mengerjakan.</p>
+                        )}
                     </div>
 
                     <div className="flex gap-3 justify-end">

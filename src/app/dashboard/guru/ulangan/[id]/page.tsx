@@ -220,6 +220,10 @@ function EditExamPageInner() {
     // Results state
     const [submissions, setSubmissions] = useState<any[]>([])
     const [resultsLoading, setResultsLoading] = useState(false)
+    // Race guard fetchResults: id request terakhir yang boleh menulis state —
+    // respons request lama (poll 10 dtk bisa tumpang-tindih saat jaringan lambat)
+    // dibuang, anti data "berubah sendiri" sesaat. Paritas admin/uts-uas/[id].
+    const resultsRequestIdRef = useRef(0)
     const [selectedSubmission, setSelectedSubmission] = useState<any>(null)
     const [resettingId, setResettingId] = useState<string | null>(null)
     const [resetMenuId, setResetMenuId] = useState<string | null>(null)
@@ -392,6 +396,9 @@ function EditExamPageInner() {
     }, [])
 
     const fetchResults = useCallback(async () => {
+        // Race guard: increment id — hanya request dengan id terbaru yang boleh
+        // menulis submissions/spinner (respons lama dibuang)
+        const myId = ++resultsRequestIdRef.current
         setResultsLoading(true)
         try {
             // Batch mode: "Semua Kelas" = submission SEMUA member batch
@@ -400,14 +407,14 @@ function EditExamPageInner() {
                 ? `/api/exam-submissions?batch_id=${exam?.batch_id}`
                 : `/api/exam-submissions?exam_id=${resultsClassFilter || examId}`
             const res = await fetch(url)
-            if (res.ok) {
+            if (res.ok && resultsRequestIdRef.current === myId) {
                 const data = await res.json()
                 setSubmissions(Array.isArray(data) ? data : [])
             }
         } catch (error) {
             console.error('Error fetching results:', error)
         } finally {
-            setResultsLoading(false)
+            if (resultsRequestIdRef.current === myId) setResultsLoading(false)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [examId, exam?.batch_id, isBatchView, resultsClassFilter])

@@ -302,10 +302,12 @@ async function run() {
     check('P2: respons memuat ends_at ≈ T0+13m ±90s', endsMs !== null && Math.abs(endsMs - (T0 + 13 * MIN)) < 90_000, r.data?.ends_at)
 
     // ═══ [W] Write-gate SETELAH batas lama + grace ═══
-    console.log('\n═══ [W] Write-gate pasca batas lama (menunggu) ══')
+    console.log('\n═══ [W] Write-gate pasca batas lama (menunggu) ═══')
     const waitT1 = (T0 + 4 * MIN + 20_000) - Date.now()
-    if (waitT1 > 0) { console.log(`  menunggu ${(waitT1 / 1000).toFixed(0)}s sampai lewat batas lama A (T0+3m) + grace 60s...`); await new Promise(r2 => setTimeout(r2, waitT1)) }
-    r = await api('PUT', '/api/exam-submissions', { submission_id: P.subA, answers: [{ question_id: P.qA1, answer: 'A' }] }, siswa1)
+    if (waitT1 > 0) { console.log(`  menunggu ${(waitT1 / 1000).toFixed(0)}s sampai lelewat batas lama A (T0+3m) + grace 60s...`); await new Promise(r2 => setTimeout(r2, waitT1)) }
+    // Re-login: session cache (30 dtk TTL) mungkin kedaluwarsa selama tunggu
+    const siswa1Fresh = await login('e2et_siswa1')
+    r = await api('PUT', '/api/exam-submissions', { submission_id: P.subA, answers: [{ question_id: P.qA1, answer: 'A' }] }, siswa1Fresh)
     check('W1: PUT SETELAH batas lama+grace → tetap 200 (inti fitur; tanpa extend pasti 409)', r.status === 200, r)
     const { data: subACheck } = await supabase.from('exam_submissions').select('is_submitted').eq('id', P.subA).single()
     check('W1b: submission A masih terbuka', subACheck?.is_submitted === false, subACheck)

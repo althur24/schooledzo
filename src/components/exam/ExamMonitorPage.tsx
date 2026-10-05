@@ -8,6 +8,7 @@ import ResetAttemptMenu from '@/components/exam/ResetAttemptMenu'
 import ExtEndTimeMenu from '@/components/exam/ExtEndTimeMenu'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
+import { getOfficialExamStatus } from '@/lib/exam'
 import { round2, formatScore } from '@/lib/formatScore'
 import {
     Loader2, ArrowLeft, GraduationCap, Users,
@@ -15,11 +16,13 @@ import {
 } from 'lucide-react'
 
 /**
- * ExamMonitorPage — monitor live progress siswa, dipakai dua rute:
- *  - /dashboard/guru/ulangan/[id]/monitor  → mode 'ulangan' (exam_submissions)
- *  - /dashboard/guru/uts-uas/[id]/monitor  → mode 'official' (official_exam_submissions)
- * Sebelumnya monitor ulangan biasa di-hosting di rute uts-uas (?type=ulangan) —
- * membingungkan guru; kini tiap jenis ujian punya rute sendiri, logika satu komponen.
+ * ExamMonitorPage — monitor live progress siswa, dipakai TIGA rute:
+ *  - /dashboard/guru/ulangan/[id]/monitor      → mode 'ulangan'
+ *  - /dashboard/guru/uts-uas/[id]/monitor      → mode 'official'
+ *  - /dashboard/admin/uts-uas/[id]/monitor     → mode 'official'/'ulangan' (dengan statusFilter)
+ * Sebelumnya admin punya salinan mandiri ~600 baris yang tertinggal 3 perbaikan
+ * (pause polling saat tab hidden, dedup fetch KKM, guard badge LIVE) — kini satu
+ * komponen, satu perilaku, tanpa divergensi (doktrin satu ExamRunner yang sama).
  */
 
 interface StudentProgress {
@@ -48,6 +51,8 @@ interface MonitorData {
         subject_name: string
         start_time: string
         duration_minutes: number
+        window_end_time?: string | null
+        is_active: boolean
         total_questions: number
         max_violations: number
         subject_id: string
@@ -63,23 +68,29 @@ interface MonitorData {
     }
 }
 
-export default function ExamMonitorPage({ examId, mode, batch }: {
+export default function ExamMonitorPage({ examId, mode, batch, backHref: backHrefProp, enableStatusFilter }: {
     examId: string
     mode: 'ulangan' | 'official'
     /** true = monitor SEMUA member batch multi-kelas (khusus ulangan — mirror UTS/UAS) */
     batch?: boolean
+    /** Rute kembali — default rute guru ulangan (kompatibilitas pemanggil lama) */
+    backHref?: string
+    /** Filter status (Mengerjakan/Selesai/Belum Mulai) — fitur admin monitor lama */
+    enableStatusFilter?: boolean
 }) {
     const router = useRouter()
     const labels = useSchoolLabels()
     const monitorEndpoint = mode === 'ulangan' ? '/api/exam-submissions/monitor' : '/api/official-exam-submissions/monitor'
     // Endpoint reset = endpoint monitor tanpa suffix /monitor (PUT reset_attempt soft/hard)
     const resetEndpoint = mode === 'ulangan' ? '/api/exam-submissions' : '/api/official-exam-submissions'
+    const backHref = backHrefProp ?? '/dashboard/guru/ulangan'
 
     const [data, setData] = useState<MonitorData | null>(null)
     const [loading, setLoading] = useState(true)
     const [refreshing, setRefreshing] = useState(false)
     const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
     const [classFilter, setClassFilter] = useState('')
+    const [statusFilter, setStatusFilter] = useState('')
     const [error, setError] = useState<string | null>(null)
     const [subjectKkms, setSubjectKkms] = useState<any[]>([])
 
@@ -102,6 +113,8 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
             if (!res.ok) throw new Error(json.error || 'Gagal memuat data')
 
             setData(json)
+            // KKM di-fetch terpisah via effect dedup di bawah — bukan di sini
+            // (dulu salinan admin fetch ulang KKM di setiap poll 15 dtk = dobel beban)
 
             setLastUpdated(new Date())
             setTickOffset(0) // Reset client countdown on fresh data
@@ -129,7 +142,7 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
     }, [data?.exam?.subject_id])
 
     // Auto refresh every 15 seconds — dijeda saat tab disembunyikan
-    // (guru yang mengecilkan tab tidak boleh terus membebani API),
+    // (guru/admin yang mengecilkan tab tidak boleh terus membebani API),
     // dan langsung refresh begitu tab terlihat lagi.
     useEffect(() => {
         fetchMonitorData() // Initial
@@ -165,7 +178,7 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
         toastTimerRef.current = setTimeout(() => setToast(null), 4000)
     }
 
-    // Reset attempt langsung dari monitor live — sama dengan pola admin monitor
+    // Reset attempt langsung dari monitor live — paritas guru & admin
     const handleResetAttempt = async (submissionId: string, studentName: string, resetMode: 'soft' | 'hard') => {
         const confirmMsg = resetMode === 'soft'
             ? `Soft Reset: Izinkan "${studentName}" melanjutkan ujian?\n\nTimer melanjutkan sisa waktu pengerjaan siswa tersebut dan pelanggaran di-reset. Jawaban yang sudah tersimpan tetap ada. Hanya bisa selama batas waktu pengerjaan belum lewat.`
@@ -215,8 +228,8 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
                 <div className="p-4 bg-orange-50 border-b border-orange-100 dark:bg-orange-900/10 dark:border-orange-900/20 px-8 flex flex-col items-center justify-center text-center">
                     <p className="font-bold text-orange-800 dark:text-orange-400 mb-2">Ujian Belum Dimulai</p>
                     <p className="text-sm text-orange-700 dark:text-orange-500 mb-4">Waktu mulai: {new Date(data.exam.start_time).toLocaleString('id-ID')}</p>
-                    <button onClick={() => router.push('/dashboard/guru/ulangan')} className="text-primary hover:underline font-bold">
-                        Kembali ke Daftar {labels.ulangan}
+                    <button onClick={() => router.push(backHref)} className="text-primary hover:underline font-bold">
+                        Kembali
                     </button>
                 </div>
             );
@@ -227,8 +240,8 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
                 <AlertTriangle className="w-12 h-12 text-red-500 mx-auto" />
                 <h2 className="text-xl font-bold text-text-main dark:text-white">Gagal Memuat Monitor</h2>
                 <p className="text-text-secondary">{error || 'Data ujian tidak ditemukan atau Anda tidak memiliki akses.'}</p>
-                <button onClick={() => router.push('/dashboard/guru/ulangan')} className="text-primary hover:underline font-bold">
-                    Kembali ke Daftar {labels.ulangan}
+                <button onClick={() => router.push(backHref)} className="text-primary hover:underline font-bold">
+                    Kembali
                 </button>
             </div>
         )
@@ -236,8 +249,14 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
 
     const { exam, summary, students } = data
 
+    // Badge LIVE hanya saat jendela waktu benar-benar berjalan — is_active
+    // tetap true setelah ujian selesai (sweeper tidak lagi menonaktifkan),
+    // jadi cek is_active saja akan menampilkan "LIVE" palsu di ujian selesai.
+    const isExamLive = getOfficialExamStatus(exam).isLive
+
     // Sort logic: 'working' first, then 'submitted', then 'not_started'
     // Within 'working', sort by highest answered count
+    // Within 'submitted', sort by submitted_at ASC (earliest first)
     const sortedStudents = [...students].sort((a, b) => {
         const order = { 'working': 1, 'submitted': 2, 'not_started': 3 }
         if (order[a.status] !== order[b.status]) {
@@ -246,12 +265,19 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
         if (a.status === 'working') {
             return b.answered_count - a.answered_count
         }
+        if (a.status === 'submitted') {
+            const timeA = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
+            const timeB = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
+            return timeA - timeB;
+        }
         return a.student_name.localeCompare(b.student_name)
     })
 
-    const filteredStudents = classFilter
-        ? sortedStudents.filter(s => s.class_name === classFilter) // we only have class_name here currently, so match by exact name context
-        : sortedStudents
+    const filteredStudents = sortedStudents.filter(s => {
+        if (classFilter && s.class_name !== classFilter) return false;
+        if (enableStatusFilter && statusFilter && s.status !== statusFilter) return false;
+        return true;
+    })
 
     // Timer display logic
     const formatTimeRemaining = (seconds: number) => {
@@ -280,13 +306,15 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
             <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                 <div>
                     <Link
-                        href={'/dashboard/guru/ulangan'}
+                        href={backHref}
                         className="inline-flex items-center justify-center p-3 mb-4 rounded-xl bg-white dark:bg-surface-dark border border-secondary/20 hover:border-primary text-text-secondary hover:text-primary transition-all shadow-sm"
-                        title={`Kembali ke Daftar ${labels.ulangan}`}
+                        title="Kembali"
                     >
                         <ArrowLeft className="w-5 h-5" />
                     </Link>
                     <div className="flex items-center gap-3">
+                        {/* Mode ulangan: exam_type = sentinel 'Ulangan' dari API exams (bukan
+                            'UTS'/'UAS') — tanpa guard ini badge jatuh ke cabang UAS. */}
                         {mode === 'ulangan' ? (
                             <span className="px-3 py-1 text-sm font-bold rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400">
                                 {labels.ulangan}
@@ -297,12 +325,14 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
                             </span>
                         )}
                         <h1 className="text-xl md:text-2xl font-bold text-text-main dark:text-white">{exam.title}</h1>
-                        <span className="flex items-center gap-1.5 px-3 py-1 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse shadow-lg shadow-red-500/20">
-                            <span className="w-2 h-2 rounded-full bg-white relative">
-                                <span className="absolute inset-0 rounded-full bg-white animate-ping"></span>
+                        {isExamLive && (
+                            <span className="flex items-center gap-1.5 px-3 py-1 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse shadow-lg shadow-red-500/20">
+                                <span className="w-2 h-2 rounded-full bg-white relative">
+                                    <span className="absolute inset-0 rounded-full bg-white animate-ping"></span>
+                                </span>
+                                LIVE
                             </span>
-                            LIVE
-                        </span>
+                        )}
                     </div>
                     <p className="text-sm text-text-secondary mt-1">
                         {exam.subject_name} • {exam.total_questions} Soal • {exam.duration_minutes} Menit
@@ -381,23 +411,45 @@ export default function ExamMonitorPage({ examId, mode, batch }: {
                         <GraduationCap className="w-5 h-5 text-primary" /> Progress Siswa
                     </h2>
 
-                    <div className="flex bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl overflow-hidden focus-within:ring-2 ring-primary/50 transition-all">
-                        <div className="px-3 py-2 border-r border-secondary/20 bg-secondary/5 font-medium text-text-secondary text-sm">
-                            Saring Kelas:
+                    <div className="flex flex-col sm:flex-row gap-3">
+                        {/* Class Filter */}
+                        <div className="flex bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl overflow-hidden focus-within:ring-2 ring-primary/50 transition-all">
+                            <div className="px-3 py-2 border-r border-secondary/20 bg-secondary/5 font-medium text-text-secondary text-sm">
+                                Saring Kelas:
+                            </div>
+                            <select
+                                value={classFilter}
+                                onChange={(e) => setClassFilter(e.target.value)}
+                                className="px-3 py-2 bg-transparent text-text-main dark:text-white focus:outline-none text-sm font-bold min-w-[120px] cursor-pointer"
+                            >
+                                <option value="">Semua Kelas</option>
+                                {/* Unique classes from students array */}
+                                {Array.from(new Set(students.map(s => s.class_name))).filter(Boolean)
+                                    .sort((a, b) => a.localeCompare(b, 'id', { numeric: true, sensitivity: 'base' }))
+                                    .map(className => (
+                                    <option key={className} value={className}>{className}</option>
+                                ))}
+                            </select>
                         </div>
-                        <select
-                            value={classFilter}
-                            onChange={(e) => setClassFilter(e.target.value)}
-                            className="px-3 py-2 bg-transparent text-text-main dark:text-white focus:outline-none text-sm font-bold min-w-[120px] cursor-pointer"
-                        >
-                            <option value="">Semua Kelas</option>
-                            {/* Unique classes from students array */}
-                            {Array.from(new Set(students.map(s => s.class_name))).filter(Boolean)
-                                .sort((a, b) => a.localeCompare(b, 'id', { numeric: true, sensitivity: 'base' }))
-                                .map(className => (
-                                <option key={className} value={className}>{className}</option>
-                            ))}
-                        </select>
+
+                        {/* Status Filter (mode admin) */}
+                        {enableStatusFilter && (
+                            <div className="flex bg-white dark:bg-surface-dark border border-secondary/20 rounded-xl overflow-hidden focus-within:ring-2 ring-primary/50 transition-all">
+                                <div className="px-3 py-2 border-r border-secondary/20 bg-secondary/5 font-medium text-text-secondary text-sm">
+                                    Status:
+                                </div>
+                                <select
+                                    value={statusFilter}
+                                    onChange={(e) => setStatusFilter(e.target.value)}
+                                    className="px-3 py-2 bg-transparent text-text-main dark:text-white focus:outline-none text-sm font-bold min-w-[120px] cursor-pointer"
+                                >
+                                    <option value="">Semua Status</option>
+                                    <option value="working">Mengerjakan</option>
+                                    <option value="submitted">Selesai</option>
+                                    <option value="not_started">Belum Mulai</option>
+                                </select>
+                            </div>
+                        )}
                     </div>
                 </div>
 

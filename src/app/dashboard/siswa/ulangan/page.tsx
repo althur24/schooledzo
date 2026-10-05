@@ -35,6 +35,7 @@ interface ExamSubmission {
     max_score: number | null
     results_hidden?: boolean
     started_at: string
+    timer_override_until?: string | null
 }
 
 interface OfficialExam {
@@ -60,6 +61,7 @@ interface OfficialSubmission {
     max_score: number | null
     results_hidden?: boolean
     started_at: string
+    timer_override_until?: string | null
 }
 
 export default function SiswaUlanganPage() {
@@ -127,11 +129,20 @@ export default function SiswaUlanganPage() {
         }
 
         if (submission && !submission.is_submitted) {
-            // Check personal expiration — min(started_at + durasi, jam tutup), buffer 1 menit
+            // Check personal expiration — min(started_at + durasi, jam tutup), buffer 1 menit.
+            // timer_override_until (Tambah Waktu/Hard Reset) = keputusan eksplisit guru:
+            // endAt = max(batas efektif, override) dan override TIDAK dipotong jam tutup
+            // (paritas resolveWindowExpiry di src/lib/examExpiry.ts) — tanpa ini kartu
+            // tampil "Waktu Habis" padahal sesi di server masih terbuka.
             const subStartedAt = new Date(submission.started_at).getTime()
             const durationMs = exam.duration_minutes * 60000
             const perStudentEnd = durationMs > 0 ? subStartedAt + durationMs : null
-            const effectiveEnd = Math.min(...[perStudentEnd, strictEndTime.getTime()].filter((v): v is number => v !== null))
+            const overrideEnd = submission.timer_override_until
+                ? new Date(submission.timer_override_until).getTime() : null
+            const effectiveEnd = Math.max(
+                Math.min(...[perStudentEnd, strictEndTime.getTime()].filter((v): v is number => v !== null)),
+                ...(overrideEnd !== null ? [overrideEnd] : []),
+            )
             const isExpired = currentTime.getTime() > (effectiveEnd + 60000)
 
             if (isExpired) {
@@ -173,10 +184,17 @@ export default function SiswaUlanganPage() {
             return { status: 'submitted', label: 'Sudah Dikumpulkan', icon: TickSquare, color: 'bg-green-100 text-green-600 dark:bg-green-500/20 dark:text-green-400' }
         }
         if (submission && !submission.is_submitted) {
+            // Paritas override dengan getExamStatus — lihat komentar di atas
+            // (override TIDAK dipotong jam tutup, paritas resolveWindowExpiry).
             const subStartedAt = new Date(submission.started_at).getTime()
             const durationMs = exam.duration_minutes * 60000
             const perStudentEnd = durationMs > 0 ? subStartedAt + durationMs : null
-            const effectiveEnd = Math.min(...[perStudentEnd, strictEndTime.getTime()].filter((v): v is number => v !== null))
+            const overrideEnd = submission.timer_override_until
+                ? new Date(submission.timer_override_until).getTime() : null
+            const effectiveEnd = Math.max(
+                Math.min(...[perStudentEnd, strictEndTime.getTime()].filter((v): v is number => v !== null)),
+                ...(overrideEnd !== null ? [overrideEnd] : []),
+            )
             const isExpired = currentTime.getTime() > (effectiveEnd + 60000)
             if (isExpired) return { status: 'expired_open', label: 'Waktu Habis', icon: TimeCircle, color: 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300' }
             return { status: 'in_progress', label: 'Lanjutkan', icon: Play, color: 'bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400' }

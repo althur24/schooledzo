@@ -108,8 +108,24 @@ export async function extendTimeForExam(
             .eq('id', exam.id)
         if (examErr) throw examErr
     } else if (duration > 0) {
-        // Mode serentak: durasi += N (akhir = start + durasi; semua tergeser)
-        newDuration = duration + minutes
+        // Mode serentak: anchor di max(batas lama, sekarang) + N — sama dengan
+        // mode jendela. Fix 4 (audit round-2): sebelumnya duration += N yang
+        // menghitung dari start_time → kalau extend SETELAH batas lewat lebih
+        // dari N menit, akhir baru tetap di masa lalu (no-op total). Kini:
+        // newEnd = max(start+durasiLama, now) + N → selalu membuka ulang dari
+        // sekarang. Durasi dihitung mundur dari start (dibulatkan ke atas)
+        // supaya resolveWindowExpiry (serentak: start + durasi) menghasilkan
+        // newEnd. Side-effect: kartu ujian menampilkan durasi total yang lebih
+        // besar (mis. 130 dari 90) — akurat (rentang start→end baru).
+        const startMs = toMs(exam.start_time)
+        if (startMs !== null) {
+            const oldEndMs = startMs + duration * 60_000
+            const newEndMs = Math.max(oldEndMs, now) + minutes * 60_000
+            newDuration = Math.ceil((newEndMs - startMs) / 60_000)
+        } else {
+            // Fallback (start null — data tak lengkap): behavior lama
+            newDuration = duration + minutes
+        }
         const { error: examErr } = await supabase
             .from(examTable)
             .update({ duration_minutes: newDuration })
