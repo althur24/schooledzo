@@ -36,6 +36,10 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
     const [timeLeft, setTimeLeft] = useState<number | null>(0)
     const [loading, setLoading] = useState(true)
     const [submitting, setSubmitting] = useState(false)
+    // Synchronous guard: mencegah race timer 00:00 + 15s retry memanggil
+    // handleSubmit bersamaan (React state async → bisa miss double-click).
+    // submittingRef.current = true langsung visible tanpa tunggu re-render.
+    const submittingRef = useRef(false)
     const [showConfirmSubmit, setShowConfirmSubmit] = useState(false)
     const [showOfflineTimeoutModal, setShowOfflineTimeoutModal] = useState(false)
     const [violationCount, setViolationCount] = useState(0)
@@ -931,7 +935,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
 
     // Submit exam
     const handleSubmit = async (auto = false) => {
-        if (!submission || submitting) return
+        if (!submission || submittingRef.current) return
+        submittingRef.current = true
         setSubmitting(true)
         setShowOfflineTimeoutModal(false)
 
@@ -1012,6 +1017,12 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             // perangkat lain") bila ada; fallback ke pesan generik.
             alert(error instanceof Error && error.message ? error.message : `Gagal mengumpulkan ${examLabelRef.current}`)
         } finally {
+            // finally tetap dieksekusi walau try `return` dini (jalur extend di
+            // 00:00 / 409 force-close) — tanpa reset ini submittingRef terkunci
+            // true selamanya dan tombol submit + auto-submit mati sampai reload.
+            // Aman: submit ganda saat sukses ditangani server (400 Already submitted,
+            // sudah di-whitelist di atas).
+            submittingRef.current = false
             setSubmitting(false)
         }
     }

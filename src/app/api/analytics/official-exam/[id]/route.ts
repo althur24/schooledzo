@@ -6,6 +6,7 @@ import { resolveKkm } from '@/lib/resolveKkm'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { parseAnswerLetters } from '@/lib/questionTypeUtils'
+import { getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 
 // ─── Shared helpers ─────────────────────────────────────────────
 function median(arr: number[]): number {
@@ -73,6 +74,26 @@ export async function GET(
         // Tenant guard: ujian harus milik sekolah caller (IDOR lintas sekolah)
         if (tenantMismatch(exam.school_id, schoolId)) {
             return notFound()
+        }
+
+        // GURU non-pengampu tidak boleh membaca analitik ujian guru lain
+        // (skor per siswa, ranking, heatmap — paritas guard monitor & list
+        // submissions: mengajar mapel ujian di ≥1 kelas target). ADMIN tetap
+        // boleh (tenant guard di atas). Tanpa ini guru sekolah sama yang tahu
+        // id bisa menganalisis kelas guru lain.
+        if (user.role === 'GURU') {
+            const { data: examScope } = await supabase
+                .from('official_exams')
+                .select('subject_id, target_class_ids, academic_year_id')
+                .eq('id', examId)
+                .single()
+            const scope = await getTeacherScope(user.id, examScope?.academic_year_id ?? null)
+            const canRead = !!examScope && (examScope.target_class_ids || []).some((cid: string) =>
+                coTeachesClassSubject(scope, examScope.subject_id, cid)
+            )
+            if (!canRead) {
+                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            }
         }
 
         const subjectId = (exam.subject as any)?.id

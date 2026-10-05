@@ -78,9 +78,17 @@ export default function RescueDraftPage() {
                 const key = localStorage.key(i)
                 if (!key) continue
                 for (const t of EXAM_TYPES) {
-                    const marker = `${t.prefix}_answers`
-                    if (!key.startsWith(`${t.prefix}_`) || !key.endsWith(marker)) continue
-                    const examId = key.slice(t.prefix.length + 1, key.length - marker.length)
+                    // Runner menulis key `${prefix}_${examId}_answers` (lihat
+                    // useExamRunner) — mis. `exam_<uuid>_answers`. Marker yang
+                    // dicocokkan adalah `_answers` (bukan `${prefix}_answers` —
+                    // itu tak akan pernah cocok untuk UUID dan membuat scan
+                    // selalu kosong). Prefix `exam` tidak menabrak key
+                    // `official_exam_...` karena startsWith('exam_') sudah salah
+                    // untuk key itu (diawali "official_").
+                    const marker = '_answers'
+                    const prefixWithDash = `${t.prefix}_`
+                    if (!key.startsWith(prefixWithDash) || !key.endsWith(marker)) continue
+                    const examId = key.slice(prefixWithDash.length, key.length - marker.length)
                     if (!examId || examId.includes('_')) continue
                     try {
                         const parsed = JSON.parse(localStorage.getItem(key) || '{}')
