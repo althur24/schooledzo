@@ -15,6 +15,13 @@ import { mergeViolations, IncomingViolation } from '@/lib/violationBatch'
 import { logGradeChange } from '@/lib/gradeHistory'
 
 // GET official exam submissions
+interface RemedialRow {
+    id: string
+    remedial_for_id: string
+    remedial_score_policy?: string | null
+    remedial_max_score?: number | null
+}
+
 export async function GET(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
@@ -244,21 +251,42 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        // If filtering by examId and the user is ADMIN/GURU, fetch remedial submissions
+        // If filtering by examId (atau jalur SEMUA-exam guru — mis. halaman nilai
+        // single-fetch) and the user is ADMIN/GURU, fetch remedial submissions
         // and merge by score sesuai kebijakan remedial (HIGHEST/AVERAGE/CAP).
-        if (examId && (user.role === 'GURU' || user.role === 'ADMIN')) {
-            const { data: remedials } = await supabase
-                .from('official_exams')
-                .select('id, remedial_score_policy, remedial_max_score')
-                .eq('remedial_for_id', examId)
+        // Tanpa exam_id: sumber merge = exam-exam yang muncul di result
+        // (punya submission) — remedial tanpa submission tidak relevan.
+        const mergeExamIds = examId
+            ? [examId]
+            : (user.role === 'GURU' || user.role === 'ADMIN')
+                ? [...new Set(result.map((s: any) => s.exam_id))]
+                : null
+        if (mergeExamIds && mergeExamIds.length > 0 && (user.role === 'GURU' || user.role === 'ADMIN')) {
+            const remedials = await batchedIn<RemedialRow>(
+                'remedial_for_id', mergeExamIds,
+                (chunk) => supabase
+                    .from('official_exams')
+                    .select('id, remedial_for_id, remedial_score_policy, remedial_max_score')
+                    .in('remedial_for_id', chunk)
+            )
 
             if (remedials && remedials.length > 0) {
                 const remedialIds = remedials.map(r => r.id)
-                // Kebijakan remedial diambil dari remedial pertama yang menaut langsung
-                // ke ujian dasar (pola helper: remedial berlapis memakai kebijakan
-                // remedial pertama — konsisten dengan titik merge lain).
-                const remedialPolicy = (remedials[0] as any).remedial_score_policy
-                const remedialCap = (remedials[0] as any).remedial_max_score
+                // Pemetaan remedial → ujian sumber + kebijakan per sumber
+                // (pola helper: remedial berlapis memakai kebijakan remedial
+                // pertama — konsisten dengan titik merge lain; paritas
+                // /api/exam-submissions).
+                const sourceByRemedialId = new Map(remedials.map(r => [r.id, r.remedial_for_id]))
+                const policyBySource = new Map<string, { policy: any; cap: any }>()
+                remedials.forEach(r => {
+                    const src = r.remedial_for_id
+                    if (!policyBySource.has(src)) {
+                        policyBySource.set(src, {
+                            policy: (r as any).remedial_score_policy,
+                            cap: (r as any).remedial_max_score,
+                        })
+                    }
+                })
                 // fetchAllRows: remedial seangkatan/sekolah bisa >1000 submissions
                 const remedialSubmissions = await fetchAllRows(supabase
                     .from('official_exam_submissions')
@@ -275,11 +303,14 @@ export async function GET(request: NextRequest) {
                     .order('id'))
 
                 if (remedialSubmissions && remedialSubmissions.length > 0) {
+                    // Key merge = `${exam sumber}|${siswa}` — jalur SEMUA-exam
+                    // memuat banyak ujian; key per-siswa saja akan saling
+                    // menimpa antar ujian (single-exam lama tetap benar).
                     const studentMerged = new Map<string, any>()
 
                     // Add all original submissions first
                     result.forEach((sub: any) => {
-                        studentMerged.set(sub.student?.id, sub)
+                        studentMerged.set(`${sub.exam_id}|${sub.student?.id}`, sub)
                     })
 
                     // Gabungkan per siswa: skor remedial tertinggi (perwakilan bila
@@ -288,35 +319,46 @@ export async function GET(request: NextRequest) {
                     const bestRemedialByStudent = new Map<string, any>()
                     remedialSubmissions.forEach((sub: any) => {
                         const studentId = sub.student?.id
-                        if (!studentId) return
+                        const sourceId = sourceByRemedialId.get(sub.exam_id)
+                        if (!studentId || !sourceId) return
+                        const key = `${sourceId}|${studentId}`
                         const currentScore = (sub.total_score || 0) / (sub.max_score || 1)
-                        const prev = bestRemedialByStudent.get(studentId)
+                        const prev = bestRemedialByStudent.get(key)
                         if (!prev || currentScore >= (prev.total_score || 0) / (prev.max_score || 1)) {
-                            bestRemedialByStudent.set(studentId, sub)
+                            bestRemedialByStudent.set(key, sub)
                         }
                     })
 
-                    bestRemedialByStudent.forEach((remSub, studentId) => {
-                        const original = studentMerged.get(studentId)
+                    bestRemedialByStudent.forEach((remSub, key) => {
+                        const sourceId = key.split('|')[0]
+                        const original = studentMerged.get(key)
+                        const policy = policyBySource.get(sourceId)
                         const remScore = (remSub.total_score || 0) / (remSub.max_score || 1) * 100
                         const finalScore = original
                             ? applyRemedialPolicy(
                                 (original.total_score || 0) / (original.max_score || 1) * 100,
                                 remScore,
-                                remedialPolicy,
-                                remedialCap,
+                                policy?.policy,
+                                policy?.cap,
                             )
                             : remScore
                         if (!original) {
-                            // Siswa hanya ikut remedial (tidak punya baris asli —
-                            // kasus langka): masukkan baris remedial apa adanya.
-                            studentMerged.set(studentId, remSub)
+                            // Siswa hanya ikut remedial (tanpa baris asli — kasus sah:
+                            // sakit saat ujian dasar). exam_id & embed exam dipetakan
+                            // ke exam SUMBER supaya konsumen single-fetch (filter by
+                            // exam_id sumber) tidak membuang baris ini — paritas
+                            // perilaku lama yang memetakan paksa di client.
+                            studentMerged.set(key, {
+                                ...remSub,
+                                exam_id: sourceId,
+                                exam: { ...(Array.isArray(remSub.exam) ? remSub.exam[0] : remSub.exam), id: sourceId },
+                            })
                             return
                         }
                         if (finalScore !== null) {
                             // Skor final disimpan proporsional pada max_score baris asli
                             const maxScore = original.max_score || 100
-                            studentMerged.set(studentId, {
+                            studentMerged.set(key, {
                                 ...original,
                                 total_score: Math.round(finalScore / 100 * maxScore * 100) / 100,
                                 merged_from_remedial: true,

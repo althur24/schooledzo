@@ -268,15 +268,19 @@ export default function NilaiPage() {
             const myExams = (examsData || []).filter((e: Exam) => e.teaching_assignment?.id === selectedTA && !e.is_remedial)
             setExams(myExams)
 
-            // Fetch exam submissions
-            const allExamSubs: ExamSubmission[] = []
-            for (const exam of myExams) {
-                const eSubRes = await fetch(`/api/exam-submissions?exam_id=${exam.id}`)
-                const eSubData = await eSubRes.json()
-                if (Array.isArray(eSubData)) {
-                    allExamSubs.push(...eSubData.filter((s: any) => s.is_submitted).map((s: any) => ({ ...s, exam: { id: exam.id, title: exam.title } })))
-                }
-            }
+            // Fetch exam submissions — SATU request tanpa exam_id: endpoint
+            // year-scoped + scope mapel|kelas guru, merge remedial kini jalan
+            // juga di jalur ini (paritas jalur per-exam). Filter client ke TA
+            // terpilih; server tetap otoritatif.
+            const eSubRes = await fetch('/api/exam-submissions')
+            const eSubData = await eSubRes.json()
+            const myExamIds = new Set(myExams.map((e: Exam) => e.id))
+            const allExamSubs: ExamSubmission[] = (Array.isArray(eSubData) ? eSubData : [])
+                .filter((s: any) => s.is_submitted && myExamIds.has(s.exam_id))
+                .map((s: any) => {
+                    const ex = Array.isArray(s.exam) ? s.exam[0] : s.exam
+                    return { ...s, exam: { id: s.exam_id, title: ex?.title || '' } }
+                })
             setExamSubmissions(allExamSubs)
 
             // Fetch official exams (UTS/UAS) matching this subject + class —
@@ -291,23 +295,20 @@ export default function NilaiPage() {
                 subject_id: oe.subject?.id, target_class_ids: oe.target_class_ids
             })))
 
-            // Fetch official exam submissions
-            const allOfficialSubs: OfficialExamSubForNilai[] = []
-            for (const oe of myOfficialExams) {
-                const oeSubRes = await fetch(`/api/official-exam-submissions?exam_id=${oe.id}`)
-                const oeSubData = await oeSubRes.json()
-                if (Array.isArray(oeSubData)) {
-                    allOfficialSubs.push(...oeSubData
-                        .filter((s: any) => s.is_submitted)
-                        .map((s: any) => ({
-                            id: s.id, student_id: s.student?.id || s.student_id,
-                            is_submitted: true, total_score: s.total_score,
-                            max_score: s.max_score, is_graded: s.is_graded,
-                            exam_id: oe.id, submitted_at: s.submitted_at
-                        }))
-                    )
-                }
-            }
+            // Fetch official exam submissions — SATU request tanpa exam_id
+            // (endpoint mengirim hanya ujian sekolah ini, scope guru + tahun
+            // aktif), lalu filter client ke UTS/UAS mapel-kelas terpilih.
+            const oeSubRes = await fetch('/api/official-exam-submissions')
+            const oeSubData = await oeSubRes.json()
+            const myOeIds = new Set(myOfficialExams.map((oe: any) => oe.id))
+            const allOfficialSubs: OfficialExamSubForNilai[] = (Array.isArray(oeSubData) ? oeSubData : [])
+                .filter((s: any) => s.is_submitted && myOeIds.has(s.exam_id))
+                .map((s: any) => ({
+                    id: s.id, student_id: s.student?.id || s.student_id,
+                    is_submitted: true, total_score: s.total_score,
+                    max_score: s.max_score, is_graded: s.is_graded,
+                    exam_id: s.exam_id, submitted_at: s.submitted_at
+                }))
             setOfficialExamSubs(allOfficialSubs)
 
         } catch (error) {
