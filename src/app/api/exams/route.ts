@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
                     class:classes(id, name, school_level, grade_level),
                     academic_year:academic_years(id, name, is_active)
                 ),
-                exam_questions(id)
+                exam_questions(count)
             `)
             .order('created_at', { ascending: false })
 
@@ -159,10 +159,12 @@ export async function GET(request: NextRequest) {
         const batchIds = [...new Set(visibleData.map((e: any) => e.batch_id).filter(Boolean))] as string[]
         const batchInfos = await getBatchInfo('exams', batchIds)
 
-        // Add question count
+        // Add question count — embed aggregate (count): DB yang menghitung,
+        // bukan mengirim semua baris soal (378 exam × ±30 soal = 11rb baris
+        // per response dulu; kini 1 angka per exam).
         const examsWithCount = visibleData.map(exam => ({
             ...exam,
-            question_count: exam.exam_questions?.length || 0,
+            question_count: (exam.exam_questions as unknown as { count: number }[] | null)?.[0]?.count ?? 0,
             exam_questions: undefined,
             creator_role: exam.created_by ? roleMap.get(exam.created_by) || null : null,
             batch_size: exam.batch_id ? batchInfos.get(exam.batch_id)?.uniqueClassCount || 1 : 1,

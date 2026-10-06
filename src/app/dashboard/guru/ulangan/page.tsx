@@ -17,6 +17,7 @@ import TimeWindowFields from '@/components/TimeWindowFields'
 import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { useIncrementalList } from '@/hooks/useIncrementalList'
 import { labelForGradeType } from '@/lib/labels'
 import { TimeCircle as Clock, Plus, Lock, ShieldDone, Swap, Graph, Edit, Document } from 'react-iconly'
 import { Loader2, CheckSquare, Square, RefreshCw, GraduationCap, BookOpen, Copy, Trash2, Activity } from 'lucide-react'
@@ -190,13 +191,17 @@ export default function GuruUlanganPage() {
         if (!user) return
 
         try {
-            const [examsRes, myAssignmentsRes, yearsRes, officialExamsRes, returnedRes, settingsRes] = await Promise.all([
+            // Wave-1 paralel penuh: semua fetch mandiri (grading-overview tidak
+            // tergantung apa pun — dulu dieksekusi SETELAH 3 tahap waterfall,
+            // menambah satu round-trip penuh di akhir).
+            const [examsRes, myAssignmentsRes, yearsRes, officialExamsRes, returnedRes, settingsRes, gradingRes] = await Promise.all([
                 fetch('/api/exams'),
                 fetch('/api/my-teaching-assignments'),
                 fetch('/api/academic-years'),
                 fetch('/api/official-exams'),
                 fetch('/api/exams/returned-counts'),
-                fetch('/api/school-settings')
+                fetch('/api/school-settings'),
+                fetch('/api/dashboard/guru/grading-overview')
             ])
 
             if (settingsRes.ok) {
@@ -233,17 +238,13 @@ export default function GuruUlanganPage() {
                 try {
                     // status=ACTIVE: hitungan "N siswa" kelas = anggota SAAT INI —
                     // siswa yang pindah kelas tidak terhitung dobel di dua kelas.
-                    const studentsRes = await fetch(`/api/students?enrollment_year_id=${activeYear.id}&status=ACTIVE`)
-                    const studentsData = await studentsRes.json()
-                    const studentsArray = Array.isArray(studentsData) ? studentsData : []
-                    const counts: Record<string, number> = {}
-                    studentsArray.forEach((s: any) => {
-                        const classId = s.class?.id || s.class_id
-                        if (classId) counts[classId] = (counts[classId] || 0) + 1
-                    })
-                    setStudentCounts(counts)
+                    // Satu request GROUP BY (RPC) — pengganti roster 1.000+ siswa
+                    // full-embed yang hanya dipakai untuk counts[classId]++.
+                    const countsRes = await fetch(`/api/students/class-counts?enrollment_year_id=${activeYear.id}`)
+                    const countsData = await countsRes.json()
+                    setStudentCounts(countsData && !Array.isArray(countsData) ? countsData : {})
                 } catch (e) {
-                    console.error('Error fetching students:', e)
+                    console.error('Error fetching class student counts:', e)
                 }
             }
 
@@ -261,14 +262,14 @@ export default function GuruUlanganPage() {
             })
             setExams(myExams)
 
-            // Satu request ringkasan (bukan N+1 per ulangan/UTS). Definisi sama
-            // dengan sebelumnya: submitted = is_submitted, pending = is_submitted && !is_graded.
+            // Ringkasan koreksi dari wave-1 (satu request, cache server 30 dtk).
+            // Definisi sama dengan sebelumnya: submitted = is_submitted,
+            // pending = is_submitted && !is_graded.
             const subCounts: Record<string, number> = {}
             const pendingCounts: Record<string, number> = {}
             try {
-                const res = await fetch('/api/dashboard/guru/grading-overview')
-                if (res.ok) {
-                    const data = await res.json()
+                if (gradingRes.ok) {
+                    const data = await gradingRes.json()
                     const items = Array.isArray(data?.items) ? data.items : []
                     items.forEach((it: any) => {
                         subCounts[it.id] = it.submitted_count || 0
@@ -881,6 +882,11 @@ export default function GuruUlanganPage() {
             .filter(([id]) => !!id)
     ).entries()].sort((a, b) => a[1].localeCompare(b[1], 'id'))
 
+    // Render bertahap: 24 kartu pertama langsung, sisanya menyusul saat
+    // di-scroll (sentinel + IntersectionObserver) — DOM ratusan kartu
+    // dirender sekaligus membuat halaman tersendat walau data sudah sampai.
+    const { items: renderedExamGroups, sentinelRef: listSentinelRef, hasMore: listHasMore } = useIncrementalList(visibleExamGroups)
+
     return (
         <div className="space-y-6">
             <PageHeader
@@ -1007,7 +1013,7 @@ export default function GuruUlanganPage() {
                             </div>
                         ) : (
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                                {visibleExamGroups.map((group) => {
+                                {renderedExamGroups.map((group) => {
                                     const exam = group.representative
                                     const repStatus = getExamStatus(exam)
                                     // Status agregat batch: live bila ADA member live,
@@ -1076,6 +1082,8 @@ export default function GuruUlanganPage() {
                                 })}
                             </div>
                         )}
+                        {/* Sentinel render bertahap: terlihat saat scroll → muat batch berikutnya */}
+                        {listHasMore && <div ref={listSentinelRef} className="h-1" aria-hidden="true" />}
                     </div>
 
                     <div>

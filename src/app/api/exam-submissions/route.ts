@@ -9,12 +9,19 @@ import { resolveWindowExpiry, isWriteAllowed, isSweepDue, endsAtIso } from '@/li
 import { forceCloseExamSubmission } from '@/lib/autoCloseExpired'
 import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { batchedIn } from '@/lib/batchedIn'
 import { bufferTeacherSubmissionNotification } from '@/lib/teacherNotifyBuffer'
 import { mergeViolations, IncomingViolation } from '@/lib/violationBatch'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { logGradeChange } from '@/lib/gradeHistory'
 
 // GET exam submissions
+interface ExamRemedialRow {
+    id: string
+    remedial_for_id: string
+    remedial_score_policy?: string | null
+    remedial_max_score?: number | null
+}
 export async function GET(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
@@ -207,12 +214,28 @@ export async function GET(request: NextRequest) {
         // submissions and merge by score sesuai kebijakan (HIGHEST/AVERAGE/CAP).
         // Key merge = `${exam sumber}|${student}` — batch multi-kelas punya siswa
         // berbeda per member, key per-siswa saja akan saling menimpa antar kelas.
-        const mergeSourceIds = batchMemberIds || (examId ? [examId] : null)
+        // GURU tanpa exam_id (single-fetch, mis. halaman nilai): sumber merge =
+        // exam-exam yang sudah ada di finalData (punya submission) — remedial
+        // tanpa submission tidak relevan; scope guru tetap membatasi hasil.
+        let guruTaughtPairs: Set<string> | null = null
+        if (user.role === 'GURU') {
+            const scopeForMerge = await getTeacherScope(user.id)
+            guruTaughtPairs = new Set((scopeForMerge?.assignments || []).map(a => `${a.subject_id}|${a.class_id}`))
+        }
+        let mergeSourceIds = batchMemberIds || (examId ? [examId] : null)
+        if (!mergeSourceIds && guruTaughtPairs) {
+            mergeSourceIds = [...new Set(finalData.map((s: any) => s.exam_id).filter(Boolean))]
+        }
         if (mergeSourceIds && (user.role === 'GURU' || user.role === 'ADMIN')) {
-            const { data: remedials } = await supabase
-                .from('exams')
-                .select('id, remedial_for_id, remedial_score_policy, remedial_max_score')
-                .in('remedial_for_id', mergeSourceIds)
+            // batchedIn per 100 id (batas URL 16KB): jalur guru tanpa exam_id
+            // bisa membawa ratusan exam ber-submission se-sekolah.
+            const remedials = await batchedIn<ExamRemedialRow>(
+                'remedial_for_id', mergeSourceIds,
+                (chunk) => supabase
+                    .from('exams')
+                    .select('id, remedial_for_id, remedial_score_policy, remedial_max_score')
+                    .in('remedial_for_id', chunk)
+            )
 
             if (remedials && remedials.length > 0) {
                 const remedialIds = remedials.map(r => r.id)
@@ -228,7 +251,6 @@ export async function GET(request: NextRequest) {
                         })
                     }
                 })
-                // fetchAllRows: remedial sekelas/sekolah bisa >1000 submissions
                 const remedialSubmissions = await fetchAllRows(supabase
                     .from('exam_submissions')
                     .select(`
@@ -281,7 +303,16 @@ export async function GET(request: NextRequest) {
                         const policy = policyBySource.get(sourceId)
                         const remScore = (remSub.total_score || 0) / (remSub.max_score || 1) * 100
                         if (!original) {
-                            studentMerged.set(key, remSub)
+                            // Siswa hanya ikut remedial (tanpa submission asli —
+                            // kasus sah: sakit saat ujian dasar). exam_id & embed exam
+                            // dipetakan ke exam SUMBER supaya konsumen single-fetch
+                            // (filter by exam_id sumber) tidak membuang baris ini —
+                            // paritas perilaku lama yang memetakan paksa di client.
+                            studentMerged.set(key, {
+                                ...remSub,
+                                exam_id: sourceId,
+                                exam: { ...(Array.isArray(remSub.exam) ? remSub.exam[0] : remSub.exam), id: sourceId },
+                            })
                             return
                         }
                         const finalScore = applyRemedialPolicy(
@@ -318,14 +349,13 @@ export async function GET(request: NextRequest) {
         // sebelumnya guru menerima SEMUA submission sekolah (nilai + jawaban
         // siswa ulangan guru lain). Pasangan exact mapel|kelas; class_id unik
         // per tahun ajaran → otomatis year-scoped. Ditempatkan setelah merge
-        // remedial agar baris remedial ikut terfilter.
-        if (user.role === 'GURU') {
-            const scope = await getTeacherScope(user.id)
-            const taughtPairs = new Set((scope?.assignments || []).map(a => `${a.subject_id}|${a.class_id}`))
+        // remedial agar baris remedial ikut terfilter. Scope sudah di-resolve
+        // di blok merge di atas (guruTaughtPairs) — jangan query ulang.
+        if (guruTaughtPairs) {
             finalData = finalData.filter((s) => {
                 const ex = Array.isArray(s.exam) ? s.exam[0] : s.exam
                 const ta = Array.isArray(ex?.teaching_assignment) ? ex.teaching_assignment[0] : ex?.teaching_assignment
-                return !!ta && taughtPairs.has(`${ta.subject_id}|${ta.class_id}`)
+                return !!ta && guruTaughtPairs!.has(`${ta.subject_id}|${ta.class_id}`)
             })
         }
 

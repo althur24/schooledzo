@@ -110,17 +110,23 @@ export default function ExamGradingPage() {
         setSaving(true)
 
         try {
-            // Reconstruct answers array with new grades
+            // Reconstruct answers array with new grades — iterasi QUESTIONS (bukan
+            // submission.answers): soal yang TIDAK dijawab siswa (esai/isian kosong
+            // → tidak ada baris exam_answers dari autosave) tetap harus menerima
+            // nilai guru; dulu baris itu ikut hilang dari payload sehingga skor
+            // koreksi esai kosong tak pernah tersimpan & total salah.
             let totalScore = 0
-            const updatedAnswers = submission.answers.map(ans => {
-                const grade = grades[ans.question_id]
-                const currentScore = grade ? grade.score : (ans.score || 0)
-                const currentFeedback = grade ? grade.feedback : (ans.feedback || '')
+            const updatedAnswers = questions.map(q => {
+                const ans = submission.answers.find(a => a.question_id === q.id)
+                const grade = grades[q.id]
+                const currentScore = grade ? grade.score : (ans?.score || 0)
+                const currentFeedback = grade ? grade.feedback : (ans?.feedback || '')
 
                 totalScore += currentScore
 
                 return {
-                    ...ans,
+                    ...(ans || { question_id: q.id, answer: null, is_correct: null }),
+                    question_id: q.id,
                     score: currentScore,
                     feedback: currentFeedback
                 }

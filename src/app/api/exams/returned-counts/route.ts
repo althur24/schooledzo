@@ -2,8 +2,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { pickBatchRepresentativeIds } from '@/lib/examBatch'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 export const dynamic = 'force-dynamic'
+
+interface ExamQuestionsRow {
+    id: string
+    title: string
+    batch_id: string | null
+    pending_publish: boolean | null
+    created_at: string
+    questions?: { status?: string | null }[] | null
+    ta?: { subject_id: string; class_id: string } | { subject_id: string; class_id: string }[] | null
+}
 
 export async function GET(request: NextRequest) {
     try {
@@ -29,10 +40,23 @@ export async function GET(request: NextRequest) {
         // TA guru ini — dipakai scope co-teaching (mapel+kelas), bukan hanya
         // TA milik sendiri: kelas multi-pengampu = 1 exam, semua pengampu
         // harus melihat badge "Perlu Diperbaiki" exam yang sama.
+        // Year-scoped tahun aktif: badge mengikuti list ulangan yang memang
+        // hanya menampilkan tahun aktif — tanpa ini returned-counts memindai
+        // SEMUA tahun (tumbuh permanen tiap tahun ajaran).
+        const { data: activeYears } = await supabase
+            .from('academic_years')
+            .select('id')
+            .eq('is_active', true)
+            .eq('school_id', ctx.schoolId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+        const activeYearId = activeYears?.[0]?.id
+
         const { data: assignments } = await supabase
             .from('teaching_assignments')
             .select('id, subject_id, class_id')
             .eq('teacher_id', teacher.id)
+            .eq('academic_year_id', activeYearId || '')
 
         if (!assignments || assignments.length === 0) {
             return NextResponse.json([])
@@ -40,33 +64,39 @@ export async function GET(request: NextRequest) {
 
         const pairSet = new Set(assignments.map(a => `${a.subject_id}|${a.class_id}`))
         const classIds = [...new Set(assignments.map(a => a.class_id).filter(Boolean))]
+        // .in() dengan array kosong ditolak PostgREST (400) — guru tanpa kelas
+        // valid berarti tanpa ulangan, kembalikan kosong langsung.
+        if (classIds.length === 0) {
+            return NextResponse.json([])
+        }
 
         // Get exams with returned questions — pre-filter per kelas (murah di
         // DB), lalu exact pair mapel+kelas post-fetch (guru hanya co-teacher
         // untuk mapel yang dia ampau, bukan semua exam di kelas itu).
-        const { data: exams, error } = await supabase
-            .from('exams')
-            .select(`
-                id,
-                title,
-                batch_id,
-                pending_publish,
-                created_at,
-                questions:exam_questions(id, status),
-                ta:teaching_assignments!inner(subject_id, class_id)
-            `)
-            .in('ta.class_id', classIds)
+        // .order('id') + fetchAllRows: paginasi stabil + tahan >1000 baris
+        // (PostgREST memotong diam-diam di 1000). Embed (status) saja —
+        // jumlah soal per exam tidak dibutuhkan di sini.
+        const exams = await fetchAllRows<ExamQuestionsRow>(
+            supabase
+                .from('exams')
+                .select(`
+                    id,
+                    title,
+                    batch_id,
+                    pending_publish,
+                    created_at,
+                    questions:exam_questions(status),
+                    ta:teaching_assignments!inner(subject_id, class_id)
+                `)
+                .in('ta.class_id', classIds)
+                .order('id')
+        )
 
-        if (error) {
-            console.error('Error fetching returned exam counts:', error)
-            return NextResponse.json({ error: 'Database error' }, { status: 500 })
-        }
-
-        const pairVisible = (e: any) => {
+        const pairVisible = (e: ExamQuestionsRow) => {
             const ta = Array.isArray(e.ta) ? e.ta[0] : e.ta
             return pairSet.has(`${ta?.subject_id}|${ta?.class_id}`)
         }
-        const visibleExams = (exams || []).filter(pairVisible)
+        const visibleExams = exams.filter(pairVisible)
 
         // Batch multi-kelas berbagi soal identik (mirror) — badge "Perlu Diperbaiki"
         // cukup di satu representative exam, bukan di setiap sibling
@@ -75,7 +105,7 @@ export async function GET(request: NextRequest) {
         const returnedSummary = visibleExams
             .filter(e => representativeIds.has(e.id))
             .map(e => {
-                const returnedQuestions = (e.questions || []).filter((question: any) => question.status === 'returned')
+                const returnedQuestions = (e.questions || []).filter((question: { status?: string | null }) => question.status === 'returned')
                 return {
                     examId: e.id,
                     title: e.title,

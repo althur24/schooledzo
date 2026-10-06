@@ -90,24 +90,19 @@ export default function TugasPage() {
             const taArray = Array.isArray(taData) ? taData : []
             const assignmentsArray = Array.isArray(assignmentsData) ? assignmentsData : []
 
-            // Get active academic year and fetch students with enrollment
+            // Get active academic year and fetch per-class student counts
             const activeYear = Array.isArray(yearsData) ? yearsData.find((y: any) => y.is_active) : null
             if (activeYear) {
                 try {
                     // status=ACTIVE: hitungan "N siswa" kelas = anggota SAAT INI —
                     // tanpa ini baris TRANSFERRED_OUT ikut terhitung sehingga kelas
                     // asal + kelas tujuan sama-sama menghitung siswa yang pindah.
-                    const studentsRes = await fetch(`/api/students?enrollment_year_id=${activeYear.id}&status=ACTIVE`)
-                    const studentsData = await studentsRes.json()
-                    const studentsArray = Array.isArray(studentsData) ? studentsData : []
-                    const counts: Record<string, number> = {}
-                    studentsArray.forEach((s: any) => {
-                        const classId = s.class?.id || s.class_id
-                        if (classId) counts[classId] = (counts[classId] || 0) + 1
-                    })
-                    setStudentCounts(counts)
+                    // Satu request GROUP BY (RPC) — pengganti roster penuh.
+                    const countsRes = await fetch(`/api/students/class-counts?enrollment_year_id=${activeYear.id}`)
+                    const countsData = await countsRes.json()
+                    setStudentCounts(countsData && !Array.isArray(countsData) ? countsData : {})
                 } catch (e) {
-                    console.error('Error fetching students:', e)
+                    console.error('Error fetching class student counts:', e)
                 }
             }
 

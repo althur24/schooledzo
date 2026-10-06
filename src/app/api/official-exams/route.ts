@@ -18,7 +18,7 @@ interface OfficialExamRow {
     is_active: boolean | null
     is_remedial: boolean | null
     allowed_student_ids: string[] | null
-    official_exam_questions?: { id: string }[] | null
+    official_exam_questions?: { count: number }[] | null
     [key: string]: unknown
 }
 
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
                 *,
                 subject:subjects(id, name, kkm),
                 academic_year:academic_years(id, name, is_active),
-                official_exam_questions(id)
+                official_exam_questions(count)
             `)
             .eq('school_id', schoolId)
             .order('created_at', { ascending: false })
@@ -201,15 +201,23 @@ export async function GET(request: NextRequest) {
             console.error('Gagal memuat nama kelas target (degrade ke kosong):', err)
         }
 
-        // Add question count
+        // Add question count — embed aggregate (count): DB yang menghitung,
+        // bukan mengirim semua baris soal (paritas /api/exams).
         const examsWithCount = result.map((exam) => ({
             ...exam,
-            question_count: exam.official_exam_questions?.length || 0,
+            question_count: (exam.official_exam_questions as unknown as { count: number }[] | null)?.[0]?.count ?? 0,
             official_exam_questions: undefined,
             creator_role: exam.created_by ? creatorMap.get(exam.created_by)?.role || null : null,
             creator_name: exam.created_by ? creatorMap.get(exam.created_by)?.name || null : null,
             target_class_names: (exam.target_class_ids || []).map((cid: string) => classNameById.get(cid) || cid.slice(0, 8))
         }))
+
+        // SISWA: jangan bocorkan allowed_student_ids (daftar "siapa yang
+        // remedial") — paritas GET /api/exams. Server tetap memakai kolom ini
+        // untuk filter visibility di atas; hanya payload yang di-strip.
+        if (user.role === 'SISWA') {
+            examsWithCount.forEach((e) => { delete (e as Record<string, unknown>).allowed_student_ids })
+        }
 
         return NextResponse.json(examsWithCount)
     } catch (error) {

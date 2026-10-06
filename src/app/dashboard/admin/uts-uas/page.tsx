@@ -15,6 +15,7 @@ import ShowDraftsToggle from '@/components/ShowDraftsToggle'
 import { Plus, ChevronDown } from 'react-iconly'
 import { Loader2, Activity, Edit3, Trash2, GraduationCap, BarChart3, Copy, RefreshCw } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
+import { useIncrementalList } from '@/hooks/useIncrementalList'
 import { labelForGradeType } from '@/lib/labels'
 
 interface OfficialExam {
@@ -200,22 +201,20 @@ function AdminUtsUasPageInner() {
             })
             setClasses(activeClasses)
 
-            // Fetch submission counts for each exam
+            // Hitungan pengumpulan semua UTS/UAS dalam SATU request (RPC +
+            // cache server 30 dtk) — pengganti N+1 per-exam yang membuat
+            // halaman makin lambat mengikuti jumlah ujian.
             const examsList = Array.isArray(examsData) ? examsData : []
             const counts: Record<string, { submitted: number; total: number }> = {}
-            await Promise.all(examsList.map(async (exam: OfficialExam) => {
-                try {
-                    const res = await fetch(`/api/official-exam-submissions?exam_id=${exam.id}`)
-                    if (res.ok) {
-                        const subs = await res.json()
-                        const subsArr = Array.isArray(subs) ? subs : []
-                        counts[exam.id] = {
-                            submitted: subsArr.filter((s: any) => s.is_submitted).length,
-                            total: subsArr.length
-                        }
-                    }
-                } catch { }
-            }))
+            try {
+                const countsRes = await fetch('/api/official-exams/submission-counts')
+                if (countsRes.ok) {
+                    const data = await countsRes.json()
+                    Object.entries(data || {}).forEach(([examId, c]: [string, any]) => {
+                        counts[examId] = { submitted: Number(c?.submitted) || 0, total: Number(c?.total) || 0 }
+                    })
+                }
+            } catch { }
             setSubmissionCounts(counts)
         } catch (error) {
             console.error('Error fetching data:', error)
@@ -231,17 +230,18 @@ function AdminUtsUasPageInner() {
             const data = await res.json()
             const list = Array.isArray(data) ? data : []
             setUlanganExams(list)
+            // Hitungan pengumpulan semua ulangan dalam SATU request (paritas
+            // fetchData UTS/UAS di atas) — pengganti N+1 per-exam.
             const counts: Record<string, { submitted: number; total: number }> = {}
-            await Promise.all(list.map(async (exam: any) => {
-                try {
-                    const r = await fetch(`/api/exam-submissions?exam_id=${exam.id}`)
-                    if (r.ok) {
-                        const subs = await r.json()
-                        const arr = Array.isArray(subs) ? subs : []
-                        counts[exam.id] = { submitted: arr.filter((s: any) => s.is_submitted).length, total: arr.length }
-                    }
-                } catch { }
-            }))
+            try {
+                const r = await fetch('/api/exams/submission-counts')
+                if (r.ok) {
+                    const data = await r.json()
+                    Object.entries(data || {}).forEach(([examId, c]: [string, any]) => {
+                        counts[examId] = { submitted: Number(c?.submitted) || 0, total: Number(c?.total) || 0 }
+                    })
+                }
+            } catch { }
             setUlanganCounts(counts)
         } catch (error) {
             console.error('Error fetching ulangan:', error)
@@ -930,6 +930,11 @@ function AdminUtsUasPageInner() {
     // Ringkasan pencocokan guru pengampu per kelas terpilih (mode Ulangan)
     const ulanganMatches = computeUlanganMatches()
 
+    // Render bertahap kedua tab (±378 kartu ulangan + 149 UTS di PIIS) —
+    // 24 kartu pertama langsung, sisanya menyusul saat di-scroll.
+    const utsuasList = useIncrementalList(filteredExams)
+    const ulanganList = useIncrementalList(visibleUlanganGroups)
+
     return (
         <div className="space-y-6">
             <PageHeader
@@ -1009,7 +1014,7 @@ function AdminUtsUasPageInner() {
                 />
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {filteredExams.map((exam) => {
+                    {utsuasList.items.map((exam) => {
                         const status = getOfficialExamStatus(exam)
                         const isLive = status.isLive
                         const isDone = status.isDone
@@ -1067,6 +1072,8 @@ function AdminUtsUasPageInner() {
                     })}
                 </div>
             )}
+            {/* Sentinel render bertahap tab UTS/UAS */}
+            {utsuasList.hasMore && <div ref={utsuasList.sentinelRef} className="h-1" aria-hidden="true" />}
             </div>
 
             {/* Exam List — Ulangan */}
@@ -1084,7 +1091,7 @@ function AdminUtsUasPageInner() {
                 />
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {visibleUlanganGroups.map((group) => {
+                    {ulanganList.items.map((group) => {
                             const exam = group.representative
                             const repStatus = getExamStatus(exam)
                             // Status agregat batch: live bila ADA member live,
@@ -1157,6 +1164,8 @@ function AdminUtsUasPageInner() {
                         })}
                     </div>
                 )}
+                {/* Sentinel render bertahap tab Ulangan */}
+                {ulanganList.hasMore && <div ref={ulanganList.sentinelRef} className="h-1" aria-hidden="true" />}
             </div>
 
             {/* Create Modal */}
