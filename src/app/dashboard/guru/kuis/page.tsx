@@ -366,7 +366,11 @@ export default function GuruKuisPage() {
 
     const handleDelete = async (id: string) => {
         if (!confirm(`Hapus ${labels.kuis.toLowerCase()} ini?`)) return
-        await fetch(`/api/quizzes/${id}`, { method: 'DELETE' })
+        const res = await fetch(`/api/quizzes/${id}`, { method: 'DELETE' })
+        if (!res.ok) {
+            const err = await res.json().catch(() => null)
+            alert(err?.error || `Gagal menghapus ${labels.kuis.toLowerCase()}.`)
+        }
         fetchData()
     }
 

@@ -257,9 +257,28 @@ function EditExamPageInner() {
         show_results_immediately: true
     })
     const [savingSettings, setSavingSettings] = useState(false)
-    // Terapkan jadwal juga ke kelas paralel dalam batch (default mati — perubahan
-    // per-kelas yang berbeda tetap dimungkinkan)
-    const [applyScheduleToSiblings, setApplyScheduleToSiblings] = useState(false)
+
+    // ── Kelola Kelas Paralel (Batch) — paritas tab Pengaturan admin/uts-uas ──
+    // Modal Pengaturan guru menambah/hapus member batch SEBELUM publish. Kandidat
+    // tambah = penugasan guru sendiri se-mapel yang belum jadi member. Server
+    // menyeragamkan jadwal/aturan/tampilan hasil antar member otomatis (K3 —
+    // checkbox "Terapkan" lama dihapus: no-op sejak sinkronisasi server-side).
+    interface TaEmbed { id?: string; name?: string }
+    interface BatchTaCandidate {
+        id: string
+        subject?: TaEmbed | TaEmbed[]
+        class?: { id?: string; name?: string } | { id?: string; name?: string }[]
+        academic_year?: TaEmbed | TaEmbed[]
+    }
+    const firstEmb = <T,>(v: T | T[] | undefined | null): T | undefined =>
+        Array.isArray(v) ? v[0] : (v ?? undefined)
+    const [myAssignments, setMyAssignments] = useState<BatchTaCandidate[]>([])
+    const [taLoading, setTaLoading] = useState(false)
+    const [batchMemberSaving, setBatchMemberSaving] = useState(false)
+
+    // Reset TA cache saat navigasi antar exam (komponen dipakai ulang oleh
+    // Next.js App Router — tanpa ini, kandidat dari exam sebelumnya menetap).
+    useEffect(() => { setMyAssignments([]) }, [examId])
 
     // Toast kecil (mis. konfirmasi reorder berhasil/gagal)
     const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
@@ -668,6 +687,140 @@ function EditExamPageInner() {
                 show_results_immediately: exam.show_results_immediately ?? true
             })
             setShowEditSettings(true)
+            // Lazy-fetch TA guru sendiri (kandidat tambah kelas paralel) —
+            // paritas fetchTeachingAssignmentsIfNeeded admin. Hindari re-fetch
+            // bila sudah termuat (filter tahun ajaran exam agar kandidat akurat).
+            fetchMyAssignmentsIfNeeded()
+        }
+    }
+
+    const fetchMyAssignmentsIfNeeded = async () => {
+        if (myAssignments.length > 0 || taLoading) return myAssignments
+        setTaLoading(true)
+        try {
+            const yearId = exam?.teaching_assignment?.academic_year?.id
+            // /api/my-teaching-assignments scope per-teacher (bukan /api/teaching-assignments
+            // yang mengembalikan SEMUA TA sekolah — guru hanya boleh lihat penugasan sendiri
+            // sebagai kandidat tambah kelas paralel).
+            const url = yearId
+                ? `/api/my-teaching-assignments?academic_year_id=${yearId}`
+                : '/api/my-teaching-assignments'
+            const res = await fetch(url)
+            const data = await res.json()
+            const arr: BatchTaCandidate[] = Array.isArray(data) ? data : []
+            // Guru hanya melihat penugasan sendiri (API sudah scope-kan via school
+            // context + filter tahun). Filter se-mapel exam untuk kandidat batch.
+            setMyAssignments(arr)
+            return arr
+        } catch (e) {
+            console.error('Error fetching teaching assignments', e)
+            return []
+        } finally {
+            setTaLoading(false)
+        }
+    }
+
+    const handleAddBatchMember = async (taId: string, className: string) => {
+        if (!exam || batchMemberSaving) return
+        const subjectId = exam.teaching_assignment?.subject?.id
+        if (!subjectId) {
+            setToast({ message: 'Mapel tidak ditemukan pada ulangan ini', type: 'error' })
+            return
+        }
+        setBatchMemberSaving(true)
+        try {
+            // Convert form datetime-local → UTC (paritas handleSaveSettings)
+            const localStart = new Date(editForm.start_time || exam.start_time)
+            const formattedStartTime = localStart.toISOString()
+            const formattedWindowEnd = editForm.schedule_mode === 'window' && editForm.window_end_time
+                ? new Date(editForm.window_end_time).toISOString()
+                : null
+
+            // Tangkap batch_id sebagai variabel — bila exam tunggal (belum punya
+            // batch), generate UUID baru, buat sibling dulu, LALU ikat primary
+            // ke batch yang sama via PUT. Tanpa PUT bind, sibling yatim di batch
+            // beranggota 1 & primary tetap single (sync tak pernah terjadi).
+            const newBatchId = exam.batch_id || crypto.randomUUID()
+            const needBind = !exam.batch_id
+
+            const res = await fetch('/api/exams', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    teaching_assignment_id: taId,
+                    title: editForm.title || exam.title,
+                    description: editForm.description,
+                    start_time: formattedStartTime,
+                    duration_minutes: editForm.duration_minutes,
+                    window_end_time: formattedWindowEnd,
+                    is_randomized: editForm.is_randomized,
+                    max_violations: editForm.max_violations,
+                    show_results_immediately: editForm.show_results_immediately,
+                    duplicate_from_exam_id: examId,
+                    duplicate_questions: true,
+                    batch_id: newBatchId
+                })
+            })
+            if (!res.ok) {
+                const err = await res.json().catch(() => null)
+                setToast({ message: err?.error || `Gagal menambah kelas ${className}`, type: 'error' })
+                return
+            }
+            const newMember = await res.json()
+
+            // Ikat primary ke batch (bind-only — guard PUT menerima bila belum
+            // punya batch). Jika gagal, hapus sibling yg baru dibuat (cleanup)
+            // agar tidak yatim.
+            if (needBind) {
+                const bindRes = await fetch(`/api/exams/${examId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ batch_id: newBatchId })
+                })
+                if (!bindRes.ok) {
+                    const err = await bindRes.json().catch(() => null)
+                    await fetch(`/api/exams/${newMember.id}`, { method: 'DELETE' }).catch(() => {})
+                    setToast({ message: err?.error || `Gagal mengikat kelas paralel untuk ${className}`, type: 'error' })
+                    return
+                }
+            }
+
+            setToast({ message: `Kelas ${className} ditambahkan ke kelas paralel`, type: 'success' })
+            await fetchExam()
+        } catch (e) {
+            console.error('Error adding batch member', e)
+            setToast({ message: 'Terjadi kesalahan sistem', type: 'error' })
+        } finally {
+            setBatchMemberSaving(false)
+        }
+    }
+
+    const handleRemoveBatchMember = async (memberId: string, className: string) => {
+        if (memberId === examId || batchMemberSaving) return
+        try {
+            // Guard: jangan hapus member yang sudah ada submission (paritas admin)
+            const r = await fetch(`/api/exam-submissions?exam_id=${memberId}`)
+            if (r.ok) {
+                const subs = await r.json()
+                if (Array.isArray(subs) && subs.length > 0) {
+                    setToast({ message: `Tidak bisa hapus ${className}: sudah ada ${subs.length} submission. Tarik ulangan ke draft & hapus jawaban dulu.`, type: 'error' })
+                    return
+                }
+            }
+        } catch { }
+        if (!confirm(`Hapus kelas ${className} dari kelas paralel ini? Soal & data kelas ini akan dihapus (member lain tak terpengaruh).`)) return
+        setBatchMemberSaving(true)
+        try {
+            const res = await fetch(`/api/exams/${memberId}`, { method: 'DELETE' })
+            if (res.ok) {
+                setToast({ message: `Kelas ${className} dihapus dari kelas paralel`, type: 'success' })
+                await fetchExam()
+            } else {
+                const err = await res.json().catch(() => null)
+                setToast({ message: err?.error || 'Gagal menghapus kelas', type: 'error' })
+            }
+        } finally {
+            setBatchMemberSaving(false)
         }
     }
 
@@ -716,14 +869,15 @@ function EditExamPageInner() {
                 })
             })
             if (res.ok) {
-                // K3: jadwal batch kini diseragamkan SERVER-SIDE (PUT jadwal pada
-                // member batch otomatis menular ke semua member — paritas UTS/UAS).
-                // Loop client lama menjadi no-op idempoten; toast tetap informatif.
-                if (applyScheduleToSiblings && (exam?.batch_siblings?.length || 0) > 0) {
-                    setToast({ message: `Jadwal, batas pelanggaran & tampilan hasil diterapkan ke ${exam!.batch_siblings!.length + 1} kelas paralel`, type: 'success' })
+                // K3: jadwal/aturan/tampilan hasil batch diseragamkan SERVER-SIDE
+                // (PUT pada member menular ke semua member). Tidak ada checkbox
+                // "Terapkan" lagi — toast cukup informatif.
+                if (isBatchView) {
+                    setToast({ message: `Pengaturan diseragamkan otomatis ke ${batchMembers.length} kelas paralel`, type: 'success' })
+                } else {
+                    setToast({ message: 'Pengaturan tersimpan', type: 'success' })
                 }
                 setShowEditSettings(false)
-                setApplyScheduleToSiblings(false)
                 fetchExam()
             } else {
                 setAlertInfo({ type: 'error', title: 'Gagal', message: 'Gagal menyimpan pengaturan.' })
@@ -3073,25 +3227,85 @@ function EditExamPageInner() {
                             durationRequired
                         />
                     </div>
-                    {(exam?.batch_siblings?.length || 0) > 0 && (
-                        <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700/30 rounded-xl">
-                            <input
-                                type="checkbox"
-                                id="applyScheduleSiblings"
-                                checked={applyScheduleToSiblings}
-                                onChange={(e) => setApplyScheduleToSiblings(e.target.checked)}
-                                disabled={exam?.is_active}
-                                className="w-5 h-5 mt-0.5 rounded border-secondary/30 text-primary focus:ring-primary"
-                            />
-                            <label htmlFor="applyScheduleSiblings" className="text-sm cursor-pointer">
-                                <span className="font-medium text-text-main dark:text-white">Terapkan ke {exam!.batch_siblings!.length} kelas paralel</span>
-                                <span className="block text-xs text-text-secondary mt-0.5">
-                                    {exam!.batch_siblings!.map(s => s.class_name).join(', ')}
-                                    {' — jadwal, batas pelanggaran, acak soal & tampilan hasil batch selalu seragam otomatis (paritas UTS/UAS)'}
-                                </span>
-                            </label>
+                    {/* Kelola Kelas Paralel (Batch) — paritas tab Pengaturan admin.
+                        Guru tambah/hapus member batch sebelum publish; kandidat
+                        tambah = penugasan sendiri se-mapel yang belum jadi member.
+                        Saat aktif semua dikunci (member tak bisa diubah mid-ujian). */}
+                    <div className="p-4 rounded-xl border border-secondary/20 bg-secondary/5 space-y-3">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white">Kelas Paralel (Batch)</label>
+                                <p className="text-xs text-text-secondary mt-0.5">
+                                    {exam?.is_active
+                                        ? 'Member tak bisa diubah saat ulangan aktif.'
+                                        : isBatchView
+                                            ? `Sesuaikan kelas sebelum publish. ${batchMembers.length} kelas saat ini.`
+                                            : `Tambah kelas paralel agar beberapa kelas mengerjakan ${labels.ulangan.toLowerCase()} yang sama (soal & pengaturan terseragamkan otomatis).`}
+                                </p>
+                            </div>
+                            <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">{batchMembers.length} kelas</span>
                         </div>
-                    )}
+
+                        {/* Member saat ini (chip + hapus) — hanya mode batch */}
+                        {isBatchView && (
+                            <div className="flex flex-wrap gap-2">
+                                {batchMembers.map(m => (
+                                    <span key={m.id} className={`inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 rounded-full text-xs font-bold ${m.id === examId ? 'bg-primary/10 text-primary' : 'bg-white dark:bg-surface-dark text-text-main dark:text-white border border-secondary/20'}`}>
+                                        {m.class_name}
+                                        {m.id === examId ? <span className="text-[10px] text-text-secondary ml-0.5">(ini)</span> : (
+                                            <button
+                                                onClick={() => handleRemoveBatchMember(m.id, m.class_name)}
+                                                disabled={exam?.is_active || batchMemberSaving}
+                                                title={exam?.is_active ? 'Tarik ulangan ke draft untuk menghapus member' : 'Hapus dari batch'}
+                                                className="ml-1 w-5 h-5 inline-flex items-center justify-center rounded-full hover:bg-red-500/20 text-text-secondary hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                            >×</button>
+                                        )}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Kandidat tambah: TA guru sendiri se-mapel, kelas belum jadi member */}
+                        {(() => {
+                            if (exam?.is_active) return null
+                            const subjectId = exam?.teaching_assignment?.subject?.id
+                            const memberClassIds = new Set<string>([
+                                ...(exam?.teaching_assignment?.class?.id ? [exam.teaching_assignment.class.id] : []),
+                                ...(exam?.batch_siblings || []).map(s => s.class_id).filter(Boolean) as string[]
+                            ])
+                            const candidates = myAssignments
+                                .filter((ta: BatchTaCandidate) => {
+                                    const subj = firstEmb(ta.subject)
+                                    const cls = firstEmb(ta.class)
+                                    const yr = firstEmb(ta.academic_year)
+                                    const sameYear = !exam?.teaching_assignment?.academic_year?.id || !yr?.id || yr.id === exam.teaching_assignment.academic_year.id
+                                    return subj?.id === subjectId && cls?.id && !memberClassIds.has(cls.id) && sameYear
+                                })
+                                .map((ta: BatchTaCandidate) => {
+                                    const cls = firstEmb(ta.class)
+                                    return { id: ta.id, classId: cls?.id || '', className: cls?.name || '' }
+                                })
+                                .sort((a, b) => a.className.localeCompare(b.className, 'id', { numeric: true, sensitivity: 'base' }))
+                            if (candidates.length === 0) {
+                                return <p className="text-xs text-text-secondary">{taLoading ? 'Memuat penugasan…' : (isBatchView ? 'Semua kelas ampuan Anda se-mapel sudah jadi member batch.' : 'Belum ada kelas lain yang Anda ampu untuk mapel ini.')}</p>
+                            }
+                            return (
+                                <div>
+                                    <p className="text-xs font-bold text-text-secondary mb-1.5">Tambah kelas (dari penugasan Anda):</p>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {candidates.map(c => (
+                                            <button
+                                                key={c.id}
+                                                onClick={() => handleAddBatchMember(c.id, c.className)}
+                                                disabled={batchMemberSaving}
+                                                className="px-2.5 py-1.5 rounded-lg text-xs font-bold border border-dashed border-primary/40 text-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                            >+ {c.className}</button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )
+                        })()}
+                    </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran</label>
                         <input

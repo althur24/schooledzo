@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { syncQuizBatch } from '@/lib/examBatch'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
-import { tenantMismatch, notFound, resolveQuizSchoolId } from '@/lib/tenantGuard'
+import { tenantMismatch, notFound, resolveQuizSchoolId, findQuizzesOutsideSchool } from '@/lib/tenantGuard'
 
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
 import { gkMaxPicks } from '@/lib/questionTypeUtils'
@@ -127,19 +127,55 @@ export async function GET(
             }
         }
 
-        // Sibling batch (kelas paralel) — sumber definitif untuk checkbox
-        // "Terapkan jadwal juga ke kelas paralel" (sessionStorage bisa hilang).
-        let batchSiblings: { id: string; class_name: string }[] = []
-        if (data?.batch_id) {
+        // Sibling batch (kelas paralel) — sumber definitif blok "Kelas Paralel"
+        // di modal Pengaturan kuis. A4-parity dengan GET /api/exams/[id]: untuk
+        // GURU, hanya sibling kelas+mapel yang dia ampu (co-teacher parsial tidak
+        // boleh melihat kelas yang bukan haknya — tombol × di UI hanya muncul
+        // untuk member yang bisa dihapus). Tenant guard: buang sibling sekolah
+        // lain. SISWA: tidak diberi sibling (bukan informasinya — paritas exam).
+        let batchSiblings: { id: string; class_id: string | null; class_name: string }[] = []
+        if (data?.batch_id && user.role !== 'SISWA') {
             const { data: siblings } = await supabase
                 .from('quizzes')
-                .select('id, teaching_assignment:teaching_assignments(class:classes(name))')
+                .select('id, teaching_assignment:teaching_assignments(subject_id, class:classes(id, name))')
                 .eq('batch_id', data.batch_id)
                 .neq('id', id)
-            batchSiblings = (siblings || []).map((s: any) => ({
-                id: s.id,
-                class_name: (Array.isArray(s.teaching_assignment) ? s.teaching_assignment[0]?.class : s.teaching_assignment?.class)?.name || '-'
-            }))
+            // A4: untuk GURU, filter sibling yang tidak dia ampu
+            let pairs: Set<string> | null = null
+            if (user.role === 'GURU') {
+                const { data: teacher } = await supabase
+                    .from('teachers')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .single()
+                if (teacher) {
+                    const { data: myTAs } = await supabase
+                        .from('teaching_assignments')
+                        .select('subject_id, class_id')
+                        .eq('teacher_id', teacher.id)
+                    pairs = new Set((myTAs || []).map((ta: { subject_id: string; class_id: string }) => `${ta.subject_id}|${ta.class_id}`))
+                }
+            }
+            // Tenant guard: buang sibling milik sekolah lain
+            const siblingIds = (siblings || []).map((s: { id: string }) => s.id)
+            const outsideIds = new Set(siblingIds.length > 0
+                ? await findQuizzesOutsideSchool(siblingIds, schoolId)
+                : [])
+            type SiblingTa = { subject_id: string; class?: { id: string; name: string } | { id: string; name: string }[] }
+            type SiblingRow = { id: string; teaching_assignment?: SiblingTa | SiblingTa[] }
+            const normTa = (s: SiblingRow): SiblingTa | undefined =>
+                Array.isArray(s.teaching_assignment) ? s.teaching_assignment[0] : s.teaching_assignment
+            const normCls = (ta?: SiblingTa): { id?: string; name?: string } | undefined =>
+                Array.isArray(ta?.class) ? ta.class[0] : ta?.class
+            batchSiblings = (siblings || [] as SiblingRow[])
+                .filter((s: SiblingRow) => !outsideIds.has(s.id))
+                .map((s: SiblingRow) => {
+                    const ta = normTa(s)
+                    const cls = normCls(ta)
+                    return { id: s.id, subject_id: ta?.subject_id, class_id: cls?.id || null, class_name: cls?.name || '-' }
+                })
+                .filter((s: { subject_id?: string; class_id: string | null }) => !pairs || pairs.has(`${s.subject_id}|${s.class_id}`))
+                .map(({ subject_id, ...rest }: { id: string; subject_id?: string; class_id: string | null; class_name: string }) => rest)
         }
 
         return NextResponse.json({ ...data, batch_siblings: batchSiblings })
@@ -189,7 +225,7 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: quizForYear } = await supabase
             .from('quizzes')
-            .select('teaching_assignment_id, deadline, available_from, is_active')
+            .select('teaching_assignment_id, deadline, available_from, is_active, is_remedial, batch_id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
             .eq('id', id)
             .single()
         if (quizForYear?.teaching_assignment_id) {
@@ -202,7 +238,7 @@ export async function PUT(
         const labels = await getMenuLabelsForSchool(schoolId)
 
         const body = await request.json()
-        const { title, description, duration_minutes, is_randomized, is_active, deadline, available_from } = body
+        const { title, description, duration_minutes, is_randomized, is_active, deadline, available_from, batch_id } = body
 
         // Validasi jendela waktu kuis: deadline harus setelah jam buka
         if (deadline || available_from) {
@@ -295,6 +331,52 @@ export async function PUT(
         if (is_active !== undefined) {
             updateData.pending_publish = finalPendingPublish
         }
+
+        // ── Bind batch: fitur "Tambah Kelas Paralel" dari modal Pengaturan kuis ──
+        // Paritas PUT /api/exams/[id]. SATU ARAH: hanya kuis TANPA batch yang boleh
+        // diikat. Guard M9 paritas POST /api/quizzes: caller GURU harus own TA
+        // anchor ATAU TA baru se-mapel yang kelasnya kelas member batch. Mencegah
+        // kuis B menyerobot batch guru A → syncDraftQuizQuestions menyalin soal
+        // guru A ke kuis B (ekfiltrasi soal).
+        let bindBatch = false
+        if (batch_id !== undefined) {
+            if (quizForYear?.batch_id) {
+                if (quizForYear.batch_id !== batch_id) {
+                    return NextResponse.json({ error: 'Kuis ini sudah terikat kelas paralel lain' }, { status: 409 })
+                }
+            } else if (quizForYear?.is_active) {
+                return NextResponse.json({ error: `Tidak bisa menambah kelas paralel saat ${labels.kuis.toLowerCase()} aktif — tarik ke draft dulu` }, { status: 400 })
+            } else if (quizForYear?.is_remedial) {
+                return NextResponse.json({ error: 'Kuis remedial tidak bisa diikat ke kelas paralel' }, { status: 400 })
+            } else {
+                const { data: batchMembers } = await supabase
+                    .from('quizzes')
+                    .select('id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id)')
+                    .eq('batch_id', batch_id)
+                type BatchMember = { id: string; teaching_assignment?: { teacher_id: string; subject_id: string; class_id: string } | { teacher_id: string; subject_id: string; class_id: string }[] }
+                const anchorFirst = (batchMembers || [])[0] as BatchMember | undefined
+                const anchorTaRaw = anchorFirst?.teaching_assignment
+                const anchorTa = Array.isArray(anchorTaRaw) ? anchorTaRaw[0] : anchorTaRaw
+                if (anchorTa && user.role === 'GURU') {
+                    const scope = await getTeacherScope(user.id)
+                    const isOwn = ownsTeachingAssignment(scope, anchorTa.teacher_id)
+                    if (!isOwn) {
+                        const myTaRaw = quizForYear?.teaching_assignment
+                        const myTaNorm = Array.isArray(myTaRaw) ? myTaRaw[0] : myTaRaw
+                        const sameSubject = !!myTaNorm?.subject_id && myTaNorm.subject_id === anchorTa.subject_id
+                        const myClassIsMember = !!myTaNorm?.class_id && (batchMembers || []).some((m: BatchMember) => {
+                            const ta = Array.isArray(m.teaching_assignment) ? m.teaching_assignment[0] : m.teaching_assignment
+                            return ta?.class_id === myTaNorm.class_id
+                        })
+                        if (!sameSubject || !myClassIsMember) {
+                            return NextResponse.json({ error: 'Kelas paralel ini bukan milik penugasan Anda' }, { status: 403 })
+                        }
+                    }
+                }
+                bindBatch = true
+            }
+        }
+        if (bindBatch) updateData.batch_id = batch_id
 
         const { data, error } = await supabase
             .from('quizzes')
@@ -464,6 +546,20 @@ export async function DELETE(
         if (quizForYear?.teaching_assignment_id) {
             const yearStatus = await getYearStatusByTA(quizForYear.teaching_assignment_id)
             if (yearStatus === 'COMPLETED') return archivedYearResponse()
+        }
+
+        // Guard server-side: jangan hapus kuis yang sudah ada submission.
+        // Paritas DELETE /api/exams/[id]. Tanpa ini, data siswa (submission +
+        // jawaban) hilang permanen atau orphan. Client ada yang cek (batch
+        // member remove), ada yang tidak (list page delete) — pelindung mutlak.
+        const { count: submissionCount } = await supabase
+            .from('quiz_submissions')
+            .select('id', { count: 'exact', head: true })
+            .eq('quiz_id', id)
+        if ((submissionCount || 0) > 0) {
+            return NextResponse.json({
+                error: `Tidak bisa menghapus: sudah ada ${submissionCount} submission. Reset attempt di halaman detail dulu, lalu hapus.`
+            }, { status: 409 })
         }
 
         const { error } = await supabase

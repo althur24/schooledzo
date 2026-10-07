@@ -5,7 +5,7 @@ import { tenantMismatch, notFound, resolveExamSchoolId, findExamsOutsideSchool }
 import { isAIReviewEnabled } from '@/lib/triggerHOTS'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncExamBatch } from '@/lib/examBatch'
-import { canManageExamCoTaught } from '@/lib/teacherScope'
+import { canManageExamCoTaught, getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 
 // GET single exam
@@ -126,7 +126,7 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id, results_released, start_time, is_active, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
+            .select('teaching_assignment_id, results_released, start_time, is_active, is_remedial, batch_id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -145,7 +145,7 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { title, description, start_time, duration_minutes, window_end_time, is_randomized, is_active, max_violations, show_results_immediately, results_released } = body
+        const { title, description, start_time, duration_minutes, window_end_time, is_randomized, is_active, max_violations, show_results_immediately, results_released, batch_id } = body
 
         // Validasi jendela waktu: jam tutup harus setelah jam buka
         if (window_end_time) {
@@ -237,6 +237,54 @@ export async function PUT(
             return NextResponse.json({ error: 'Maksimal pelanggaran harus antara 1 sampai 10' }, { status: 400 })
         }
 
+        // ── Bind batch: fitur "Tambah Kelas Paralel" dari modal Pengaturan guru ──
+        // SATU ARAH: hanya exam TANPA batch yang boleh diikat ke batch (draft).
+        // Exam yang sudah punya batch TIDAK bisa pindah/dilepas dari PUT (member
+        // yatim & sync liar). batch_id client-generated; guard paritas M9 di
+        // POST /api/exams: bila batch sudah punya member, caller GURU harus
+        // pengampu TA anchor (own) ATAU TA baru se-mapel yang kelasnya memang
+        // kelas member batch (co-teacher). Mencegah exam ulangan B menyerobot
+        // batch guru A → syncDraft menyalin soal guru A ke exam B (ekfiltrasi).
+        let bindBatch = false
+        if (batch_id !== undefined) {
+            if (examForYear?.batch_id) {
+                if (examForYear.batch_id !== batch_id) {
+                    return NextResponse.json({ error: 'Ulangan ini sudah terikat kelas paralel lain' }, { status: 409 })
+                }
+                // batch_id sama → no-op (idempoten)
+            } else if (examForYear?.is_active) {
+                return NextResponse.json({ error: `Tidak bisa menambah kelas paralel saat ${labels.ulangan.toLowerCase()} aktif — tarik ke draft dulu` }, { status: 400 })
+            } else if (examForYear?.is_remedial) {
+                return NextResponse.json({ error: 'Ulangan remedial tidak bisa diikat ke kelas paralel' }, { status: 400 })
+            } else {
+                // Batch kosong (baru) atau sudah ada member — validasi kepemilikan
+                const { data: batchMembers } = await supabase
+                    .from('exams')
+                    .select('id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id)')
+                    .eq('batch_id', batch_id)
+                type BatchMember = { id: string; teaching_assignment?: { teacher_id: string; subject_id: string; class_id: string } | { teacher_id: string; subject_id: string; class_id: string }[] }
+                const anchorFirst = (batchMembers || [])[0] as BatchMember | undefined
+                const anchorTaRaw = anchorFirst?.teaching_assignment
+                const anchorTa = Array.isArray(anchorTaRaw) ? anchorTaRaw[0] : anchorTaRaw
+                if (anchorTa && user.role === 'GURU') {
+                    const scope = await getTeacherScope(user.id)
+                    const isOwn = ownsTeachingAssignment(scope, anchorTa.teacher_id)
+                    if (!isOwn) {
+                        const myTa = taCtx
+                        const sameSubject = !!myTa?.subject_id && myTa.subject_id === anchorTa.subject_id
+                        const myClassIsMember = !!myTa?.class_id && (batchMembers || []).some((m: BatchMember) => {
+                            const ta = Array.isArray(m.teaching_assignment) ? m.teaching_assignment[0] : m.teaching_assignment
+                            return ta?.class_id === myTa.class_id
+                        })
+                        if (!sameSubject || !myClassIsMember) {
+                            return NextResponse.json({ error: 'Kelas paralel ini bukan milik penugasan Anda' }, { status: 403 })
+                        }
+                    }
+                }
+                bindBatch = true
+            }
+        }
+
         if (title !== undefined) updateData.title = title
         if (description !== undefined) updateData.description = description
         if (start_time !== undefined) updateData.start_time = start_time
@@ -253,6 +301,7 @@ export async function PUT(
         }
 
         if (max_violations !== undefined) updateData.max_violations = max_violations
+        if (bindBatch) updateData.batch_id = batch_id
 
         // ── H1 (audit eksternal): tolak unpublish bila sudah ada yang mengumpulkan ──
         // Alur "tarik ke draft untuk edit soal" sah, TAPI setelah ada submission
@@ -470,6 +519,21 @@ export async function DELETE(
         if (!(await canManageExamCoTaught(user, taCtx))) {
             const labels = await getMenuLabelsForSchool(schoolId)
             return NextResponse.json({ error: `Anda tidak memiliki akses ke ${labels.ulangan.toLowerCase()} ini` }, { status: 403 })
+        }
+
+        // Guard server-side: jangan hapus exam yang sudah ada submission.
+        // Tanpa ini, FK CASCADE (jika ada) menghapus exam_submissions +
+        // exam_answers secara permanen → data loss siswa. Atau FK RESTRICT
+        // → 500 generic yang membingungkan. Client ada yang cek (batch member
+        // remove), ada yang tidak (list page delete) — ini pelindung mutlak.
+        const { count: submissionCount } = await supabase
+            .from('exam_submissions')
+            .select('id', { count: 'exact', head: true })
+            .eq('exam_id', id)
+        if ((submissionCount || 0) > 0) {
+            return NextResponse.json({
+                error: `Tidak bisa menghapus: sudah ada ${submissionCount} submission. Reset attempt di halaman detail dulu, lalu hapus.`
+            }, { status: 409 })
         }
 
         const { error } = await supabase

@@ -57,15 +57,17 @@ interface Quiz {
     description: string | null
     is_active: boolean
     pending_publish: boolean
+    is_randomized: boolean
     batch_id?: string | null
-    /** Kelas paralel dalam batch yang sama (dari API) */
-    batch_siblings?: { id: string; class_name: string }[]
+    /** Kelas paralel dalam batch yang sama (dari API — class_id dipakai blok Pengaturan) */
+    batch_siblings?: { id: string; class_id?: string | null; class_name: string }[]
     duration_minutes?: number | null
     deadline?: string | null
     available_from?: string | null
     teaching_assignment: {
         subject: { id: string; name: string }
-        class: { name: string }
+        class: { id?: string; name: string }
+        academic_year?: { id: string; name: string }
     }
     questions: QuizQuestion[]
 }
@@ -212,8 +214,161 @@ function EditQuizPageInner() {
         deadline: ''
     })
     const [savingQuizSettings, setSavingQuizSettings] = useState(false)
-    // Terapkan jadwal juga ke kelas paralel dalam batch (default mati)
-    const [applyScheduleToSiblings, setApplyScheduleToSiblings] = useState(false)
+    // ── Kelola Kelas Paralel (Batch) — paritas modal Pengaturan ulangan ──
+    // Kuis tak punya duplicate_from_quiz_id di POST /api/quizzes (hanya remedial
+    // yang menyalin soal saat create) → tambah member = POST kuis baru
+    // (batch_id) lalu POST /api/quizzes/copy-questions. Hapus = DELETE member.
+    interface TaEmbed { id?: string; name?: string }
+    interface BatchTaCandidate {
+        id: string
+        subject?: TaEmbed | TaEmbed[]
+        class?: { id?: string; name?: string } | { id?: string; name?: string }[]
+        academic_year?: TaEmbed | TaEmbed[]
+    }
+    const firstEmb = <T,>(v: T | T[] | undefined | null): T | undefined =>
+        Array.isArray(v) ? v[0] : (v ?? undefined)
+    const [myAssignments, setMyAssignments] = useState<BatchTaCandidate[]>([])
+    const [taLoading, setTaLoading] = useState(false)
+    const [batchMemberSaving, setBatchMemberSaving] = useState(false)
+
+    // Reset TA cache saat navigasi antar kuis (komponen dipakai ulang oleh
+    // Next.js App Router — tanpa ini, kandidat dari kuis sebelumnya menetap).
+    useEffect(() => { setMyAssignments([]) }, [quizId])
+
+    const isQuizBatchView = !!(quiz?.batch_id && (quiz.batch_siblings?.length || 0) > 0)
+    const quizBatchMembers = [
+        { id: quizId, class_name: quiz?.teaching_assignment?.class?.name || 'Kelas Ini' },
+        ...(quiz?.batch_siblings || []).map(s => ({ id: s.id, class_name: s.class_name })),
+    ].sort((a, b) => a.class_name.localeCompare(b.class_name, 'id', { numeric: true, sensitivity: 'base' }))
+
+    const fetchMyAssignmentsIfNeeded = async () => {
+        if (myAssignments.length > 0 || taLoading) return myAssignments
+        setTaLoading(true)
+        try {
+            // /api/my-teaching-assignments scope per-teacher (bukan /api/teaching-assignments
+            // yang mengembalikan SEMUA TA sekolah). Pass academic_year_id agar kandidat
+            // se-TA dengan kuis (anti stale kandidat lintas tahun ajaran).
+            const yearId = quiz?.teaching_assignment?.academic_year?.id
+            const url = yearId
+                ? `/api/my-teaching-assignments?academic_year_id=${yearId}`
+                : '/api/my-teaching-assignments'
+            const res = await fetch(url)
+            const data = await res.json()
+            const arr: BatchTaCandidate[] = Array.isArray(data) ? data : []
+            setMyAssignments(arr)
+            return arr
+        } catch (e) {
+            console.error('Error fetching teaching assignments', e)
+            return []
+        } finally {
+            setTaLoading(false)
+        }
+    }
+
+    const handleAddQuizBatchMember = async (taId: string, className: string) => {
+        if (!quiz || batchMemberSaving) return
+        const subjectId = quiz.teaching_assignment?.subject?.id
+        if (!subjectId) { showToast('Mapel tidak ditemukan pada kuis ini', 'error'); return }
+        setBatchMemberSaving(true)
+        try {
+            // Kuis baru dijadikan DRAFT (is_active=false default bila ONLINE).
+            // Soal disalin terpisah via /copy-questions (POST /api/quizzes hanya
+            // menyalin soal untuk jalur remedial). Form values dipakai agar
+            // member baru konsisten dengan apa yang guru lihat di modal (paritas
+            // admin/ulangan — bukan quiz.* nilai saved).
+            const newBatchId = quiz.batch_id || crypto.randomUUID()
+            const needBind = !quiz.batch_id
+            const res = await fetch('/api/quizzes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    teaching_assignment_id: taId,
+                    title: quiz.title,
+                    description: quiz.description,
+                    duration_minutes: quizSettingsForm.duration_minutes || quiz.duration_minutes || 30,
+                    is_randomized: quiz.is_randomized,
+                    deadline: quizSettingsForm.has_deadline && quizSettingsForm.deadline
+                        ? new Date(quizSettingsForm.deadline).toISOString()
+                        : (quiz.deadline ?? null),
+                    available_from: quizSettingsForm.has_available_from && quizSettingsForm.available_from
+                        ? new Date(quizSettingsForm.available_from).toISOString()
+                        : (quiz.available_from ?? null),
+                    batch_id: newBatchId
+                })
+            })
+            if (!res.ok) {
+                const err = await res.json().catch(() => null)
+                showToast(err?.error || `Gagal menambah kelas ${className}`, 'error')
+                return
+            }
+            const newMember = await res.json()
+            // Salin soal dari kuis ini ke member baru (also_publish=false — draft)
+            const copyRes = await fetch('/api/quizzes/copy-questions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_quiz_id: quizId,
+                    target_quiz_ids: [newMember.id],
+                    also_publish: false
+                })
+            })
+            // Ikat primary ke batch (bind-only). Jika gagal, hapus member baru
+            // (cleanup) agar tidak yatim di batch beranggota 1.
+            if (needBind) {
+                const bindRes = await fetch(`/api/quizzes/${quizId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ batch_id: newBatchId })
+                })
+                if (!bindRes.ok) {
+                    const err = await bindRes.json().catch(() => null)
+                    await fetch(`/api/quizzes/${newMember.id}`, { method: 'DELETE' }).catch(() => {})
+                    showToast(err?.error || `Gagal mengikat kelas paralel untuk ${className}`, 'error')
+                    return
+                }
+            }
+            if (!copyRes.ok) {
+                showToast(`Kelas ${className} dibuat, tetapi gagal menyalin soal. Salin manual dari editor.`, 'error')
+            } else {
+                showToast(`Kelas ${className} ditambahkan ke kelas paralel`, 'success')
+            }
+            await fetchQuiz()
+        } catch (e) {
+            console.error('Error adding quiz batch member', e)
+            showToast('Terjadi kesalahan sistem', 'error')
+        } finally {
+            setBatchMemberSaving(false)
+        }
+    }
+
+    const handleRemoveQuizBatchMember = async (memberId: string, className: string) => {
+        if (memberId === quizId || batchMemberSaving) return
+        try {
+            // Guard: jangan hapus member yang sudah ada submission (paritas ulangan)
+            const r = await fetch(`/api/quiz-submissions?quiz_id=${memberId}`)
+            if (r.ok) {
+                const subs = await r.json()
+                if (Array.isArray(subs) && subs.length > 0) {
+                    showToast(`Tidak bisa hapus ${className}: sudah ada ${subs.length} submission. Tarik kuis ke draft & hapus jawaban dulu.`, 'error')
+                    return
+                }
+            }
+        } catch { }
+        if (!confirm(`Hapus kelas ${className} dari kelas paralel ini? Soal & data kelas ini akan dihapus (member lain tak terpengaruh).`)) return
+        setBatchMemberSaving(true)
+        try {
+            const res = await fetch(`/api/quizzes/${memberId}`, { method: 'DELETE' })
+            if (res.ok) {
+                showToast(`Kelas ${className} dihapus dari kelas paralel`, 'success')
+                await fetchQuiz()
+            } else {
+                const err = await res.json().catch(() => null)
+                showToast(err?.error || 'Gagal menghapus kelas', 'error')
+            }
+        } finally {
+            setBatchMemberSaving(false)
+        }
+    }
 
     const openQuizSettings = () => {
         if (!quiz) return
@@ -232,6 +387,8 @@ function EditQuizPageInner() {
             deadline: toLocalInput(quiz.deadline)
         })
         setShowQuizSettings(true)
+        // Lazy-fetch TA guru (kandidat tambah kelas paralel)
+        fetchMyAssignmentsIfNeeded()
     }
 
     const handleSaveQuizSettings = async () => {
@@ -251,31 +408,15 @@ function EditQuizPageInner() {
                 })
             })
             if (res.ok) {
-                // Terapkan jadwal ke kelas paralel (opsional, hanya field timing)
-                if (applyScheduleToSiblings && (quiz?.batch_siblings?.length || 0) > 0) {
-                    const schedulePayload = {
-                        duration_minutes: quizSettingsForm.duration_minutes || 0,
-                        available_from: quizSettingsForm.has_available_from && quizSettingsForm.available_from
-                            ? new Date(quizSettingsForm.available_from).toISOString()
-                            : null,
-                        deadline: quizSettingsForm.has_deadline && quizSettingsForm.deadline
-                            ? new Date(quizSettingsForm.deadline).toISOString()
-                            : null
-                    }
-                    await Promise.allSettled(
-                        (quiz?.batch_siblings || []).map(s =>
-                            fetch(`/api/quizzes/${s.id}`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(schedulePayload)
-                            })
-                        )
-                    )
-                    showToast(`Jadwal diterapkan ke ${quiz!.batch_siblings!.length} kelas paralel`, 'success')
+                // K3: jadwal batch kuis diseragamkan SERVER-SIDE (PUT field jadwal
+                // pada member menular ke semua member). Tidak ada checkbox
+                // "Terapkan jadwal" lagi — toast cukup informatif.
+                if (isQuizBatchView) {
+                    showToast(`Jadwal diseragamkan otomatis ke ${quizBatchMembers.length} kelas paralel`, 'success')
+                } else {
+                    showToast(`Pengaturan ${labels.kuis.toLowerCase()} tersimpan`, 'success')
                 }
                 setShowQuizSettings(false)
-                setApplyScheduleToSiblings(false)
-                showToast(`Pengaturan ${labels.kuis.toLowerCase()} tersimpan`, 'success')
                 fetchQuiz()
             } else {
                 const err = await res.json().catch(() => ({}))
@@ -2509,23 +2650,83 @@ function EditQuizPageInner() {
                         </p>
                     </div>
 
-                    {(quiz?.batch_siblings?.length || 0) > 0 && (
-                        <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-700/30 rounded-xl">
-                            <input
-                                type="checkbox"
-                                id="applyScheduleSiblingsQuiz"
-                                checked={applyScheduleToSiblings}
-                                onChange={(e) => setApplyScheduleToSiblings(e.target.checked)}
-                                className="w-5 h-5 mt-0.5 rounded border-secondary/30 text-primary focus:ring-primary"
-                            />
-                            <label htmlFor="applyScheduleSiblingsQuiz" className="text-sm cursor-pointer">
-                                <span className="font-medium text-text-main dark:text-white">Terapkan jadwal ini juga ke {quiz!.batch_siblings!.length} kelas paralel</span>
-                                <span className="block text-xs text-text-secondary mt-0.5">
-                                    {quiz!.batch_siblings!.map(s => s.class_name).join(', ')}
-                                </span>
-                            </label>
+                    {/* Kelola Kelas Paralel (Batch) — paritas modal Pengaturan ulangan.
+                        Kuis tambah/hapus member batch sebelum publish; kandidat
+                        tambah = penugasan sendiri se-mapel yang belum jadi member.
+                        Saat aktif semua dikunci. */}
+                    <div className="p-4 rounded-xl border border-secondary/20 bg-secondary/5 space-y-3">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <label className="block text-sm font-bold text-text-main dark:text-white">Kelas Paralel (Batch)</label>
+                                <p className="text-xs text-text-secondary mt-0.5">
+                                    {quiz?.is_active
+                                        ? 'Member tak bisa diubah saat kuis aktif.'
+                                        : isQuizBatchView
+                                            ? `Sesuaikan kelas sebelum publish. ${quizBatchMembers.length} kelas saat ini.`
+                                            : `Tambah kelas paralel agar beberapa kelas mengerjakan ${labels.kuis.toLowerCase()} yang sama (soal & jadwal terseragamkan otomatis).`}
+                                </p>
+                            </div>
+                            <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">{quizBatchMembers.length} kelas</span>
                         </div>
-                    )}
+
+                        {isQuizBatchView && (
+                            <div className="flex flex-wrap gap-2">
+                                {quizBatchMembers.map(m => (
+                                    <span key={m.id} className={`inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 rounded-full text-xs font-bold ${m.id === quizId ? 'bg-primary/10 text-primary' : 'bg-white dark:bg-surface-dark text-text-main dark:text-white border border-secondary/20'}`}>
+                                        {m.class_name}
+                                        {m.id === quizId ? <span className="text-[10px] text-text-secondary ml-0.5">(ini)</span> : (
+                                            <button
+                                                onClick={() => handleRemoveQuizBatchMember(m.id, m.class_name)}
+                                                disabled={quiz?.is_active || batchMemberSaving}
+                                                title={quiz?.is_active ? 'Tarik kuis ke draft untuk menghapus member' : 'Hapus dari batch'}
+                                                className="ml-1 w-5 h-5 inline-flex items-center justify-center rounded-full hover:bg-red-500/20 text-text-secondary hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                            >×</button>
+                                        )}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+
+                        {(() => {
+                            if (quiz?.is_active) return null
+                            const subjectId = quiz?.teaching_assignment?.subject?.id
+                            const memberClassIds = new Set<string>([
+                                ...(quiz?.teaching_assignment?.class?.id ? [quiz.teaching_assignment.class.id] : []),
+                                ...(quiz?.batch_siblings || []).map(s => s.class_id).filter(Boolean) as string[]
+                            ])
+                            const candidates = myAssignments
+                                .filter((ta: BatchTaCandidate) => {
+                                    const subj = firstEmb(ta.subject)
+                                    const cls = firstEmb(ta.class)
+                                    const yr = firstEmb(ta.academic_year)
+                                    const sameYear = !quiz?.teaching_assignment?.academic_year?.id || !yr?.id || yr.id === quiz.teaching_assignment.academic_year.id
+                                    return subj?.id === subjectId && cls?.id && !memberClassIds.has(cls.id) && sameYear
+                                })
+                                .map((ta: BatchTaCandidate) => {
+                                    const cls = firstEmb(ta.class)
+                                    return { id: ta.id, classId: cls?.id || '', className: cls?.name || '' }
+                                })
+                                .sort((a, b) => a.className.localeCompare(b.className, 'id', { numeric: true, sensitivity: 'base' }))
+                            if (candidates.length === 0) {
+                                return <p className="text-xs text-text-secondary">{taLoading ? 'Memuat penugasan…' : (isQuizBatchView ? 'Semua kelas ampuan Anda se-mapel sudah jadi member batch.' : 'Belum ada kelas lain yang Anda ampu untuk mapel ini.')}</p>
+                            }
+                            return (
+                                <div>
+                                    <p className="text-xs font-bold text-text-secondary mb-1.5">Tambah kelas (dari penugasan Anda):</p>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {candidates.map(c => (
+                                            <button
+                                                key={c.id}
+                                                onClick={() => handleAddQuizBatchMember(c.id, c.className)}
+                                                disabled={batchMemberSaving}
+                                                className="px-2.5 py-1.5 rounded-lg text-xs font-bold border border-dashed border-primary/40 text-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                            >+ {c.className}</button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )
+                        })()}
+                    </div>
 
                     <div className="flex gap-3 pt-4 border-t border-secondary/10">
                         <Button variant="secondary" onClick={() => setShowQuizSettings(false)} className="flex-1">Batal</Button>

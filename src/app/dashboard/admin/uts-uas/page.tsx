@@ -438,7 +438,11 @@ function AdminUtsUasPageInner() {
                 await Promise.all(members.map(async (m) => {
                     try {
                         const res = await fetch(`/api/exams/${m.id}`, { method: 'DELETE' })
-                        if (!res.ok) failedClasses.push(first(ulanganTA(m)?.class)?.name || m.title)
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => null)
+                            const className = first(ulanganTA(m)?.class)?.name || m.title
+                            failedClasses.push(err?.error ? `${className} (${err.error})` : className)
+                        }
                     } catch {
                         failedClasses.push(first(ulanganTA(m)?.class)?.name || m.title)
                     }
