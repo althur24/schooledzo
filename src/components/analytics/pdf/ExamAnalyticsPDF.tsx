@@ -5,6 +5,7 @@ import {
     Page,
     Text,
     View,
+    Image,
     StyleSheet,
     Font,
 } from '@react-pdf/renderer'
@@ -80,7 +81,7 @@ const C = {
     grayBar: '#cbd5e1',
 }
 
-const QUESTIONS_PER_PAGE = 10
+const QUESTIONS_PER_PAGE = 6
 const STUDENTS_PER_PAGE = 24
 
 const QUESTION_TYPE_LABELS: Record<string, string> = {
@@ -128,9 +129,11 @@ function trunc(s: string, n: number): string {
     return s.length > n ? s.slice(0, n - 1) + '…' : s
 }
 
-function stripHtml(s?: string | null): string {
+function stripHtmlPreserveBreaks(s?: string | null): string {
     if (!s) return ''
     return s
+        .replace(/<\/(?:p|div|li|h[1-6]|tr)>/gi, '\n')
+        .replace(/<br\s*\/?>/gi, '\n')
         .replace(/<[^>]*>/g, ' ')
         .replace(/&nbsp;/g, ' ')
         .replace(/&amp;/g, '&')
@@ -138,7 +141,10 @@ function stripHtml(s?: string | null): string {
         .replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'")
-        .replace(/\s+/g, ' ')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n[ \t]+/g, '\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
         .trim()
 }
 
@@ -334,28 +340,79 @@ const styles = StyleSheet.create({
         textTransform: 'uppercase',
         letterSpacing: 0.5,
     },
-    qRow: {
-        flexDirection: 'row',
+    qCard: {
         borderBottomWidth: 0.5,
         borderBottomColor: C.border,
-        paddingVertical: 6,
+        paddingVertical: 8,
         paddingHorizontal: 4,
     },
-    qNo: { width: 22 },
-    qText: {
-        fontSize: 8,
+    qCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    qCardNo: { fontSize: 9, fontWeight: 700, color: C.faint, marginRight: 6 },
+    qCardBadge: {
+        fontSize: 6.5,
+        fontWeight: 700,
+        paddingHorizontal: 5,
+        paddingVertical: 1.5,
+        borderRadius: 3,
+        backgroundColor: C.bgSoft,
+        color: C.sub,
+        marginRight: 6,
+    },
+    qCardPts: { fontSize: 7.5, color: C.sub, marginRight: 6 },
+    qCardRate: { fontSize: 9, fontWeight: 700 },
+    qCardCat: { fontSize: 7, fontWeight: 700 },
+    qCardText: {
+        fontSize: 8.5,
         color: C.ink,
-        lineHeight: 1.3,
+        lineHeight: 1.4,
+        marginBottom: 2,
     },
-    qMeta: {
-        fontSize: 7,
+    qCardImage: {
+        width: CONTENT_W * 0.55,
+        maxHeight: 160,
+        objectFit: 'contain',
+        alignSelf: 'center',
+        marginBottom: 4,
+    },
+    qCardOptions: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
         marginTop: 3,
-        lineHeight: 1.3,
     },
-    qType: { width: 58, fontSize: 7.5, color: C.sub, paddingTop: 1 },
-    qPts: { width: 30, fontSize: 7.5, color: C.sub, textAlign: 'center', paddingTop: 1 },
-    qRate: { width: 42, fontSize: 9, fontWeight: 700, textAlign: 'center' },
-    qCat: { width: 58, fontSize: 7, fontWeight: 700, textAlign: 'center', paddingTop: 2 },
+    qCardOptItem: {
+        fontSize: 7,
+        marginRight: 8,
+    },
+    qCardAvgScore: {
+        fontSize: 7,
+        color: C.sub,
+        marginTop: 3,
+    },
+    passageBlock: {
+        backgroundColor: '#f0fdfa',
+        borderRadius: 6,
+        borderWidth: 0.5,
+        borderColor: '#99f6e4',
+        padding: 8,
+        marginBottom: 6,
+    },
+    passageHeader: {
+        fontSize: 7,
+        fontWeight: 700,
+        color: '#0d9488',
+        textTransform: 'uppercase',
+        letterSpacing: 0.8,
+        marginBottom: 4,
+    },
+    passageText: {
+        fontSize: 8,
+        color: '#134e4a',
+        lineHeight: 1.4,
+    },
     rRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -601,48 +658,72 @@ function DistributionPage({ data, meta }: { data: AnalyticsData; meta: ExamAnaly
     )
 }
 
-function QuestionRow({ q }: { q: QuestionAnalysisItem }) {
+function QuestionCard({ q, showPassage }: { q: QuestionAnalysisItem; showPassage: boolean }) {
     const band = difficultyBand(q.correctRate)
     const typeLabel = QUESTION_TYPE_LABELS[q.questionType] || q.questionType
-    // Soal matematika menyimpan LaTeX mentah ($...$, \frac, ^2) — konversi ke
-    // teks unicode dulu supaya tidak tampil berantakan di PDF (KaTeX hanya
-    // jalan di layar, bukan di engine PDF).
-    const text = trunc(latexToText(stripHtml(q.questionText)), 130)
+    const text = latexToText(stripHtmlPreserveBreaks(q.questionText))
 
-    let metaLine: React.ReactNode = null
+    const passageEl = showPassage && q.passageText && q.passageText.trim() ? (
+        <View style={styles.passageBlock}>
+            <Text style={styles.passageHeader}>Bacaan</Text>
+            <MixedText
+                text={latexToText(stripHtmlPreserveBreaks(q.passageText))}
+                style={styles.passageText}
+            />
+        </View>
+    ) : null
+
+    const imageEl = q.imageUrl ? (
+        // eslint-disable-next-line jsx-a11y/alt-text
+        <Image src={q.imageUrl} style={styles.qCardImage} />
+    ) : null
+
+    let metaEl: React.ReactNode = null
     if (q.optionDistribution && q.optionDistribution.length > 0) {
-        const parts = q.optionDistribution.map((opt, i) => (
-            <Text
-                key={opt.option}
-                style={{
-                    fontSize: 7,
-                    color: opt.isCorrect ? C.primaryDark : C.sub,
-                    fontWeight: opt.isCorrect ? 700 : 400,
-                }}
-            >
-                {i > 0 ? '   ' : ''}{opt.option}: {opt.count}{opt.isCorrect ? ' (kunci)' : ''}
-            </Text>
-        ))
-        metaLine = <Text style={styles.qMeta}>{parts}</Text>
+        metaEl = (
+            <View style={styles.qCardOptions}>
+                {q.optionDistribution.map((opt) => (
+                    <Text
+                        key={opt.option}
+                        style={[
+                            styles.qCardOptItem,
+                            {
+                                color: opt.isCorrect ? C.primaryDark : C.sub,
+                                fontWeight: opt.isCorrect ? 700 : 400,
+                            },
+                        ]}
+                    >
+                        {opt.option}: {opt.count}{opt.isCorrect ? ' (kunci)' : ''}
+                    </Text>
+                ))}
+            </View>
+        )
     } else {
-        metaLine = (
-            <Text style={styles.qMeta}>
+        metaEl = (
+            <Text style={styles.qCardAvgScore}>
                 Rata-rata skor: {formatScore(q.avgScore)}/{formatScore(q.maxPoints)} (jawaban non-objektif)
             </Text>
         )
     }
 
     return (
-        <View style={styles.qRow}>
-            <Text style={[styles.qNo, { fontSize: 9, fontWeight: 700, color: C.faint }]}>{q.questionIndex}</Text>
-            <View style={{ flex: 1, paddingRight: 6 }}>
-                <MixedText text={text} style={styles.qText} />
-                {metaLine}
+        <View style={styles.qCard}>
+            {passageEl}
+            <View style={styles.qCardHeader}>
+                <Text style={styles.qCardNo}>{q.questionIndex}.</Text>
+                <Text style={styles.qCardBadge}>{typeLabel}</Text>
+                <Text style={styles.qCardPts}>{q.maxPoints} poin</Text>
+                <View style={{ flex: 1 }} />
+                <Text style={[styles.qCardRate, { color: band.color }]}>
+                    {formatScore(q.correctRate)}%
+                </Text>
+                <Text style={[styles.qCardCat, { color: band.color, marginLeft: 6 }]}>
+                    {band.label}
+                </Text>
             </View>
-            <Text style={styles.qType}>{typeLabel}</Text>
-            <Text style={styles.qPts}>{q.maxPoints}</Text>
-            <Text style={styles.qRate}>{formatScore(q.correctRate)}%</Text>
-            <Text style={[styles.qCat, { color: band.color }]}>{band.label}</Text>
+            {imageEl}
+            <MixedText text={text} style={styles.qCardText} />
+            {metaEl}
         </View>
     )
 }
@@ -658,6 +739,12 @@ function QuestionsPage({
     totalParts: number
     meta: ExamAnalyticsMeta
 }) {
+    const passageFlags = questions.map((q, i) => {
+        const pt = q.passageText?.trim() || null
+        if (!pt) return false
+        const prev = i > 0 ? (questions[i - 1].passageText?.trim() || null) : null
+        return pt !== prev
+    })
     return (
         <Page size={A4} style={styles.page}>
             <Text style={styles.sectionTitle}>
@@ -666,15 +753,13 @@ function QuestionsPage({
             <Text style={styles.sectionTitleSmall}>
                 Persentase benar = tingkat kesulitan empiris. Kategori: Mudah (&gt;=80%), Sedang (60-79%), Sulit (40-59%), Sangat Sulit (&lt;40%)
             </Text>
-            <View style={styles.tableHeader}>
-                <Text style={[styles.tableHeaderText, { width: 22 }]}>No</Text>
-                <Text style={[styles.tableHeaderText, { flex: 1 }]}>Soal &amp; Distribusi Jawaban</Text>
-                <Text style={[styles.tableHeaderText, { width: 58 }]}>Tipe</Text>
-                <Text style={[styles.tableHeaderText, { width: 30, textAlign: 'center' }]}>Poin</Text>
-                <Text style={[styles.tableHeaderText, { width: 42, textAlign: 'center' }]}>Benar</Text>
-                <Text style={[styles.tableHeaderText, { width: 58, textAlign: 'center' }]}>Kategori</Text>
-            </View>
-            {questions.map(q => <QuestionRow key={q.questionIndex} q={q} />)}
+            {questions.map((q, i) => (
+                <QuestionCard
+                    key={q.questionIndex}
+                    q={q}
+                    showPassage={passageFlags[i]}
+                />
+            ))}
             <Footer meta={meta} />
         </Page>
     )

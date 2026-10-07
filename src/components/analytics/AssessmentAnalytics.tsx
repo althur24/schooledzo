@@ -45,6 +45,12 @@ export interface QuestionAnalysisItem {
     avgScore: number
     maxPoints: number
     optionDistribution?: { option: string; count: number; isCorrect: boolean }[]
+    /** Teks bacaan (passage) — denormalized dari question_passages saat import
+     *  soal dari bank ke exam/quiz/UTS-UAS. Dipakai PDF analitik utk menampilkan
+     *  konteks bacaan di atas soal yang memerlukannya. */
+    passageText?: string | null
+    /** URL gambar soal (R2 public URL) — soal bergambar (grafik/diagram geometri). */
+    imageUrl?: string | null
 }
 
 export interface TimeAnalysisItem {

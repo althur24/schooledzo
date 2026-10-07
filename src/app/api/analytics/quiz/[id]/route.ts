@@ -90,7 +90,7 @@ export async function GET(
         // 2) Fetch all questions for this quiz
         const { data: questions } = await supabase
             .from('quiz_questions')
-            .select('id, question_text, question_type, options, correct_answer, points, order_index')
+            .select('id, question_text, question_type, options, correct_answer, points, order_index, passage_text, image_url')
             .eq('quiz_id', quizId)
             .order('order_index', { ascending: true })
 
@@ -249,7 +249,9 @@ export async function GET(
                 partialRate: Math.round(partialRate * 100) / 100,
                 avgScore: Math.round(avgScoreQ * 100) / 100,
                 maxPoints: q.points || 0,
-                optionDistribution
+                optionDistribution,
+                passageText: q.passage_text ?? null,
+                imageUrl: q.image_url ?? null,
             }
         })
 

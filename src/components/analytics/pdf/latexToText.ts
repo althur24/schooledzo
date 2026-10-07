@@ -36,6 +36,17 @@ const SYMBOLS: Record<string, string> = {
     sec: 'sec', csc: 'csc', arcsin: 'arcsin', arccos: 'arccos', arctan: 'arctan',
     sinh: 'sinh', cosh: 'cosh', tanh: 'tanh', exp: 'exp', min: 'min', max: 'max',
     gcd: 'gcd', mod: 'mod', deg: 'deg', det: 'det',
+    // Alias — confirmed di LiberationSans (≤ ≥ → ↔ sudah diverifikasi)
+    leqslant: '≤', geqslant: '≥', implies: '→', Leftarrow: '←', Leftrightarrow: '↔',
+    // Set theory & logika — Unicode (glyph mungkin ada di LiberationSans;
+    // jika tidak, kotak notdef masih lebih baik dari teks mentah "partial")
+    partial: '∂', nabla: '∇', triangle: '△', vartriangle: '△',
+    subset: '⊂', supset: '⊃', subseteq: '⊆', supseteq: '⊇',
+    subsetneq: '⊊', supsetneq: '⊋', setminus: '\\',
+    neg: '¬', lnot: '¬', land: '∧', lor: '∨',
+    therefore: '∴', because: '∵',
+    oint: '∮', iint: '∬', iiint: '∭',
+    dagger: '†', ddagger: '‡',
 }
 
 const SUP_MAP: Record<string, string> = { '1': '¹', '2': '²', '3': '³', 'n': 'ⁿ' }
@@ -92,10 +103,14 @@ function convertMath(input: string): string {
                 const v = convertMath(x)
                 return /[\s+\-=<>±×÷·]/.test(v) ? `√(${v})` : `√${v}`
             })
-        next = next.replace(/\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{([\s\S]*?)\}/g, '$1')
+        next = next.replace(/\\(?:text|mathrm|mathbf|mathit|operatorname|textbf|textit|textnormal|texttt)\s*\{([\s\S]*?)\}/g, '$1')
         next = next.replace(/\\mathbb\s*\{R\}/g, 'R')
-        next = next.replace(/\\(?:bar|overline)\s*\{([\s\S]*?)\}/g, (_m, x: string) => `${convertMath(x)}‾`)
-        next = next.replace(/\\(?:vec|hat|tilde)\s*\{([\s\S]*?)\}/g, '$1')
+        next = next.replace(/\\(?:bar|overline|underline)\s*\{([\s\S]*?)\}/g, (_m, x: string) => `${convertMath(x)}‾`)
+        next = next.replace(/\\overrightarrow\s*\{([\s\S]*?)\}/g, (_m, x: string) => `${convertMath(x)}→`)
+        next = next.replace(/\\overleftarrow\s*\{([\s\S]*?)\}/g, (_m, x: string) => `←${convertMath(x)}`)
+        next = next.replace(/\\binom\s*\{([\s\S]*?)\}\s*\{([\s\S]*?)\}/g,
+            (_m, a: string, b: string) => `C(${convertMath(a)},${convertMath(b)})`)
+        next = next.replace(/\\(?:vec|hat|tilde|dot|ddot|grave|acute|check|breve)\s*\{([\s\S]*?)\}/g, '$1')
         if (next === s) break
         s = next
     }

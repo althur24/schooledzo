@@ -25,6 +25,25 @@ function sanitizeFileName(s: string): string {
     return s.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_').slice(0, 60) || 'Laporan'
 }
 
+async function validateImageUrls(data: AnalyticsData): Promise<void> {
+    const urls = data.questionAnalysis
+        ?.map(q => q.imageUrl)
+        .filter((u): u is string => !!u)
+    if (!urls || urls.length === 0) return
+    const valid = new Set<string>()
+    await Promise.all(urls.map(async (url) => {
+        try {
+            const res = await fetch(url, { method: 'HEAD' })
+            if (res.ok) valid.add(url)
+        } catch {
+            // CORS / network error — skip image
+        }
+    }))
+    for (const q of data.questionAnalysis) {
+        if (q.imageUrl && !valid.has(q.imageUrl)) q.imageUrl = null
+    }
+}
+
 export default function PDFDownloadButton({
     assessmentId,
     assessmentType,
@@ -51,6 +70,8 @@ export default function PDFDownloadButton({
             if (!data.classOverview.submitted) {
                 throw new Error('Belum ada pengumpulan yang bisa dilaporkan')
             }
+
+            await validateImageUrls(data)
 
             const [{ pdf }, { default: ExamAnalyticsPDF }] = await Promise.all([
                 import('@react-pdf/renderer'),
