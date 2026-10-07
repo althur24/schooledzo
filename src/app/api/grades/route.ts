@@ -151,124 +151,20 @@ export async function GET(request: NextRequest) {
                 .order('id')
             examQuery = applyYearFilter(examQuery, 'exam.teaching_assignment')
 
-            // Filter by student_id if provided (all four categories now filtered at DB level)
             const studentId = request.nextUrl.searchParams.get('student_id')
-            if (studentId) {
+            const studentIdsParam = request.nextUrl.searchParams.get('student_ids')
+            const studentIds = studentIdsParam ? studentIdsParam.split(',').filter(Boolean) : null
+
+            if (studentIds && studentIds.length > 0) {
+                assignmentQuery = assignmentQuery.in('submission.student_id', studentIds)
+                quizQuery = quizQuery.in('student_id', studentIds)
+                examQuery = examQuery.in('student_id', studentIds)
+            } else if (studentId) {
                 assignmentQuery = assignmentQuery.eq('submission.student_id', studentId)
                 quizQuery = quizQuery.eq('student_id', studentId)
                 examQuery = examQuery.eq('student_id', studentId)
             }
 
-            // fetchAllRows: rekap setahun penuh bisa jauh melampaui limit 1000 baris
-            // PostgREST per request — ambil semua halaman (cap 50.000 baris per kategori)
-            const assignmentGrades = await fetchAllRows(assignmentQuery, 1000, 50)
-            const quizSubmissions = await fetchAllRows(quizQuery, 1000, 50)
-            const examSubmissions = await fetchAllRows(examQuery, 1000, 50)
-
-            const mappedAssignments = assignmentGrades
-                .map((g: any) => {
-                    const submission = g.submission
-                    const assignment = submission?.assignment
-                    const subject = assignment?.teaching_assignment?.subject
-                    return {
-                        id: g.id,
-                        student_id: submission?.student_id,
-                        subject_id: subject?.id,
-                        // Normalize PR/PROYEK/LATIHAN to TUGAS so they count in rekap/rapor
-                        grade_type: assignment?.type === 'ULANGAN' ? 'ULANGAN' : 'TUGAS',
-                        score: g.score,
-                        subject: { name: subject?.name || '-' },
-                        graded_at: g.graded_at
-                    }
-                })
-            allGrades.push(...mappedAssignments)
-
-            const mappedQuizzes = quizSubmissions
-                .map((qs: any) => {
-                    const quiz = qs.quiz
-                    const subject = quiz?.teaching_assignment?.subject
-                    const score = qs.max_score > 0 ? (qs.total_score / qs.max_score) * 100 : 0
-                    return {
-                        id: qs.id,
-                        student_id: qs.student_id,
-                        subject_id: subject?.id,
-                        quiz_id: quiz?.id,
-                        remedial_for_id: quiz?.remedial_for_id || null,
-                        is_remedial: quiz?.is_remedial || false,
-                        policy: quiz?.remedial_score_policy,
-                        cap: quiz?.remedial_max_score,
-                        grade_type: 'KUIS',
-                        score: round2(score),
-                        subject: { name: subject?.name || '-' },
-                        graded_at: qs.submitted_at
-                    }
-                })
-
-            // Remedial merge: nilai remedial MENGGANTIKAN (bukan menambah) nilai
-            // kuis asli — sesuai kebijakan remedial (HIGHEST/AVERAGE/CAP, lihat
-            // src/lib/remedialScore.ts). Tanpa ini siswa yang lulus remedial
-            // tercatat 2 nilai KUIS di rekap/rapor.
-            const quizGroups = new Map<string, any[]>()
-            for (const m of mappedQuizzes) {
-                const base = m.remedial_for_id || m.quiz_id
-                const key = `${m.student_id}:${base}`
-                if (!quizGroups.has(key)) quizGroups.set(key, [])
-                quizGroups.get(key)!.push(m)
-            }
-            const mergedQuizzes = Array.from(quizGroups.values()).map(group => {
-                const original = group.find(m => !m.is_remedial) || group[0]
-                const remedial = group.find(m => m.is_remedial)
-                const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
-                // Field internal merge (is_remedial/policy/cap) tidak ikut respons.
-                const { is_remedial: _ir, policy: _p, cap: _c, ...clean } = original
-                // graded_at = tanggal pengerjaan remedial bila ada (perilaku lama),
-                // selain itu tanggal ujian asli.
-                return { ...clean, score: final !== null ? round2(final) : original.score, graded_at: (remedial ?? original).graded_at }
-            })
-            allGrades.push(...mergedQuizzes)
-
-            const mappedExams = examSubmissions
-                .map((es: any) => {
-                    const exam = es.exam
-                    const subject = exam?.teaching_assignment?.subject
-                    const score = es.max_score > 0 ? (es.total_score / es.max_score) * 100 : 0
-                    return {
-                        id: es.id,
-                        student_id: es.student_id,
-                        subject_id: subject?.id,
-                        exam_id: exam?.id,
-                        remedial_for_id: exam?.remedial_for_id || null,
-                        is_remedial: exam?.is_remedial || false,
-                        policy: exam?.remedial_score_policy,
-                        cap: exam?.remedial_max_score,
-                        grade_type: 'ULANGAN',
-                        score: round2(score),
-                        subject: { name: subject?.name || '-' },
-                        graded_at: es.submitted_at
-                    }
-                })
-
-            // Remedial merge (ULANGAN) — GAP FIX: section ini sebelumnya tidak
-            // pernah merge, siswa remedial tercatat 2 nilai di rekap/rapor.
-            // Kebijakan mengikuti ujian remedial (HIGHEST/AVERAGE/CAP).
-            const examGroups = new Map<string, any[]>()
-            for (const m of mappedExams) {
-                const base = m.remedial_for_id || m.exam_id
-                const key = `${m.student_id}:${base}`
-                if (!examGroups.has(key)) examGroups.set(key, [])
-                examGroups.get(key)!.push(m)
-            }
-            const mergedExams = Array.from(examGroups.values()).map(group => {
-                const original = group.find(m => !m.is_remedial) || group[0]
-                const remedial = group.find(m => m.is_remedial)
-                const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
-                const { is_remedial: _ir, policy: _p, cap: _c, ...clean } = original
-                return { ...clean, score: final !== null ? round2(final) : original.score, graded_at: (remedial ?? original).graded_at }
-            })
-            allGrades.push(...mergedExams)
-
-            // 4. Fetch Official Exam Grades (UTS / UAS) — scoped to this school only.
-            //    Year filter is intentionally NOT applied here (same as before).
             let officialExamQuery = supabase
                 .from('official_exam_submissions')
                 .select(`
@@ -298,21 +194,119 @@ export async function GET(request: NextRequest) {
             if (schoolId) {
                 officialExamQuery = officialExamQuery.eq('exam.school_id', schoolId)
             }
-            if (studentId) {
+            if (studentIds && studentIds.length > 0) {
+                officialExamQuery = officialExamQuery.in('student_id', studentIds)
+            } else if (studentId) {
                 officialExamQuery = officialExamQuery.eq('student_id', studentId)
             }
-            // Filter tahun ajaran — PARITAS tugas/kuis/ulangan di atas. Tanpa ini
-            // UTS/UAS SEMUA tahun ikut ter-averaging ke rekap tahun terpilih
-            // (siswa ikut UTS tahun lama → nilai tahun ini terkontaminasi).
-            // all_years=true (admin lintas tahun) tetap tak difilter.
             if (filterYearId) {
                 officialExamQuery = officialExamQuery.eq('exam.academic_year_id', filterYearId)
             }
-            // order('id') wajib sebelum fetchAllRows — paginasi range tanpa
-            // order stabil bisa melewatkan/duplikasi baris diam-diam
             officialExamQuery = officialExamQuery.order('id')
 
-            const officialSubmissions = await fetchAllRows(officialExamQuery, 1000, 50)
+            const [assignmentGrades, quizSubmissions, examSubmissions, officialSubmissions] = await Promise.all([
+                fetchAllRows(assignmentQuery, 1000, 50),
+                fetchAllRows(quizQuery, 1000, 50),
+                fetchAllRows(examQuery, 1000, 50),
+                fetchAllRows(officialExamQuery, 1000, 50)
+            ])
+
+            const mappedAssignments = assignmentGrades
+                .map((g: any) => {
+                    const submission = g.submission
+                    const assignment = submission?.assignment
+                    const subject = assignment?.teaching_assignment?.subject
+                    return {
+                        id: g.id,
+                        student_id: submission?.student_id,
+                        subject_id: subject?.id,
+                        item_id: assignment?.id,
+                        item_title: assignment?.title,
+                        grade_type: assignment?.type === 'ULANGAN' ? 'ULANGAN' : 'TUGAS',
+                        score: g.score,
+                        subject: { name: subject?.name || '-' },
+                        graded_at: g.graded_at
+                    }
+                })
+            allGrades.push(...mappedAssignments)
+
+            const mappedQuizzes = quizSubmissions
+                .map((qs: any) => {
+                    const quiz = qs.quiz
+                    const subject = quiz?.teaching_assignment?.subject
+                    const score = qs.max_score > 0 ? (qs.total_score / qs.max_score) * 100 : 0
+                    return {
+                        id: qs.id,
+                        student_id: qs.student_id,
+                        subject_id: subject?.id,
+                        item_id: quiz?.id,
+                        item_title: quiz?.title,
+                        quiz_id: quiz?.id,
+                        remedial_for_id: quiz?.remedial_for_id || null,
+                        is_remedial: quiz?.is_remedial || false,
+                        policy: quiz?.remedial_score_policy,
+                        cap: quiz?.remedial_max_score,
+                        grade_type: 'KUIS',
+                        score: round2(score),
+                        subject: { name: subject?.name || '-' },
+                        graded_at: qs.submitted_at
+                    }
+                })
+
+            const quizGroups = new Map<string, any[]>()
+            for (const m of mappedQuizzes) {
+                const base = m.remedial_for_id || m.quiz_id
+                const key = `${m.student_id}:${base}`
+                if (!quizGroups.has(key)) quizGroups.set(key, [])
+                quizGroups.get(key)!.push(m)
+            }
+            const mergedQuizzes = Array.from(quizGroups.values()).map(group => {
+                const original = group.find(m => !m.is_remedial) || group[0]
+                const remedial = group.find(m => m.is_remedial)
+                const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
+                const { is_remedial: _ir, policy: _p, cap: _c, ...clean } = original
+                return { ...clean, score: final !== null ? round2(final) : original.score, graded_at: (remedial ?? original).graded_at }
+            })
+            allGrades.push(...mergedQuizzes)
+
+            const mappedExams = examSubmissions
+                .map((es: any) => {
+                    const exam = es.exam
+                    const subject = exam?.teaching_assignment?.subject
+                    const score = es.max_score > 0 ? (es.total_score / es.max_score) * 100 : 0
+                    return {
+                        id: es.id,
+                        student_id: es.student_id,
+                        subject_id: subject?.id,
+                        item_id: exam?.id,
+                        item_title: exam?.title,
+                        exam_id: exam?.id,
+                        remedial_for_id: exam?.remedial_for_id || null,
+                        is_remedial: exam?.is_remedial || false,
+                        policy: exam?.remedial_score_policy,
+                        cap: exam?.remedial_max_score,
+                        grade_type: 'ULANGAN',
+                        score: round2(score),
+                        subject: { name: subject?.name || '-' },
+                        graded_at: es.submitted_at
+                    }
+                })
+
+            const examGroups = new Map<string, any[]>()
+            for (const m of mappedExams) {
+                const base = m.remedial_for_id || m.exam_id
+                const key = `${m.student_id}:${base}`
+                if (!examGroups.has(key)) examGroups.set(key, [])
+                examGroups.get(key)!.push(m)
+            }
+            const mergedExams = Array.from(examGroups.values()).map(group => {
+                const original = group.find(m => !m.is_remedial) || group[0]
+                const remedial = group.find(m => m.is_remedial)
+                const final = mergeRemedialScores(group.map(m => ({ score: m.score, isRemedial: m.is_remedial, policy: m.policy, cap: m.cap })))
+                const { is_remedial: _ir, policy: _p, cap: _c, ...clean } = original
+                return { ...clean, score: final !== null ? round2(final) : original.score, graded_at: (remedial ?? original).graded_at }
+            })
+            allGrades.push(...mergedExams)
 
             const mappedOfficial = officialSubmissions
                 .map((os: any) => {
@@ -323,20 +317,20 @@ export async function GET(request: NextRequest) {
                         id: os.id,
                         student_id: os.student_id,
                         subject_id: subject?.id,
+                        item_id: exam?.id,
+                        item_title: exam?.title,
                         exam_id: exam?.id,
                         remedial_for_id: exam?.remedial_for_id || null,
                         is_remedial: exam?.is_remedial || false,
                         policy: exam?.remedial_score_policy,
                         cap: exam?.remedial_max_score,
-                        grade_type: exam?.exam_type || 'UTS', // 'UTS' or 'UAS'
+                        grade_type: exam?.exam_type || 'UTS',
                         score: round2(score),
                         subject: { name: subject?.name || '-' },
                         graded_at: os.submitted_at
                     }
                 })
 
-            // Remedial merge (UTS/UAS): nilai remedial MENGGANTIKAN nilai asli
-            // per (siswa, ujian dasar) sesuai kebijakan (HIGHEST/AVERAGE/CAP).
             const officialGroups = new Map<string, any[]>()
             for (const m of mappedOfficial) {
                 const base = m.remedial_for_id || m.exam_id

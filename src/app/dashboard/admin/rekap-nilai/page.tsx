@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { PageHeader, Button, EmptyState } from '@/components/ui'
 import { Graph as BarChart3, Download } from 'react-iconly'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
-import { round2, formatScore } from '@/lib/formatScore'
+import { formatScore } from '@/lib/formatScore'
+import ExportNilaiModal from '@/components/admin/ExportNilaiModal'
 
 interface AcademicYear {
     id: string
@@ -37,6 +37,8 @@ interface Grade {
     grade_type: string
     score: number
     subject: { name: string }
+    item_id?: string | null
+    item_title?: string | null
 }
 
 interface SubjectGrade {
@@ -57,6 +59,13 @@ interface StudentGrades {
     average: number | null
 }
 
+const getScoreColor = (score: number | null, kkm: number = 75): string => {
+    if (score === null) return 'text-text-secondary dark:text-zinc-500'
+    if (score >= kkm) return 'text-green-700 dark:text-green-400'
+    if (score >= kkm - 15) return 'text-amber-700 dark:text-amber-400'
+    return 'text-red-700 dark:text-red-400'
+}
+
 export default function RekapNilaiPage() {
     const labels = useSchoolLabels()
     const [academicYears, setAcademicYears] = useState<AcademicYear[]>([])
@@ -66,7 +75,14 @@ export default function RekapNilaiPage() {
     const [loading, setLoading] = useState(true)
     const [loadingData, setLoadingData] = useState(false)
     const [studentGrades, setStudentGrades] = useState<StudentGrades[]>([])
+    const [rawGrades, setRawGrades] = useState<Grade[]>([])
     const [subjects, setSubjects] = useState<{ id: string; name: string }[]>([])
+    const [viewMode, setViewMode] = useState<'ringkas' | 'detail'>('ringkas')
+    const [searchQuery, setSearchQuery] = useState('')
+    const [sortBy, setSortBy] = useState('name')
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+    const [exportOpen, setExportOpen] = useState(false)
+    const abortRef = useRef<AbortController | null>(null)
 
     useEffect(() => {
         fetchInitialData()
@@ -84,7 +100,6 @@ export default function RekapNilaiPage() {
             setAcademicYears(Array.isArray(yearsData) ? yearsData : [])
             setClasses(Array.isArray(classesData) ? classesData : [])
 
-            // Auto select active year
             const activeYear = yearsData.find((y: AcademicYear) => y.is_active)
             if (activeYear) {
                 setSelectedYear(activeYear.id)
@@ -99,28 +114,41 @@ export default function RekapNilaiPage() {
     const fetchGrades = async () => {
         if (!selectedYear || !selectedClass) return
 
+        abortRef.current?.abort()
+        const controller = new AbortController()
+        abortRef.current = controller
+        const { signal } = controller
+
         setLoadingData(true)
         try {
-            // Fetch students in the class — year-aware so historical years show the
-            // students who were actually enrolled then (not just current roster).
-            const studentsRes = await fetch(`/api/students?class_id=${selectedClass}&enrollment_year_id=${selectedYear}`)
-            const studentsData = await studentsRes.json()
-            const students: Student[] = Array.isArray(studentsData) ? studentsData : []
+            const [studentsRes, subjectsRes, subjectKkmRes] = await Promise.all([
+                fetch(`/api/students?class_id=${selectedClass}&enrollment_year_id=${selectedYear}`, { signal }),
+                fetch('/api/subjects', { signal }),
+                fetch('/api/subject-kkm', { signal })
+            ])
 
-            // Fetch all grades
-            const gradesRes = await fetch(`/api/grades?academic_year_id=${selectedYear}`)
+            const studentsData = await studentsRes.json()
+            const subjectsData = await subjectsRes.json()
+            const subjectKkmData = await subjectKkmRes.json()
+            const students: Student[] = Array.isArray(studentsData) ? studentsData : []
+            setSubjects(Array.isArray(subjectsData) ? subjectsData : [])
+            const allSubjectKkms = Array.isArray(subjectKkmData) ? subjectKkmData : []
+
+            const studentIds = students.map(s => s.id).join(',')
+            const gradesRes = await fetch(`/api/grades?academic_year_id=${selectedYear}&student_ids=${studentIds}`, { signal })
             const gradesData = await gradesRes.json()
             const allGrades: Grade[] = Array.isArray(gradesData) ? gradesData : []
+            setRawGrades(allGrades)
 
-            // Fetch subjects
-            const subjectsRes = await fetch('/api/subjects')
-            const subjectsData = await subjectsRes.json()
-            setSubjects(Array.isArray(subjectsData) ? subjectsData : [])
-
-            // Fetch subject_kkm
-            const subjectKkmRes = await fetch('/api/subject-kkm')
-            const subjectKkmData = await subjectKkmRes.json()
-            const allSubjectKkms = Array.isArray(subjectKkmData) ? subjectKkmData : []
+            const gradesIndex = new Map<string, Map<string, Map<string, Grade[]>>>()
+            for (const g of allGrades) {
+                if (!gradesIndex.has(g.student_id)) gradesIndex.set(g.student_id, new Map())
+                const subjMap = gradesIndex.get(g.student_id)!
+                if (!subjMap.has(g.subject_id)) subjMap.set(g.subject_id, new Map())
+                const typeMap = subjMap.get(g.subject_id)!
+                if (!typeMap.has(g.grade_type)) typeMap.set(g.grade_type, [])
+                typeMap.get(g.grade_type)!.push(g)
+            }
 
             const classObj = classes.find(c => c.id === selectedClass)
             const classSchoolLevel = classObj?.school_level
@@ -128,33 +156,30 @@ export default function RekapNilaiPage() {
 
             const getKkm = (subjectId: string, fallbackKkm: number = 75) => {
                 if (!classSchoolLevel || !classGradeLevel) return fallbackKkm
-                const granular = allSubjectKkms.find((k: any) => 
-                    k.subject_id === subjectId && 
-                    k.school_level === classSchoolLevel && 
+                const granular = allSubjectKkms.find((k: Record<string, unknown>) =>
+                    k.subject_id === subjectId &&
+                    k.school_level === classSchoolLevel &&
                     k.grade_level === classGradeLevel
                 )
                 return granular ? granular.kkm : fallbackKkm
             }
 
-            // Process grades per student
             const processedGrades: StudentGrades[] = students.map(student => {
-                const studentGradesList = allGrades.filter(g => g.student_id === student.id)
+                const subjMap = gradesIndex.get(student.id)
 
-                // Group by subject
                 const subjectGrades: SubjectGrade[] = subjectsData.map((subject: { id: string; name: string; kkm?: number }) => {
-                    const subjectGradesList = studentGradesList.filter(g => g.subject_id === subject.id)
+                    const typeMap = subjMap?.get(subject.id)
+                    const getAvg = (type: string): number | null => {
+                        const grades = typeMap?.get(type) || []
+                        if (grades.length === 0) return null
+                        return grades.reduce((a, b) => a + b.score, 0) / grades.length
+                    }
 
-                    const tugasGrades = subjectGradesList.filter(g => g.grade_type === 'TUGAS').map(g => g.score)
-                    const kuisGrades = subjectGradesList.filter(g => g.grade_type === 'KUIS').map(g => g.score)
-                    const ulanganGrades = subjectGradesList.filter(g => g.grade_type === 'ULANGAN').map(g => g.score)
-                    const utsGrades = subjectGradesList.filter(g => g.grade_type === 'UTS').map(g => g.score)
-                    const uasGrades = subjectGradesList.filter(g => g.grade_type === 'UAS').map(g => g.score)
-
-                    const tugasAvg = tugasGrades.length > 0 ? tugasGrades.reduce((a, b) => a + b, 0) / tugasGrades.length : null
-                    const kuisAvg = kuisGrades.length > 0 ? kuisGrades.reduce((a, b) => a + b, 0) / kuisGrades.length : null
-                    const ulanganAvg = ulanganGrades.length > 0 ? ulanganGrades.reduce((a, b) => a + b, 0) / ulanganGrades.length : null
-                    const utsAvg = utsGrades.length > 0 ? utsGrades.reduce((a, b) => a + b, 0) / utsGrades.length : null
-                    const uasAvg = uasGrades.length > 0 ? uasGrades.reduce((a, b) => a + b, 0) / uasGrades.length : null
+                    const tugasAvg = getAvg('TUGAS')
+                    const kuisAvg = getAvg('KUIS')
+                    const ulanganAvg = getAvg('ULANGAN')
+                    const utsAvg = getAvg('UTS')
+                    const uasAvg = getAvg('UAS')
 
                     const allScores = [tugasAvg, kuisAvg, ulanganAvg, utsAvg, uasAvg].filter(s => s !== null) as number[]
                     const subjectAvg = allScores.length > 0 ? allScores.reduce((a, b) => a + b, 0) / allScores.length : null
@@ -173,7 +198,6 @@ export default function RekapNilaiPage() {
                     }
                 })
 
-                // Calculate overall average
                 const allSubjectAvgs = subjectGrades.map(sg => sg.rata_rata).filter(s => s !== null) as number[]
                 const overallAvg = allSubjectAvgs.length > 0 ? allSubjectAvgs.reduce((a, b) => a + b, 0) / allSubjectAvgs.length : null
 
@@ -184,16 +208,18 @@ export default function RekapNilaiPage() {
                 }
             })
 
-            // Sort by student name
             processedGrades.sort((a, b) =>
                 (a.student.user.full_name || '').localeCompare(b.student.user.full_name || '')
             )
 
             setStudentGrades(processedGrades)
         } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') return
             console.error('Error:', error)
         } finally {
-            setLoadingData(false)
+            if (abortRef.current === controller) {
+                setLoadingData(false)
+            }
         }
     }
 
@@ -202,67 +228,77 @@ export default function RekapNilaiPage() {
             fetchGrades()
         } else {
             setStudentGrades([])
+            setRawGrades([])
         }
     }, [selectedYear, selectedClass])
 
-    const handleDownloadExcel = async () => {
-        if (studentGrades.length === 0) return
-
-        // Lazy load xlsx (7.2MB) only when user clicks export
-        const XLSX = await import('xlsx')
-
-        const selectedClassName = classes.find(c => c.id === selectedClass)?.name || ''
-        const selectedYearName = academicYears.find(y => y.id === selectedYear)?.name || ''
-
-        // Prepare Excel data
-        const headers = ['No', 'NIS', 'Nama Siswa']
-        subjects.forEach(s => {
-            headers.push(`${s.name} (${labels.tugas})`)
-            headers.push(`${s.name} (${labels.kuis})`)
-            headers.push(`${s.name} (${labels.ulangan})`)
-            headers.push(`${s.name} (${labels.uts})`)
-            headers.push(`${s.name} (${labels.uas})`)
-            headers.push(`${s.name} (Rata-rata)`)
-        })
-        headers.push('Rata-rata Keseluruhan')
-
-        const data = studentGrades.map((sg, idx) => {
-            const row: (string | number)[] = [
-                idx + 1,
-                sg.student.nis || '-',
-                sg.student.user.full_name || '-'
-            ]
-
-            sg.grades.forEach(g => {
-                // round-2 (kontrak presisi tunggal) — bukan round-1: 87.25 harus
-                // diekspor 87.25, bukan 87.3. Kolom tetap NUMBER agar bisa dihitung.
-                row.push(g.tugas !== null ? round2(g.tugas) : '-')
-                row.push(g.kuis !== null ? round2(g.kuis) : '-')
-                row.push(g.ulangan !== null ? round2(g.ulangan) : '-')
-                row.push(g.uts !== null ? round2(g.uts) : '-')
-                row.push(g.uas !== null ? round2(g.uas) : '-')
-                row.push(g.rata_rata !== null ? round2(g.rata_rata) : '-')
-            })
-
-            row.push(sg.average !== null ? round2(sg.average) : '-')
-
-            return row
-        })
-
-        // Create workbook
-        const wb = XLSX.utils.book_new()
-        const ws = XLSX.utils.aoa_to_sheet([headers, ...data])
-
-        // Set column widths
-        ws['!cols'] = headers.map((_, i) => ({ wch: i < 3 ? 20 : 12 }))
-
-        XLSX.utils.book_append_sheet(wb, ws, 'Rekap Nilai')
-        XLSX.writeFile(wb, `Rekap_Nilai_${selectedClassName}_${selectedYearName}.xlsx`)
+    const handleSort = (column: string) => {
+        if (sortBy === column) {
+            setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
+        } else {
+            setSortBy(column)
+            setSortDir(column === 'name' ? 'asc' : 'desc')
+        }
     }
 
-    // Tampilan skor pakai helper global formatScore (koma id-ID, tanpa nol buntut)
-    // — jangan bikin formatScore lokal: versi lama me-return number (titik desimal)
-    // sehingga render "87.25" bukan "87,25".
+    const renderSortIcon = (column: string) => {
+        if (sortBy !== column) return <ArrowUpDown className="inline-block w-3 h-3 ml-1 opacity-30" />
+        return sortDir === 'asc'
+            ? <ArrowUp className="inline-block w-3 h-3 ml-1" />
+            : <ArrowDown className="inline-block w-3 h-3 ml-1" />
+    }
+
+    const displayGrades = useMemo(() => {
+        let result = [...studentGrades]
+
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase()
+            result = result.filter(sg =>
+                (sg.student.user.full_name || '').toLowerCase().includes(q) ||
+                (sg.student.nis || '').toLowerCase().includes(q)
+            )
+        }
+
+        if (sortBy === 'name') {
+            result.sort((a, b) => {
+                const cmp = (a.student.user.full_name || '').localeCompare(b.student.user.full_name || '')
+                return sortDir === 'asc' ? cmp : -cmp
+            })
+        } else if (sortBy === 'average') {
+            result.sort((a, b) => {
+                const av = a.average ?? -1
+                const bv = b.average ?? -1
+                return sortDir === 'asc' ? av - bv : bv - av
+            })
+        } else {
+            result.sort((a, b) => {
+                const ag = a.grades.find(g => g.subject_id === sortBy)
+                const bg = b.grades.find(g => g.subject_id === sortBy)
+                const av = ag?.rata_rata ?? -1
+                const bv = bg?.rata_rata ?? -1
+                return sortDir === 'asc' ? av - bv : bv - av
+            })
+        }
+
+        return result
+    }, [studentGrades, searchQuery, sortBy, sortDir])
+
+    const avgKkm = useMemo(() => {
+        if (studentGrades.length === 0 || studentGrades[0].grades.length === 0) return 75
+        return studentGrades[0].grades.reduce((sum, s) => sum + s.kkm, 0) / studentGrades[0].grades.length
+    }, [studentGrades])
+
+    const detailHeaders = useMemo(() => {
+        const cats = [
+            labels.tugas.charAt(0).toUpperCase(),
+            labels.kuis.charAt(0).toUpperCase(),
+            labels.ulangan.charAt(0).toUpperCase(),
+            labels.uts,
+            labels.uas,
+            'Rata\u00B2'
+        ]
+        return cats
+    }, [labels])
 
     return (
         <div className="space-y-6">
@@ -273,7 +309,6 @@ export default function RekapNilaiPage() {
                 icon={<BarChart3 set="bold" primaryColor="currentColor" size={32} />}
             />
 
-            {/* Filters */}
             <div className="bg-white dark:bg-surface-dark border border-slate-200 dark:border-slate-700 rounded-xl p-6 shadow-sm">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
@@ -282,8 +317,6 @@ export default function RekapNilaiPage() {
                             value={selectedYear}
                             onChange={(e) => {
                                 setSelectedYear(e.target.value)
-                                // Kelas terpilih bisa milik tahun lama — reset agar
-                                // tidak memicu query kelas/tahun yang tidak cocok
                                 setSelectedClass('')
                             }}
                             className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -312,20 +345,19 @@ export default function RekapNilaiPage() {
                     </div>
                     <div className="flex items-end">
                         <Button
-                            onClick={handleDownloadExcel}
+                            onClick={() => setExportOpen(true)}
                             disabled={studentGrades.length === 0}
                             className="w-full"
                             icon={
                                 <div className="text-white"><Download set="bold" primaryColor="currentColor" size={20} /></div>
                             }
                         >
-                            Download Excel
+                            Export Nilai
                         </Button>
                     </div>
                 </div>
             </div>
 
-            {/* Results */}
             {loading ? (
                 <div className="flex justify-center py-12">
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -348,71 +380,198 @@ export default function RekapNilaiPage() {
                 />
             ) : (
                 <div className="bg-white dark:bg-surface-dark border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
-                    <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                    <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
                         <div>
                             <h3 className="font-bold text-text-main dark:text-white">
                                 Rekap Nilai: {classes.find(c => c.id === selectedClass)?.name}
                             </h3>
-                            <p className="text-sm text-text-secondary dark:text-zinc-400">{studentGrades.length} siswa</p>
+                            <p className="text-sm text-text-secondary dark:text-zinc-400">
+                                {displayGrades.length} siswa{searchQuery.trim() && displayGrades.length !== studentGrades.length ? ` (dari ${studentGrades.length})` : ''}
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-secondary dark:text-zinc-500" />
+                                <input
+                                    type="text"
+                                    placeholder="Cari siswa..."
+                                    value={searchQuery}
+                                    onChange={e => setSearchQuery(e.target.value)}
+                                    className="pl-9 pr-4 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 w-48"
+                                />
+                            </div>
+                            <div className="flex bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
+                                <button
+                                    onClick={() => setViewMode('ringkas')}
+                                    className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${viewMode === 'ringkas'
+                                        ? 'bg-white dark:bg-slate-700 text-text-main dark:text-white shadow-sm'
+                                        : 'text-text-secondary dark:text-zinc-400 hover:text-text-main dark:hover:text-white'
+                                        }`}
+                                >
+                                    Ringkas
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('detail')}
+                                    className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${viewMode === 'detail'
+                                        ? 'bg-white dark:bg-slate-700 text-text-main dark:text-white shadow-sm'
+                                        : 'text-text-secondary dark:text-zinc-400 hover:text-text-main dark:hover:text-white'
+                                        }`}
+                                >
+                                    Detail
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div className="overflow-x-auto">
-                        <table className="w-full min-w-[800px]">
-                            <thead className="bg-slate-50 dark:bg-slate-800">
-                                <tr>
-                                    <th className="px-4 py-3 text-left text-sm font-bold text-text-main dark:text-white sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">No</th>
-                                    <th className="px-4 py-3 text-left text-sm font-bold text-text-main dark:text-white sticky left-12 bg-slate-50 dark:bg-slate-800 z-10">Nama Siswa</th>
-                                    {subjects.map(s => (
-                                        <th key={s.id} className="px-4 py-3 text-center text-sm font-bold text-text-main dark:text-white whitespace-nowrap">
-                                            {s.name}
+                        {viewMode === 'ringkas' ? (
+                            <table className="w-full min-w-[800px]">
+                                <thead className="bg-slate-50 dark:bg-slate-800">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left text-sm font-bold text-text-main dark:text-white sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">No</th>
+                                        <th
+                                            className="px-4 py-3 text-left text-sm font-bold text-text-main dark:text-white sticky left-12 bg-slate-50 dark:bg-slate-800 z-10 cursor-pointer select-none whitespace-nowrap"
+                                            onClick={() => handleSort('name')}
+                                        >
+                                            Nama Siswa {renderSortIcon('name')}
                                         </th>
-                                    ))}
-                                    <th className="px-4 py-3 text-center text-sm font-bold text-emerald-600 dark:text-emerald-400">Rata-rata</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                {studentGrades.map((sg, idx) => (
-                                    <tr key={sg.student.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                                        <td className="px-4 py-3 text-text-secondary dark:text-zinc-400 sticky left-0 bg-white dark:bg-surface-dark">{idx + 1}</td>
-                                        <td className="px-4 py-3 text-text-main dark:text-white sticky left-12 bg-white dark:bg-surface-dark">
-                                            <div>
-                                                <p className="font-medium">{sg.student.user.full_name || '-'}</p>
-                                                <p className="text-xs text-text-secondary dark:text-zinc-500">{sg.student.nis || '-'}</p>
-                                            </div>
-                                        </td>
-                                        {sg.grades.map(g => (
-                                            <td key={g.subject_id} className="px-4 py-3 text-center">
-                                                <span className={`font-medium ${g.rata_rata !== null
-                                                    ? g.rata_rata >= g.kkm
-                                                        ? 'text-green-700 dark:text-green-400'
-                                                        : g.rata_rata >= g.kkm - 15
-                                                            ? 'text-amber-700 dark:text-amber-400'
-                                                            : 'text-red-700 dark:text-red-400'
-                                                    : 'text-text-secondary dark:text-zinc-500'
-                                                    }`}>
-                                                    {formatScore(g.rata_rata)}
+                                        {subjects.map(s => (
+                                            <th
+                                                key={s.id}
+                                                className="px-4 py-3 text-center text-sm font-bold text-text-main dark:text-white whitespace-nowrap cursor-pointer select-none"
+                                                onClick={() => handleSort(s.id)}
+                                            >
+                                                {s.name} {renderSortIcon(s.id)}
+                                            </th>
+                                        ))}
+                                        <th
+                                            className="px-4 py-3 text-center text-sm font-bold text-emerald-600 dark:text-emerald-400 cursor-pointer select-none whitespace-nowrap"
+                                            onClick={() => handleSort('average')}
+                                        >
+                                            Rata-rata {renderSortIcon('average')}
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                                    {displayGrades.map((sg, idx) => (
+                                        <tr key={sg.student.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                            <td className="px-4 py-3 text-text-secondary dark:text-zinc-400 sticky left-0 bg-white dark:bg-surface-dark">{idx + 1}</td>
+                                            <td className="px-4 py-3 text-text-main dark:text-white sticky left-12 bg-white dark:bg-surface-dark">
+                                                <div>
+                                                    <p className="font-medium">{sg.student.user.full_name || '-'}</p>
+                                                    <p className="text-xs text-text-secondary dark:text-zinc-500">{sg.student.nis || '-'}</p>
+                                                </div>
+                                            </td>
+                                            {sg.grades.map(g => (
+                                                <td key={g.subject_id} className="px-4 py-3 text-center">
+                                                    <span className={`font-medium ${getScoreColor(g.rata_rata, g.kkm)}`}>
+                                                        {formatScore(g.rata_rata)}
+                                                    </span>
+                                                </td>
+                                            ))}
+                                            <td className="px-4 py-3 text-center">
+                                                <span className={`font-bold ${getScoreColor(sg.average, avgKkm)}`}>
+                                                    {formatScore(sg.average)}
                                                 </span>
                                             </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        ) : (
+                            <table className="w-full" style={{ minWidth: `${subjects.length * 180 + 200}px` }}>
+                                <thead className="bg-slate-50 dark:bg-slate-800">
+                                    <tr>
+                                        <th className="px-3 py-3 text-left text-sm font-bold text-text-main dark:text-white sticky left-0 bg-slate-50 dark:bg-slate-800 z-10" rowSpan={2}>No</th>
+                                        <th
+                                            className="px-3 py-3 text-left text-sm font-bold text-text-main dark:text-white sticky left-10 bg-slate-50 dark:bg-slate-800 z-10 cursor-pointer select-none whitespace-nowrap"
+                                            rowSpan={2}
+                                            onClick={() => handleSort('name')}
+                                        >
+                                            Nama Siswa {renderSortIcon('name')}
+                                        </th>
+                                        {subjects.map(s => (
+                                            <th
+                                                key={s.id}
+                                                className="px-2 py-2 text-center text-xs font-bold text-text-main dark:text-white whitespace-nowrap border-l border-slate-200 dark:border-slate-600"
+                                                colSpan={6}
+                                            >
+                                                {s.name}
+                                            </th>
                                         ))}
-                                        <td className="px-4 py-3 text-center">
-                                            <span className={`font-bold ${sg.average !== null
-                                                ? sg.average >= (sg.grades.length > 0 ? sg.grades.reduce((sum, s) => sum + s.kkm, 0) / sg.grades.length : 75)
-                                                    ? 'text-emerald-600 dark:text-emerald-400'
-                                                    : sg.average >= (sg.grades.length > 0 ? sg.grades.reduce((sum, s) => sum + s.kkm, 0) / sg.grades.length : 75) - 15
-                                                        ? 'text-amber-600 dark:text-amber-400'
-                                                        : 'text-rose-600 dark:text-rose-400'
-                                                : 'text-slate-400 dark:text-slate-500'
-                                                }`}>
-                                                {formatScore(sg.average)}
-                                            </span>
-                                        </td>
+                                        <th
+                                            className="px-3 py-3 text-center text-sm font-bold text-emerald-600 dark:text-emerald-400 cursor-pointer select-none whitespace-nowrap"
+                                            rowSpan={2}
+                                            onClick={() => handleSort('average')}
+                                        >
+                                            Rata-rata {renderSortIcon('average')}
+                                        </th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                    <tr>
+                                        {subjects.map(s => (
+                                            detailHeaders.map((label, i) => (
+                                                <th
+                                                    key={`${s.id}_${i}`}
+                                                    className="px-2 py-1.5 text-center text-xs font-semibold text-text-secondary dark:text-zinc-400 whitespace-nowrap border-l border-slate-200 dark:border-slate-600"
+                                                >
+                                                    {label}
+                                                </th>
+                                            ))
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                                    {displayGrades.map((sg, idx) => (
+                                        <tr key={sg.student.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                            <td className="px-3 py-2.5 text-text-secondary dark:text-zinc-400 sticky left-0 bg-white dark:bg-surface-dark">{idx + 1}</td>
+                                            <td className="px-3 py-2.5 text-text-main dark:text-white sticky left-10 bg-white dark:bg-surface-dark">
+                                                <div>
+                                                    <p className="font-medium text-sm">{sg.student.user.full_name || '-'}</p>
+                                                    <p className="text-xs text-text-secondary dark:text-zinc-500">{sg.student.nis || '-'}</p>
+                                                </div>
+                                            </td>
+                                            {sg.grades.map(g => (
+                                                [
+                                                    { val: g.tugas, kkm: g.kkm },
+                                                    { val: g.kuis, kkm: g.kkm },
+                                                    { val: g.ulangan, kkm: g.kkm },
+                                                    { val: g.uts, kkm: g.kkm },
+                                                    { val: g.uas, kkm: g.kkm },
+                                                    { val: g.rata_rata, kkm: g.kkm }
+                                                ].map((cell, i) => (
+                                                    <td
+                                                        key={`${g.subject_id}_${i}`}
+                                                        className={`px-2 py-2.5 text-center text-sm border-l border-slate-100 dark:border-slate-700/50 ${i === 5 ? 'font-bold' : 'font-medium'}`}
+                                                    >
+                                                        <span className={getScoreColor(cell.val, cell.kkm)}>
+                                                            {formatScore(cell.val)}
+                                                        </span>
+                                                    </td>
+                                                ))
+                                            ))}
+                                            <td className="px-3 py-2.5 text-center">
+                                                <span className={`font-bold ${getScoreColor(sg.average, avgKkm)}`}>
+                                                    {formatScore(sg.average)}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
                     </div>
                 </div>
             )}
+
+            <ExportNilaiModal
+                open={exportOpen}
+                onClose={() => setExportOpen(false)}
+                students={studentGrades}
+                subjects={subjects}
+                rawGrades={rawGrades}
+                labels={labels}
+                className={classes.find(c => c.id === selectedClass)?.name || ''}
+                yearName={academicYears.find(y => y.id === selectedYear)?.name || ''}
+            />
         </div>
     )
 }
