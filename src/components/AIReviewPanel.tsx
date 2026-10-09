@@ -11,25 +11,26 @@ import React from 'react'
  */
 
 interface AIReview {
-    primary_bloom_level: number
-    secondary_bloom_levels?: number[]
-    hots_flag: boolean
-    hots_strength: string
-    hots_signals?: string[]
-    boundedness: string
-    difficulty_score: number
-    difficulty_label: string
-    difficulty_reasons?: string[]
-    clarity_score: number
-    ambiguity_flags?: string[]
-    missing_info_flags?: string[]
-    grade_fit_flags?: string[]
+    primary_bloom_level: number | null
+    secondary_bloom_levels?: number[] | null
+    hots_flag: boolean | null
+    hots_strength: string | null
+    hots_signals?: string[] | null
+    boundedness: string | null
+    difficulty_score: number | null
+    difficulty_label: string | null
+    difficulty_reasons?: string[] | null
+    clarity_score: number | null
+    ambiguity_flags?: string[] | null
+    missing_info_flags?: string[] | null
+    grade_fit_flags?: string[] | null
     suggested_edits?: any
-    bloom_confidence: number
-    hots_confidence: number
-    difficulty_confidence: number
-    boundedness_confidence: number
+    bloom_confidence: number | null
+    hots_confidence: number | null
+    difficulty_confidence: number | null
+    boundedness_confidence: number | null
     full_json_report?: any
+    model_version?: string | null
 }
 
 interface AIReviewPanelProps {
@@ -68,7 +69,7 @@ function getVerdict(review: AIReview): { label: string; color: string; bgColor: 
     const hasFlags = (review.ambiguity_flags?.length || 0) > 0 ||
         (review.missing_info_flags?.length || 0) > 0 ||
         (review.grade_fit_flags?.length || 0) > 0
-    const lowConf = Math.min(review.bloom_confidence, review.hots_confidence, review.difficulty_confidence, review.boundedness_confidence) < 0.65
+    const lowConf = Math.min(review.bloom_confidence ?? 0, review.hots_confidence ?? 0, review.difficulty_confidence ?? 0, review.boundedness_confidence ?? 0) < 0.65
     const badBound = review.boundedness === 'B0'
 
     if (hasFlags || badBound) {
@@ -107,10 +108,36 @@ export default function AIReviewPanel({ review, compact = false }: AIReviewPanel
         )
     }
 
-    const bloom = BLOOM_LABELS[review.primary_bloom_level] || BLOOM_LABELS[1]
-    const hots = HOTS_LABELS[review.hots_strength] || HOTS_LABELS['S0']
-    const bound = BOUND_LABELS[review.boundedness] || BOUND_LABELS['B1']
-    const diff = DIFF_LABELS[review.difficulty_label?.toLowerCase()] || DIFF_LABELS['medium']
+    // FAILED record — jangan render panel dengan nilai NULL (garbage display).
+    // Tampilkan pesan jelas agar admin tahu AI sudah dicoba tapi gagal.
+    if (review.model_version === 'FAILED') {
+        if (compact) {
+            return (
+                <span className="px-2 py-0.5 text-xs rounded-full font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                    ❌ AI Gagal
+                </span>
+            )
+        }
+        return (
+            <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
+                <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">❌</span>
+                    <span className="text-sm font-bold text-red-700 dark:text-red-300">Analisis AI Gagal</span>
+                </div>
+                <p className="text-sm text-red-600 dark:text-red-400">
+                    AI tidak dapat menganalisis soal ini. Klik tombol "Re-analyze AI" untuk mencoba ulang, atau kembalikan soal ke guru.
+                </p>
+                {review.full_json_report?.error && (
+                    <p className="text-xs text-red-500 dark:text-red-400 mt-2 italic">Error: {review.full_json_report.error}</p>
+                )}
+            </div>
+        )
+    }
+
+    const bloom = BLOOM_LABELS[review.primary_bloom_level ?? 1] || BLOOM_LABELS[1]
+    const hots = HOTS_LABELS[review.hots_strength ?? 'S0'] || HOTS_LABELS['S0']
+    const bound = BOUND_LABELS[review.boundedness ?? 'B1'] || BOUND_LABELS['B1']
+    const diff = DIFF_LABELS[review.difficulty_label?.toLowerCase() ?? 'medium'] || DIFF_LABELS['medium']
     const verdict = getVerdict(review)
 
     // ========== COMPACT MODE (for admin inline) ==========
@@ -127,7 +154,7 @@ export default function AIReviewPanel({ review, compact = false }: AIReviewPanel
                 </span>
                 {/* Difficulty with score */}
                 <span className={`px-2 py-0.5 text-xs rounded-full font-semibold ${diff.bgColor} ${diff.color}`}>
-                    {diff.emoji} {diff.label} ({review.difficulty_score}/10)
+                    {diff.emoji} {diff.label} ({review.difficulty_score ?? 0}/10)
                 </span>
                 {/* Boundedness */}
                 <span className={`px-2 py-0.5 text-xs rounded-full font-semibold ${bound.bgColor} ${bound.color}`}>
@@ -135,7 +162,7 @@ export default function AIReviewPanel({ review, compact = false }: AIReviewPanel
                 </span>
                 {/* Clarity score */}
                 <span className="px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 font-medium">
-                    Kejelasan: {review.clarity_score}/100
+                    Kejelasan: {review.clarity_score ?? 0}/100
                 </span>
             </div>
         )
@@ -193,14 +220,14 @@ export default function AIReviewPanel({ review, compact = false }: AIReviewPanel
             <div className="bg-white dark:bg-zinc-800 rounded-lg p-3 border border-gray-100 dark:border-zinc-700">
                 <div className="flex items-center justify-between mb-1.5">
                     <span className="text-xs font-bold text-text-secondary dark:text-zinc-400">📊 Skor Kejelasan Soal</span>
-                    <span className={`text-sm font-bold ${review.clarity_score >= 80 ? 'text-emerald-600 dark:text-emerald-400' : review.clarity_score >= 60 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>
-                        {review.clarity_score}/100
+                    <span className={`text-sm font-bold ${(review.clarity_score ?? 0) >= 80 ? 'text-emerald-600 dark:text-emerald-400' : (review.clarity_score ?? 0) >= 60 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {review.clarity_score ?? 0}/100
                     </span>
                 </div>
                 <div className="h-2.5 bg-gray-200 dark:bg-zinc-700 rounded-full overflow-hidden">
                     <div
-                        className={`h-full rounded-full transition-all ${review.clarity_score >= 80 ? 'bg-emerald-500' : review.clarity_score >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
-                        style={{ width: `${review.clarity_score}%` }}
+                        className={`h-full rounded-full transition-all ${(review.clarity_score ?? 0) >= 80 ? 'bg-emerald-500' : (review.clarity_score ?? 0) >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
+                        style={{ width: `${review.clarity_score ?? 0}%` }}
                     />
                 </div>
             </div>
@@ -307,10 +334,10 @@ export default function AIReviewPanel({ review, compact = false }: AIReviewPanel
                     Seberapa yakin AI bahwa hasilnya benar (bukan seberapa tinggi nilainya)
                 </p>
                 <div className="space-y-2">
-                    <ConfidenceBar value={review.bloom_confidence} label={`Bloom → ${bloom.label}`} />
-                    <ConfidenceBar value={review.hots_confidence} label={`HOTS → ${hots.shortLabel}`} />
-                    <ConfidenceBar value={review.difficulty_confidence} label={`Kesulitan → ${diff.label} (${review.difficulty_score}/10)`} />
-                    <ConfidenceBar value={review.boundedness_confidence} label={`Batasan → ${bound.label}`} />
+                    <ConfidenceBar value={review.bloom_confidence ?? 0} label={`Bloom → ${bloom.label}`} />
+                    <ConfidenceBar value={review.hots_confidence ?? 0} label={`HOTS → ${hots.shortLabel}`} />
+                    <ConfidenceBar value={review.difficulty_confidence ?? 0} label={`Kesulitan → ${diff.label} (${review.difficulty_score ?? 0}/10)`} />
+                    <ConfidenceBar value={review.boundedness_confidence ?? 0} label={`Batasan → ${bound.label}`} />
                 </div>
             </div>
         </div>

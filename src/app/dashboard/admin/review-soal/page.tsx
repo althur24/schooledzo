@@ -554,8 +554,8 @@ export default function ReviewSoalPage() {
                                                             <div className="flex flex-wrap items-center gap-1.5 mt-1 pl-0.5">
                                                                 <span className="text-xs text-text-secondary dark:text-zinc-500 font-medium mr-0.5" title="Analisis AI">🤖</span>
                                                                 <AIReviewPanel review={item.ai_review} compact />
-                                                                {/* Konflik: Guru klaim HOTS tapi AI bilang LOTS */}
-                                                                {item.teacher_hots_claim && item.ai_review.hots_strength === 'S0' && (
+                                                                {/* Konflik: Guru klaim HOTS tapi AI bilang LOTS — skip untuk FAILED record */}
+                                                                {item.teacher_hots_claim && item.ai_review.model_version !== 'FAILED' && item.ai_review.hots_strength === 'S0' && (
                                                                     <span className="px-1.5 py-0.5 text-xs rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 font-bold animate-pulse" title="Guru mengklaim soal ini HOTS, tetapi AI mendeteksi soal ini sebagai LOTS">
                                                                         ⚡ Konflik: Guru HOTS ≠ AI LOTS
                                                                     </span>

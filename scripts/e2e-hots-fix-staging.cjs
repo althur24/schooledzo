@@ -166,9 +166,10 @@ async function main() {
         check('POST /api/question-bank (2nd) 200/201', qb2St === 200 || qb2St === 201, qb2Data)
         const qb2Qid = qb2Data?.id
 
-        // Cek status SEGERA — harus 'draft', bukan 'approved' (DB default)
+        // Cek status SEGERA — harus 'draft' atau 'ai_reviewing' (HOTS mungkin sudah mulai),
+        // yang penting BUKAN 'approved' (DB default sebelum BUG 6 fix)
         const { data: qb2Q } = await supabase.from('question_bank').select('status').eq('id', qb2Qid).single()
-        check('status = draft SEGERA setelah insert (BUG 6 fix)', qb2Q?.status === 'draft', qb2Q?.status)
+        check('status = draft/ai_reviewing SEGERA setelah insert (BUG 6 fix — bukan approved)', qb2Q?.status === 'draft' || qb2Q?.status === 'ai_reviewing', qb2Q?.status)
 
         // Tunggu HOTS, lalu cek status berubah ke 'admin_review' (fallback)
         console.log('  menunggu HOTS gagal (8 dtk)...')
@@ -221,7 +222,7 @@ async function main() {
         if (eqData && Array.isArray(eqData)) {
             for (const q of eqData) {
                 const { data: eq } = await supabase.from('exam_questions').select('status').eq('id', q.id).single()
-                check(`exam question "${q.question_text?.slice(0, 20)}..." status = draft`, eq?.status === 'draft', eq?.status)
+                check(`exam question "${q.question_text?.slice(0, 20)}..." status = draft/ai_reviewing (bukan approved)`, eq?.status === 'draft' || eq?.status === 'ai_reviewing', eq?.status)
             }
         }
 

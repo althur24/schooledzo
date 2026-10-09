@@ -331,9 +331,14 @@ export default function AdminBankSoalPage() {
                                                             <SourceBadge source={item.source_type} sourceName={item.source_name} />
                                                             <QuestionStatusBadge status={item.status} aiReviewEnabled={aiReviewEnabled} />
                                                             {item.teacher_hots_claim && <HotsBadge />}
-                                                            {item.ai_review && (
+                                                            {item.ai_review && item.ai_review.model_version !== 'FAILED' && (
                                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-medium border bg-secondary/10 text-text-secondary border-secondary/20">
                                                                     <Discovery set="bold" primaryColor="currentColor" size={12} /> AI Analyzed
+                                                                </span>
+                                                            )}
+                                                            {item.ai_review && item.ai_review.model_version === 'FAILED' && (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-medium border bg-red-500/10 text-red-600 dark:text-red-400 border-red-200 dark:border-red-500/20">
+                                                                    <Discovery set="bold" primaryColor="currentColor" size={12} /> AI Gagal
                                                                 </span>
                                                             )}
                                                         </div>
