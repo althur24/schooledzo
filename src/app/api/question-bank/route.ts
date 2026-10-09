@@ -108,8 +108,8 @@ export async function GET(request: NextRequest) {
 
         // Fetch AI reviews for all questions
         const questionIds = (data || []).map((q: any) => q.id)
-        let aiReviewMap = new Map()
-        let adminReviewMap = new Map()
+        const aiReviewMap = new Map()
+        const adminReviewMap = new Map()
 
         if (questionIds.length > 0) {
             // batchedIn per 100 question id (batas URL) + fetchAllRows per chunk.
@@ -318,6 +318,7 @@ export async function POST(request: NextRequest) {
 
         // Handle bulk insert
         if (Array.isArray(body)) {
+            const aiEnabled = await isAIReviewEnabled(schoolId)
             const questions = body.map((q: any) => ({
                 teacher_id: teacher.id,
                 subject_id: q.subject_id || null,
@@ -330,6 +331,7 @@ export async function POST(request: NextRequest) {
                 image_url: q.image_url || null,
                 teacher_hots_claim: Boolean(q.teacher_hots_claim),
                 content_format: q.content_format || 'plain',
+                status: aiEnabled ? 'draft' : 'approved',
                 ...(q.question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: q.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL' } : {})
             }))
 
@@ -351,7 +353,6 @@ export async function POST(request: NextRequest) {
 
             // Trigger HOTS analysis for each saved question (fire-and-forget)
             if (data && data.length > 0) {
-                const aiEnabled = await isAIReviewEnabled(schoolId)
                 if (aiEnabled) {
                     let subjectName = ''
                     if (data[0]?.subject_id) {
@@ -384,6 +385,7 @@ export async function POST(request: NextRequest) {
         // Single insert
         const { subject_id, question_text, question_type, options, correct_answer, difficulty, tags, teacher_hots_claim, content_format } = body
 
+        const singleAiEnabled = await isAIReviewEnabled(schoolId)
         const candidate = {
             teacher_id: teacher.id,
             subject_id: subject_id || null,
@@ -395,6 +397,7 @@ export async function POST(request: NextRequest) {
             tags: tags || null,
             teacher_hots_claim: Boolean(teacher_hots_claim),
             content_format: content_format || 'plain',
+            status: singleAiEnabled ? 'draft' : 'approved',
             ...(question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: body.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL' } : {})
         }
 
@@ -417,8 +420,7 @@ export async function POST(request: NextRequest) {
 
         // Trigger HOTS analysis for single question (fire-and-forget)
         if (data) {
-            const aiEnabled = await isAIReviewEnabled(schoolId)
-            if (aiEnabled) {
+            if (singleAiEnabled) {
                 let subjectName = ''
                 if (data.subject_id) {
                     const { data: subjectData } = await supabase
@@ -454,7 +456,7 @@ export async function DELETE(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user, schoolId } = ctx
+        const { user } = ctx
 
         if (user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

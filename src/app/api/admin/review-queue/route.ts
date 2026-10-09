@@ -79,10 +79,16 @@ export async function GET(request: NextRequest) {
                 .select('*')
                 .eq('question_source', sourceType)
                 .in('question_id', questionIds)
+                .order('created_at', { ascending: false })
 
-            // Map reviews to questions
+            // Map reviews to questions — keep-first (latest wins, konsisten
+            // dengan pattern di question-bank/route.ts)
             const reviewMap = new Map()
-            reviews?.forEach((r: any) => reviewMap.set(r.question_id, r))
+            reviews?.forEach((r: any) => {
+                if (!reviewMap.has(r.question_id)) {
+                    reviewMap.set(r.question_id, r)
+                }
+            })
 
             return data.map((q: any) => ({
                 ...q,

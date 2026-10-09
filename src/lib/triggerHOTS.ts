@@ -256,11 +256,12 @@ export async function triggerHOTSAnalysis(input: TriggerHOTSInput): Promise<void
             .update({ status: fallbackStatus })
             .eq('id', input.questionId)
             
-        // Insert a "failed" ai_review record so admin knows AI was attempted
+        // Insert a "failed" ai_review record so admin knows AI was attempted.
+        // primary_bloom_level sengaja tidak di-set (NULL) — CHECK constraint
+        // memerlukan BETWEEN 1 AND 6; nilai 0 ditolak diam-diam oleh Postgres.
         await supabase.from('ai_reviews').insert({
             question_source: input.questionSource,
             question_id: input.questionId,
-            primary_bloom_level: 0,
             hots_flag: false,
             hots_strength: 'S0',
             model_version: 'FAILED',

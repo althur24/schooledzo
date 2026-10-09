@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user, schoolId } = ctx
+        const { user } = ctx
 
         if (user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
         if (error) throw error
 
         // Sort questions by order_in_passage and fetch admin_reviews
-        let adminReviewMap = new Map()
+        const adminReviewMap = new Map()
         const questionIds = data?.flatMap(p => p.questions?.map((q: any) => q.id) || []) || []
 
         if (questionIds.length > 0) {
@@ -155,6 +155,7 @@ export async function POST(request: NextRequest) {
         if (passageError) throw passageError
 
         // Create questions linked to passage
+        const postAiEnabled = await isAIReviewEnabled(schoolId)
         const questionsToInsert = questions.map((q: any, idx: number) => ({
             question_text: q.question_text,
             question_type: q.question_type,
@@ -166,6 +167,7 @@ export async function POST(request: NextRequest) {
             passage_id: passage.id,
             order_in_passage: idx + 1,
             teacher_hots_claim: Boolean(q.teacher_hots_claim),
+            status: postAiEnabled ? 'draft' : 'approved',
             ...(q.question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: q.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL' } : {})
         }))
 
@@ -178,8 +180,7 @@ export async function POST(request: NextRequest) {
 
         // Trigger HOTS analysis for each saved question (fire-and-forget)
         if (insertedQuestions && insertedQuestions.length > 0) {
-            const aiEnabled = await isAIReviewEnabled(schoolId)
-            if (aiEnabled) {
+            if (postAiEnabled) {
                 let subjectName = ''
                 if (subject_id) {
                     const { data: subjectData } = await supabase
@@ -276,7 +277,7 @@ export async function PUT(request: NextRequest) {
         }
 
         // Update passage info
-        const { data: passage, error: passageError } = await supabase
+        const { error: passageError } = await supabase
             .from('question_passages')
             .update({
                 title,
@@ -300,6 +301,7 @@ export async function PUT(request: NextRequest) {
                 .eq('passage_id', id)
 
             // Insert new questions
+            const putAiEnabled = await isAIReviewEnabled(schoolId)
             const questionsToInsert = questions.map((q: any, idx: number) => ({
                 question_text: q.question_text,
                 question_type: q.question_type,
@@ -311,6 +313,7 @@ export async function PUT(request: NextRequest) {
                 passage_id: id,
                 order_in_passage: idx + 1,
                 teacher_hots_claim: Boolean(q.teacher_hots_claim),
+                status: putAiEnabled ? 'draft' : 'approved',
                 ...(q.question_type === 'MULTIPLE_ANSWER' ? { gk_grading_mode: q.gk_grading_mode === 'ALL_OR_NOTHING' ? 'ALL_OR_NOTHING' : 'PROPORTIONAL' } : {})
             }))
 
@@ -323,8 +326,7 @@ export async function PUT(request: NextRequest) {
 
             // Trigger HOTS analysis for newly added or updated questions
             if (updatedQuestions && updatedQuestions.length > 0) {
-                const aiEnabled = await isAIReviewEnabled(schoolId)
-                if (aiEnabled) {
+                if (putAiEnabled) {
                     let subjectName = ''
                     if (subject_id) {
                         const { data: subjectData } = await supabase
@@ -375,7 +377,7 @@ export async function DELETE(request: NextRequest) {
     try {
         const ctx = await getSchoolContextOrError(request)
         if (isErrorResponse(ctx)) return ctx
-        const { user, schoolId } = ctx
+        const { user } = ctx
 
         if (user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
