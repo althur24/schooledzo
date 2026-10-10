@@ -7,6 +7,7 @@ import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
 import { parseAnswerLetters } from '@/lib/questionTypeUtils'
 import { getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
+import { enrollmentClassAt, EnrollmentInterval } from '@/lib/enrollmentClassAt'
 
 // ─── Shared helpers ─────────────────────────────────────────────
 function median(arr: number[]): number {
@@ -62,6 +63,7 @@ export async function GET(
             .from('official_exams')
             .select(`
                 id, title, exam_type, duration_minutes, target_class_ids, school_id,
+                academic_year_id, start_time,
                 subject:subjects(id, name, kkm)
             `)
             .eq('id', examId)
@@ -140,9 +142,33 @@ export async function GET(
             .eq('is_submitted', true)
             .order('id'))
 
-        // Filter by class if specified
+        // Filter by class if specified — resolve student's class IN THE EXAM'S
+        // YEAR via enrollment (not current class_id), so filtering works for
+        // past exams too. Paritas dengan official-exam-submissions API &
+        // analytics/exam/[id]: student.class_id (current) akan menempatkan
+        // siswa pindah kelas di kelas salah atau mengecualikan dari filter.
         if (classIdFilter) {
-            allSubmissions = allSubmissions.filter(s => (s.student as any)?.class_id === classIdFilter)
+            const studentIds = [...new Set(allSubmissions.map(s => s.student_id))]
+            const examYearId = (exam as any)?.academic_year_id
+            const examStart = (exam as any)?.start_time
+            const enrollments = await batchedIn<any>(
+                'student_id', studentIds,
+                (chunk) => supabase
+                    .from('student_enrollments')
+                    .select('student_id, class_id, academic_year_id, status, enrolled_at, ended_at, created_at, updated_at')
+                    .in('student_id', chunk)
+                    .eq('academic_year_id', examYearId || '00000000-0000-0000-0000-000000000000')
+            )
+            const rowsByStudent = new Map<string, EnrollmentInterval[]>()
+            ;(enrollments || []).forEach((e: any) => {
+                if (!rowsByStudent.has(e.student_id)) rowsByStudent.set(e.student_id, [])
+                rowsByStudent.get(e.student_id)!.push(e)
+            })
+            allSubmissions = allSubmissions.filter(s => {
+                const rows = rowsByStudent.get(s.student_id)
+                const match = rows ? enrollmentClassAt(rows, examStart) : null
+                return match?.class_id === classIdFilter
+            })
         }
 
         // 4) Fetch all answers (normalized table)
@@ -169,11 +195,14 @@ export async function GET(
         )
 
         // 5) Count total students (across targeted classes or filtered class)
+        // Count by ENROLLMENT, not students.class_id (current) — enrollment
+        // records persist after promotion/move, so this stays correct for
+        // historical exams. Paritas dengan analytics/exam/[id].
         let totalStudentsInClass = 0
         const classIdsToCount = classIdFilter ? [classIdFilter] : targetClassIds
         if (classIdsToCount.length > 0) {
             const { count } = await supabase
-                .from('students')
+                .from('student_enrollments')
                 .select('id', { count: 'exact', head: true })
                 .in('class_id', classIdsToCount)
             totalStudentsInClass = count || 0

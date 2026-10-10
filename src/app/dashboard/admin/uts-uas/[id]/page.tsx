@@ -353,14 +353,19 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         try {
             // Ulangan batch: "Semua Kelas" = submission SEMUA member batch
             // (tenant-guarded server-side); kelas spesifik = exam member tsb.
-            // Official: class_id filter tetap seperti sebelumnya.
+            // Official: exam_id selalu examId, class_id = filter kelas terpilih.
             // (API exams tidak punya filter class_id — ulangan satu kelas per TA)
+            // BUG FIX: sebelumnya exam_id = resultsClassFilter (class ID untuk
+            // official) → API query exam_id=classId → 0 hasil. Sekarang official
+            // selalu pakai examId untuk exam_id, resultsClassFilter hanya untuk
+            // class_id. Ulangan batch tetah pakai member exam ID (valid exam_id).
             let url: string
             if (isUlangan && isBatchView && !resultsClassFilter) {
                 url = `${submissionsApi}?batch_id=${exam?.batch_id}`
+            } else if (!isUlangan && resultsClassFilter) {
+                url = `${submissionsApi}?exam_id=${examId}&class_id=${resultsClassFilter}`
             } else {
                 url = `${submissionsApi}?exam_id=${resultsClassFilter || examId}`
-                if (!isUlangan && resultsClassFilter) url += `&class_id=${resultsClassFilter}`
             }
             const res = await fetch(url)
             const data = await res.json()
