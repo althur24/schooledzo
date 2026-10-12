@@ -210,16 +210,16 @@ async function main() {
     await api('PUT', '/api/exam-submissions', { submission_id: fx.subId, answers: [
         { question_id: fx.qIds[0], answer: 'A' }, { question_id: fx.qIds[1], answer: 'B' },
     ] }, 's2')
-    await shiftExamClock(fx.examId, 60, 4 * MIN) // endAt = now - 4 mnt (> sweep buffer 2 mnt)
-    console.log('  ⏳ menunggu scheduler sweep (tick 1 dtk-1 mnt, buffer 2 mnt)...')
+    await shiftExamClock(fx.examId, 60, 12 * MIN) // endAt = now - 12 mnt (> sweep buffer 10 mnt)
+    console.log('  ⏳ menunggu scheduler sweep (tick 1 dtk-1 mnt, buffer 10 mnt)...')
     let c4done = false, c4sub = null
-    const c4deadline = Date.now() + 150_000
+    const c4deadline = Date.now() + 180_000
     while (Date.now() < c4deadline) {
         await new Promise(res => setTimeout(res, 5000))
         const { data: s } = await supabase.from('exam_submissions').select('is_submitted, total_score, submitted_at').eq('id', fx.subId).single()
         if (s?.is_submitted) { c4done = true; c4sub = s; break }
     }
-    check('C4a sweep menutup otomatis (≤150 dtk)', c4done, c4sub)
+    check('C4a sweep menutup otomatis (≤180 dtk)', c4done, c4sub)
     check('C4b jawaban autosave terakhir dinilai (skor 20)', c4sub?.total_score === 20, c4sub)
     check('C4c submitted_at = batas efektif (jujur, bukan jam sweep)', c4sub?.submitted_at && new Date(c4sub.submitted_at).getTime() <= Date.now() - 3.5 * MIN, c4sub?.submitted_at)
 

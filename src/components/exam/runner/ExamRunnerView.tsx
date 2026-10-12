@@ -1,6 +1,7 @@
 'use client'
 
 import { Document, Danger, Scan, TimeCircle, TickSquare } from 'react-iconly'
+import { Loader2 } from 'lucide-react'
 import NetworkBadge from '@/components/NetworkBadge'
 import ExamZoomControls from '@/components/exam/ExamZoomControls'
 import ExamZoomHint from '@/components/exam/ExamZoomHint'
@@ -313,25 +314,28 @@ export function ExamRunnerView({ state, mode = 'live' }: ExamRunnerViewProps) {
                 </div>
             )}
 
-            {/* Offline Timeout Modal */}
+            {/* Offline Timeout Modal — non-dismissable, jawaban aman, auto-submit saat reconnect */}
             {state.showOfflineTimeoutModal && (
                 <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="bg-surface-light dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-2xl p-8 w-full max-w-sm text-center shadow-2xl">
-                        <div className="w-20 h-20 bg-amber-500/20 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <Danger set="bold" primaryColor="currentColor" size={40} />
+                        <div className="w-20 h-20 flex items-center justify-center mx-auto mb-6">
+                            <Loader2 className="w-10 h-10 animate-spin text-primary" />
                         </div>
                         <h3 className="text-2xl font-bold text-text-main dark:text-white mb-2">
-                            Waktu Habis (Offline)
+                            Menunggu Koneksi Internet
                         </h3>
-                        <p className="text-text-secondary mb-6">
-                            Waktu {state.examLabel} telah habis, tetapi koneksi internet terputus. Jawaban Anda sudah tersimpan secara lokal dan akan dikumpulkan otomatis saat koneksi kembali.
+                        <p className="text-text-secondary mb-4">
+                            {state.timeLeft !== null && state.timeLeft <= 0
+                                ? `Waktu ${state.examLabel} telah berakhir.`
+                                : `Anda mengumpulkan ${state.examLabel}.`}
+                            {' '}Sambungkan ke internet untuk mengirim jawaban Anda.
                         </p>
-                        <button
-                            onClick={() => state.handleSubmit(true)}
-                            className="w-full px-6 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary-dark transition-opacity"
-                        >
-                            Kumpulkan Sekarang
-                        </button>
+                        <p className="text-xs text-green-600 dark:text-green-400 font-medium">
+                            ✓ Jawaban Anda aman tersimpan di perangkat ini
+                        </p>
+                        <p className="text-xs text-text-secondary mt-2">
+                            Jawaban akan dikirim otomatis saat koneksi tersambung.
+                        </p>
                     </div>
                 </div>
             )}

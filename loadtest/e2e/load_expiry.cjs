@@ -3,7 +3,7 @@
  * Memvalidasi penegakan batas waktu di bawah beban (TIME_ENFORCEMENT_UPGRADE_PLAN Fase 6):
  *  - 0 write diterima setelah ends_at + grace 60 dtk (yang lewat harus 409 TIME_EXPIRED)
  *  - tidak ada 5xx apa pun (409 yang diharapkan bukan error)
- *  - semua submission tertutup ≤ ends_at + buffer sweep + 2 tick (≤ ~4,5 menit)
+ *  - semua submission tertutup ≤ ends_at + buffer sweep + 2 tick (≤ ~11 menit)
  *  - p95 autosave fase normal (sebelum jendela tutup) < 800ms (hot path tanpa query tambahan)
  *
  * Jalankan: node loadtest/e2e/load_expiry.cjs
@@ -162,11 +162,11 @@ async function main() {
     }
 
     await Promise.all(users.map(studentWork))
-    console.log('fase kerja selesai — menunggu sweep menutup semua (maks ~4,5 menit)...')
+    console.log('fase kerja selesai — menunggu sweep menutup semua (maks ~11 menit)...')
 
-    // Semua submission harus tertutup ≤ ends_at + buffer 2 mnt + 2 tick sweep
+    // Semua submission harus tertutup ≤ ends_at + buffer 10 mnt + 2 tick sweep
     let allClosed = false
-    const deadlineWait = Date.now() + 270 * 1000
+    const deadlineWait = Date.now() + 660 * 1000
     while (Date.now() < deadlineWait) {
         const { data: openLeft } = await supabase
             .from('official_exam_submissions').select('id', { count: 'exact' })

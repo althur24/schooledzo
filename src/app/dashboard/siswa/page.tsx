@@ -8,6 +8,7 @@ import { labelForGradeType } from '@/lib/labels'
 import { useRouter } from 'next/navigation'
 import { TimeCircle as Clock, Danger, Calendar, Document, Edit, ArrowRight, Notification } from 'react-iconly'
 import { PartyPopper, GraduationCap, Loader2, Megaphone } from 'lucide-react'
+import ProactiveRescueBanner from '@/components/ProactiveRescueBanner'
 
 interface StudentData {
     id: string
@@ -521,6 +522,7 @@ export default function SiswaDashboard() {
 
     return (
         <div className="space-y-5 md:space-y-8 animate-in fade-in duration-500">
+            <ProactiveRescueBanner />
             {/* Peringatan gagal memuat — jangan biarkan empty state perayaan
                 ("Semua Sudah Dikerjakan!" / "Libur!") menyembunyikan error */}
             {!loading && dataFailed && (

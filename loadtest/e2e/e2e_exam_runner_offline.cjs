@@ -9,7 +9,7 @@
  *  [OFF-DRAFT] Ganti jawaban saat offline → draft masuk localStorage
  *             (exam_${id}_answers), TIDAK ke server.
  *  [OFF-TIMEOUT] Timer habis saat offline (durasi 1 menit) → modal
- *             "Waktu Habis (Offline)" muncul — jalur yang dulu cuma ada di
+ *             "Menunggu Koneksi Internet" muncul — jalur yang dulu cuma ada di
  *             ulangan, kini juga di UTS/UAS via runner.
  *  [ON-RECOVERY] Kembali online → event 'online' → syncLocalToServer dengan
  *             isTimeUp → submit OTOMATIS → redirect halaman hasil → DB
@@ -263,15 +263,15 @@ async function main() {
     check('Server MASIH answer=A (perubahan offline belum terkirim)', ans2?.answer === 'A', `answer=${ans2?.answer}`)
 
     // ---------- TIMER HABIS SAAT OFFLINE ----------
-    console.log('\n[4] [OFF-TIMEOUT] tunggu timer habis saat offline → modal "Waktu Habis (Offline)"')
+    console.log('\n[4] [OFF-TIMEOUT] tunggu timer habis saat offline → modal "Menunggu Koneksi Internet"')
     // ends_at ≈ start + 60 dtk; sudah terpakai ~20 dtk → tunggu maks 55 dtk
     let modalMuncul = false
     for (let i = 0; i < 40; i++) {
         await sleep(2000)
-        modalMuncul = await evalInPage(cdp, `document.body.innerText.includes('Waktu Habis (Offline)')`)
+        modalMuncul = await evalInPage(cdp, `document.body.innerText.includes('Menunggu Koneksi Internet')`)
         if (modalMuncul) break
     }
-    check('Modal "Waktu Habis (Offline)" tampil (timer habis + offline)', modalMuncul)
+    check('Modal "Menunggu Koneksi Internet" tampil (timer habis + offline)', modalMuncul)
 
     // Pastikan TIDAK auto-submit saat offline (fetch pasti gagal → draft tetap)
     const { data: subOff } = await supabase.from('exam_submissions').select('is_submitted').eq('id', subId).single()

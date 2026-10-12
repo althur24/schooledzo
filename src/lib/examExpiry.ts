@@ -22,7 +22,7 @@
  */
 
 export const WRITE_GRACE_MS = 60_000 // toleransi jaringan/autosave utk write & submit
-export const SWEEP_BUFFER_MS = 120_000 // sweep menutup submission lewat batas + buffer ini
+export const SWEEP_BUFFER_MS = 600_000 // 10 menit — beri waktu siswa reconnect sebelum force-close
 
 export type Expiry = { limited: false } | { limited: true; endAt: number }
 

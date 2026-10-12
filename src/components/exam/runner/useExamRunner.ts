@@ -182,11 +182,38 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         }
     }
 
+    // 1b: Keepalive flush — fire-and-forget fetch saat page unload / tab switch.
+    // Browser MENJAMIN request dikirim meski page sedang unload (keepalive: true).
+    // Tanpa submit:true — hanya simpan draft, tidak force-submit.
+    const flushAnswersKeepalive = () => {
+        const sub = submissionRef.current
+        if (!sub || sub.is_submitted) return
+        const localAnswers = loadAnswersFromLocal()
+        if (Object.keys(localAnswers).length === 0) return
+        const answersArray = Object.entries(localAnswers).map(([question_id, answer]) => ({
+            question_id, answer: String(answer)
+        }))
+        fetch(configRef.current.submissionApi, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ submission_id: sub.id, answers: answersArray }),
+            keepalive: true,
+        }).catch(() => {})
+    }
+
     const submissionRef = useRef(submission)
 
     useEffect(() => {
         submissionRef.current = submission
     }, [submission])
+
+    // 1a: Track submit yang gagal karena offline/server error.
+    // null = tidak pending. true = auto-submit (timer habis). false = manual submit (siswa klik Selesai).
+    const pendingSubmitRef = useRef<boolean | null>(null)
+
+    // 1g: Ref pendamping showOfflineTimeoutModal (stale-closure-safe untuk event handler)
+    const showOfflineTimeoutModalRef = useRef(false)
+    useEffect(() => { showOfflineTimeoutModalRef.current = showOfflineTimeoutModal }, [showOfflineTimeoutModal])
 
     // Ref pendamping listener 'online' (stale-closure-safe): retry load saat koneksi kembali
     const loadFailedRef = useRef(false)
@@ -304,6 +331,12 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 return
             }
             await syncLocalToServer()
+            // 1d: Retry pending submit setelah sync berhasil
+            if (pendingSubmitRef.current !== null) {
+                const wasAuto = pendingSubmitRef.current
+                pendingSubmitRef.current = null
+                await handleSubmit(wasAuto)
+            }
             await flushPendingViolations()
         }
 
@@ -339,14 +372,37 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             // ada soal berbeda dari snapshot (atau belum pernah tersinkron)
             return draftKeys.some(qid => synced[qid] !== draft[qid])
         }
-        if (saveStatus !== 'error' && !hasUnsyncedChanges()) return
+        if (saveStatus !== 'error' && !hasUnsyncedChanges() && pendingSubmitRef.current === null) return
         const iv = setInterval(() => {
-            if (saveStatus !== 'error' && !hasUnsyncedChanges()) return
+            if (saveStatus !== 'error' && !hasUnsyncedChanges() && pendingSubmitRef.current === null) return
             syncLocalToServer()
         }, 15000)
         return () => clearInterval(iv)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [saveStatus, submission])
+
+    // 1k: Battery API (best-effort) — proactive sync saat baterai kritis.
+    // iOS Safari tidak support getBattery — catch diam-diam.
+    useEffect(() => {
+        if (!submission || submission.is_submitted) return
+        let battery: any = null
+        let check: (() => void) | null = null
+        let cancelled = false
+        ;(navigator as any).getBattery?.().then((b: any) => {
+            if (cancelled) return
+            battery = b
+            check = () => {
+                if (battery.level < 0.15 && !battery.charging) syncLocalToServer()
+            }
+            check()
+            battery.addEventListener('levelchange', check)
+        }).catch(() => {})
+        return () => {
+            cancelled = true
+            if (battery && check) battery.removeEventListener('levelchange', check)
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [submission])
 
     const syncLocalToServer = async () => {
         const localAnswers = loadAnswersFromLocal()
@@ -417,7 +473,17 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     const isTimeUpFresh = endsAtRef.current !== null
                         && (Date.now() + offsetMsRef.current) >= endsAtRef.current
                     if (isTimeUpFresh) {
-                        handleSubmit(true)
+                        await handleSubmit(true)
+                    }
+
+                    // 1e: Retry pending submit (manual) setelah sync berhasil.
+                    // isTimeUpFresh di atas hanya memanggil handleSubmit(true) untuk
+                    // auto-submit; manual submit (pendingSubmitRef=false) butuh
+                    // check ini. Double-call dicegah submittingRef guard.
+                    if (pendingSubmitRef.current !== null) {
+                        const wasAuto = pendingSubmitRef.current
+                        pendingSubmitRef.current = null
+                        await handleSubmit(wasAuto)
                     }
                 } else {
                     // Server menolak (5xx dsb.) → tetap error; retry loop akan mencoba lagi.
@@ -649,6 +715,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 if (navigator.onLine) {
                     handleSubmit(true)
                 } else {
+                    pendingSubmitRef.current = true
                     setShowOfflineTimeoutModal(true)
                 }
             }
@@ -672,7 +739,12 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         if (!submission || submission.is_submitted) return
 
         const handleVisibilityChange = async () => {
+            // 1g: Disable violation detection saat submit/menunggu koneksi —
+            // siswa boleh switch ke WiFi settings untuk menyambungkan internet.
+            if (submittingRef.current || showOfflineTimeoutModalRef.current) return
             if (document.hidden) {
+                // 1g: kirim jawaban saat switch app (safety net)
+                flushAnswersKeepalive()
                 // Only record timestamp — don't send violation yet
                 hiddenAtRef.current = Date.now()
             } else {
@@ -698,12 +770,14 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
 
         // Method 2: Window blur/focus (works for PWA standalone + Alt+Tab)
         const handleWindowBlur = async () => {
+            if (submittingRef.current || showOfflineTimeoutModalRef.current) return
             if (document.hidden) return // Already handled by visibilitychange
             // Only record timestamp for blur without visibility change
             if (hiddenAtRef.current === 0) hiddenAtRef.current = Date.now()
         }
 
         const handleWindowFocus = async () => {
+            if (submittingRef.current || showOfflineTimeoutModalRef.current) return
             if (document.hidden) return
             if (hiddenAtRef.current <= 0) return
 
@@ -725,10 +799,14 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         }
 
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            flushAnswersKeepalive()
             e.preventDefault()
             e.returnValue = `Anda sedang dalam ${examLabelRef.current}. Keluar akan dihitung sebagai pelanggaran!`
             return e.returnValue
         }
+
+        // 1i: pagehide — safety net tambahan (iOS Safari kadang tidak fire beforeunload)
+        const handlePageHide = () => { flushAnswersKeepalive() }
 
         // Prevent right-click
         const handleContextMenu = (e: MouseEvent) => {
@@ -759,6 +837,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         window.addEventListener('blur', handleWindowBlur)
         window.addEventListener('focus', handleWindowFocus)
         window.addEventListener('beforeunload', handleBeforeUnload)
+        window.addEventListener('pagehide', handlePageHide)
         document.addEventListener('contextmenu', handleContextMenu)
         document.addEventListener('copy', handleCopy)
         document.addEventListener('paste', handlePaste)
@@ -769,6 +848,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             window.removeEventListener('blur', handleWindowBlur)
             window.removeEventListener('focus', handleWindowFocus)
             window.removeEventListener('beforeunload', handleBeforeUnload)
+            window.removeEventListener('pagehide', handlePageHide)
             document.removeEventListener('contextmenu', handleContextMenu)
             document.removeEventListener('copy', handleCopy)
             document.removeEventListener('paste', handlePaste)
@@ -925,6 +1005,20 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             setSaveStatus(res.ok ? 'saved' : 'error')
             // M5: autosave per soal sukses → snapshot tersinkron ikut maju
             if (res.ok) {
+                // 1j: Propagasi "Tambah Waktu" guru via autosave per-soal (sebelumnya
+                // hanya syncLocalToServer yang baca ends_at — siswa yang aktif
+                // menjawab tidak terima update sampai timer hit 0).
+                const okBody = await res.json().catch(() => null)
+                const freshEnds = okBody?.ends_at ? new Date(okBody.ends_at).getTime() : null
+                const oldEnds = endsAtRef.current
+                if (freshEnds !== null && Number.isFinite(freshEnds)
+                    && oldEnds !== null && freshEnds > oldEnds + 1_000) {
+                    endsAtRef.current = freshEnds
+                    const addedMin = Math.max(1, Math.round((freshEnds - Math.max(oldEnds, Date.now() + offsetMsRef.current)) / 60_000))
+                    setTimeExtension({ minutes: addedMin })
+                    setTimeLeft(computeRemaining())
+                }
+
                 saveSyncedSnapshot({ ...loadSyncedSnapshot(), [questionId]: answer })
             }
         } catch (error) {
@@ -935,12 +1029,16 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
 
     // Submit exam
     const handleSubmit = async (auto = false) => {
-        if (!submission || submittingRef.current) return
+        if (!submissionRef.current || submittingRef.current) return
         submittingRef.current = true
         setSubmitting(true)
-        setShowOfflineTimeoutModal(false)
 
         try {
+            if (!navigator.onLine) {
+                pendingSubmitRef.current = auto
+                setShowOfflineTimeoutModal(true)
+                return
+            }
             // Save all current answers first
             const answersArray = Object.entries(answersRef.current).map(([question_id, answer]) => ({
                 question_id, answer
@@ -957,7 +1055,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        submission_id: submission.id,
+                        submission_id: submissionRef.current.id,
                         answers: answersArray,
                         // TIDAK ada submit:true — cuma simpan + dapat ends_at segar
                     })
@@ -972,6 +1070,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     const addedMin = Math.max(1, Math.round((freshEnds - (Date.now() + offsetMsRef.current)) / 60_000))
                     setTimeExtension({ minutes: addedMin })
                     setTimeLeft(computeRemaining())
+                    pendingSubmitRef.current = null
+                    setShowOfflineTimeoutModal(false)
                     setSubmitting(false)
                     return // Jangan submit — siswa masih punya waktu
                 }
@@ -990,7 +1090,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    submission_id: submission.id,
+                    submission_id: submissionRef.current.id,
                     answers: answersArray,
                     submit: true
                 })
@@ -1005,6 +1105,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
 
             // Clear localStorage after successful submit
             clearLocalAnswers()
+            pendingSubmitRef.current = null
+            setShowOfflineTimeoutModal(false)
 
             if (document.fullscreenElement) {
                 await document.exitFullscreen()
@@ -1013,9 +1115,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             router.push(configRef.current.resultRoute(examId))
         } catch (error) {
             console.error('Error submitting:', error)
-            // Tampilkan pesan spesifik dari server (mis. "Sudah dikumpulkan dari
-            // perangkat lain") bila ada; fallback ke pesan generik.
-            alert(error instanceof Error && error.message ? error.message : `Gagal mengumpulkan ${examLabelRef.current}`)
+            pendingSubmitRef.current = auto
+            setShowOfflineTimeoutModal(true)
         } finally {
             // finally tetap dieksekusi walau try `return` dini (jalur extend di
             // 00:00 / 409 force-close) — tanpa reset ini submittingRef terkunci

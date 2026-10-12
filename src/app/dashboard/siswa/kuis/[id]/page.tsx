@@ -9,6 +9,7 @@ import PassageBlock from '@/components/PassageBlock'
 import NetworkBadge from '@/components/NetworkBadge'
 import useOnlineStatus from '@/hooks/useOnlineStatus'
 import { Danger, TimeCircle, TickSquare } from 'react-iconly'
+import { Loader2 } from 'lucide-react'
 
 interface QuizQuestion {
     id: string
@@ -58,6 +59,8 @@ export default function KerjakanKuisPage() {
     const [startTime, setStartTime] = useState<string | null>(null)
     const [showTimeoutModal, setShowTimeoutModal] = useState(false)
     const [showOfflineTimeoutModal, setShowOfflineTimeoutModal] = useState(false)
+    const pendingSubmitRef = useRef<boolean | null>(null)
+    const submittingRef = useRef(false)
     const [error, setError] = useState<string | null>(null)
     const [loadFailed, setLoadFailed] = useState(false) // error yang bisa dicoba ulang (kegagalan jaringan)
     const isOnline = useOnlineStatus()
@@ -149,6 +152,26 @@ export default function KerjakanKuisPage() {
     }
 
     const loadAnswersFromLocal = (): Record<string, string> => loadLocalDraft().answers
+
+    // 4b: Keepalive flush — fire-and-forget saat page unload / tab switch.
+    const flushAnswersKeepalive = () => {
+        if (!startTimeRef.current) return
+        const localAnswers = loadAnswersFromLocal()
+        if (Object.keys(localAnswers).length === 0) return
+        const formattedAnswers = Object.entries(localAnswers).map(([qId, val]) => ({
+            question_id: qId, answer: val
+        }))
+        fetch('/api/quiz-submissions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                quiz_id: quizId,
+                answers: formattedAnswers,
+                started_at: startTimeRef.current,
+            }),
+            keepalive: true,
+        }).catch(() => {})
+    }
 
     const clearLocalAnswers = () => {
         if (typeof window !== 'undefined') {
@@ -244,7 +267,7 @@ export default function KerjakanKuisPage() {
 
     // Sync local answers to server when called manually
     useEffect(() => {
-        const handleOnline = () => {
+        const handleOnline = async () => {
             // Halaman gagal dimuat saat offline → muat ulang begitu koneksi kembali
             if (loadFailedRef.current) {
                 setError(null)
@@ -253,7 +276,13 @@ export default function KerjakanKuisPage() {
                 fetchQuizData()
                 return
             }
-            syncLocalToServer()
+            await syncLocalToServer()
+            // 4e: Retry pending submit setelah sync
+            if (pendingSubmitRef.current !== null) {
+                const wasAuto = pendingSubmitRef.current
+                pendingSubmitRef.current = null
+                confirmSubmit(wasAuto)
+            }
         }
 
         if (typeof window !== 'undefined') {
@@ -265,6 +294,25 @@ export default function KerjakanKuisPage() {
                 window.removeEventListener('online', handleOnline)
             }
         }
+    }, [])
+
+    // 4c: Keepalive flush saat page unload / tab switch (paritas ExamRunner)
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const handleBeforeUnload = () => flushAnswersKeepalive()
+        const handlePageHide = () => flushAnswersKeepalive()
+        const handleVisibilityChange = () => {
+            if (document.hidden) flushAnswersKeepalive()
+        }
+        window.addEventListener('beforeunload', handleBeforeUnload)
+        window.addEventListener('pagehide', handlePageHide)
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload)
+            window.removeEventListener('pagehide', handlePageHide)
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     const syncLocalToServer = async () => {
@@ -303,15 +351,38 @@ export default function KerjakanKuisPage() {
                 && (errBody?.code === 'ANSWERS_RESCUED' || errBody?.error === 'Kuis sudah dikumpulkan')
             if (res.status === 409 || alreadySubmitted) {
                 clearLocalAnswers()
+                pendingSubmitRef.current = null
                 router.replace(`/dashboard/siswa/kuis/${quizId}/hasil`)
             } else if (isTimeUp && res.ok) {
                 clearLocalAnswers()
+                pendingSubmitRef.current = null
                 router.replace(`/dashboard/siswa/kuis/${quizId}/hasil`)
+            }
+
+            // 4f: Retry pending submit (manual) setelah sync berhasil
+            if (pendingSubmitRef.current !== null) {
+                const wasAuto = pendingSubmitRef.current
+                pendingSubmitRef.current = null
+                confirmSubmit(wasAuto)
             }
         } catch (error) {
             console.error('Error syncing to server:', error)
+            setSaveStatus('error')
         }
     }
+
+    // 4g: Retry berkala saat autosave gagal ATAU ada pending submit
+    useEffect(() => {
+        if (!quiz || !startTime) return
+        const iv = setInterval(() => {
+            if (saveStatus !== 'error'
+                && dirtyQuestionsRef.current.size === 0
+                && pendingSubmitRef.current === null) return
+            syncLocalToServer()
+        }, 15000)
+        return () => clearInterval(iv)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [quiz, startTime, saveStatus])
 
     useEffect(() => {
         if (user) {
@@ -340,6 +411,7 @@ export default function KerjakanKuisPage() {
                 if (navigator.onLine) {
                     confirmSubmit(true)
                 } else {
+                    pendingSubmitRef.current = true
                     setShowOfflineTimeoutModal(true)
                 }
             }
@@ -660,9 +732,10 @@ export default function KerjakanKuisPage() {
     }
 
     const confirmSubmit = async (auto = false) => {
+        if (submittingRef.current) return
+        submittingRef.current = true
         setSubmitting(true)
         setShowSubmitConfirm(false)
-        setShowOfflineTimeoutModal(false)
         if (timerRef.current) clearInterval(timerRef.current)
         // Batalkan autosave terjadwal — submit ini membawa semua jawaban;
         // tanpa ini save yang tertunda menembak submission yang sudah tertutup (400)
@@ -670,6 +743,12 @@ export default function KerjakanKuisPage() {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
 
         try {
+            // 4d: Gate offline — tidak fetch yang pasti gagal, tampilkan modal
+            if (!navigator.onLine) {
+                pendingSubmitRef.current = auto
+                setShowOfflineTimeoutModal(true)
+                return
+            }
             // Format answers for API
             const formattedAnswers = Object.entries(answersRef.current).map(([qId, val]) => ({
                 question_id: qId,
@@ -682,7 +761,7 @@ export default function KerjakanKuisPage() {
                 body: JSON.stringify({
                     quiz_id: quizId,
                     answers: formattedAnswers,
-                    started_at: startTime,
+                    started_at: startTimeRef.current,
                     submit: true
                 })
             })
@@ -696,6 +775,8 @@ export default function KerjakanKuisPage() {
 
             // Clear localStorage after successful submit
             clearLocalAnswers()
+            pendingSubmitRef.current = null
+            setShowOfflineTimeoutModal(false)
 
             if (auto) {
                 setShowTimeoutModal(true)
@@ -704,7 +785,10 @@ export default function KerjakanKuisPage() {
             }
         } catch (error) {
             console.error('Error submitting:', error)
-            alert(`Gagal mengumpulkan ${labels.kuis}. Coba lagi.`)
+            pendingSubmitRef.current = auto
+            setShowOfflineTimeoutModal(true)
+        } finally {
+            submittingRef.current = false
             setSubmitting(false)
         }
     }
@@ -1067,25 +1151,28 @@ export default function KerjakanKuisPage() {
                 </div>
             )}
 
-            {/* Offline Timeout Modal */}
+            {/* Offline Timeout Modal — non-dismissable, jawaban aman, auto-submit saat reconnect */}
             {showOfflineTimeoutModal && (
                 <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="bg-surface-light dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-2xl p-8 w-full max-w-sm text-center shadow-2xl">
-                        <div className="w-20 h-20 bg-amber-500/20 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <Danger set="bold" primaryColor="currentColor" size={40} />
+                        <div className="w-20 h-20 flex items-center justify-center mx-auto mb-6">
+                            <Loader2 className="w-10 h-10 animate-spin text-primary" />
                         </div>
                         <h3 className="text-2xl font-bold text-text-main dark:text-white mb-2">
-                            Waktu Habis (Offline)
+                            Menunggu Koneksi Internet
                         </h3>
-                        <p className="text-text-secondary mb-6">
-                            Waktu {labels.kuis} telah habis, tetapi koneksi internet terputus. Jawaban Anda sudah tersimpan secara lokal dan akan dikumpulkan otomatis saat koneksi kembali.
+                        <p className="text-text-secondary mb-4">
+                            {timeLeft !== null && timeLeft <= 0
+                                ? `Waktu ${labels.kuis} telah berakhir.`
+                                : `Anda mengumpulkan ${labels.kuis}.`}
+                            {' '}Sambungkan ke internet untuk mengirim jawaban Anda.
                         </p>
-                        <button
-                            onClick={() => confirmSubmit(true)}
-                            className="w-full px-6 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary-dark transition-opacity"
-                        >
-                            Kumpulkan Sekarang
-                        </button>
+                        <p className="text-xs text-green-600 dark:text-green-400 font-medium">
+                            ✓ Jawaban Anda aman tersimpan di perangkat ini
+                        </p>
+                        <p className="text-xs text-text-secondary mt-2">
+                            Jawaban akan dikirim otomatis saat koneksi tersambung.
+                        </p>
                     </div>
                 </div>
             )}
