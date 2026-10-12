@@ -49,9 +49,6 @@ export default function NetworkBadge({ isOnline, saveStatus, latencyMs, showLabe
     let label = ''
     if (showLabel) {
         if (tier === 'offline') label = 'Offline'
-        else if (saveStatus === 'saving') label = 'Menyimpan…'
-        else if (saveStatus === 'error') label = 'Gagal simpan'
-        else if (saveStatus === 'saved') label = 'Tersimpan'
     }
 
     return (

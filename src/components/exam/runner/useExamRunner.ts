@@ -459,6 +459,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     if (newEnds !== null && Number.isFinite(newEnds)
                         && oldEnds !== null && newEnds > oldEnds + 1_000) {
                         endsAtRef.current = newEnds
+                        setShowOfflineTimeoutModal(false)
                         const addedMin = Math.max(1, Math.round((newEnds - Math.max(oldEnds, Date.now() + offsetMsRef.current)) / 60_000))
                         setTimeExtension({ minutes: addedMin })
                         setTimeLeft(computeRemaining())
@@ -1036,6 +1037,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         try {
             if (!navigator.onLine) {
                 pendingSubmitRef.current = auto
+                setShowConfirmSubmit(false)
                 setShowOfflineTimeoutModal(true)
                 return
             }
@@ -1078,6 +1080,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 if (probeRes.status === 409) {
                     // Server sudah force-close (jawaban terselamatkan via K1 rescue)
                     clearLocalAnswers()
+                    setShowOfflineTimeoutModal(false)
                     router.replace(configRef.current.resultRoute(examId))
                     setSubmitting(false)
                     return
@@ -1116,6 +1119,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         } catch (error) {
             console.error('Error submitting:', error)
             pendingSubmitRef.current = auto
+            setShowConfirmSubmit(false)
             setShowOfflineTimeoutModal(true)
         } finally {
             // finally tetap dieksekusi walau try `return` dini (jalur extend di

@@ -129,9 +129,13 @@ export default function KerjakanKuisPage() {
     // LocalStorage helpers
     const saveAnswersToLocal = (answers: Record<string, string>) => {
         if (typeof window !== 'undefined') {
+            const existing = localStorage.getItem(`quiz_${quizId}_answers`)
+            let synced: Record<string, string> = {}
+            if (existing) {
+                try { synced = JSON.parse(existing)?.synced || {} } catch { /* korup */ }
+            }
             localStorage.setItem(`quiz_${quizId}_answers`, JSON.stringify({
-                answers,
-                lastSaved: new Date().toISOString()
+                answers, synced, lastSaved: new Date().toISOString()
             }))
         }
     }
@@ -152,6 +156,29 @@ export default function KerjakanKuisPage() {
     }
 
     const loadAnswersFromLocal = (): Record<string, string> => loadLocalDraft().answers
+
+    const loadSyncedSnapshot = (): Record<string, string> => {
+        if (typeof window !== 'undefined') {
+            const data = localStorage.getItem(`quiz_${quizId}_answers`)
+            if (data) {
+                try { return JSON.parse(data)?.synced || {} } catch { return {} }
+            }
+        }
+        return {}
+    }
+
+    const saveSyncedSnapshot = (synced: Record<string, string>) => {
+        if (typeof window !== 'undefined') {
+            const data = localStorage.getItem(`quiz_${quizId}_answers`)
+            let answers: Record<string, string> = {}
+            if (data) {
+                try { answers = JSON.parse(data)?.answers || {} } catch { /* korup */ }
+            }
+            localStorage.setItem(`quiz_${quizId}_answers`, JSON.stringify({
+                answers, synced, lastSaved: new Date().toISOString()
+            }))
+        }
+    }
 
     // 4b: Keepalive flush — fire-and-forget saat page unload / tab switch.
     const flushAnswersKeepalive = () => {
@@ -195,6 +222,7 @@ export default function KerjakanKuisPage() {
         const current = answersRef.current
         // Submission dibuat saat halaman dibuka (startTimeRef terisi) — tanpa itu belum ada yang bisa disimpan
         if (!startTimeRef.current) return
+        if (!navigator.onLine) return
 
         // Delta: kirim hanya soal dirty. Set dirty kosong (mis. tepat setelah
         // load sebelum resume) → fallback kirim semua (superset, server merge aman).
@@ -245,6 +273,11 @@ export default function KerjakanKuisPage() {
                 for (const p of payload) {
                     if (nowAnswers[p.question_id] === p.answer) dirty.delete(p.question_id)
                 }
+                const newSynced = { ...loadSyncedSnapshot() }
+                for (const p of payload) {
+                    if (nowAnswers[p.question_id] === p.answer) newSynced[p.question_id] = p.answer
+                }
+                saveSyncedSnapshot(newSynced)
             }
             setSaveStatus(res.ok ? 'saved' : 'error')
         } catch {
@@ -352,12 +385,16 @@ export default function KerjakanKuisPage() {
             if (res.status === 409 || alreadySubmitted) {
                 clearLocalAnswers()
                 pendingSubmitRef.current = null
+                setShowOfflineTimeoutModal(false)
                 router.replace(`/dashboard/siswa/kuis/${quizId}/hasil`)
             } else if (isTimeUp && res.ok) {
                 clearLocalAnswers()
                 pendingSubmitRef.current = null
+                setShowOfflineTimeoutModal(false)
                 router.replace(`/dashboard/siswa/kuis/${quizId}/hasil`)
             }
+
+            if (res.ok) setSaveStatus('saved')
 
             // 4f: Retry pending submit (manual) setelah sync berhasil
             if (pendingSubmitRef.current !== null) {
@@ -937,11 +974,6 @@ export default function KerjakanKuisPage() {
                         <p className="text-xs text-text-secondary">Total: {quiz.questions.length} Soal</p>
                     </div>
                     <div className="flex items-center gap-2 md:gap-3">
-                        {saveStatus !== 'idle' && (
-                            <span className={`text-[10px] font-bold ${saveStatus === 'error' ? 'text-red-500' : saveStatus === 'saved' ? 'text-green-500' : 'text-text-secondary'}`}>
-                                {saveStatus === 'saving' ? 'Menyimpan…' : saveStatus === 'saved' ? 'Tersimpan' : 'Gagal menyimpan'}
-                            </span>
-                        )}
                         <NetworkBadge isOnline={isOnline} />
                         <div className={`px-3 py-1.5 md:px-4 md:py-2 rounded-xl font-mono text-base md:text-xl font-bold shadow-lg relative ${timeLeft !== null && timeLeft < 60000 ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 dark:bg-surface-dark text-primary dark:text-primary-light'}`}>
                             {timeLeft !== null ? formatTime(timeLeft) : '--:--:--'}

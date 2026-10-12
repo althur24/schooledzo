@@ -200,7 +200,7 @@ export function ExamRunnerView({ state, mode = 'live' }: ExamRunnerViewProps) {
                     </div>
                     <div className="flex items-center justify-between md:justify-end gap-3 md:gap-6 flex-wrap">
                         {!isPreview && (
-                            <NetworkBadge isOnline={state.isOnline} saveStatus={state.saveStatus} latencyMs={state.lastLatencyMs} />
+                            <NetworkBadge isOnline={state.isOnline} />
                         )}
                         <ExamZoomControls
                             zoomLevel={zoom.zoomLevel}

@@ -7,6 +7,7 @@ interface DraftFound {
     kind: 'exam' | 'official' | 'quiz'
     examId: string
     label: string
+    examTitle: string
     answerCount: number
     rescueLink: string
 }
@@ -48,6 +49,7 @@ export default function ProactiveRescueBanner() {
                             found.push({
                                 key, kind: t.kind, examId,
                                 label: t.label,
+                                examTitle: t.label,
                                 answerCount: Object.keys(answers).length,
                                 rescueLink: t.kind === 'quiz'
                                     ? `/dashboard/siswa/kuis/${examId}`
@@ -69,7 +71,9 @@ export default function ProactiveRescueBanner() {
                 const subs = Array.isArray(data) ? data : []
                 const sub = subs[0]
                 // exam/official: is_submitted (boolean); quiz: submitted_at (non-null = submitted)
-                if (sub && (sub.is_submitted || sub.submitted_at)) return d
+                if (sub && (sub.is_submitted || sub.submitted_at)) {
+                    return { ...d, examTitle: sub.exam?.title || sub.quiz?.title || d.label }
+                }
                 return null
             } catch { return null }
         })).then(results => {
@@ -98,7 +102,7 @@ export default function ProactiveRescueBanner() {
                         {drafts.map(d => (
                             <li key={d.key}>
                                 <a href={d.rescueLink} className="text-xs text-amber-700 dark:text-amber-300 hover:underline font-medium">
-                                    • {d.label} ({d.answerCount} jawaban) → Kirim
+                                    • {d.examTitle} ({d.answerCount} jawaban) → Kirim
                                 </a>
                             </li>
                         ))}

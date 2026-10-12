@@ -203,11 +203,12 @@ async function main() {
     console.log(`  exam A submission ${subIdA?.slice(0, 8)} ends_at=${startBodyA?.ends_at}`)
 
     // EXAM B: untuk angle "manual submit + tab switch"
-    console.log('[fixture] exam B: durasi 5 menit, sisa ~30 dtk (untuk manual submit test)')
+    // start_time 3 menit lalu → sisa ~2 menit (section A makan ~50 dtk, perlu buffer)
+    console.log('[fixture] exam B: durasi 5 menit, sisa ~2 menit (untuk manual submit test)')
     const createResB = await api('/api/exams', guruTok, {
         method: 'POST',
         body: JSON.stringify({
-            title: `${U} Exam B Manual`, start_time: new Date(Date.now() - 270000).toISOString(),
+            title: `${U} Exam B Manual`, start_time: new Date(Date.now() - 180000).toISOString(),
             duration_minutes: 5, teaching_assignment_id: taA.id, is_randomized: false,
             max_violations: 3, show_results_immediately: true,
         }),
@@ -318,7 +319,7 @@ async function main() {
 
     console.log('[B1] Navigasi ke exam B, jawab online')
     await cdp.send('Page.navigate', { url: `http://localhost:${PROXY_PORT}/dashboard/siswa/ulangan/${examB.id}` })
-    await sleep(5000)
+    await sleep(7000)
     await evalInPage(cdp, `(() => {
         const btns = [...document.querySelectorAll('button')]
         const lanjut = btns.find(b => b.textContent.includes('Lanjutkan'))

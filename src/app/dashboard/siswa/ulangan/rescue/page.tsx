@@ -58,6 +58,7 @@ interface SubmissionInfo {
     is_submitted: boolean
     total_score: number | null
     max_score: number | null
+    examTitle?: string
 }
 
 export default function RescueDraftPage() {
@@ -126,7 +127,7 @@ export default function RescueDraftPage() {
                 setStatusByExam(p => ({
                     ...p,
                     [d.examId]: sub
-                        ? { id: sub.id, is_submitted: !!sub.is_submitted, total_score: sub.total_score, max_score: sub.max_score }
+                        ? { id: sub.id, is_submitted: !!sub.is_submitted, total_score: sub.total_score, max_score: sub.max_score, examTitle: sub.exam?.title || sub.official_exam?.title }
                         : 'no_submission'
                 }))
             } catch {
@@ -166,6 +167,8 @@ export default function RescueDraftPage() {
             })
             const data = await res.json().catch(() => null)
             if (res.ok) {
+                localStorage.removeItem(d.key)
+                setDrafts(prev => prev.filter(x => x.key !== d.key))
                 setResult({
                     ok: true,
                     text: data?.message || `Berhasil: ${data?.rescued ?? 0} jawaban terselamatkan.`
@@ -249,8 +252,14 @@ export default function RescueDraftPage() {
                             <div key={d.key} className="bg-white dark:bg-surface-dark border-2 border-amber-300 dark:border-amber-500/40 rounded-xl p-4 md:p-5 space-y-3">
                                 <div className="flex items-start justify-between gap-3">
                                     <div>
-                                        <p className="font-bold text-text-main dark:text-white">{d.label}</p>
-                                        <p className="text-xs text-text-secondary font-mono break-all">{d.examId}</p>
+                                        <p className="font-bold text-text-main dark:text-white">
+                                            {status && status !== 'fetch_error' && status !== 'no_submission' && status.examTitle
+                                                ? status.examTitle
+                                                : d.label}
+                                        </p>
+                                        <p className="text-xs text-text-secondary mt-1">
+                                            {d.label} · ID: <span className="font-mono break-all">{d.examId.slice(0, 8)}…</span>
+                                        </p>
                                         {d.lastSaved && (
                                             <p className="text-xs text-text-secondary mt-1">
                                                 Terakhir disimpan di perangkat: {fmtTime(d.lastSaved)}
