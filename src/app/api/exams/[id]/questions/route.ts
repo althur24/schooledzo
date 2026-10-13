@@ -11,6 +11,7 @@ import { syncDraftExamQuestions } from '@/lib/examBatch'
 import { resolveWindowExpiry } from '@/lib/examExpiry'
 import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { hasStartedSubmissions } from '@/lib/hasSubmissions'
 
 /**
  * Mirror soal ke sibling batch (draft) setelah mutasi sukses.
@@ -244,6 +245,16 @@ export async function POST(
             return NextResponse.json({ error: 'Ulangan sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
         }
 
+        // Lock soal setelah siswa pernah mulai mengerjakan — bahkan jika
+        // ditarik ke draft, perubahan soal merusak konsistensi nilai.
+        const { hasSubmissions: hasSubs } = await hasStartedSubmissions('exam_submissions', id)
+        if (hasSubs) {
+            const labels = await getMenuLabelsForSchool(schoolId)
+            return NextResponse.json({
+                error: `Tidak dapat mengubah soal — sudah ada siswa yang mengerjakan ${labels.ulangan.toLowerCase()} ini.`,
+            }, { status: 409 })
+        }
+
         const body = await request.json()
 
         // Reorder action: { reorder: [{ id, order_index }] } — batch update urutan soal
@@ -440,6 +451,16 @@ export async function PUT(
         // penghapusan soal memutus relasi jawaban tersimpan. Tarik ke draft dulu.
         if (examForYear?.is_active) {
             return NextResponse.json({ error: 'Ulangan sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
+        }
+
+        // Lock soal setelah siswa pernah mulai mengerjakan — bahkan jika
+        // ditarik ke draft, perubahan soal merusak konsistensi nilai.
+        const { hasSubmissions: hasSubsPut } = await hasStartedSubmissions('exam_submissions', id)
+        if (hasSubsPut) {
+            const labels = await getMenuLabelsForSchool(schoolId)
+            return NextResponse.json({
+                error: `Tidak dapat mengubah soal — sudah ada siswa yang mengerjakan ${labels.ulangan.toLowerCase()} ini.`,
+            }, { status: 409 })
         }
 
         const body = await request.json()

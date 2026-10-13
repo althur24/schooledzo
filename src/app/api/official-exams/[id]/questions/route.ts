@@ -7,6 +7,7 @@ import { logError } from '@/lib/logError'
 import { canManageOfficialExam, getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { resolveWindowExpiry } from '@/lib/examExpiry'
 import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
+import { hasStartedSubmissions } from '@/lib/hasSubmissions'
 
 // GET questions for an official exam
 export async function GET(
@@ -221,6 +222,15 @@ export async function POST(
             }
         }
 
+        // Lock soal setelah siswa pernah mulai mengerjakan — bahkan jika
+        // ditarik ke draft, perubahan soal merusak konsistensi nilai.
+        const { hasSubmissions: hasSubs } = await hasStartedSubmissions('official_exam_submissions', id)
+        if (hasSubs) {
+            return NextResponse.json({
+                error: 'Tidak dapat mengubah soal — sudah ada siswa yang mengerjakan ujian ini.',
+            }, { status: 409 })
+        }
+
         const body = await request.json()
         const questions = Array.isArray(body) ? body : (Array.isArray(body.questions) ? body.questions : [body])
 
@@ -357,6 +367,15 @@ export async function PUT(
             }
         }
 
+        // Lock soal setelah siswa pernah mulai mengerjakan — bahkan jika
+        // ditarik ke draft, perubahan soal merusak konsistensi nilai.
+        const { hasSubmissions: hasSubsPut } = await hasStartedSubmissions('official_exam_submissions', id)
+        if (hasSubsPut) {
+            return NextResponse.json({
+                error: 'Tidak dapat mengubah soal — sudah ada siswa yang mengerjakan ujian ini.',
+            }, { status: 409 })
+        }
+
         const body = await request.json()
         const { question_id, question_text, question_type, options, correct_answer, difficulty, points, image_url, passage_text, passage_audio_url, teacher_hots_claim, text_direction, content_format, tags } = body
 
@@ -450,6 +469,15 @@ export async function DELETE(
             if (examScope.is_active) {
                 return NextResponse.json({ error: 'Ujian sedang aktif — soal terkunci. Tarik ke draft untuk mengubah soal.' }, { status: 409 })
             }
+        }
+
+        // Lock soal setelah siswa pernah mulai mengerjakan — hapus soal
+        // memutus relasi jawaban tersimpan & merusak total_score snapshot.
+        const { hasSubmissions: hasSubsDel } = await hasStartedSubmissions('official_exam_submissions', id)
+        if (hasSubsDel) {
+            return NextResponse.json({
+                error: 'Tidak dapat menghapus soal — sudah ada siswa yang mengerjakan ujian ini.',
+            }, { status: 409 })
         }
 
         const { question_id } = await request.json()

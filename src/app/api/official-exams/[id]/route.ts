@@ -7,6 +7,7 @@ import { logError } from '@/lib/logError'
 import { canManageOfficialExam, getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { validateTargetClassIds } from '@/lib/targetClassValidation'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { hasStartedSubmissions } from '@/lib/hasSubmissions'
 
 // GET single official exam
 export async function GET(
@@ -105,6 +106,14 @@ export async function PUT(
             }
         }
 
+        // ── Lock settings setelah siswa mulai mengerjakan ──
+        // Setelah ada submission dengan started_at (siswa pernah buka ujian),
+        // field yang mempengaruhi konsistensi nilai TIDAK boleh diubah.
+        // Strategi: silent ignore — field terkunci tidak masuk updateData,
+        // field yang aman (title, description, show_results, results_released,
+        // is_active) tetap tersimpan. Mencegah "save all at once" break.
+        const { hasSubmissions: hasSubs } = await hasStartedSubmissions('official_exam_submissions', id)
+
         const body = await request.json()
         const {
             title, description, start_time, duration_minutes, window_end_time,
@@ -112,15 +121,26 @@ export async function PUT(
             target_class_ids, subject_id, show_results_immediately, results_released
         } = body
 
+        // Field yang di-lock saat ada submission — skip validasi & penulisan.
+        // Field yang tetap allow: title, description, show_results_immediately,
+        // results_released, is_active.
+        const effectiveTargetClassIds = hasSubs ? undefined : target_class_ids
+        const effectiveStartTime = hasSubs ? undefined : start_time
+        const effectiveDuration = hasSubs ? undefined : duration_minutes
+        const effectiveWindowEnd = hasSubs ? undefined : window_end_time
+        const effectiveIsRandomized = hasSubs ? undefined : is_randomized
+        const effectiveMaxViolations = hasSubs ? undefined : max_violations
+        const effectiveSubjectId = hasSubs ? undefined : subject_id
+
         // Validasi kelas target baru (bila diubah): wajib milik sekolah caller +
         // tahun ajaran exam — paritas guard POST create/duplicate (A1/A2).
-        if (target_class_ids !== undefined) {
+        if (effectiveTargetClassIds !== undefined) {
             const { data: examYear } = await supabase
                 .from('official_exams')
                 .select('academic_year_id')
                 .eq('id', id)
                 .single()
-            const targetValidation = await validateTargetClassIds(target_class_ids, ctx.schoolId ?? null, examYear?.academic_year_id ?? null)
+            const targetValidation = await validateTargetClassIds(effectiveTargetClassIds, ctx.schoolId ?? null, examYear?.academic_year_id ?? null)
             if (!targetValidation.ok) {
                 return NextResponse.json({ error: targetValidation.errorMessage }, { status: 400 })
             }
@@ -128,8 +148,8 @@ export async function PUT(
 
         // Validasi jendela waktu: jam tutup harus setelah jam buka (pakai start_time
         // baru bila ada, jika tidak cek start_time lama di DB)
-        if (window_end_time) {
-            let effectiveStart = start_time
+        if (effectiveWindowEnd) {
+            let effectiveStart = effectiveStartTime
             if (!effectiveStart) {
                 const { data: cur } = await supabase
                     .from('official_exams')
@@ -138,7 +158,7 @@ export async function PUT(
                     .single()
                 effectiveStart = cur?.start_time
             }
-            if (effectiveStart && new Date(window_end_time) <= new Date(effectiveStart)) {
+            if (effectiveStart && new Date(effectiveWindowEnd) <= new Date(effectiveStart)) {
                 return NextResponse.json({ error: 'Jam tutup jendela waktu harus setelah jam buka' }, { status: 400 })
             }
         }
@@ -157,14 +177,14 @@ export async function PUT(
         const updateData: any = { updated_at: new Date().toISOString() }
         if (title !== undefined) updateData.title = title
         if (description !== undefined) updateData.description = description
-        if (start_time !== undefined) updateData.start_time = start_time
-        if (duration_minutes !== undefined) updateData.duration_minutes = duration_minutes
-        if (window_end_time !== undefined) updateData.window_end_time = window_end_time || null
-        if (is_randomized !== undefined) updateData.is_randomized = is_randomized
+        if (effectiveStartTime !== undefined) updateData.start_time = effectiveStartTime
+        if (effectiveDuration !== undefined) updateData.duration_minutes = effectiveDuration
+        if (effectiveWindowEnd !== undefined) updateData.window_end_time = effectiveWindowEnd || null
+        if (effectiveIsRandomized !== undefined) updateData.is_randomized = effectiveIsRandomized
         if (is_active !== undefined) updateData.is_active = is_active
-        if (max_violations !== undefined) updateData.max_violations = max_violations
-        if (target_class_ids !== undefined) updateData.target_class_ids = target_class_ids
-        if (subject_id !== undefined) updateData.subject_id = subject_id
+        if (effectiveMaxViolations !== undefined) updateData.max_violations = effectiveMaxViolations
+        if (effectiveTargetClassIds !== undefined) updateData.target_class_ids = effectiveTargetClassIds
+        if (effectiveSubjectId !== undefined) updateData.subject_id = effectiveSubjectId
         if (show_results_immediately !== undefined) updateData.show_results_immediately = show_results_immediately
         if (results_released !== undefined) updateData.results_released = results_released
 

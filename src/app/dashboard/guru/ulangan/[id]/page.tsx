@@ -257,6 +257,7 @@ function EditExamPageInner() {
         show_results_immediately: true
     })
     const [savingSettings, setSavingSettings] = useState(false)
+    const [hasSubmissions, setHasSubmissions] = useState(false)
 
     // ── Kelola Kelas Paralel (Batch) — paritas tab Pengaturan admin/uts-uas ──
     // Modal Pengaturan guru menambah/hapus member batch SEBELUM publish. Kandidat
@@ -313,6 +314,15 @@ function EditExamPageInner() {
             const examData = await examRes.json()
             const questionsData = await questionsRes.json()
             setExam(examData)
+            // Cek apakah sudah ada siswa yang mulai mengerjakan (lock settings)
+            try {
+                const countsRes = await fetch('/api/exams/submission-counts')
+                if (countsRes.ok) {
+                    const counts = await countsRes.json()
+                    const entry = counts?.[examId]
+                    setHasSubmissions(entry ? (entry.total > 0) : false)
+                }
+            } catch { /* non-fatal */ }
             setQuestions(Array.isArray(questionsData) ? questionsData : [])
 
             if (examData?.teaching_assignment?.subject?.id) {
@@ -1683,8 +1693,8 @@ function EditExamPageInner() {
                         <div className="flex items-center gap-4 border-l border-secondary/20 pl-4">
                             <BalancePointsControl
                                 count={questions.length}
-                                disabled={!!exam?.is_active || !!exam?.pending_publish}
-                                disabledReason={exam?.is_active ? 'Soal terkunci saat aktif — tarik ke draft dulu' : 'Menunggu publish — tarik ke draft untuk mengubah soal'}
+                                disabled={!!exam?.is_active || !!exam?.pending_publish || hasSubmissions}
+                                disabledReason={exam?.is_active ? 'Soal terkunci saat aktif — tarik ke draft dulu' : hasSubmissions ? 'Sudah ada siswa yang mengerjakan — soal terkunci' : 'Menunggu publish — tarik ke draft untuk mengubah soal'}
                                 applying={balancing}
                                 onApply={handleBalancePoints}
                             />
@@ -1810,7 +1820,8 @@ function EditExamPageInner() {
                 <div className="relative inline-block" data-tutorial="exam-add-section">
                     <button
                         onClick={() => setShowAddDropdown(!showAddDropdown)}
-                        className="flex items-center gap-2 px-5 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 active:scale-95 transition-all shadow-md shadow-primary/20 cursor-pointer"
+                        disabled={hasSubmissions}
+                        className="flex items-center gap-2 px-5 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 active:scale-95 transition-all shadow-md shadow-primary/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Plus set="bold" primaryColor="currentColor" size={20} />
                         Tambah Soal
@@ -2200,7 +2211,7 @@ function EditExamPageInner() {
                                                     className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-40 disabled:cursor-not-allowed"
                                                     min={0.01}
                                                     step={0.01}
-                                                    disabled={!!exam?.is_active || !!exam?.pending_publish}
+                                                    disabled={!!exam?.is_active || !!exam?.pending_publish || hasSubmissions}
                                                 />
                                             </div>
                                             <span className="text-[10px] uppercase font-bold text-text-secondary mt-1">Poin</span>
@@ -2220,7 +2231,7 @@ function EditExamPageInner() {
                                                     fetchExam()
                                                 }
                                             }}
-                                            disabled={!!exam?.is_active || !!exam?.pending_publish}
+                                            disabled={!!exam?.is_active || !!exam?.pending_publish || hasSubmissions}
                                         />
 
                                         <button
@@ -2232,8 +2243,8 @@ function EditExamPageInner() {
                                                 })
                                             }}
                                             className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                                            disabled={!!exam?.is_active || !!exam?.pending_publish}
-                                            title={exam?.is_active ? 'Soal terkunci saat ulangan aktif — tarik ke draft dulu' : exam?.pending_publish ? 'Menunggu publish — tarik ke draft untuk mengubah soal' : 'Edit soal'}
+                                            disabled={!!exam?.is_active || !!exam?.pending_publish || hasSubmissions}
+                                            title={exam?.is_active ? 'Soal terkunci saat ulangan aktif — tarik ke draft dulu' : exam?.pending_publish ? 'Menunggu publish — tarik ke draft untuk mengubah soal' : hasSubmissions ? 'Sudah ada siswa yang mengerjakan — soal terkunci' : 'Edit soal'}
                                         >
                                             <Edit set="bold" primaryColor="currentColor" size={20} />
                                         </button>
@@ -2241,8 +2252,8 @@ function EditExamPageInner() {
                                         <button
                                             onClick={() => q.id && handleDeleteQuestion(q.id)}
                                             className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                                            disabled={!!exam?.is_active || !!exam?.pending_publish}
-                                            title={exam?.is_active ? 'Soal terkunci saat ulangan aktif — tarik ke draft dulu' : exam?.pending_publish ? 'Menunggu publish — tarik ke draft untuk menghapus soal' : 'Hapus soal'}
+                                            disabled={!!exam?.is_active || !!exam?.pending_publish || hasSubmissions}
+                                            title={exam?.is_active ? 'Soal terkunci saat ulangan aktif — tarik ke draft dulu' : exam?.pending_publish ? 'Menunggu publish — tarik ke draft untuk menghapus soal' : hasSubmissions ? 'Sudah ada siswa yang mengerjakan — soal terkunci' : 'Hapus soal'}
                                         >
                                             <Delete set="bold" primaryColor="currentColor" size={20} />
                                         </button>
@@ -3190,6 +3201,14 @@ function EditExamPageInner() {
                 title={`⚙️ Pengaturan ${labels.ulangan}`}
             >
                 <div className="space-y-4">
+                    {hasSubmissions && (
+                        <div className="flex items-center gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-xl text-amber-700 dark:text-amber-300">
+                            <Setting set="bold" primaryColor="currentColor" size={20} />
+                            <div className="text-sm font-medium">
+                                Pengaturan Terkunci — sudah ada siswa yang mengerjakan {labels.ulangan.toLowerCase()} ini. Untuk waktu, gunakan Tambah Waktu di Monitor Live.
+                            </div>
+                        </div>
+                    )}
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul {labels.ulangan}</label>
                         <input
@@ -3225,6 +3244,7 @@ function EditExamPageInner() {
                                 window_end_time: v.mode === 'window' ? v.window_end_time : ''
                             })}
                             durationRequired
+                            disabled={hasSubmissions}
                         />
                     </div>
                     {/* Kelola Kelas Paralel (Batch) — paritas tab Pengaturan admin.
@@ -3312,7 +3332,8 @@ function EditExamPageInner() {
                             type="number"
                             value={editForm.max_violations}
                             onChange={(e) => setEditForm({ ...editForm, max_violations: parseInt(e.target.value) || 3 })}
-                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            disabled={hasSubmissions}
+                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-not-allowed"
                         />
                         <p className="text-xs text-text-secondary mt-1">Siswa akan auto-submit jika keluar tab melebihi batas ini</p>
                     </div>
@@ -3322,7 +3343,8 @@ function EditExamPageInner() {
                             id="edit-randomize"
                             checked={editForm.is_randomized}
                             onChange={(e) => setEditForm({ ...editForm, is_randomized: e.target.checked })}
-                            className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
+                            disabled={hasSubmissions}
+                            className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
                         />
                         <label htmlFor="edit-randomize" className="text-sm font-medium text-text-main dark:text-white cursor-pointer select-none">Acak urutan soal per siswa</label>
                     </div>

@@ -7,6 +7,7 @@ import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncExamBatch } from '@/lib/examBatch'
 import { canManageExamCoTaught, getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
+import { hasStartedSubmissions } from '@/lib/hasSubmissions'
 
 // GET single exam
 export async function GET(
@@ -144,13 +145,28 @@ export async function PUT(
             return NextResponse.json({ error: `Anda tidak memiliki akses ke ${labels.ulangan.toLowerCase()} ini` }, { status: 403 })
         }
 
+        // ── Lock settings setelah siswa mulai mengerjakan ──
+        // Setelah ada submission dengan started_at (siswa pernah buka ujian),
+        // field yang mempengaruhi konsistensi nilai TIDAK boleh diubah.
+        // Strategi: silent ignore — field terkunci tidak masuk updateData,
+        // field yang aman tetap tersimpan. Mencegah "save all at once" break.
+        const { hasSubmissions: hasSubs } = await hasStartedSubmissions('exam_submissions', id)
+
         const body = await request.json()
         const { title, description, start_time, duration_minutes, window_end_time, is_randomized, is_active, max_violations, show_results_immediately, results_released, batch_id } = body
 
+        // Field yang di-lock saat ada submission — skip validasi & penulisan.
+        const effectiveStartTime = hasSubs ? undefined : start_time
+        const effectiveDuration = hasSubs ? undefined : duration_minutes
+        const effectiveWindowEnd = hasSubs ? undefined : window_end_time
+        const effectiveIsRandomized = hasSubs ? undefined : is_randomized
+        const effectiveMaxViolations = hasSubs ? undefined : max_violations
+        const effectiveBatchId = hasSubs ? undefined : batch_id
+
         // Validasi jendela waktu: jam tutup harus setelah jam buka
-        if (window_end_time) {
-            const effectiveStart = start_time ?? examForYear?.start_time
-            if (effectiveStart && new Date(window_end_time) <= new Date(effectiveStart)) {
+        if (effectiveWindowEnd) {
+            const effectiveStart = effectiveStartTime ?? examForYear?.start_time
+            if (effectiveStart && new Date(effectiveWindowEnd) <= new Date(effectiveStart)) {
                 return NextResponse.json({ error: 'Jam tutup jendela waktu harus setelah jam buka' }, { status: 400 })
             }
         }
@@ -227,13 +243,13 @@ export async function PUT(
         // durasi 0/negatif membuat seluruh kelas tidak bisa memulai (start-gate
         // menolak), sementara data absurd tersimpan diam-diam (modal create sudah
         // memblokir < 5 di client; settings modal & API belum).
-        if (duration_minutes !== undefined
-            && (typeof duration_minutes !== 'number' || !Number.isFinite(duration_minutes) || duration_minutes < 5)) {
+        if (effectiveDuration !== undefined
+            && (typeof effectiveDuration !== 'number' || !Number.isFinite(effectiveDuration) || effectiveDuration < 5)) {
             return NextResponse.json({ error: 'Durasi pengerjaan minimal 5 menit' }, { status: 400 })
         }
         // M7: max_violations wajar (1..10 — paritas min/max di form)
-        if (max_violations !== undefined
-            && (typeof max_violations !== 'number' || !Number.isFinite(max_violations) || max_violations < 1 || max_violations > 10)) {
+        if (effectiveMaxViolations !== undefined
+            && (typeof effectiveMaxViolations !== 'number' || !Number.isFinite(effectiveMaxViolations) || effectiveMaxViolations < 1 || effectiveMaxViolations > 10)) {
             return NextResponse.json({ error: 'Maksimal pelanggaran harus antara 1 sampai 10' }, { status: 400 })
         }
 
@@ -246,9 +262,9 @@ export async function PUT(
         // kelas member batch (co-teacher). Mencegah exam ulangan B menyerobot
         // batch guru A → syncDraft menyalin soal guru A ke exam B (ekfiltrasi).
         let bindBatch = false
-        if (batch_id !== undefined) {
+        if (effectiveBatchId !== undefined) {
             if (examForYear?.batch_id) {
-                if (examForYear.batch_id !== batch_id) {
+                if (examForYear.batch_id !== effectiveBatchId) {
                     return NextResponse.json({ error: 'Ulangan ini sudah terikat kelas paralel lain' }, { status: 409 })
                 }
                 // batch_id sama → no-op (idempoten)
@@ -261,7 +277,7 @@ export async function PUT(
                 const { data: batchMembers } = await supabase
                     .from('exams')
                     .select('id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id)')
-                    .eq('batch_id', batch_id)
+                    .eq('batch_id', effectiveBatchId)
                 type BatchMember = { id: string; teaching_assignment?: { teacher_id: string; subject_id: string; class_id: string } | { teacher_id: string; subject_id: string; class_id: string }[] }
                 const anchorFirst = (batchMembers || [])[0] as BatchMember | undefined
                 const anchorTaRaw = anchorFirst?.teaching_assignment
@@ -287,10 +303,10 @@ export async function PUT(
 
         if (title !== undefined) updateData.title = title
         if (description !== undefined) updateData.description = description
-        if (start_time !== undefined) updateData.start_time = start_time
-        if (duration_minutes !== undefined) updateData.duration_minutes = duration_minutes
-        if (window_end_time !== undefined) updateData.window_end_time = window_end_time || null
-        if (is_randomized !== undefined) updateData.is_randomized = is_randomized
+        if (effectiveStartTime !== undefined) updateData.start_time = effectiveStartTime
+        if (effectiveDuration !== undefined) updateData.duration_minutes = effectiveDuration
+        if (effectiveWindowEnd !== undefined) updateData.window_end_time = effectiveWindowEnd || null
+        if (effectiveIsRandomized !== undefined) updateData.is_randomized = effectiveIsRandomized
         if (is_active !== undefined) updateData.is_active = finalIsActive
         if (show_results_immediately !== undefined) updateData.show_results_immediately = show_results_immediately
         if (results_released !== undefined) updateData.results_released = results_released
@@ -300,8 +316,8 @@ export async function PUT(
             updateData.pending_publish = finalPendingPublish
         }
 
-        if (max_violations !== undefined) updateData.max_violations = max_violations
-        if (bindBatch) updateData.batch_id = batch_id
+        if (effectiveMaxViolations !== undefined) updateData.max_violations = effectiveMaxViolations
+        if (bindBatch) updateData.batch_id = effectiveBatchId
 
         // ── H1 (audit eksternal): tolak unpublish bila sudah ada yang mengumpulkan ──
         // Alur "tarik ke draft untuk edit soal" sah, TAPI setelah ada submission

@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
-        if (user.role !== 'ADMIN') {
+        if (user.role !== 'ADMIN' && user.role !== 'GURU') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
         if (!schoolId) {

@@ -182,6 +182,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         target_class_ids: [] as string[]
     })
     const [settingsSaving, setSettingsSaving] = useState(false)
+    const [hasSubmissions, setHasSubmissions] = useState(false)
 
     // Results
     const [submissions, setSubmissions] = useState<any[]>([])
@@ -271,6 +272,16 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
             const res = await fetch(`${examApi}/${examId}`)
             const data = await res.json()
             setExam(data)
+            // Cek apakah sudah ada siswa yang mulai mengerjakan (lock settings).
+            // Pakai endpoint submission-counts (di-cache 30 dtk, tersedia utk admin & guru).
+            try {
+                const countsRes = await fetch(`${examApi}/submission-counts`)
+                if (countsRes.ok) {
+                    const counts = await countsRes.json()
+                    const entry = counts?.[examId]
+                    setHasSubmissions(entry ? (entry.total > 0) : false)
+                }
+            } catch { /* non-fatal — default false */ }
             setSettingsForm({
                 title: data.title || '',
                 description: data.description || '',
@@ -1015,8 +1026,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     <div className="flex items-center gap-4 border-l border-secondary/20 pl-4">
                         <BalancePointsControl
                             count={questions.length}
-                            disabled={!!exam.is_active || !!exam.pending_publish}
-                            disabledReason={exam.is_active ? 'Soal terkunci saat aktif — tarik ke draft dulu' : 'Menunggu review — tarik ke draft untuk mengubah soal'}
+                            disabled={!!exam.is_active || !!exam.pending_publish || hasSubmissions}
+                            disabledReason={exam.is_active ? 'Soal terkunci saat aktif — tarik ke draft dulu' : hasSubmissions ? 'Sudah ada siswa yang mengerjakan — soal terkunci' : 'Menunggu review — tarik ke draft untuk mengubah soal'}
                             applying={balancing}
                             onApply={handleBalancePoints}
                         />
@@ -1076,7 +1087,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     {/* Dropdown Tambah Soal */}
                     {soalMode === 'list' && (
                         <div className="relative inline-block">
-                            <button onClick={() => setShowAddDropdown(!showAddDropdown)} className="flex items-center gap-2 px-5 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 active:scale-95 transition-all shadow-md shadow-primary/20 cursor-pointer">
+                            <button onClick={() => setShowAddDropdown(!showAddDropdown)} disabled={hasSubmissions} className="flex items-center gap-2 px-5 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 active:scale-95 transition-all shadow-md shadow-primary/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
                                 <Plus set="bold" primaryColor="currentColor" size={20} /> Tambah Soal
                             </button>
                             {showAddDropdown && (<>
@@ -1184,7 +1195,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                         </div>
                                         <div className="flex flex-col gap-3 items-end border-l border-secondary/10 pl-5">
                                             <div className="flex flex-col items-center">
-                                                <input type="number" value={q.points} onChange={(e) => { const v = Math.round((parseFloat(e.target.value) || 0) * 100) / 100; setQuestions(questions.map((qq, i) => i === idx ? { ...qq, points: v } : qq)) }} onBlur={async (e) => { if (q.id) { await fetch(`${examApi}/${examId}/questions`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: q.id, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 }) }) } }} className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary" min={0.01} step={0.01} disabled={exam?.is_active} />
+                                                <input type="number" value={q.points} onChange={(e) => { const v = Math.round((parseFloat(e.target.value) || 0) * 100) / 100; setQuestions(questions.map((qq, i) => i === idx ? { ...qq, points: v } : qq)) }} onBlur={async (e) => { if (q.id) { await fetch(`${examApi}/${examId}/questions`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: q.id, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 }) }) }                                                     }} className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary" min={0.01} step={0.01} disabled={exam?.is_active || hasSubmissions} />
                                                 <span className="text-[10px] uppercase font-bold text-text-secondary mt-1">Poin</span>
                                             </div>
                                             <div className="w-full h-px bg-secondary/10 my-1"></div>
@@ -1200,12 +1211,12 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                                         fetchQuestions()
                                                     }
                                                 }}
-                                                disabled={exam?.is_active}
+                                                disabled={exam?.is_active || hasSubmissions}
                                             />
-                                            <button onClick={() => { setEditingQuestionId(q.id); setEditQuestionForm({ ...q, question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text), options: q.options ? q.options.map((opt: string) => q.content_format === 'html' ? opt : plainToHtml(opt)) : null, passage_text: q.passage_text ? (q.content_format === 'html' ? q.passage_text : plainToHtml(q.passage_text)) : null, content_format: 'html' }) }} className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors" disabled={exam?.is_active} title="Edit soal">
+                                            <button onClick={() => { setEditingQuestionId(q.id); setEditQuestionForm({ ...q, question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text), options: q.options ? q.options.map((opt: string) => q.content_format === 'html' ? opt : plainToHtml(opt)) : null, passage_text: q.passage_text ? (q.content_format === 'html' ? q.passage_text : plainToHtml(q.passage_text)) : null, content_format: 'html' }) }} className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors" disabled={exam?.is_active || hasSubmissions} title="Edit soal">
                                                 <Edit set="bold" primaryColor="currentColor" size={20} />
                                             </button>
-                                            <button onClick={() => handleDeleteQuestion(q.id)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors" disabled={exam?.is_active}>
+                                            <button onClick={() => handleDeleteQuestion(q.id)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors" disabled={exam?.is_active || hasSubmissions}>
                                                 <Delete set="bold" primaryColor="currentColor" size={20} />
                                             </button>
                                         </div>
@@ -1220,6 +1231,14 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
             {/* ===== TAB: PENGATURAN ===== */}
             {activeTab === 'pengaturan' && (
                 <Card padding="p-4 md:p-6" className="space-y-5">
+                    {hasSubmissions && (
+                        <div className="flex items-center gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-xl text-amber-700 dark:text-amber-300">
+                            <Settings className="w-5 h-5 flex-shrink-0" />
+                            <div className="text-sm font-medium">
+                                Pengaturan Terkunci — sudah ada siswa yang mengerjakan ujian ini. Untuk waktu, gunakan Tambah Waktu di Monitor Live.
+                            </div>
+                        </div>
+                    )}
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ujian</label>
                         <input type="text" value={settingsForm.title} onChange={(e) => setSettingsForm({ ...settingsForm, title: e.target.value })} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" />
@@ -1245,15 +1264,16 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                 window_end_time: v.mode === 'window' ? v.window_end_time : ''
                             })}
                             durationRequired
+                            disabled={hasSubmissions}
                         />
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran (auto-submit)</label>
-                        <input type="number" value={settingsForm.max_violations} onChange={(e) => setSettingsForm({ ...settingsForm, max_violations: parseInt(e.target.value) || 3 })} min={1} max={10} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" />
+                        <input type="number" value={settingsForm.max_violations} onChange={(e) => setSettingsForm({ ...settingsForm, max_violations: parseInt(e.target.value) || 3 })} min={1} max={10} disabled={hasSubmissions} className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-not-allowed" />
                     </div>
                     <div className="flex flex-col gap-2">
                         <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
-                            <input type="checkbox" id="settings_randomize" checked={settingsForm.is_randomized} onChange={(e) => setSettingsForm({ ...settingsForm, is_randomized: e.target.checked })} className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary" />
+                            <input type="checkbox" id="settings_randomize" checked={settingsForm.is_randomized} onChange={(e) => setSettingsForm({ ...settingsForm, is_randomized: e.target.checked })} disabled={hasSubmissions} className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed" />
                             <label htmlFor="settings_randomize" className="text-sm font-medium text-text-main dark:text-white cursor-pointer">Acak urutan soal per siswa</label>
                         </div>
                         <div className="flex items-center gap-2 p-3 bg-secondary/5 rounded-xl border border-secondary/10">
@@ -1281,13 +1301,14 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                 return (
                                     <button
                                         key={c.id}
+                                        disabled={hasSubmissions}
                                         onClick={() => setSettingsForm(prev => ({
                                             ...prev,
                                             target_class_ids: selected
                                                 ? prev.target_class_ids.filter(id => id !== c.id)
                                                 : [...prev.target_class_ids, c.id]
                                         }))}
-                                        className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${selected ? 'bg-primary text-white' : 'bg-secondary/5 text-text-secondary hover:bg-secondary/10'}`}
+                                        className={`px-3 py-2 rounded-lg text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${selected ? 'bg-primary text-white' : 'bg-secondary/5 text-text-secondary hover:bg-secondary/10'}`}
                                     >
                                         {c.name}
                                     </button>
