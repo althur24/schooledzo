@@ -908,6 +908,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     ...(!isUlangan && { target_class_ids: settingsForm.target_class_ids })
                 } : null)
                 showToast('Pengaturan berhasil disimpan!', 'success')
+            } else {
+                const err = await res.json().catch(() => null)
+                showToast(err?.error || 'Gagal menyimpan pengaturan.', 'error')
             }
         } finally { setSettingsSaving(false) }
     }

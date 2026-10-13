@@ -377,17 +377,44 @@ export async function PUT(
         // propagasi → guru set 5 di 1 member, 9 kelas lain tetap 3 → siswa
         // dipaksa-submit di pelanggaran ke-3 padahal batas 5 → nilai 0.
         // Kategori batch (wajib seragam): jadwal + aturan + tampilan hasil.
+        //
+        // LOCK GUARD: bila ada sibling di batch yang sudah punya submission
+        // (started_at), field terkunci (jadwal + aturan) TIDAK di-propagate —
+        // hanya field aman (show_results_immediately) yang menular. Mencegah
+        // bypass lock: guru PUT member B (belum ada siswa) → propagate ke
+        // member A (sudah ada siswa) → setting A berubah tanpa guard.
         const BATCH_SYNC_KEYS_EXAM = [
             'start_time', 'duration_minutes', 'window_end_time',   // jadwal
             'max_violations', 'is_randomized',                      // aturan
             'show_results_immediately',                              // tampilan
         ] as const
+        const BATCH_LOCKED_KEYS_EXAM = [
+            'start_time', 'duration_minutes', 'window_end_time',
+            'max_violations', 'is_randomized',
+        ] as const
         const batchTouched = BATCH_SYNC_KEYS_EXAM.some(k => (updateData as any)[k] !== undefined)
         if (data?.batch_id && batchTouched) {
             try {
+                // Cek apakah ada sibling di batch yang sudah punya siswa mulai
+                const { data: batchMembers } = await supabase
+                    .from('exams')
+                    .select('id')
+                    .eq('batch_id', data.batch_id)
+                const memberIds = (batchMembers || []).map((m: any) => m.id)
+                const { count: siblingSubsCount } = await supabase
+                    .from('exam_submissions')
+                    .select('id', { count: 'exact', head: true })
+                    .in('exam_id', memberIds)
+                    .not('started_at', 'is', null)
+                const anySiblingHasSubs = (siblingSubsCount || 0) > 0
+
                 const siblingSync: Record<string, unknown> = {}
                 for (const k of BATCH_SYNC_KEYS_EXAM) {
-                    if ((updateData as any)[k] !== undefined) siblingSync[k] = (updateData as any)[k]
+                    if ((updateData as any)[k] !== undefined) {
+                        // Skip locked fields jika ada sibling dengan submission
+                        if (anySiblingHasSubs && (BATCH_LOCKED_KEYS_EXAM as readonly string[]).includes(k)) continue
+                        siblingSync[k] = (updateData as any)[k]
+                    }
                 }
                 const { error: timingErr } = await supabase
                     .from('exams')
