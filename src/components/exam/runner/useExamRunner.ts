@@ -460,6 +460,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                         && oldEnds !== null && newEnds > oldEnds + 1_000) {
                         endsAtRef.current = newEnds
                         setShowOfflineTimeoutModal(false)
+                        pendingSubmitRef.current = null
                         const addedMin = Math.max(1, Math.round((newEnds - Math.max(oldEnds, Date.now() + offsetMsRef.current)) / 60_000))
                         setTimeExtension({ minutes: addedMin })
                         setTimeLeft(computeRemaining())
@@ -1081,6 +1082,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     // Server sudah force-close (jawaban terselamatkan via K1 rescue)
                     clearLocalAnswers()
                     setShowOfflineTimeoutModal(false)
+                    pendingSubmitRef.current = null
                     router.replace(configRef.current.resultRoute(examId))
                     setSubmitting(false)
                     return
