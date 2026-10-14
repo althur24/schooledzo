@@ -321,8 +321,10 @@ function EditExamPageInner() {
                     const counts = await countsRes.json()
                     const entry = counts?.[examId]
                     setHasSubmissions(entry ? (entry.total > 0) : false)
+                } else {
+                    setHasSubmissions(true)
                 }
-            } catch { /* non-fatal */ }
+            } catch { setHasSubmissions(true) }
             setQuestions(Array.isArray(questionsData) ? questionsData : [])
 
             if (examData?.teaching_assignment?.subject?.id) {
@@ -361,6 +363,7 @@ function EditExamPageInner() {
     }, [siblingParam, examId])
 
     useEffect(() => {
+        setHasSubmissions(false)
         fetchExam()
     }, [fetchExam])
 
@@ -1177,11 +1180,16 @@ function EditExamPageInner() {
                     bank_status: q.status
                 }))
 
-            await fetch(`/api/exams/${examId}/questions`, {
+            const res = await fetch(`/api/exams/${examId}/questions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ questions: selectedQuestions })
             })
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}))
+                setAlertInfo({ type: 'error', title: 'Gagal', message: errData?.error || 'Gagal menambah soal dari bank.' })
+                return
+            }
 
             setSelectedBankIds(new Set())
             setMode('list')

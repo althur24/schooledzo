@@ -401,12 +401,17 @@ export async function PUT(
                     .select('id')
                     .eq('batch_id', data.batch_id)
                 const memberIds = (batchMembers || []).map((m: any) => m.id)
-                const { count: siblingSubsCount } = await supabase
+                const { count: siblingSubsCount, error: subsErr } = await supabase
                     .from('exam_submissions')
                     .select('id', { count: 'exact', head: true })
                     .in('exam_id', memberIds)
                     .not('started_at', 'is', null)
-                const anySiblingHasSubs = (siblingSubsCount || 0) > 0
+                if (subsErr) {
+                    // Fail-closed: bila query error, anggap ADA submission —
+                    // jangan propagate locked fields saat tak yakin.
+                    console.error('[exam][batch-sync] gagal cek submission sibling:', subsErr)
+                }
+                const anySiblingHasSubs = subsErr ? true : ((siblingSubsCount || 0) > 0)
 
                 const siblingSync: Record<string, unknown> = {}
                 for (const k of BATCH_SYNC_KEYS_EXAM) {
@@ -416,6 +421,7 @@ export async function PUT(
                         siblingSync[k] = (updateData as any)[k]
                     }
                 }
+                if (Object.keys(siblingSync).length === 0) return
                 const { error: timingErr } = await supabase
                     .from('exams')
                     .update({ ...siblingSync, updated_at: new Date().toISOString() })

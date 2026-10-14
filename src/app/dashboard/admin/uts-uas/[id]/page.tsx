@@ -280,8 +280,10 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     const counts = await countsRes.json()
                     const entry = counts?.[examId]
                     setHasSubmissions(entry ? (entry.total > 0) : false)
+                } else {
+                    setHasSubmissions(true)
                 }
-            } catch { /* non-fatal — default false */ }
+            } catch { setHasSubmissions(true) }
             setSettingsForm({
                 title: data.title || '',
                 description: data.description || '',
@@ -323,6 +325,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     }, [examId, examApi])
 
     useEffect(() => {
+        setHasSubmissions(false)
         fetchExam()
         fetchQuestions()
         fetch('/api/school-settings').then(r => r.ok ? r.json() : null).then(d => {
@@ -623,7 +626,12 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     text_direction: q.text_direction || 'ltr', content_format: 'html',
                     gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined
                 }))
-                await postQuestions({ questions: questionsToSave })
+                const res = await postQuestions({ questions: questionsToSave })
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => null)
+                    showToast(errData?.error || 'Gagal menambah soal.', 'error')
+                    return
+                }
                 setPassageText(''); setPassageAudioUrl('')
                 setPassageQuestions([{ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: null, passage_text: null, text_direction: 'ltr', content_format: 'html' }])
                 setIsPassageMode(false); setSoalMode('list'); fetchQuestions()
@@ -633,7 +641,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         if (!manualForm.question_text) return
         setSaving(true)
         try {
-            await postQuestions({
+            const res = await postQuestions({
                 question_text: manualForm.question_text, question_type: manualForm.question_type,
                 options: ['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(manualForm.question_type) ? manualForm.options : null,
                 correct_answer: manualForm.correct_answer || null, points: manualForm.points,
@@ -643,6 +651,11 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 tags: manualForm.tags || [],
                 gk_grading_mode: manualForm.question_type === 'MULTIPLE_ANSWER' ? (manualForm.gk_grading_mode ?? 'PROPORTIONAL') : undefined
             })
+            if (!res.ok) {
+                const errData = await res.json().catch(() => null)
+                showToast(errData?.error || 'Gagal menambah soal.', 'error')
+                return
+            }
             setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false, text_direction: 'ltr', content_format: 'html', tags: [], gk_grading_mode: 'PROPORTIONAL' })
             setSoalMode('list'); fetchQuestions()
         } finally { setSaving(false) }
@@ -654,7 +667,13 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
             title: 'Hapus Soal',
             message: 'Yakin ingin menghapus soal ini?',
             onConfirm: async () => {
-                await deleteQuestion(questionId)
+                const res = await deleteQuestion(questionId)
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => null)
+                    showToast(errData?.error || 'Gagal menghapus soal.', 'error')
+                    setConfirmDialog(null)
+                    return
+                }
                 fetchQuestions()
                 setConfirmDialog(null)
             }
@@ -668,10 +687,20 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
             title: 'Hapus Soal',
             message: `Yakin ingin menghapus ${selectedQuestionIds.size} soal?`,
             onConfirm: async () => {
+                let failed = 0
                 for (const qId of selectedQuestionIds) {
-                    await deleteQuestion(qId)
+                    const res = await deleteQuestion(qId)
+                    if (!res.ok) {
+                        failed++
+                        const errData = await res.json().catch(() => null)
+                        showToast(errData?.error || 'Gagal menghapus sebagian soal.', 'error')
+                        break
+                    }
                 }
-                setSelectedQuestionIds(new Set()); setIsBulkSelectMode(false); fetchQuestions()
+                if (failed === 0) {
+                    setSelectedQuestionIds(new Set()); setIsBulkSelectMode(false)
+                }
+                fetchQuestions()
                 setConfirmDialog(null)
             }
         })
@@ -682,7 +711,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         if (!editQuestionForm || !editingQuestionId) return
         setSaving(true)
         try {
-            await fetch(`${examApi}/${examId}/questions`, {
+            const res = await fetch(`${examApi}/${examId}/questions`, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     question_id: editingQuestionId, question_text: editQuestionForm.question_text,
@@ -700,6 +729,11 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     gk_grading_mode: editQuestionForm.question_type === 'MULTIPLE_ANSWER' ? (editQuestionForm.gk_grading_mode ?? 'PROPORTIONAL') : undefined
                 })
             })
+            if (!res.ok) {
+                const errData = await res.json().catch(() => null)
+                showToast(errData?.error || 'Gagal menyimpan perubahan soal.', 'error')
+                return
+            }
             setEditingQuestionId(null); setEditQuestionForm(null); fetchQuestions()
         } finally { setSaving(false) }
     }
@@ -733,7 +767,12 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     gk_grading_mode: q.question_type === 'MULTIPLE_ANSWER' ? (q.gk_grading_mode ?? 'PROPORTIONAL') : undefined,
                     bank_status: q.status
                 }))
-            await postQuestions({ questions: sel })
+            const res = await postQuestions({ questions: sel })
+            if (!res.ok) {
+                const errData = await res.json().catch(() => null)
+                showToast(errData?.error || 'Gagal menambah soal dari bank.', 'error')
+                return
+            }
             setSelectedBankIds(new Set()); setSoalMode('list'); fetchQuestions()
         } finally { setSaving(false) }
     }
@@ -874,6 +913,16 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
 
     // Save settings
     const handleSaveSettings = async () => {
+        if (!settingsForm.title || !settingsForm.start_time) {
+            showToast('Judul dan waktu mulai wajib diisi.', 'warning'); return
+        }
+        if (settingsForm.schedule_mode === 'window' && !settingsForm.window_end_time) {
+            showToast('Jam tutup jendela waktu wajib diisi.', 'warning'); return
+        }
+        const durationNum = Number(settingsForm.duration_minutes)
+        if (!Number.isFinite(durationNum) || durationNum < 5) {
+            showToast('Durasi pengerjaan minimal 5 menit.', 'warning'); return
+        }
         setSettingsSaving(true)
         try {
             const localDate = new Date(settingsForm.start_time)
@@ -888,30 +937,18 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     window_end_time: windowEndIso,
                     is_randomized: settingsForm.is_randomized, max_violations: settingsForm.max_violations,
                     show_results_immediately: settingsForm.show_results_immediately,
-                    // Kelas target hanya dimiliki official (ulangan satu kelas per teaching assignment)
                     ...(isUlangan ? {} : { target_class_ids: settingsForm.target_class_ids })
                 })
             })
             if (res.ok) {
-                // Merge skalar saja — respons PUT exams membawa teaching_assignment
-                // tipis yang akan menimpa data guru/kelas lengkap bila di-spread mentah
-                setExam(prev => prev ? {
-                    ...prev,
-                    title: settingsForm.title,
-                    description: settingsForm.description,
-                    start_time: localDate.toISOString(),
-                    duration_minutes: settingsForm.duration_minutes,
-                    window_end_time: windowEndIso,
-                    is_randomized: settingsForm.is_randomized,
-                    max_violations: settingsForm.max_violations,
-                    show_results_immediately: settingsForm.show_results_immediately,
-                    ...(!isUlangan && { target_class_ids: settingsForm.target_class_ids })
-                } : null)
                 showToast('Pengaturan berhasil disimpan!', 'success')
+                await fetchExam()
             } else {
                 const err = await res.json().catch(() => null)
                 showToast(err?.error || 'Gagal menyimpan pengaturan.', 'error')
             }
+        } catch {
+            showToast('Gagal menyimpan pengaturan. Periksa koneksi internet.', 'error')
         } finally { setSettingsSaving(false) }
     }
 
@@ -1198,7 +1235,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                         </div>
                                         <div className="flex flex-col gap-3 items-end border-l border-secondary/10 pl-5">
                                             <div className="flex flex-col items-center">
-                                                <input type="number" value={q.points} onChange={(e) => { const v = Math.round((parseFloat(e.target.value) || 0) * 100) / 100; setQuestions(questions.map((qq, i) => i === idx ? { ...qq, points: v } : qq)) }} onBlur={async (e) => { if (q.id) { await fetch(`${examApi}/${examId}/questions`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: q.id, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 }) }) }                                                     }} className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary" min={0.01} step={0.01} disabled={exam?.is_active || hasSubmissions} />
+                                                <input type="number" value={q.points} onChange={(e) => { const v = Math.round((parseFloat(e.target.value) || 0) * 100) / 100; setQuestions(questions.map((qq, i) => i === idx ? { ...qq, points: v } : qq)) }} onBlur={async (e) => { if (q.id) { const res = await fetch(`${examApi}/${examId}/questions`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: q.id, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 }) }); if (!res.ok) { showToast('Gagal menyimpan poin.', 'error'); fetchQuestions() } } }} className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary" min={0.01} step={0.01} disabled={exam?.is_active || hasSubmissions} />
                                                 <span className="text-[10px] uppercase font-bold text-text-secondary mt-1">Poin</span>
                                             </div>
                                             <div className="w-full h-px bg-secondary/10 my-1"></div>
