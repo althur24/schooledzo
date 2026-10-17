@@ -5,13 +5,13 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import type { DropdownMenuItem } from '@/components/ui/DropdownMenu'
 import TimeWindowFields from '@/components/TimeWindowFields'
-import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
+import { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import DailyExamCard from '@/components/exam/DailyExamCard'
 import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
-import { round2, formatScore } from '@/lib/formatScore'
 import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
 import ShowDraftsToggle from '@/components/ShowDraftsToggle'
+import DuplicateRemedialModal from '@/components/exam/DuplicateRemedialModal'
 import { Plus, ChevronDown } from 'react-iconly'
 import { Loader2, Activity, Edit3, Trash2, GraduationCap, BarChart3, Copy, RefreshCw } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
@@ -1045,7 +1045,7 @@ function AdminUtsUasPageInner() {
                                 onClick: () => router.push(`/dashboard/admin/uts-uas/${exam.id}#hasil`),
                             },
                             {
-                                label: 'Duplikasi Ujian',
+                                label: 'Pakai Ulang Ujian',
                                 icon: <Copy className="w-4 h-4" />,
                                 onClick: () => handleOpenDuplicate(exam, 'BIASA'),
                             },
@@ -1137,7 +1137,7 @@ function AdminUtsUasPageInner() {
                                     onClick: () => router.push(`/dashboard/admin/uts-uas/${exam.id}?type=ulangan#hasil`),
                                 },
                                 {
-                                    label: `Duplikasi ${labels.ulangan}`,
+                                    label: `Pakai Ulang ${labels.ulangan}`,
                                     icon: <Copy className="w-4 h-4" />,
                                     onClick: () => handleOpenDuplicate(exam, 'BIASA', 'ulangan', group.isBatch ? group : undefined),
                                 },
@@ -1400,228 +1400,41 @@ function AdminUtsUasPageInner() {
                 </div>
             </Modal>
 
-            {/* Duplicate & Remedial Modal */}
-            <Modal open={showDuplicate} onClose={() => setShowDuplicate(false)} title={duplicateMode === 'REMEDIAL' ? "Buat Ujian Remedial" : "Duplikasi Ujian"}>
-                {duplicateExam && (
-                    <div className="space-y-5">
-                        <div className="flex items-center gap-3 p-3 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 rounded-xl">
-                            <Copy className="w-5 h-5 flex-shrink-0" />
-                            <div className="text-sm">
-                                <div>Sumber: <span className="font-bold">{duplicateExam.title}</span>{duplicateSource === 'ulangan' && <span className="ml-1 text-xs">({labels.ulangan})</span>}</div>
-                                <div className="text-xs opacity-80">
-                                    {duplicateSource === 'ulangan' && duplicateMode === 'REMEDIAL' && ulanganRemedialMethod === 'BARU'
-                                        ? `${labels.ulangan} baru akan dibuat dengan soal kosong`
-                                        : `${duplicateExam.question_count} soal akan disalin otomatis`}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Kelas target multi-kelas — official & ulangan (paritas:
-                            ulangan kini bisa diduplikasi/remedial ke banyak kelas;
-                            TA pengampu dicocokkan otomatis per kelas saat submit) */}
-
-                        {/* Title */}
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ujian Baru</label>
-                            <input
-                                type="text"
-                                value={duplicateForm.title}
-                                onChange={(e) => setDuplicateForm({ ...duplicateForm, title: e.target.value })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary/50"
-                                placeholder="Judul ujian..."
-                            />
-                        </div>
-
-                        {/* Kelas Target — official (semua mode) & ulangan BIASA
-                            (sebelumnya prefill tersembunyi dari exam sumber; kini
-                            eksplisit & bisa diedit). Ulangan BIASA multi-kelas: TA
-                            pengampu dicocokkan otomatis per kelas saat submit —
-                            kelas tanpa pengampu di-skip. Ulangan REMEDIAL: kelas
-                            implisit per member (ikut kelas exam sumbernya). */}
-                        {(duplicateSource === 'official' || duplicateMode === 'BIASA') && (
-                            <div>
-                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
-                                    Kelas Target ({duplicateForm.target_class_ids.length} terpilih)
-                                </label>
-                                {duplicateSource === 'ulangan' && duplicateMode === 'BIASA' && (
-                                    <p className="mb-2 text-xs text-text-secondary">
-                                        {labels.ulangan} dibuat atas nama guru pengampu mapel ini di setiap kelas terpilih — kelas tanpa pengampu otomatis di-skip.
-                                    </p>
-                                )}
-                                {droppedDuplicateClasses.length > 0 && (
-                                    <div className="mb-3 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-700 dark:text-amber-300">
-                                        <span className="font-bold">{droppedDuplicateClasses.length} kelas dari ujian sumber tidak ikut disalin</span> karena bukan kelas tahun ajaran aktif:{' '}
-                                        <span className="font-medium">{droppedDuplicateClasses.map(c => c.name).join(', ')}</span>. Pilih kelas pengganti di bawah bila diperlukan.
-                                    </div>
-                                )}
-                                <div className="flex flex-wrap gap-2 mb-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setDuplicateForm(prev => ({ ...prev, target_class_ids: classes.map(c => c.id) }))}
-                                        className="text-xs px-3 py-1.5 bg-primary/10 text-primary font-bold rounded-lg hover:bg-primary/20 transition-colors"
-                                    >
-                                        Pilih Semua
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setDuplicateForm(prev => ({ ...prev, target_class_ids: [] }))}
-                                        className="text-xs px-3 py-1.5 bg-red-500/10 text-red-500 font-bold rounded-lg hover:bg-red-500/20 transition-colors"
-                                    >
-                                        Reset
-                                    </button>
-                                </div>
-                                <div className="max-h-48 overflow-y-auto space-y-1 pr-2 custom-scrollbar">
-                                    {Object.entries(classesByLevel).map(([level, levelClasses]) => (
-                                        <div key={level}>
-                                            <p className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-1 mt-2">{level}</p>
-                                            <div className="grid grid-cols-3 gap-1.5">
-                                                {(levelClasses as ClassItem[]).map(c => {
-                                                    const selected = duplicateForm.target_class_ids.includes(c.id)
-                                                    return (
-                                                        <button
-                                                            type="button"
-                                                            key={c.id}
-                                                            onClick={() => toggleDuplicateClass(c.id)}
-                                                            className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${selected
-                                                                ? 'bg-primary text-white shadow-sm'
-                                                                : 'bg-secondary/5 text-text-secondary hover:bg-secondary/10 border border-secondary/10'
-                                                                }`}
-                                                        >
-                                                            {c.name}
-                                                        </button>
-                                                    )
-                                                })}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Schedule */}
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jadwal Pengerjaan</label>
-                            <TimeWindowFields
-                                value={{
-                                    mode: duplicateForm.schedule_mode,
-                                    start_time: duplicateForm.start_time,
-                                    window_end_time: duplicateForm.window_end_time,
-                                    duration_minutes: String(duplicateForm.duration_minutes)
-                                }}
-                                onChange={(v) => setDuplicateForm({
-                                    ...duplicateForm,
-                                    schedule_mode: v.mode,
-                                    start_time: v.start_time,
-                                    duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || 0 : 0,
-                                    window_end_time: v.mode === 'window' ? v.window_end_time : ''
-                                })}
-                                durationRequired
-                            />
-                        </div>
-
-                        {/* Remedial Student Selection */}
-                        {duplicateMode === 'REMEDIAL' && (
-                            <div className="pt-2 border-t border-secondary/20">
-                                {duplicateSource === 'ulangan' && (
-                                    <div className="mb-3">
-                                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Soal Remedial</label>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => setUlanganRemedialMethod('ASLI')}
-                                                className={`px-3 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${ulanganRemedialMethod === 'ASLI' ? 'border-primary bg-primary/5 text-primary' : 'border-secondary/20 text-text-main dark:text-white hover:border-primary/50'}`}
-                                            >
-                                                Soal Asli (disalin)
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setUlanganRemedialMethod('BARU')}
-                                                className={`px-3 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${ulanganRemedialMethod === 'BARU' ? 'border-primary bg-primary/5 text-primary' : 'border-secondary/20 text-text-main dark:text-white hover:border-primary/50'}`}
-                                            >
-                                                Soal Baru (kosong)
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                                <div className="mb-4">
-                                    <RemedialPolicyFields
-                                        value={remedialPolicy}
-                                        onChange={setRemedialPolicy}
-                                        capPlaceholder={duplicateExam?.subject?.kkm || 75}
-                                    />
-                                </div>
-                                <div className="flex items-center justify-between mb-3">
-                                    <label className="block text-sm font-bold text-text-main dark:text-white">Pilih Siswa Remedial</label>
-                                    <div className="text-xs text-text-secondary">
-                                        <span className="font-bold text-primary">{selectedStudentIds.length}</span> dari {remedialStudents.length} siswa
-                                    </div>
-                                </div>
-                                
-                                {remedialLoading ? (
-                                    <div className="flex items-center justify-center py-6">
-                                        <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                                    </div>
-                                ) : remedialStudents.length === 0 ? (
-                                    <div className="p-4 bg-secondary/5 rounded-xl text-center text-sm text-text-secondary">
-                                        Belum ada siswa di kelas {labels.ulangan.toLowerCase()} ini.
-                                    </div>
-                                ) : (
-                                    <div className="max-h-60 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                                        {remedialStudents.map(student => (
-                                            <label key={student.id} className="flex items-center gap-3 p-3 rounded-xl border border-secondary/20 hover:border-primary/30 cursor-pointer transition-colors bg-white dark:bg-surface-dark">
-                                                <input 
-                                                    type="checkbox"
-                                                    checked={selectedStudentIds.includes(student.id)}
-                                                    onChange={(e) => {
-                                                        if (e.target.checked) setSelectedStudentIds(prev => [...prev, student.id])
-                                                        else setSelectedStudentIds(prev => prev.filter(id => id !== student.id))
-                                                    }}
-                                                    className="w-5 h-5 rounded border-secondary/30 text-primary focus:ring-primary"
-                                                />
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="font-bold text-sm text-text-main dark:text-white truncate">{student.name}</div>
-                                                    <div className="text-xs text-text-secondary">
-                                                        NIS: {student.nis}
-                                                        {remedialClassCount > 1 && student.className && <span className="ml-2 font-bold text-primary">{student.className}</span>}
-                                                    </div>
-                                                </div>
-                                                <div className="text-right">
-                                                    <div className={`font-bold text-sm ${student.needsRemedial ? 'text-red-500' : 'text-emerald-500'}`}>
-                                                        {formatScore(student.score)} / {formatScore(student.max_score)}
-                                                    </div>
-                                                    <div className="text-[10px] text-text-secondary">Nilai: {formatScore(round2(student.pct))}</div>
-                                                </div>
-                                            </label>
-                                        ))}
-                                    </div>
-                                )}
-                                <div className="mt-2 text-xs text-text-secondary p-2 bg-primary/5 text-primary rounded-lg">
-                                    <span className="font-bold">Info:</span> Siswa yang dipilih akan melihat soal ini di dashboard mereka. Sistem akan secara otomatis mengambil nilai tertinggi antara ujian asli dan remedial.
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="flex gap-3 pt-4 border-t border-secondary/10">
-                            <Button variant="secondary" onClick={() => setShowDuplicate(false)} className="flex-1">Batal</Button>
-                            <Button
-                                onClick={handleDuplicate}
-                                loading={duplicating}
-                                disabled={!duplicateForm.title || !duplicateForm.start_time
-                                    // Kelas target wajib: official (semua mode — endpoint duplicate
-                                    // memakainya, kosong = diam-diam fallback ke kelas sumber) &
-                                    // ulangan BIASA multi-kelas. Ulangan REMEDIAL tidak (kelas
-                                    // implisit per member exam sumbernya).
-                                    || (duplicateSource === 'official' && duplicateForm.target_class_ids.length === 0)
-                                    || (duplicateSource === 'ulangan' && duplicateMode === 'BIASA' && duplicateForm.target_class_ids.length === 0)
-                                    || (duplicateMode === 'REMEDIAL' && selectedStudentIds.length === 0)}
-                                className="flex-1"
-                            >
-                                Duplikasi & Buat Ujian
-                            </Button>
-                        </div>
-                    </div>
-                )}
-            </Modal>
+            {/* Duplicate & Remedial Modal — shared component (admin & guru pakai sama) */}
+            <DuplicateRemedialModal
+                open={showDuplicate}
+                onClose={() => setShowDuplicate(false)}
+                mode={duplicateMode}
+                source={duplicateSource}
+                sourceTitle={duplicateExam?.title || ''}
+                sourceQuestionCount={duplicateExam?.question_count || 0}
+                sourceExamType={duplicateSource === 'official' ? duplicateExam?.exam_type : undefined}
+                remedialNewQuestionsNote={duplicateSource === 'ulangan' && duplicateMode === 'REMEDIAL' && ulanganRemedialMethod === 'BARU' ? `${labels.ulangan} baru akan dibuat dengan soal kosong` : undefined}
+                form={duplicateForm}
+                onFormChange={(patch) => setDuplicateForm(prev => ({ ...prev, ...patch }))}
+                labels={labels}
+                showTargetClassSelector={duplicateSource === 'official' || duplicateMode === 'BIASA'}
+                classesByLevel={classesByLevel}
+                droppedClasses={droppedDuplicateClasses}
+                onToggleClass={toggleDuplicateClass}
+                onSelectAllClasses={() => setDuplicateForm(prev => ({ ...prev, target_class_ids: classes.map(c => c.id) }))}
+                onResetClasses={() => setDuplicateForm(prev => ({ ...prev, target_class_ids: [] }))}
+                targetClassHelperText={duplicateSource === 'ulangan' && duplicateMode === 'BIASA' ? `${labels.ulangan} dibuat atas nama guru pengampu mapel ini di setiap kelas terpilih — kelas tanpa pengampu otomatis di-skip.` : undefined}
+                remedialMethod={ulanganRemedialMethod}
+                onRemedialMethodChange={setUlanganRemedialMethod}
+                remedialPolicy={remedialPolicy}
+                onRemedialPolicyChange={setRemedialPolicy}
+                kkm={duplicateExam?.subject?.kkm || 75}
+                students={remedialStudents}
+                selectedStudentIds={selectedStudentIds}
+                onStudentToggle={(studentId) => {
+                    setSelectedStudentIds(prev => prev.includes(studentId) ? prev.filter(id => id !== studentId) : [...prev, studentId])
+                }}
+                remedialLoading={remedialLoading}
+                remedialClassCount={remedialClassCount}
+                onSubmit={handleDuplicate}
+                submitting={duplicating}
+            />
 
             {/* Toast */}
             {toast && (

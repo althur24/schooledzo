@@ -96,6 +96,7 @@ export default function GuruKuisPage() {
     const [remedialPolicy, setRemedialPolicy] = useState<RemedialPolicyValue>({ policy: 'HIGHEST', cap: 75 })
     const [remedialLoading, setRemedialLoading] = useState(false)
     const [remedialKkm, setRemedialKkm] = useState(75)
+    const [remedialTitle, setRemedialTitle] = useState('')
 
     // Tutorial event: open/close create modal when tutorial requests it
     useEffect(() => {
@@ -381,6 +382,7 @@ export default function GuruKuisPage() {
         setSelectedStudentIds([])
         setRemedialMethod('ASLI')
         setRemedialPolicy({ policy: 'HIGHEST', cap: 75 })
+        setRemedialTitle(`Remedial ${quiz.title}`)
 
         try {
             const classId = quiz.teaching_assignment?.class?.id
@@ -456,7 +458,7 @@ export default function GuruKuisPage() {
         try {
             const payload = {
                 teaching_assignment_id: remedialQuiz.teaching_assignment.id,
-                title: `[Remedial] ${remedialQuiz.title}`,
+                title: remedialTitle || `Remedial ${remedialQuiz.title}`,
                 description: `Remedial untuk kuis: ${remedialQuiz.title}`,
                 duration_minutes: remedialQuiz.duration_minutes,
                 is_randomized: remedialQuiz.is_randomized,
@@ -862,7 +864,7 @@ export default function GuruKuisPage() {
             <Modal
                 open={showRemedial}
                 onClose={() => setShowRemedial(false)}
-                title="Tugaskan Remedial"
+                title={`Buat Remedial ${labels.kuis}`}
             >
                 {remedialLoading ? (
                     <div className="flex justify-center py-10">
@@ -879,23 +881,35 @@ export default function GuruKuisPage() {
                             </div>
                         </div>
 
+                        {/* Judul Remedial */}
+                        <div>
+                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Remedial</label>
+                            <input
+                                type="text"
+                                value={remedialTitle}
+                                onChange={(e) => setRemedialTitle(e.target.value)}
+                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder={`Remedial ${remedialQuiz.title}`}
+                            />
+                        </div>
+
                         {/* Metode Soal */}
                         <div className="space-y-3">
-                            <label className="block text-sm font-bold text-text-main dark:text-white">Metode Soal Remedial</label>
+                            <label className="block text-sm font-bold text-text-main dark:text-white">Soal Remedial</label>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${remedialMethod === 'ASLI' ? 'border-primary bg-primary/5' : 'border-secondary/20 hover:border-primary/50'}`}>
                                     <input type="radio" name="method" checked={remedialMethod === 'ASLI'} onChange={() => setRemedialMethod('ASLI')} className="hidden" />
                                     <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${remedialMethod === 'ASLI' ? 'border-primary' : 'border-secondary/50'}`}>
                                         {remedialMethod === 'ASLI' && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
                                     </div>
-                                    <span className="font-medium text-text-main dark:text-white">Gunakan Soal Asli</span>
+                                    <span className="font-medium text-text-main dark:text-white">Soal Asli (disalin)</span>
                                 </label>
                                 <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${remedialMethod === 'BARU' ? 'border-primary bg-primary/5' : 'border-secondary/20 hover:border-primary/50'}`}>
                                     <input type="radio" name="method" checked={remedialMethod === 'BARU'} onChange={() => setRemedialMethod('BARU')} className="hidden" />
                                     <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${remedialMethod === 'BARU' ? 'border-primary' : 'border-secondary/50'}`}>
                                         {remedialMethod === 'BARU' && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
                                     </div>
-                                    <span className="font-medium text-text-main dark:text-white">Buat Soal Baru</span>
+                                    <span className="font-medium text-text-main dark:text-white">Soal Baru (kosong)</span>
                                 </label>
                             </div>
                         </div>
@@ -910,7 +924,7 @@ export default function GuruKuisPage() {
                         <div className="space-y-3">
                             <div className="flex items-center justify-between">
                                 <label className="block text-sm font-bold text-text-main dark:text-white">
-                                    Pilih Siswa ({selectedStudentIds.length} terpilih)
+                                    Pilih Siswa Remedial ({selectedStudentIds.length} terpilih)
                                 </label>
                                 <button
                                     onClick={() => setSelectedStudentIds(remedialStudents.map(s => s.id))}
@@ -921,7 +935,7 @@ export default function GuruKuisPage() {
                             </div>
                             <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
                                 {remedialStudents.length === 0 ? (
-                                    <p className="text-sm text-text-secondary text-center py-4">Tidak ada siswa di kelas ini</p>
+                                    <p className="text-sm text-text-secondary text-center py-4">Belum ada siswa di kelas {labels.kuis.toLowerCase()} ini.</p>
                                 ) : (
                                     remedialStudents.map((student) => {
                                         const isSelected = selectedStudentIds.includes(student.id)
@@ -951,13 +965,17 @@ export default function GuruKuisPage() {
                             </div>
                         </div>
 
+                        <div className="text-xs text-text-secondary p-2 bg-primary/5 text-primary rounded-lg">
+                            <span className="font-bold">Info:</span> Siswa yang dipilih akan melihat soal ini di dashboard mereka. Sistem akan secara otomatis mengambil nilai tertinggi antara kuis asli dan remedial sesuai kebijakan yang dipilih.
+                        </div>
+
                         <div className="flex gap-3 pt-4">
                             <Button variant="secondary" onClick={() => setShowRemedial(false)} className="flex-1">
                                 Batal
                             </Button>
                             <Button
                                 onClick={handleCreateRemedial}
-                                disabled={creating || selectedStudentIds.length === 0}
+                                disabled={creating || selectedStudentIds.length === 0 || !remedialTitle}
                                 loading={creating}
                                 className="flex-1"
                             >

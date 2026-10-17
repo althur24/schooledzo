@@ -9,18 +9,18 @@ import Card from '@/components/ui/Card'
 import DailyExamCard from '@/components/exam/DailyExamCard'
 import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
-import { round2, formatScore } from '@/lib/formatScore'
 import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
 import ShowDraftsToggle from '@/components/ShowDraftsToggle'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import TimeWindowFields from '@/components/TimeWindowFields'
-import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
+import { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
+import DuplicateRemedialModal from '@/components/exam/DuplicateRemedialModal'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { useIncrementalList } from '@/hooks/useIncrementalList'
 import { labelForGradeType } from '@/lib/labels'
-import { TimeCircle as Clock, Plus, Lock, ShieldDone, Swap, Graph, Edit, Document } from 'react-iconly'
-import { Loader2, CheckSquare, Square, RefreshCw, GraduationCap, BookOpen, Copy, Trash2, Activity } from 'lucide-react'
+import { TimeCircle as Clock, Plus, Lock, ShieldDone, Graph, Edit, Document } from 'react-iconly'
+import { Loader2, RefreshCw, GraduationCap, BookOpen, Copy, Trash2, Activity } from 'lucide-react'
 
 interface Exam {
     id: string
@@ -112,66 +112,28 @@ export default function GuruUlanganPage() {
     // Jenis yang dibuat dari satu pintu form ini: ulangan harian atau UTS/UAS resmi
     const [examKind, setExamKind] = useState<'ULANGAN' | 'UTS' | 'UAS'>('ULANGAN')
 
-    // Copy States
-    const [showCopy, setShowCopy] = useState(false)
-    const [copySourceExam, setCopySourceExam] = useState<Exam | null>(null)
-    const [copying, setCopying] = useState(false)
-
-    // Official Exam (UTS/UAS) reuse & delete states
-    const [showOfficialCopy, setShowOfficialCopy] = useState(false)
-    const [officialCopySource, setOfficialCopySource] = useState<OfficialExam | null>(null)
-    const [officialCopying, setOfficialCopying] = useState(false)
-    const [officialCopyForm, setOfficialCopyForm] = useState({
+    // ── Unified Duplicate & Remedial state (mirrors admin uts-uas/page.tsx) ──
+    // Satu modal shared component menangani 4 skenario: ulangan/official × BIASA/REMEDIAL.
+    const [dupShow, setDupShow] = useState(false)
+    const [dupMode, setDupMode] = useState<'BIASA' | 'REMEDIAL'>('BIASA')
+    const [dupSource, setDupSource] = useState<'official' | 'ulangan'>('official')
+    const [dupExam, setDupExam] = useState<any>(null)
+    const [dupMembers, setDupMembers] = useState<any[]>([])
+    const [dupForm, setDupForm] = useState({
         title: '',
         start_time: '',
-        duration_minutes: 60,
+        duration_minutes: 90,
         schedule_mode: 'sync' as 'sync' | 'window',
         window_end_time: '',
+        target_class_ids: [] as string[]
     })
-    const [copyForm, setCopyForm] = useState({
-        teaching_assignment_ids: [] as string[],
-        title: '',
-        description: '',
-        start_time: '',
-        duration_minutes: 60,
-        schedule_mode: 'sync' as 'sync' | 'window',
-        window_end_time: '',
-        is_randomized: false,
-        max_violations: 3,
-        show_results_immediately: true
-    })
-
-    // Remedial States
-    const [showRemedial, setShowRemedial] = useState(false)
-    const [remedialExam, setRemedialExam] = useState<Exam | null>(null)
-    // Member batch (1 per kelas) — >1 = remedial dari card batch, pilih kelas dulu
-    const [remedialMembers, setRemedialMembers] = useState<Exam[]>([])
-    const [remedialStudents, setRemedialStudents] = useState<any[]>([])
-    const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
-    const [remedialMethod, setRemedialMethod] = useState<'ASLI' | 'BARU'>('ASLI')
-    const [remedialPolicy, setRemedialPolicy] = useState<RemedialPolicyValue>({ policy: 'HIGHEST', cap: 75 })
-    const [remedialLoading, setRemedialLoading] = useState(false)
-    const [remedialStartTime, setRemedialStartTime] = useState('')
-    const [remedialKkm, setRemedialKkm] = useState(75)
-
-    // Remedial UTS/UAS (ujian resmi) States
-    const [showOfficialRemedial, setShowOfficialRemedial] = useState(false)
-    const [officialRemedialSource, setOfficialRemedialSource] = useState<OfficialExam | null>(null)
-    const [officialRemedialStudents, setOfficialRemedialStudents] = useState<any[]>([])
-    const [officialRemedialSelectedIds, setOfficialRemedialSelectedIds] = useState<string[]>([])
-    const [officialRemedialLoading, setOfficialRemedialLoading] = useState(false)
-    const [officialRemedialCreating, setOfficialRemedialCreating] = useState(false)
-    const [officialRemedialKkm, setOfficialRemedialKkm] = useState(75)
-    const [officialRemedialPolicy, setOfficialRemedialPolicy] = useState<RemedialPolicyValue>({ policy: 'HIGHEST', cap: 75 })
-    const [officialRemedialForm, setOfficialRemedialForm] = useState({
-        title: '',
-        start_time: '',
-        duration_minutes: 60,
-        schedule_mode: 'sync' as 'sync' | 'window',
-        window_end_time: '',
-    })
-
-    // Tutorial event: open/close create modal when tutorial requests it
+    const [dupRemedialMethod, setDupRemedialMethod] = useState<'ASLI' | 'BARU'>('ASLI')
+    const [dupRemedialPolicy, setDupRemedialPolicy] = useState<RemedialPolicyValue>({ policy: 'HIGHEST', cap: 75 })
+    const [dupRemedialStudents, setDupRemedialStudents] = useState<any[]>([])
+    const [dupSelectedStudentIds, setDupSelectedStudentIds] = useState<string[]>([])
+    const [dupRemedialLoading, setDupRemedialLoading] = useState(false)
+    const [dupSubmitting, setDupSubmitting] = useState(false)
+    const [dupKkm, setDupKkm] = useState(75)
     useEffect(() => {
         const openHandler = () => setShowCreate(true)
         const closeHandler = () => setShowCreate(false)
@@ -420,96 +382,6 @@ export default function GuruUlanganPage() {
         }
     }
 
-    const openCopyModal = (exam: Exam) => {
-        setCopySourceExam(exam)
-        setCopyForm({
-            teaching_assignment_ids: [],
-            title: `[Copy] ${exam.title}`,
-            description: exam.description || '',
-            start_time: '', // Waktu mulai wajib diisi baru
-            duration_minutes: exam.duration_minutes,
-            schedule_mode: exam.window_end_time ? 'window' : 'sync',
-            window_end_time: '',
-            is_randomized: exam.is_randomized,
-            max_violations: exam.max_violations,
-            show_results_immediately: true
-        })
-        setShowCopy(true)
-    }
-
-    const handleCopyExam = async () => {
-        if (!copySourceExam || copyForm.teaching_assignment_ids.length === 0 || !copyForm.title || !copyForm.start_time) return
-        setCopying(true)
-        try {
-            const targetIds: string[] = []
-            const localStart = new Date(copyForm.start_time)
-            const utcStart = localStart.toISOString()
-            
-            // Create target exams
-            const createResults = await Promise.allSettled(
-                copyForm.teaching_assignment_ids.map(taId => 
-                    fetch('/api/exams', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            teaching_assignment_id: taId,
-                            title: copyForm.title,
-                            description: copyForm.description,
-                            start_time: utcStart,
-                            duration_minutes: copyForm.duration_minutes,
-                            window_end_time: copyForm.schedule_mode === 'window' && copyForm.window_end_time ? new Date(copyForm.window_end_time).toISOString() : null,
-                            is_randomized: copyForm.is_randomized,
-                            max_violations: copyForm.max_violations,
-                            show_results_immediately: copyForm.show_results_immediately
-                        })
-                    }).then(r => {
-                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-                        return r.json()
-                    })
-                )
-            )
-
-            createResults.forEach(r => {
-                if (r.status === 'fulfilled' && r.value?.id) {
-                    targetIds.push(r.value.id)
-                }
-            })
-
-            if (targetIds.length === 0) {
-                alert(`Gagal membuat ${labels.ulangan.toLowerCase()} baru. Silakan coba lagi.`)
-                return
-            }
-
-            // Copy questions
-            const copyRes = await fetch('/api/exams/copy-questions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    source_exam_id: copySourceExam.id,
-                    target_exam_ids: targetIds,
-                    also_publish: false
-                })
-            })
-
-            if (!copyRes.ok) {
-                alert(`Berhasil membuat ${labels.ulangan.toLowerCase()}, tetapi gagal menyalin soal.`)
-            } else {
-                alert(`${labels.ulangan} berhasil disalin ke ${targetIds.length} kelas.`)
-            }
-
-            setShowCopy(false)
-            fetchData()
-        } catch (error) {
-            console.error('Error copying exam:', error)
-            alert(`Terjadi kesalahan saat menyalin ${labels.ulangan.toLowerCase()}.`)
-        } finally {
-            setCopying(false)
-        }
-    }
-
-    // G2: hapus card batch = hapus SEMUA member (satu per kelas). Tanpa ini,
-    // sisanya jadi batch yatim yang tetap muncul sebagai card. Guard per-member
-    // di server (canManageExamCoTaught) tetap berlaku; kegagalan parsial dilaporkan.
     const handleDelete = async (exam: Exam, group?: ExamBatchGroup<Exam>) => {
         const members = group?.isBatch ? group.members : [exam]
         if (members.length > 1) {
@@ -540,52 +412,6 @@ export default function GuruUlanganPage() {
         fetchData()
     }
 
-    const openOfficialCopyModal = (exam: OfficialExam) => {
-        setOfficialCopySource(exam)
-        setOfficialCopyForm({
-            title: `[Copy] ${exam.title}`,
-            start_time: '',
-            duration_minutes: exam.duration_minutes,
-            schedule_mode: exam.window_end_time ? 'window' : 'sync',
-            window_end_time: '',
-        })
-        setShowOfficialCopy(true)
-    }
-
-    const handleOfficialCopy = async () => {
-        if (!officialCopySource || !officialCopyForm.title || !officialCopyForm.start_time) return
-        setOfficialCopying(true)
-        try {
-            const utcStart = new Date(officialCopyForm.start_time).toISOString()
-            const res = await fetch('/api/official-exams/duplicate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    source_exam_id: officialCopySource.id,
-                    title: officialCopyForm.title,
-                    start_time: utcStart,
-                    duration_minutes: officialCopyForm.duration_minutes,
-                    window_end_time: officialCopyForm.schedule_mode === 'window' && officialCopyForm.window_end_time
-                        ? new Date(officialCopyForm.window_end_time).toISOString()
-                        : null,
-                })
-            })
-            const data = await res.json().catch(() => null)
-            if (!res.ok) {
-                alert(data?.error || 'Gagal menduplikasi ujian.')
-                return
-            }
-            alert('Ujian berhasil disalin sebagai draft. Lengkapi soal & jadwal di editor.')
-            setShowOfficialCopy(false)
-            fetchData()
-        } catch (error) {
-            console.error('Error duplicating official exam:', error)
-            alert('Terjadi kesalahan saat menduplikasi ujian.')
-        } finally {
-            setOfficialCopying(false)
-        }
-    }
-
     const handleDeleteOfficial = async (id: string) => {
         if (!confirm(`Hapus ujian ${labels.uts}/${labels.uas} ini? Semua soal & hasil pengerjaan siswa ikut terhapus.`)) return
         const res = await fetch(`/api/official-exams/${id}`, { method: 'DELETE' })
@@ -596,263 +422,365 @@ export default function GuruUlanganPage() {
         fetchData()
     }
 
-    // ── Remedial UTS/UAS ──────────────────────────────────────────────
-    // Mirror alur admin (uts-uas/page.tsx handleOpenDuplicate REMEDIAL):
-    // daftar siswa dari GET official-exam-submissions (guru-scoped — hanya
-    // siswa kelas yang diajar), KKM granular per jenjang, semua baris
-    // submission dihitung (non-pengikut = 0, identik admin).
-    const openOfficialRemedialModal = async (exam: OfficialExam) => {
-        setOfficialRemedialSource(exam)
-        setShowOfficialRemedial(true)
-        setOfficialRemedialLoading(true)
-        setOfficialRemedialSelectedIds([])
-        setOfficialRemedialPolicy({ policy: 'HIGHEST', cap: 75 })
-        setOfficialRemedialForm({
-            title: `Remedial ${exam.title}`,
-            start_time: '',
+    // ── Unified open handler (mirrors admin handleOpenDuplicate) ──
+    // Satu pintu untuk 4 skenario: ulangan/official × BIASA/REMEDIAL.
+    const openDuplicate = async (
+        exam: any,
+        mode: 'BIASA' | 'REMEDIAL',
+        source: 'official' | 'ulangan' = 'official',
+        group?: ExamBatchGroup<any>
+    ) => {
+        setDupExam(exam)
+        setDupSource(source)
+        setDupMode(mode)
+        setDupRemedialStudents([])
+        setDupSelectedStudentIds([])
+        setDupRemedialMethod('ASLI')
+        // Resolve KKM awal: official = exam.subject.kkm, ulangan = TA subject kkm
+        const initialKkm = source === 'ulangan'
+            ? (first(taOf(exam)?.subject) as any)?.kkm || 75
+            : exam.subject?.kkm || 75
+        setDupKkm(initialKkm)
+        setDupRemedialPolicy({ policy: 'HIGHEST', cap: initialKkm })
+
+        // Filter members untuk ulangan: hanya kelas yang guru co-teach (mapel
+        // yang sama). Admin tidak perlu filter (admin manage semua kelas), tapi
+        // halaman ini khusus guru. Tanpa filter ini:
+        // - BIASA: prefill ghost IDs (kelas tidak terlihat di selector tapi ada
+        //   di state → di-skip diam-diam saat submit)
+        // - REMEDIAL: guru lihat siswa dari kelas orang lain (data exposure) +
+        //   remedial ditolak 403 saat submit untuk kelas yang tidak dia ajar
+        const allMembers = group?.isBatch ? group.members : [exam]
+        const srcSubjectId = source === 'ulangan' ? subjectIdOf(exam) : undefined
+        const effectiveMembers = source === 'ulangan' && srcSubjectId
+            ? allMembers.filter(m => {
+                const mTa = taOf(m as Exam)
+                const mClass = first(mTa?.class) as any
+                if (!mClass?.id) return false
+                return teachingAssignments.some((ta: any) => {
+                    const subj = Array.isArray(ta.subject) ? ta.subject[0] : ta.subject
+                    const cl = Array.isArray(ta.class) ? ta.class[0] : ta.class
+                    return subj?.id === srcSubjectId && cl?.id === mClass.id
+                })
+            })
+            : allMembers
+        setDupMembers(effectiveMembers)
+
+        const pad = (n: number) => n.toString().padStart(2, '0')
+        const now = new Date()
+        now.setDate(now.getDate() + 1)
+        now.setHours(8, 0, 0, 0)
+        const defaultTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
+
+        // Prefill target class IDs
+        let prefillTargetIds: string[] = []
+        if (source === 'official') {
+            // Official: irisan kelas diajar guru × kelas target ujian
+            const taughtClassIds = new Set(
+                teachingAssignments.map((ta: any) => {
+                    const cls = Array.isArray(ta.class) ? ta.class[0] : ta.class
+                    return cls?.id
+                }).filter(Boolean)
+            )
+            prefillTargetIds = ((exam.target_class_ids as string[]) || []).filter(cid => taughtClassIds.has(cid))
+        } else {
+            // Ulangan: kelas dari member batch yang guru co-teach (efektif)
+            prefillTargetIds = effectiveMembers
+                .map(m => first(taOf(m as Exam)?.class)?.id)
+                .filter((id): id is string => !!id)
+        }
+
+        setDupForm({
+            title: mode === 'REMEDIAL' ? `Remedial ${exam.title}` : `[Copy] ${exam.title}`,
+            start_time: defaultTime,
             duration_minutes: exam.duration_minutes,
             schedule_mode: exam.window_end_time ? 'window' : 'sync',
             window_end_time: '',
+            target_class_ids: prefillTargetIds
         })
 
-        try {
-            let kkm = exam.subject?.kkm || 75
-            // KKM granular per jenjang (mirror admin)
+        setDupShow(true)
+
+        if (mode === 'REMEDIAL') {
+            setDupRemedialLoading(true)
             try {
-                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${exam.subject?.id}`)
-                if (kkmRes.ok) {
-                    const kkmData = await kkmRes.json()
-                    // Ambil granular dari kelas siswa pertama (ujian resmi satu
-                    // mapel bisa lintas kelas — jenjang biasanya seragam)
-                    const kkmEntries = Array.isArray(kkmData) ? kkmData : []
-                    const first = kkmEntries[0]
-                    if (first?.school_level && first?.grade_level) {
-                        const granular = kkmEntries.find((k: any) =>
-                            k.school_level === first.school_level && k.grade_level === first.grade_level)
-                        if (granular) kkm = granular.kkm
+                if (source === 'ulangan') {
+                    // Ulangan: fetch students dari member yang guru co-teach saja
+                    // (effectiveMembers sudah di-filter di atas). Tiap siswa
+                    // ditandai memberExamId untuk grouping saat submit.
+                    const members = effectiveMembers as any[]
+                    const ta = taOf(exam)
+                    const subject = first(ta?.subject)
+                    const yearId = (ta as any)?.academic_year_id || ''
+                    const baseKkm = subject?.kkm || 75
+                    let granularKkms: any[] = []
+                    try {
+                        const kkmRes = await fetch(`/api/subject-kkm?subject_id=${subject?.id}`)
+                        if (kkmRes.ok) granularKkms = await kkmRes.json()
+                    } catch (e) {
+                        console.error('Failed to fetch granular KKM', e)
+                    }
+                    const resolveKkm = (cls: any) => {
+                        if (cls?.school_level && cls?.grade_level) {
+                            const granular = granularKkms.find((k: any) => k.school_level === cls.school_level && k.grade_level === cls.grade_level)
+                            if (granular) return granular.kkm
+                        }
+                        return baseKkm
+                    }
+                    // Update dupKkm + policy cap dengan KKM yang di-resolve (paritas
+                    // kode guru lama — loadRemedialMember set cap = kkm). Ambil KKM
+                    // kelas pertama yang punya granular; fallback baseKkm.
+                    const firstResolvedKkm = members.length > 0
+                        ? resolveKkm(first(taOf(members[0])?.class) as any)
+                        : baseKkm
+                    setDupKkm(firstResolvedKkm)
+                    setDupRemedialPolicy(prev => ({ ...prev, cap: firstResolvedKkm }))
+                    const lists = await Promise.all(members.map(async (m: any) => {
+                        const mTa = taOf(m)
+                        const cls = first(mTa?.class) as any
+                        if (!cls?.id) return []
+                        const examStart = m.start_time ? `&as_of=${encodeURIComponent(m.start_time)}` : ''
+                        const [rosterRes, subsRes] = await Promise.all([
+                            fetch(`/api/students?class_id=${cls.id}&enrollment_year_id=${yearId}${examStart}`),
+                            fetch(`/api/exam-submissions?exam_id=${m.id}`)
+                        ])
+                        const roster = rosterRes.ok ? await rosterRes.json() : []
+                        const subs = subsRes.ok ? await subsRes.json() : []
+                        const scoreByStudent = new Map<string, any>()
+                        ;(Array.isArray(subs) ? subs : []).forEach((sub) => {
+                            const sid = sub.student?.id || sub.student_id
+                            if (sid && !scoreByStudent.has(sid)) scoreByStudent.set(sid, sub)
+                        })
+                        const kkm = resolveKkm(cls)
+                        return (Array.isArray(roster) ? roster : []).map((s) => {
+                            const sub = scoreByStudent.get(s.id)
+                            const score = sub?.is_submitted ? (sub.total_score || 0) : 0
+                            const maxScore = sub?.is_submitted ? (sub.max_score || 1) : 1
+                            const pct = score / maxScore * 100
+                            return {
+                                id: s.id,
+                                name: s.user?.full_name || '',
+                                nis: s.nis || '',
+                                score,
+                                max_score: maxScore,
+                                pct,
+                                needsRemedial: pct < kkm,
+                                className: cls.name,
+                                memberExamId: m.id,
+                                hasSubmitted: !!sub?.is_submitted,
+                            }
+                        })
+                    }))
+                    const studentsList = lists.flat()
+                    setDupRemedialStudents(studentsList)
+                    setDupSelectedStudentIds(studentsList.filter(s => s.needsRemedial).map(s => s.id))
+                } else {
+                    // Official: fetch dari official-exam-submissions (guru-scoped)
+                    const res = await fetch(`/api/official-exam-submissions?exam_id=${exam.id}`)
+                    if (res.ok) {
+                        const submissions = await res.json()
+                        const baseKkm = exam.subject?.kkm || 75
+                        let granularKkms: any[] = []
+                        try {
+                            const kkmRes = await fetch(`/api/subject-kkm?subject_id=${exam.subject?.id}`)
+                            if (kkmRes.ok) granularKkms = await kkmRes.json()
+                        } catch (e) {
+                            console.error('Failed to fetch granular KKM', e)
+                        }
+                        // Update dupKkm + policy cap dengan KKM granular pertama
+                        // yang cocok (paritas kode guru lama — openOfficialRemedialModal).
+                        const firstSub = (Array.isArray(submissions) ? submissions : [])[0]
+                        const firstClassLevel = firstSub?.student?.class?.school_level
+                        const firstGradeLevel = firstSub?.student?.class?.grade_level
+                        const firstGranular = firstClassLevel && firstGradeLevel
+                            ? granularKkms.find((k: any) => k.school_level === firstClassLevel && k.grade_level === firstGradeLevel)
+                            : null
+                        const resolvedKkm = firstGranular?.kkm || baseKkm
+                        setDupKkm(resolvedKkm)
+                        setDupRemedialPolicy(prev => ({ ...prev, cap: resolvedKkm }))
+                        const studentsList = (Array.isArray(submissions) ? submissions : []).map((sub: any) => {
+                            const pct = (sub.total_score || 0) / (sub.max_score || 1) * 100
+                            let studentKkm = baseKkm
+                            const classLevel = sub.student?.class?.school_level
+                            const gradeLevel = sub.student?.class?.grade_level
+                            if (classLevel && gradeLevel) {
+                                const granular = granularKkms.find((k: any) => k.school_level === classLevel && k.grade_level === gradeLevel)
+                                if (granular) studentKkm = granular.kkm
+                            }
+                            return {
+                                id: sub.student?.id,
+                                name: sub.student?.user?.full_name || '-',
+                                nis: sub.student?.nis || '-',
+                                score: sub.total_score,
+                                max_score: sub.max_score,
+                                pct,
+                                needsRemedial: pct < studentKkm,
+                                hasSubmitted: !!sub.is_submitted,
+                            }
+                        }).filter((s: any) => s.id)
+                        studentsList.sort((a: any, b: any) => a.score - b.score)
+                        setDupRemedialStudents(studentsList)
+                        setDupSelectedStudentIds(studentsList.filter((s: any) => s.needsRemedial).map((s: any) => s.id))
                     }
                 }
-            } catch (e) {
-                console.error('Failed to fetch granular KKM', e)
+            } catch (err) {
+                console.error('Failed to fetch remedial students', err)
+            } finally {
+                setDupRemedialLoading(false)
             }
-            setOfficialRemedialKkm(kkm)
-            setOfficialRemedialPolicy(prev => ({ ...prev, cap: kkm }))
-
-            // Submissions guru-scoped (endpoint sudah filter mapel+kelas diajar,
-            // termasuk merge nilai remedial terbaik bila sudah pernah remedial)
-            const subsRes = await fetch(`/api/official-exam-submissions?exam_id=${exam.id}`)
-            const subsData = await subsRes.json()
-            const subs = Array.isArray(subsData) ? subsData : []
-
-            const studentsWithScores = subs.map((sub: any) => {
-                const pct = sub.max_score > 0 ? (sub.total_score / sub.max_score) * 100 : 0
-                // Banding KKM pakai pct MENTAH — 74.6 tetap dianggap belum tuntas
-                // walau tampil 75 (keadilan di batas nilai)
-                const score = round2(pct)
-                return {
-                    id: sub.student?.id,
-                    name: sub.student?.user?.full_name || '-',
-                    nis: sub.student?.nis || '-',
-                    score,
-                    needsRemedial: pct < kkm,
-                    submitted: !!sub.is_submitted,
-                }
-            }).filter((s: any) => s.id)
-
-            studentsWithScores.sort((a: any, b: any) => a.score - b.score)
-
-            setOfficialRemedialStudents(studentsWithScores)
-            setOfficialRemedialSelectedIds(studentsWithScores.filter((s: any) => s.needsRemedial).map((s: any) => s.id))
-        } catch (error) {
-            console.error('Error fetching official remedial data:', error)
-            alert('Gagal memuat data siswa untuk remedial')
-        } finally {
-            setOfficialRemedialLoading(false)
         }
     }
 
-    const handleCreateOfficialRemedial = async () => {
-        if (!officialRemedialSource || !officialRemedialForm.title || !officialRemedialForm.start_time || officialRemedialSelectedIds.length === 0) return
-        setOfficialRemedialCreating(true)
+    // ── Unified submit handler (mirrors admin handleDuplicate) ──
+    const handleDuplicateSubmit = async () => {
+        if (!dupExam || !dupForm.title || !dupForm.start_time) return
+        setDupSubmitting(true)
         try {
-            // Kelas target = IRISAN kelas yang diajar guru × kelas target ujian
-            // (API duplicate menolak guru yang tidak mengajar SEMUA kelas target —
-            //  tanpa irisan, guru sebagian kelas selalu 403).
-            const taughtClassIds = new Set(teachingAssignments.map((ta: any) => ta.class?.id || ta.class_id))
-            const targetClassIds = (officialRemedialSource.target_class_ids || []).filter((cid: string) => taughtClassIds.has(cid))
+            const localDate = new Date(dupForm.start_time)
+            let newExam: any = null
 
-            if (targetClassIds.length === 0) {
-                alert('Anda tidak mengajar kelas target ujian ini.')
-                return
-            }
-
-            const res = await fetch('/api/official-exams/duplicate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    source_exam_id: officialRemedialSource.id,
-                    title: officialRemedialForm.title,
-                    start_time: new Date(officialRemedialForm.start_time).toISOString(),
-                    duration_minutes: officialRemedialForm.duration_minutes,
-                    window_end_time: officialRemedialForm.schedule_mode === 'window' && officialRemedialForm.window_end_time
-                        ? new Date(officialRemedialForm.window_end_time).toISOString()
-                        : null,
-                    target_class_ids: targetClassIds,
-                    is_remedial: true,
-                    allowed_student_ids: officialRemedialSelectedIds,
-                    remedial_score_policy: officialRemedialPolicy.policy,
-                    ...(officialRemedialPolicy.policy === 'CAP' ? { remedial_max_score: officialRemedialPolicy.cap } : {}),
-                })
-            })
-            const data = await res.json().catch(() => null)
-            if (!res.ok) {
-                alert(data?.error || 'Gagal membuat ujian remedial.')
-                return
-            }
-            alert(`Ujian remedial berhasil dibuat sebagai draft. Publish di editor agar siswa terpilih bisa mengerjakan.`)
-            setShowOfficialRemedial(false)
-            fetchData()
-        } catch (error) {
-            console.error('Error creating official remedial:', error)
-            alert('Terjadi kesalahan saat membuat ujian remedial.')
-        } finally {
-            setOfficialRemedialCreating(false)
-        }
-    }
-
-    // G4: remedial dari card batch → daftar member (1 per kelas) dipilih dulu;
-    // remedial memang per-kelas by design (siswa remedial terdefinisi per kelas).
-    // Modal menampilkan selector kelas saat remedialMembers.length > 1.
-    const handleOpenRemedial = async (exam: Exam, group?: ExamBatchGroup<Exam>) => {
-        const members = group?.isBatch ? group.members : [exam]
-        setRemedialMembers(members)
-        setShowRemedial(true)
-        // exam = representative card (pending_publish bila ada) — mulai dari situ,
-        // bukan members[0] (tertua), agar selector kelas sinkron dengan card.
-        await loadRemedialMember(exam)
-    }
-
-    // Muat KKM + siswa + submission untuk satu member (kelas) terpilih — dipakai
-    // ulang saat guru berganti kelas di modal remedial batch.
-    const loadRemedialMember = async (exam: Exam) => {
-        setRemedialExam(exam)
-        setRemedialLoading(true)
-        setSelectedStudentIds([])
-        setRemedialMethod('ASLI')
-        setRemedialPolicy({ policy: 'HIGHEST', cap: 75 })
-        setRemedialStartTime('')
-
-        try {
-            const ta: any = first(exam.teaching_assignment)
-            const cls: any = first(ta?.class)
-            const subj: any = first(ta?.subject)
-            const classId = cls?.id
-            let kkm = subj?.kkm || 75
-
-            // Resolve Granular KKM if available
-            try {
-                const kkmRes = await fetch(`/api/subject-kkm?subject_id=${subj?.id}`)
-                if (kkmRes.ok) {
-                    const kkmData = await kkmRes.json()
-                    const classLevel = cls?.school_level
-                    const gradeLevel = cls?.grade_level
-                    const granular = kkmData.find((k: any) => k.school_level === classLevel && k.grade_level === gradeLevel)
-                    if (granular) kkm = granular.kkm
-                }
-            } catch (e) {
-                console.error('Failed to fetch granular KKM', e)
-            }
-
-            setRemedialKkm(kkm)
-            setRemedialPolicy(prev => ({ ...prev, cap: kkm }))
-
-            if (!classId) throw new Error('Class ID missing')
-
-            // as_of = waktu mulai ulangan dasar → kandidat remedial = anggota
-            // kelas saat ulangan itu diadakan (interval enrollment) — siswa yang
-            // pindah keluar sejak itu tidak ikut diremajakan.
-            const examStart = exam?.start_time
-                ? `&as_of=${encodeURIComponent(exam.start_time)}`
-                : ''
-            const [studentsRes, subsRes] = await Promise.all([
-                fetch(`/api/students?class_id=${classId}&enrollment_year_id=${(ta as any)?.academic_year_id || ''}${examStart}`),
-                fetch(`/api/exam-submissions?exam_id=${exam.id}&teacher_view=true`)
-            ])
-            const studentsData = await studentsRes.json()
-            const subsData = await subsRes.json()
-
-            const studentsWithScores = (Array.isArray(studentsData) ? studentsData : []).map((s: any) => {
-                const sub = (Array.isArray(subsData) ? subsData : []).find((sub: any) => sub.student_id === s.id)
-                let score = 0
-                if (sub && sub.max_score > 0) {
-                    score = (sub.total_score / sub.max_score) * 100
-                }
-                // isBelowKKM dari nilai mentah; tampilan round-2 (desimal utuh)
-                const isBelowKKM = score < kkm
-                return {
-                    ...s,
-                    score: round2(score),
-                    isBelowKKM
-                }
-            })
-
-            studentsWithScores.sort((a, b) => a.score - b.score)
-
-            setRemedialStudents(studentsWithScores)
-            setSelectedStudentIds(studentsWithScores.filter((s: any) => s.isBelowKKM).map((s: any) => s.id))
-        } catch (error) {
-            console.error('Error fetching remedial data:', error)
-            alert('Gagal memuat data siswa untuk remedial')
-        } finally {
-            setRemedialLoading(false)
-        }
-    }
-
-    const handleCreateRemedial = async () => {
-        if (!remedialExam || selectedStudentIds.length === 0 || !remedialStartTime) return
-        setCreating(true)
-        try {
-            let formattedRemedialStartTime = null;
-            if (remedialStartTime) {
-                const localDate = new Date(remedialStartTime);
-                formattedRemedialStartTime = localDate.toISOString();
-            }
-
-            const payload = {
-                teaching_assignment_id: (first(remedialExam.teaching_assignment) as any)?.id,
-                title: `[Remedial] ${remedialExam.title}`,
-                description: `Remedial untuk ulangan: ${remedialExam.title}`,
-                start_time: formattedRemedialStartTime,
-                duration_minutes: remedialExam.duration_minutes,
-                is_randomized: remedialExam.is_randomized,
-                max_violations: remedialExam.max_violations,
-                is_remedial: true,
-                remedial_for_id: remedialExam.id,
-                allowed_student_ids: selectedStudentIds,
-                duplicate_questions: remedialMethod === 'ASLI',
-                remedial_score_policy: remedialPolicy.policy,
-                ...(remedialPolicy.policy === 'CAP' ? { remedial_max_score: remedialPolicy.cap } : {})
-            }
-
-            const res = await fetch('/api/exams', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            })
-
-            if (res.ok) {
-                const newExam = await res.json()
-                setShowRemedial(false)
-                fetchData()
-
-                if (remedialMethod === 'BARU') {
-                    router.push(`/dashboard/guru/ulangan/${newExam.id}`)
+            if (dupSource === 'ulangan') {
+                if (dupMode === 'REMEDIAL') {
+                    // Ulangan REMEDIAL: group siswa per memberExamId, loop per member
+                    const selected = dupRemedialStudents.filter(s => dupSelectedStudentIds.includes(s.id))
+                    const byMember = new Map<string, any[]>()
+                    selected.forEach(s => {
+                        const key = s.memberExamId || dupExam.id
+                        if (!byMember.has(key)) byMember.set(key, [])
+                        byMember.get(key)!.push(s)
+                    })
+                    const targets = dupMembers.filter(m => (byMember.get(m.id) || []).length > 0)
+                    if (targets.length === 0) {
+                        alert('Pilih minimal satu siswa remedial')
+                        return
+                    }
+                    const results = await Promise.allSettled(targets.map(m => {
+                        const ta = taOf(m)
+                        const payload: any = {
+                            teaching_assignment_id: ta?.id,
+                            title: dupForm.title,
+                            description: dupExam.description,
+                            start_time: localDate.toISOString(),
+                            duration_minutes: dupForm.duration_minutes,
+                            window_end_time: dupForm.schedule_mode === 'window' && dupForm.window_end_time
+                                ? new Date(dupForm.window_end_time).toISOString() : null,
+                            is_randomized: dupExam.is_randomized,
+                            max_violations: dupExam.max_violations,
+                            show_results_immediately: dupExam.show_results_immediately ?? true,
+                            is_remedial: true,
+                            remedial_for_id: m.id,
+                            allowed_student_ids: (byMember.get(m.id) || []).map(s => s.id),
+                            remedial_score_policy: dupRemedialPolicy.policy,
+                            ...(dupRemedialPolicy.policy === 'CAP' ? { remedial_max_score: dupRemedialPolicy.cap } : {}),
+                            duplicate_questions: dupRemedialMethod === 'ASLI'
+                        }
+                        return fetch('/api/exams', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
+                    }))
+                    const okResults = results.filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+                    if (okResults.length === 0) {
+                        alert('Gagal membuat remedial. Silakan coba lagi.')
+                        return
+                    }
+                    newExam = okResults[0].value
+                    if (okResults.length < targets.length) {
+                        alert(`Remedial dibuat di ${okResults.length} kelas; GAGAL di ${targets.length - okResults.length} kelas — ulangi dari daftar`)
+                    } else {
+                        alert(`Remedial berhasil dibuat di ${okResults.length} kelas.`)
+                    }
+                    if (dupRemedialMethod === 'BARU' && newExam?.id) {
+                        router.push(`/dashboard/guru/ulangan/${newExam.id}`)
+                    }
+                } else {
+                    // Ulangan BIASA: loop per target class, resolve TA, POST with duplicate_from_exam_id
+                    const subjectId = subjectIdOf(dupExam)
+                    const matched = dupForm.target_class_ids.map(classId => {
+                        const tas = teachingAssignments.filter((ta: any) => {
+                            const subj = Array.isArray(ta.subject) ? ta.subject[0] : ta.subject
+                            const cl = Array.isArray(ta.class) ? ta.class[0] : ta.class
+                            return subj?.id === subjectId && cl?.id === classId
+                        })
+                        return { classId, anchor: tas[0] }
+                    })
+                    const withTeachers = matched.filter(m => m.anchor)
+                    if (withTeachers.length === 0) {
+                        alert('Tidak ada kelas terpilih yang memiliki guru pengampu untuk mapel ini.')
+                        return
+                    }
+                    const batchId = withTeachers.length > 1 ? crypto.randomUUID() : null
+                    const results = await Promise.allSettled(withTeachers.map(m =>
+                        fetch('/api/exams', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                teaching_assignment_id: m.anchor.id,
+                                title: dupForm.title,
+                                description: dupExam.description,
+                                start_time: localDate.toISOString(),
+                                duration_minutes: dupForm.duration_minutes,
+                                window_end_time: dupForm.schedule_mode === 'window' && dupForm.window_end_time
+                                    ? new Date(dupForm.window_end_time).toISOString() : null,
+                                is_randomized: dupExam.is_randomized,
+                                max_violations: dupExam.max_violations,
+                                show_results_immediately: dupExam.show_results_immediately ?? true,
+                                duplicate_from_exam_id: dupExam.id,
+                                duplicate_questions: true,
+                                batch_id: batchId
+                            })
+                        }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
+                    ))
+                    const okResults = results.filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+                    if (okResults.length === 0) {
+                        alert(`Gagal menyalin ${labels.ulangan.toLowerCase()}. Silakan coba lagi.`)
+                        return
+                    }
+                    newExam = okResults[0].value
+                    alert(`${okResults.length} ${labels.ulangan} berhasil disalin.`)
                 }
             } else {
-                alert(`Gagal membuat ${labels.ulangan.toLowerCase()} remedial`)
+                // Official (UTS/UAS) — POST /api/official-exams/duplicate
+                const payload = {
+                    source_exam_id: dupExam.id,
+                    title: dupForm.title,
+                    start_time: localDate.toISOString(),
+                    duration_minutes: dupForm.duration_minutes,
+                    window_end_time: dupForm.schedule_mode === 'window' && dupForm.window_end_time
+                        ? new Date(dupForm.window_end_time).toISOString() : null,
+                    target_class_ids: dupForm.target_class_ids,
+                    is_remedial: dupMode === 'REMEDIAL',
+                    allowed_student_ids: dupMode === 'REMEDIAL' ? dupSelectedStudentIds : null,
+                    ...(dupMode === 'REMEDIAL' ? {
+                        remedial_score_policy: dupRemedialPolicy.policy,
+                        ...(dupRemedialPolicy.policy === 'CAP' ? { remedial_max_score: dupRemedialPolicy.cap } : {}),
+                    } : {})
+                }
+                const res = await fetch('/api/official-exams/duplicate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                })
+                if (res.ok) {
+                    newExam = await res.json()
+                } else {
+                    const err = await res.json().catch(() => null)
+                    alert(err?.error || 'Gagal menduplikasi ujian')
+                    return
+                }
             }
+
+            setDupShow(false)
+            fetchData()
+            if (newExam?.id && dupSource === 'official') {
+                router.push(`/dashboard/guru/uts-uas/${newExam.id}`)
+            }
+        } catch (e) {
+            console.error('Error in duplicate submit:', e)
+            alert('Terjadi kesalahan')
         } finally {
-            setCreating(false)
+            setDupSubmitting(false)
         }
     }
 
@@ -885,6 +813,46 @@ export default function GuruUlanganPage() {
             .map(ta => [ta.class?.id, ta.class?.name] as [string, string])
             .filter(([id]) => !!id)
     ).entries()].sort((a, b) => a[1].localeCompare(b[1], 'id'))
+
+    // ── classesByLevel untuk modal duplikasi (guru = kelas dari TA saya) ──
+    // Official: irisan kelas diajar × kelas target ujian.
+    // Ulangan: hanya kelas yang guru ajar mapel yang SAMA dengan exam sumber
+    // (paritas ClassChipsSelector lama yang filter via defaultSubjectId).
+    const guruClasses = teachingAssignments.map((ta: any) => {
+        const cls = Array.isArray(ta.class) ? ta.class[0] : ta.class
+        const subj = Array.isArray(ta.subject) ? ta.subject[0] : ta.subject
+        if (!cls) return null
+        return { id: cls.id, name: cls.name, school_level: cls.school_level || null, grade_level: cls.grade_level || null, subjectId: subj?.id }
+    }).filter(Boolean) as { id: string; name: string; school_level: string | null; grade_level: number | null; subjectId?: string }[]
+
+    const dupClassesByLevel = (() => {
+        let classes = guruClasses
+        if (dupSource === 'official' && dupExam?.target_class_ids) {
+            const examClassIds = new Set(dupExam.target_class_ids as string[])
+            classes = guruClasses.filter(c => examClassIds.has(c.id))
+        } else if (dupSource === 'ulangan' && dupExam) {
+            // Filter by source exam's subject — hanya tampilkan kelas dengan
+            // mapel yang sama agar "Pilih Semua" tidak memilih kelas mapel lain
+            // yang akan di-skip diam-diam saat submit (tidak ada TA match).
+            const srcSubjectId = subjectIdOf(dupExam)
+            if (srcSubjectId) {
+                classes = guruClasses.filter(c => c.subjectId === srcSubjectId)
+            }
+        }
+        return classes.reduce((acc, c) => {
+            const level = c.school_level || 'Lainnya'
+            if (!acc[level]) acc[level] = []
+            acc[level].push(c)
+            return acc
+        }, {} as Record<string, { id: string; name: string; school_level: string | null; grade_level: number | null }[]>)
+    })()
+
+    const dupRemedialClassCount = new Set(dupRemedialStudents.map((s: any) => s.className).filter(Boolean)).size
+
+    // Partial warning: guru ajar sebagian kelas dari ujian resmi
+    const dupPartialWarning = dupSource === 'official' && dupExam?.target_class_ids
+        ? { taught: dupClassesByLevel ? Object.values(dupClassesByLevel).flat().length : 0, total: dupExam.target_class_ids.length, typeLabel: dupExam.exam_type === 'UAS' ? labels.uas : labels.uts }
+        : undefined
 
     // Render bertahap: 24 kartu pertama langsung, sisanya menyusul saat
     // di-scroll (sentinel + IntersectionObserver) — DOM ratusan kartu
@@ -1056,13 +1024,13 @@ export default function GuruUlanganPage() {
                                             label: 'Buat Remedial',
                                             show: isActive && !exam.is_remedial && isDone,
                                             icon: <RefreshCw className="w-4 h-4" />,
-                                            onClick: () => handleOpenRemedial(exam, group.isBatch ? group : undefined),
+                                            onClick: () => openDuplicate(exam, 'REMEDIAL', 'ulangan', group.isBatch ? group : undefined),
                                         },
                                         {
                                             label: 'Pakai Ulang',
                                             show: isActive,
                                             icon: <Copy className="w-4 h-4" />,
-                                            onClick: () => openCopyModal(exam),
+                                            onClick: () => openDuplicate(exam, 'BIASA', 'ulangan', group.isBatch ? group : undefined),
                                         },
                                         {
                                             label: 'Hapus',
@@ -1130,13 +1098,13 @@ export default function GuruUlanganPage() {
                                             label: `Buat Remedial ${exam.exam_type === 'UTS' ? labels.uts : labels.uas}`,
                                             show: isDone && !exam.is_remedial,
                                             icon: <RefreshCw className="w-4 h-4" />,
-                                            onClick: () => openOfficialRemedialModal(exam),
+                                            onClick: () => openDuplicate(exam, 'REMEDIAL', 'official'),
                                         },
                                         {
                                             label: 'Pakai Ulang',
                                             show: isDone || isLive,
                                             icon: <Copy className="w-4 h-4" />,
-                                            onClick: () => openOfficialCopyModal(exam),
+                                            onClick: () => openDuplicate(exam, 'BIASA', 'official'),
                                         },
                                         {
                                             label: 'Hapus',
@@ -1161,294 +1129,6 @@ export default function GuruUlanganPage() {
                     </div>
                 </div>
             )}
-
-            <Modal
-                open={showCopy}
-                onClose={() => setShowCopy(false)}
-                title={`Pakai Ulang ${labels.ulangan}`}
-            >
-                <div className="space-y-4">
-                    <div className="bg-secondary/10 p-4 rounded-xl mb-2">
-                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source {labels.ulangan}: {copySourceExam?.title}</h4>
-                        <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
-                            <span>Mata Pelajaran: <strong>{copySourceExam?.teaching_assignment?.subject?.name}</strong></span>
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Pilih Kelas Tujuan</label>
-                        <ClassChipsSelector
-                            assignments={teachingAssignments}
-                            selectedIds={copyForm.teaching_assignment_ids}
-                            onChange={(ids) => setCopyForm({ ...copyForm, teaching_assignment_ids: ids })}
-                            disabled={teachingAssignments.length === 0}
-                            defaultSubjectId={copySourceExam?.teaching_assignment?.subject?.id}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul {labels.ulangan} Baru</label>
-                        <input
-                            type="text"
-                            value={copyForm.title}
-                            onChange={(e) => setCopyForm({ ...copyForm, title: e.target.value })}
-                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Deskripsi (Opsional)</label>
-                        <textarea
-                            value={copyForm.description}
-                            onChange={(e) => setCopyForm({ ...copyForm, description: e.target.value })}
-                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            rows={2}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Jadwal Pengerjaan</label>
-                        <TimeWindowFields
-                            value={{
-                                mode: copyForm.schedule_mode,
-                                start_time: copyForm.start_time,
-                                window_end_time: copyForm.window_end_time,
-                                duration_minutes: String(copyForm.duration_minutes)
-                            }}
-                            onChange={(v) => setCopyForm({
-                                ...copyForm,
-                                schedule_mode: v.mode,
-                                start_time: v.start_time,
-                                duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || 0 : 0,
-                                window_end_time: v.mode === 'window' ? v.window_end_time : ''
-                            })}
-                            startLabel="Waktu Mulai Baru"
-                            durationRequired
-                        />
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Max Pelanggaran</label>
-                            <input
-                                type="number"
-                                value={copyForm.max_violations}
-                                onChange={(e) => setCopyForm({ ...copyForm, max_violations: parseInt(e.target.value) || 3 })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                min={1}
-                                max={10}
-                            />
-                        </div>
-                        <div className="flex items-end">
-                            <label className="flex items-center gap-2 cursor-pointer p-3 bg-secondary/5 border border-secondary/20 rounded-xl w-full">
-                                <input
-                                    type="checkbox"
-                                    checked={copyForm.is_randomized}
-                                    onChange={(e) => setCopyForm({ ...copyForm, is_randomized: e.target.checked })}
-                                    className="w-5 h-5 rounded bg-white border-secondary/30 text-primary focus:ring-primary"
-                                />
-                                <span className="text-text-main dark:text-white flex items-center gap-1"><Swap set="bold" primaryColor="currentColor" size={16} /> Acak Soal</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div className="flex gap-3 pt-4">
-                        <Button
-                            variant="secondary"
-                            onClick={() => setShowCopy(false)}
-                            className="flex-1"
-                        >
-                            Batal
-                        </Button>
-                        <Button
-                            onClick={handleCopyExam}
-                            disabled={copying || copyForm.teaching_assignment_ids.length === 0 || !copyForm.title || !copyForm.start_time || copyForm.duration_minutes < 5 || (copyForm.schedule_mode === 'window' && !copyForm.window_end_time)}
-                            loading={copying}
-                            className="flex-1"
-                        >
-                            Salin {labels.ulangan}
-                        </Button>
-                    </div>
-                </div>
-            </Modal>
-
-            {/* Modal Pakai Ulang UTS/UAS — duplikasi ujian resmi sebagai draft baru */}
-            <Modal
-                open={showOfficialCopy}
-                onClose={() => setShowOfficialCopy(false)}
-                title={`Pakai Ulang ${labels.uts}/${labels.uas}`}
-            >
-                <div className="space-y-4">
-                    <div className="bg-secondary/10 p-4 rounded-xl">
-                        <h4 className="font-bold text-text-main dark:text-white mb-1">Source Ujian: {officialCopySource?.title}</h4>
-                        <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
-                            <span>Jenis: <strong>{officialCopySource ? labelForGradeType(officialCopySource.exam_type, labels) : ''}</strong></span>
-                            <span>Mapel: <strong>{officialCopySource?.subject?.name}</strong></span>
-                            <span>Soal: <strong>{officialCopySource?.question_count}</strong></span>
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Ujian Baru</label>
-                        <input
-                            type="text"
-                            value={officialCopyForm.title}
-                            onChange={(e) => setOfficialCopyForm({ ...officialCopyForm, title: e.target.value })}
-                            className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                        />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai <span className="text-red-500">*</span></label>
-                            <input
-                                type="datetime-local"
-                                value={officialCopyForm.start_time}
-                                onChange={(e) => setOfficialCopyForm({ ...officialCopyForm, start_time: e.target.value })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Durasi (menit)</label>
-                            <input
-                                type="number"
-                                min={5}
-                                max={300}
-                                value={officialCopyForm.duration_minutes}
-                                onChange={(e) => setOfficialCopyForm({ ...officialCopyForm, duration_minutes: parseInt(e.target.value, 10) || 0 })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                        </div>
-                    </div>
-                    <TimeWindowFields
-                        value={{
-                            mode: officialCopyForm.schedule_mode,
-                            start_time: officialCopyForm.start_time,
-                            duration_minutes: String(officialCopyForm.duration_minutes),
-                            window_end_time: officialCopyForm.window_end_time,
-                        }}
-                        onChange={(v: any) => setOfficialCopyForm(prev => ({
-                            ...prev,
-                            schedule_mode: v.mode,
-                            start_time: v.start_time || prev.start_time,
-                            duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || prev.duration_minutes : prev.duration_minutes,
-                            window_end_time: v.mode === 'window' ? v.window_end_time : '',
-                        }))}
-                        durationRequired
-                    />
-                    <p className="text-xs text-text-secondary bg-sky-500/10 border border-sky-500/20 rounded-xl p-3">
-                        ℹ️ Ujian baru dibuat sebagai <strong>draft</strong> dengan kelas target yang sama. Anda bisa mengubah kelas & jadwalnya di editor setelah ini.
-                    </p>
-                    <div className="flex gap-3 pt-2">
-                        <Button variant="secondary" onClick={() => setShowOfficialCopy(false)} className="flex-1">Batal</Button>
-                        <Button
-                            onClick={handleOfficialCopy}
-                            disabled={officialCopying || !officialCopyForm.title || !officialCopyForm.start_time || officialCopyForm.duration_minutes < 5 || (officialCopyForm.schedule_mode === 'window' && !officialCopyForm.window_end_time)}
-                            loading={officialCopying}
-                            className="flex-1"
-                        >
-                            Salin Ujian
-                        </Button>
-                    </div>
-                </div>
-            </Modal>
-
-            {/* Modal Remedial UTS/UAS — ujian resmi untuk siswa di bawah KKM (mirror alur admin) */}
-            <Modal
-                open={showOfficialRemedial}
-                onClose={() => setShowOfficialRemedial(false)}
-                title={`Buat Remedial ${officialRemedialSource?.exam_type === 'UAS' ? labels.uas : labels.uts}`}
-            >
-                {officialRemedialLoading ? (
-                    <div className="flex justify-center py-10">
-                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                    </div>
-                ) : officialRemedialSource ? (
-                    <div className="space-y-4">
-                        <div className="bg-secondary/10 p-4 rounded-xl">
-                            <h4 className="font-bold text-text-main dark:text-white mb-1">{officialRemedialSource.title}</h4>
-                            <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
-                                <span>Mapel: <strong>{officialRemedialSource.subject?.name}</strong></span>
-                                <span>KKM: <strong className="text-red-500">{officialRemedialKkm}</strong></span>
-                            </div>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Judul Remedial</label>
-                            <input
-                                type="text"
-                                value={officialRemedialForm.title}
-                                onChange={(e) => setOfficialRemedialForm({ ...officialRemedialForm, title: e.target.value })}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                        </div>
-                        <TimeWindowFields
-                            value={{
-                                mode: officialRemedialForm.schedule_mode,
-                                start_time: officialRemedialForm.start_time,
-                                duration_minutes: String(officialRemedialForm.duration_minutes),
-                                window_end_time: officialRemedialForm.window_end_time,
-                            }}
-                            onChange={(v: any) => setOfficialRemedialForm(prev => ({
-                                ...prev,
-                                schedule_mode: v.mode,
-                                start_time: v.start_time || prev.start_time,
-                                duration_minutes: v.duration_minutes ? parseInt(v.duration_minutes, 10) || prev.duration_minutes : prev.duration_minutes,
-                                window_end_time: v.mode === 'window' ? v.window_end_time : '',
-                            }))}
-                            durationRequired
-                        />
-                        <RemedialPolicyFields
-                            value={officialRemedialPolicy}
-                            onChange={setOfficialRemedialPolicy}
-                            capPlaceholder={officialRemedialKkm}
-                        />
-                        <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                                <label className="block text-sm font-bold text-text-main dark:text-white">
-                                    Pilih Siswa ({officialRemedialSelectedIds.length} terpilih)
-                                </label>
-                                <span className="text-xs text-text-secondary">Merah = di bawah KKM</span>
-                            </div>
-                            <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                                {officialRemedialStudents.length === 0 ? (
-                                    <p className="text-sm text-text-secondary text-center py-4">Tidak ada data pengerjaan siswa untuk ujian ini</p>
-                                ) : (
-                                    officialRemedialStudents.map((student) => {
-                                        const isSelected = officialRemedialSelectedIds.includes(student.id)
-                                        return (
-                                            <div
-                                                key={student.id}
-                                                onClick={() => {
-                                                    if (isSelected) {
-                                                        setOfficialRemedialSelectedIds(prev => prev.filter(id => id !== student.id))
-                                                    } else {
-                                                        setOfficialRemedialSelectedIds(prev => [...prev, student.id])
-                                                    }
-                                                }}
-                                                className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${isSelected ? 'border-primary bg-primary/5 dark:bg-primary/20' : 'border-secondary/20 bg-white dark:bg-surface-dark hover:bg-secondary/5'}`}
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    {isSelected ? <CheckSquare className="text-primary w-5 h-5" /> : <Square className="text-secondary/50 w-5 h-5" />}
-                                                    <span className="font-medium text-text-main dark:text-white">{student.name}</span>
-                                                </div>
-                                                <div className={`px-2 py-1 rounded text-xs font-bold ${student.needsRemedial ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'}`}>
-                                                    Nilai: {formatScore(student.score)}
-                                                </div>
-                                            </div>
-                                        )
-                                    })
-                                )}
-                            </div>
-                        </div>
-                        <p className="text-xs text-text-secondary bg-sky-500/10 border border-sky-500/20 rounded-xl p-3">
-                            ℹ️ Ujian remedial dibuat sebagai <strong>draft</strong> — publish di editor agar siswa terpilih bisa mengerjakan. Nilai remedial otomatis diambil yang tertinggi. Hanya siswa terpilih yang bisa memulai.
-                        </p>
-                        <div className="flex gap-3 pt-2">
-                            <Button variant="secondary" onClick={() => setShowOfficialRemedial(false)} className="flex-1">Batal</Button>
-                            <Button
-                                onClick={handleCreateOfficialRemedial}
-                                disabled={officialRemedialCreating || !officialRemedialForm.title || !officialRemedialForm.start_time || officialRemedialForm.duration_minutes < 5 || (officialRemedialForm.schedule_mode === 'window' && !officialRemedialForm.window_end_time) || officialRemedialSelectedIds.length === 0}
-                                loading={officialRemedialCreating}
-                                className="flex-1"
-                            >
-                                Proses Remedial
-                            </Button>
-                        </div>
-                    </div>
-                ) : null}
-            </Modal>
 
             <Modal
                 open={showCreate}
@@ -1578,136 +1258,46 @@ export default function GuruUlanganPage() {
                 </div>
             </Modal>
 
-            <Modal
-                open={showRemedial}
-                onClose={() => setShowRemedial(false)}
-                title={`Tugaskan Remedial ${labels.ulangan}`}
-            >
-                {remedialLoading ? (
-                    <div className="flex justify-center py-10">
-                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                    </div>
-                ) : remedialExam ? (
-                    <div className="space-y-6">
-                        <div className="bg-secondary/10 p-4 rounded-xl">
-                            <h4 className="font-bold text-text-main dark:text-white mb-1">{remedialExam.title}</h4>
-                            <div className="flex gap-4 text-sm text-text-secondary dark:text-zinc-400">
-                                <span>Mata Pelajaran: <strong>{first((first(remedialExam.teaching_assignment) as any)?.subject)?.name}</strong></span>
-                                <span>KKM: <strong className="text-red-500">{remedialKkm}</strong></span>
-                            </div>
-                        </div>
-
-                        {/* Batch multi-kelas: remedial dikerjakan per kelas — pilih kelas dulu */}
-                        {remedialMembers.length > 1 && (
-                            <div>
-                                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Kelas</label>
-                                <select
-                                    value={remedialExam.id}
-                                    onChange={(e) => {
-                                        const m = remedialMembers.find(x => x.id === e.target.value)
-                                        if (m) loadRemedialMember(m)
-                                    }}
-                                    disabled={remedialLoading}
-                                    className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
-                                >
-                                    {remedialMembers.map(m => (
-                                        <option key={m.id} value={m.id}>{first((first(m.teaching_assignment) as any)?.class)?.name || '-'}</option>
-                                    ))}
-                                </select>
-                                <p className="text-xs text-text-secondary mt-1">Remedial dibuat per kelas — pilih kelas yang siswanya perlu remedial, lalu pilih siswanya.</p>
-                            </div>
-                        )}
-
-                        <div>
-                            <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Waktu Mulai {labels.ulangan} Remedial</label>
-                            <input
-                                type="datetime-local"
-                                value={remedialStartTime}
-                                onChange={(e) => setRemedialStartTime(e.target.value)}
-                                className="w-full px-4 py-3 bg-secondary/5 border border-secondary/20 rounded-xl text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                        </div>
-
-                        <div className="space-y-3">
-                            <label className="block text-sm font-bold text-text-main dark:text-white">Metode Soal Remedial</label>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${remedialMethod === 'ASLI' ? 'border-primary bg-primary/5' : 'border-secondary/20 hover:border-primary/50'}`}>
-                                    <input type="radio" name="method" checked={remedialMethod === 'ASLI'} onChange={() => setRemedialMethod('ASLI')} className="hidden" />
-                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${remedialMethod === 'ASLI' ? 'border-primary' : 'border-secondary/50'}`}>
-                                        {remedialMethod === 'ASLI' && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
-                                    </div>
-                                    <span className="font-medium text-text-main dark:text-white">Gunakan Soal Asli</span>
-                                </label>
-                                <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${remedialMethod === 'BARU' ? 'border-primary bg-primary/5' : 'border-secondary/20 hover:border-primary/50'}`}>
-                                    <input type="radio" name="method" checked={remedialMethod === 'BARU'} onChange={() => setRemedialMethod('BARU')} className="hidden" />
-                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${remedialMethod === 'BARU' ? 'border-primary' : 'border-secondary/50'}`}>
-                                        {remedialMethod === 'BARU' && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
-                                    </div>
-                                    <span className="font-medium text-text-main dark:text-white">Buat Soal Baru</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <RemedialPolicyFields
-                            value={remedialPolicy}
-                            onChange={setRemedialPolicy}
-                            capPlaceholder={remedialKkm}
-                        />
-
-                        <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                                <label className="block text-sm font-bold text-text-main dark:text-white">
-                                    Pilih Siswa ({selectedStudentIds.length} terpilih)
-                                </label>
-                            </div>
-                            <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                                {remedialStudents.length === 0 ? (
-                                    <p className="text-sm text-text-secondary text-center py-4">Tidak ada siswa di kelas ini</p>
-                                ) : (
-                                    remedialStudents.map((student) => {
-                                        const isSelected = selectedStudentIds.includes(student.id)
-                                        return (
-                                            <div
-                                                key={student.id}
-                                                onClick={() => {
-                                                    if (isSelected) {
-                                                        setSelectedStudentIds(prev => prev.filter(id => id !== student.id))
-                                                    } else {
-                                                        setSelectedStudentIds(prev => [...prev, student.id])
-                                                    }
-                                                }}
-                                                className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${isSelected ? 'border-primary bg-primary/5 dark:bg-primary/20' : 'border-secondary/20 bg-white dark:bg-surface-dark hover:bg-secondary/5'}`}
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    {isSelected ? <CheckSquare className="text-primary w-5 h-5" /> : <Square className="text-secondary/50 w-5 h-5" />}
-                                                    <span className="font-medium text-text-main dark:text-white">{student.user.full_name}</span>
-                                                </div>
-                                                <div className={`px-2 py-1 rounded text-xs font-bold ${student.isBelowKKM ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'}`}>
-                                                    Nilai: {formatScore(student.score)}
-                                                </div>
-                                            </div>
-                                        )
-                                    })
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="flex gap-3 pt-4">
-                            <Button variant="secondary" onClick={() => setShowRemedial(false)} className="flex-1">
-                                Batal
-                            </Button>
-                            <Button
-                            onClick={handleCreateRemedial}
-                            disabled={creating || selectedStudentIds.length === 0 || !remedialStartTime}
-                            loading={creating}
-                            className="flex-1"
-                        >
-                                Proses Remedial
-                            </Button>
-                        </div>
-                    </div>
-                ) : null}
-            </Modal>
+            {/* Unified Duplicate & Remedial Modal — shared component (admin & guru pakai sama) */}
+            <DuplicateRemedialModal
+                open={dupShow}
+                onClose={() => setDupShow(false)}
+                mode={dupMode}
+                source={dupSource}
+                sourceTitle={dupExam?.title || ''}
+                sourceQuestionCount={dupExam?.question_count || 0}
+                sourceExamType={dupSource === 'official' ? dupExam?.exam_type : undefined}
+                remedialNewQuestionsNote={dupSource === 'ulangan' && dupMode === 'REMEDIAL' && dupRemedialMethod === 'BARU' ? `${labels.ulangan} baru akan dibuat dengan soal kosong` : undefined}
+                form={dupForm}
+                onFormChange={(patch) => setDupForm(prev => ({ ...prev, ...patch }))}
+                labels={labels}
+                showTargetClassSelector={dupSource === 'official' || dupMode === 'BIASA'}
+                classesByLevel={dupClassesByLevel}
+                onToggleClass={(classId) => setDupForm(prev => ({
+                    ...prev,
+                    target_class_ids: prev.target_class_ids.includes(classId)
+                        ? prev.target_class_ids.filter(id => id !== classId)
+                        : [...prev.target_class_ids, classId]
+                }))}
+                onSelectAllClasses={() => setDupForm(prev => ({ ...prev, target_class_ids: Object.values(dupClassesByLevel).flat().map(c => c.id) }))}
+                onResetClasses={() => setDupForm(prev => ({ ...prev, target_class_ids: [] }))}
+                targetClassHelperText={dupSource === 'ulangan' && dupMode === 'BIASA' ? `${labels.ulangan} dibuat atas nama guru pengampu mapel ini di setiap kelas terpilih.` : undefined}
+                partialWarning={dupPartialWarning}
+                remedialMethod={dupRemedialMethod}
+                onRemedialMethodChange={setDupRemedialMethod}
+                remedialPolicy={dupRemedialPolicy}
+                onRemedialPolicyChange={setDupRemedialPolicy}
+                kkm={dupKkm}
+                students={dupRemedialStudents}
+                selectedStudentIds={dupSelectedStudentIds}
+                onStudentToggle={(studentId) => {
+                    setDupSelectedStudentIds(prev => prev.includes(studentId) ? prev.filter(id => id !== studentId) : [...prev, studentId])
+                }}
+                remedialLoading={dupRemedialLoading}
+                remedialClassCount={dupRemedialClassCount}
+                onSubmit={handleDuplicateSubmit}
+                submitting={dupSubmitting}
+            />
         </div>
     )
 }
