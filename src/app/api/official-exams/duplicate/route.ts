@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch } from '@/lib/tenantGuard'
-import { canManageOfficialExam } from '@/lib/teacherScope'
+import { canManageOfficialExam, getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { batchedIn } from '@/lib/batchedIn'
 import { sanitizePolicyInput } from '@/lib/remedialScore'
@@ -88,16 +88,26 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: targetValidation.errorMessage }, { status: 400 })
         }
 
-        // Kepemilikan guru: boleh menyalin hanya bila dia mengajar mapel source exam
-        // DAN semua kelas targetnya (kecuali target diganti — cek target baru)
+        // Kepemilikan guru: boleh menyalin bila dia mengajar mapel source exam
+        // di ≥1 kelas target (guard baca longgar — paritas questions route &
+        // monitor yang sudah allow guru mengajar sebagian kelas). Target tetap
+        // ketat: guru harus ajar SEMUA kelas target yang dipilih (payload).
+        // Sebelumnya: sourceOk pakai canManageOfficialExam = ajar SEMUA kelas
+        // sumber → guru parsial (1 dari 6) selalu 403 walau cuma duplikasi ke
+        // kelasnya sendiri. Padahal guru sudah punya akses baca soal + kunci.
         if (user.role === 'GURU') {
-            // Array kosong adalah truthy di JS — fallback ke target sumber agar
-            // tidak lahir ujian tanpa kelas target dari payload kosong.
             const effectiveTarget = (Array.isArray(target_class_ids) && target_class_ids.length > 0)
                 ? target_class_ids
                 : sourceExam.target_class_ids
-            const sourceOk = await canManageOfficialExam(user, sourceExam)
-            const targetOk = sourceOk && await canManageOfficialExam(user, {
+            const scope = await getTeacherScope(user.id, sourceExam.academic_year_id)
+            // Source: ajar mapel di ≥1 kelas sumber (guard longgar — guru
+            // sudah bisa baca soal via questions route dengan guard yang sama)
+            const sourceOk = (sourceExam.target_class_ids || []).some((cid: string) =>
+                coTeachesClassSubject(scope, sourceExam.subject_id, cid)
+            )
+            // Target: ajar mapel di SEMUA kelas target (guard ketat —
+            // mencegah duplikasi ke kelas yang guru tidak ajar)
+            const targetOk = await canManageOfficialExam(user, {
                 subject_id: sourceExam.subject_id,
                 target_class_ids: effectiveTarget,
                 academic_year_id: sourceExam.academic_year_id
