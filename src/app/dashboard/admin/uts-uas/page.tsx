@@ -686,6 +686,7 @@ function AdminUtsUasPageInner() {
                         showToast('Pilih minimal satu siswa remedial', 'error')
                         return
                     }
+                    const remedialBatchId = targets.length > 1 ? crypto.randomUUID() : null
                     const results = await Promise.allSettled(targets.map((m) => {
                         const ta = ulanganTA(m)
                         const payload: any = {
@@ -705,7 +706,8 @@ function AdminUtsUasPageInner() {
                             allowed_student_ids: (byMember.get(m.id) || []).map((s) => s.id),
                             remedial_score_policy: remedialPolicy.policy,
                             ...(remedialPolicy.policy === 'CAP' ? { remedial_max_score: remedialPolicy.cap } : {}),
-                            duplicate_questions: ulanganRemedialMethod === 'ASLI'
+                            duplicate_questions: ulanganRemedialMethod === 'ASLI',
+                            batch_id: remedialBatchId
                         }
                         return fetch('/api/exams', {
                             method: 'POST',

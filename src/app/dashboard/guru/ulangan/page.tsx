@@ -654,6 +654,7 @@ export default function GuruUlanganPage() {
                         alert('Pilih minimal satu siswa remedial')
                         return
                     }
+                    const remedialBatchId = targets.length > 1 ? crypto.randomUUID() : null
                     const results = await Promise.allSettled(targets.map(m => {
                         const ta = taOf(m)
                         const payload: any = {
@@ -672,7 +673,8 @@ export default function GuruUlanganPage() {
                             allowed_student_ids: (byMember.get(m.id) || []).map(s => s.id),
                             remedial_score_policy: dupRemedialPolicy.policy,
                             ...(dupRemedialPolicy.policy === 'CAP' ? { remedial_max_score: dupRemedialPolicy.cap } : {}),
-                            duplicate_questions: dupRemedialMethod === 'ASLI'
+                            duplicate_questions: dupRemedialMethod === 'ASLI',
+                            batch_id: remedialBatchId
                         }
                         return fetch('/api/exams', {
                             method: 'POST',
@@ -690,9 +692,6 @@ export default function GuruUlanganPage() {
                         alert(`Remedial dibuat di ${okResults.length} kelas; GAGAL di ${targets.length - okResults.length} kelas — ulangi dari daftar`)
                     } else {
                         alert(`Remedial berhasil dibuat di ${okResults.length} kelas.`)
-                    }
-                    if (dupRemedialMethod === 'BARU' && newExam?.id) {
-                        router.push(`/dashboard/guru/ulangan/${newExam.id}`)
                     }
                 } else {
                     // Ulangan BIASA: loop per target class, resolve TA, POST with duplicate_from_exam_id
@@ -773,8 +772,10 @@ export default function GuruUlanganPage() {
 
             setDupShow(false)
             fetchData()
-            if (newExam?.id && dupSource === 'official') {
-                router.push(`/dashboard/guru/uts-uas/${newExam.id}`)
+            if (newExam?.id) {
+                router.push(dupSource === 'official'
+                    ? `/dashboard/guru/uts-uas/${newExam.id}`
+                    : `/dashboard/guru/ulangan/${newExam.id}`)
             }
         } catch (e) {
             console.error('Error in duplicate submit:', e)
