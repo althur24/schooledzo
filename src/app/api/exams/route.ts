@@ -317,20 +317,34 @@ export async function POST(request: NextRequest) {
             }
             const { data: srcExam } = await supabase
                 .from('exams')
-                .select('teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id)')
+                .select('teaching_assignment_id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id)')
                 .eq('id', duplicateSourceId)
                 .single()
             const srcTa = srcExam?.teaching_assignment as any
             if (user.role === 'GURU') {
-                // Sumber harus penugasan guru sendiri — guru lain sekalipun sed sekolah
+                // Sumber harus penugasan sendiri ATAU co-teacher mapel+kelas
+                // yang sama — co-teacher sudah punya akses ke soal & kunci
+                // jawaban (bisa lihat editor, koreksi submission). Paritas
+                // copy-questions route yang sudah allow co-teacher.
                 const scope = await getTeacherScope(user.id)
-                if (!srcTa || !ownsTeachingAssignment(scope, srcTa.teacher_id)) {
-                    return NextResponse.json({ error: 'Ulangan sumber remedial/duplikasi harus milik penugasan Anda sendiri' }, { status: 403 })
+                const isOwn = ownsTeachingAssignment(scope, srcTa?.teacher_id)
+                const isCoTeacher = coTeachesClassSubject(scope, srcTa?.subject_id, srcTa?.class_id)
+                if (!srcTa || (!isOwn && !isCoTeacher)) {
+                    return NextResponse.json({ error: 'Ulangan sumber remedial/duplikasi harus milik penugasan atau co-teaching Anda' }, { status: 403 })
                 }
             }
-            // Remedial: kelas & mapel harus sama dengan TA target (paritas guard kuis)
-            if (is_remedial && srcExam?.teaching_assignment_id !== teaching_assignment_id) {
-                return NextResponse.json({ error: 'Ulangan remedial harus berasal dari kelas & mapel yang sama' }, { status: 400 })
+            // Remedial: kelas & mapel harus sama dengan TA target (paritas guard kuis).
+            // Cek subject+class equality, bukan TA ID equality — co-teacher punya TA
+            // berbeda tapi subject+class sama, tetap boleh membuat remedial.
+            if (is_remedial) {
+                const { data: targetTa } = await supabase
+                    .from('teaching_assignments')
+                    .select('subject_id, class_id')
+                    .eq('id', teaching_assignment_id)
+                    .single()
+                if (!targetTa || targetTa.subject_id !== srcTa?.subject_id || targetTa.class_id !== srcTa?.class_id) {
+                    return NextResponse.json({ error: 'Ulangan remedial harus berasal dari kelas & mapel yang sama' }, { status: 400 })
+                }
             }
         }
 

@@ -725,7 +725,7 @@ export default function GuruUlanganPage() {
                                 is_randomized: dupExam.is_randomized,
                                 max_violations: dupExam.max_violations,
                                 show_results_immediately: dupExam.show_results_immediately ?? true,
-                                duplicate_from_exam_id: dupExam.id,
+                                duplicate_from_exam_id: dupMembers[0]?.id || dupExam.id,
                                 duplicate_questions: true,
                                 batch_id: batchId
                             })
