@@ -32,6 +32,7 @@ import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
 import PDFDownloadButton from '@/components/analytics/pdf/PDFDownloadButton'
 import { detectTextDirection } from '@/lib/textDirection'
 import { Modal, PageHeader, Button, EmptyState, Toast, type ToastType } from '@/components/ui'
+import { useDuplicateGuard } from '@/components/exam/useDuplicateGuard'
 import Card from '@/components/ui/Card'
 
 interface ExamQuestion {
@@ -276,6 +277,8 @@ function EditExamPageInner() {
     const [myAssignments, setMyAssignments] = useState<BatchTaCandidate[]>([])
     const [taLoading, setTaLoading] = useState(false)
     const [batchMemberSaving, setBatchMemberSaving] = useState(false)
+    // Guard duplikat-judul (pre-flight + dialog) — shared guru+admin (adil).
+    const dupGuard = useDuplicateGuard(labels.ulangan)
 
     // Reset TA cache saat navigasi antar exam (komponen dipakai ulang oleh
     // Next.js App Router — tanpa ini, kandidat dari exam sebelumnya menetap).
@@ -740,8 +743,14 @@ function EditExamPageInner() {
             setToast({ message: 'Mapel tidak ditemukan pada ulangan ini', type: 'error' })
             return
         }
+        // setBatchMemberSaving(true) SEBELUM guard agar tombol disable selama
+        // pre-flight (anti double-click yang justru bikin duplikat).
         setBatchMemberSaving(true)
         try {
+            // Pre-flight cek duplikat-judul untuk TA kelas kandidat (adil: guru & admin).
+            const dupTitle = editForm.title || exam.title || ''
+            const { proceed: dupOk, forceDuplicate: dupForce } = await dupGuard.guard([taId], dupTitle)
+            if (!dupOk) return
             // Convert form datetime-local → UTC (paritas handleSaveSettings)
             const localStart = new Date(editForm.start_time || exam.start_time)
             const formattedStartTime = localStart.toISOString()
@@ -771,7 +780,8 @@ function EditExamPageInner() {
                     show_results_immediately: editForm.show_results_immediately,
                     duplicate_from_exam_id: examId,
                     duplicate_questions: true,
-                    batch_id: newBatchId
+                    batch_id: newBatchId,
+                    force_duplicate: dupForce,
                 })
             })
             if (!res.ok) {
@@ -3456,6 +3466,8 @@ function EditExamPageInner() {
             {toast && (
                 <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
             )}
+            {/* Guard duplikat-judul dialog (pre-flight) — shared guru+admin */}
+            {dupGuard.dialog}
         </div >
     )
 }

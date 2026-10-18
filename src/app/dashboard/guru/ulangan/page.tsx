@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Modal, PageHeader, Button } from '@/components/ui'
@@ -9,13 +9,14 @@ import Card from '@/components/ui/Card'
 import DailyExamCard from '@/components/exam/DailyExamCard'
 import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
-import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
+import { groupExamsByBatch, detectDuplicateGroups, type ExamBatchGroup } from '@/lib/examBatchGrouping'
 import ShowDraftsToggle from '@/components/ShowDraftsToggle'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import TimeWindowFields from '@/components/TimeWindowFields'
 import { useServerTimeOffset } from '@/hooks/useServerTimeOffset'
 import { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import DuplicateRemedialModal from '@/components/exam/DuplicateRemedialModal'
+import { useDuplicateGuard } from '@/components/exam/useDuplicateGuard'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { useIncrementalList } from '@/hooks/useIncrementalList'
@@ -136,6 +137,8 @@ export default function GuruUlanganPage() {
     const [dupRemedialLoading, setDupRemedialLoading] = useState(false)
     const [dupSubmitting, setDupSubmitting] = useState(false)
     const [dupKkm, setDupKkm] = useState(75)
+    // Guard duplikat-judul (pre-flight + dialog konfirmasi) — shared guru+admin.
+    const dupGuard = useDuplicateGuard(labels.ulangan)
     useEffect(() => {
         const openHandler = () => setShowCreate(true)
         const closeHandler = () => setShowCreate(false)
@@ -314,6 +317,12 @@ export default function GuruUlanganPage() {
         if (form.teaching_assignment_ids.length === 0 || !form.title || !form.start_time) return
         setCreating(true)
         try {
+            // Pre-flight cek duplikat-judul per TA (adil: guru & admin sama).
+            // Pakai exams in-memory (nol fetch tambahan) — list page sudah punya data.
+            // setCreating(true) SEBELUM guard agar tombol disable selama pre-flight
+            // (anti double-click yang justru bikin duplikat).
+            const { proceed, forceDuplicate } = await dupGuard.guard(form.teaching_assignment_ids, form.title, exams)
+            if (!proceed) return
             const localStart = new Date(form.start_time)
             const utcStart = localStart.toISOString()
             // Satu batch multi-kelas diikat batch_id di DB — tahan tab tertutup
@@ -322,7 +331,8 @@ export default function GuruUlanganPage() {
                 ...form,
                 start_time: utcStart,
                 window_end_time: form.schedule_mode === 'window' && form.window_end_time ? new Date(form.window_end_time).toISOString() : null,
-                batch_id: batchId
+                batch_id: batchId,
+                force_duplicate: forceDuplicate,
             }
 
             // Create first (primary) exam
@@ -712,6 +722,10 @@ export default function GuruUlanganPage() {
                         alert('Tidak ada kelas terpilih yang memiliki guru pengampu untuk mapel ini.')
                         return
                     }
+                    // Pre-flight cek duplikat-judul per TA target (adil: guru & admin).
+                    // Pakai exams in-memory (nol fetch tambahan).
+                    const { proceed: dupOk, forceDuplicate: dupForce } = await dupGuard.guard(withTeachers.map(m => m.anchor.id), dupForm.title, exams)
+                    if (!dupOk) return
                     const batchId = withTeachers.length > 1 ? crypto.randomUUID() : null
                     const results = await Promise.allSettled(withTeachers.map(m =>
                         fetch('/api/exams', {
@@ -730,7 +744,8 @@ export default function GuruUlanganPage() {
                                 show_results_immediately: dupExam.show_results_immediately ?? true,
                                 duplicate_from_exam_id: dupMembers[0]?.id || dupExam.id,
                                 duplicate_questions: true,
-                                batch_id: batchId
+                                batch_id: batchId,
+                                force_duplicate: dupForce,
                             })
                         }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
                     ))
@@ -793,6 +808,16 @@ export default function GuruUlanganPage() {
     // diagregasi dari member yang TERLIHAT (co-teacher parsial hanya kelasnya);
     // badge "N Kelas Paralel" dari server tetap mencerminkan batch penuh.
     const examGroups = groupExamsByBatch(exams, { subjectId: subjectIdOf, classId: classIdOf })
+    // Deteksi duplikat lintas grup (same-TA + normalize-title sama) — badge
+    // "Kemungkinan Duplikat" bantu identifikasi duplikat lama. Memoize atas
+    // examGroups (anti recompute tiap render). Shared lib → guru & admin identik.
+    const duplicateSuspects = useMemo(
+        () => detectDuplicateGroups(examGroups, {
+            taId: (e) => taOf(e)?.id,
+            title: (e) => e.title,
+        }),
+        [examGroups],
+    )
     const classFilteredGroups = classFilter
         ? examGroups.filter(g => g.classIds.includes(classFilter))
         : examGroups
@@ -1018,6 +1043,22 @@ export default function GuruUlanganPage() {
                                             ? { label: 'Lihat Hasil', href: `/dashboard/guru/ulangan/${exam.id}?tab=hasil`, icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> }
                                             : { label: exam.pending_publish ? 'Perbaiki Soal' : 'Edit Soal', href: `/dashboard/guru/ulangan/${exam.id}`, icon: <Edit set="bold" primaryColor="currentColor" size={16} /> }
 
+                                    // Info per-kelas untuk section expandable (batch card).
+                                    const batchMembers = group.isBatch
+                                        ? group.members.map(m => {
+                                            const ms = getExamStatus(m, nowMs)
+                                            const cId = classIdOf(m) || ''
+                                            return {
+                                                examId: m.id,
+                                                className: first(taOf(m)?.class)?.name || null,
+                                                statusLabel: ms.label,
+                                                statusColor: ms.color,
+                                                submitted: submissionCounts[m.id] || 0,
+                                                total: studentCounts[cId] || 0,
+                                            }
+                                        })
+                                        : undefined
+
                                     const menuItems: DropdownMenuItem[] = [
                                         {
                                             label: 'Lihat Hasil',
@@ -1055,6 +1096,8 @@ export default function GuruUlanganPage() {
                                             primaryAction={primaryAction}
                                             menuItems={menuItems}
                                             now={serverNow()}
+                                            batchMembers={batchMembers}
+                                            isDuplicateSuspect={duplicateSuspects.has(exam.id)}
                                         />
                                     )
                                 })}
@@ -1305,6 +1348,9 @@ export default function GuruUlanganPage() {
                 onSubmit={handleDuplicateSubmit}
                 submitting={dupSubmitting}
             />
+
+            {/* Guard duplikat-judul dialog (pre-flight) — shared guru+admin */}
+            {dupGuard.dialog}
         </div>
     )
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Modal, PageHeader, Button, EmptyState } from '@/components/ui'
 import type { DropdownMenuItem } from '@/components/ui/DropdownMenu'
@@ -9,9 +9,10 @@ import { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import DailyExamCard from '@/components/exam/DailyExamCard'
 import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
-import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
+import { groupExamsByBatch, detectDuplicateGroups, type ExamBatchGroup } from '@/lib/examBatchGrouping'
 import ShowDraftsToggle from '@/components/ShowDraftsToggle'
 import DuplicateRemedialModal from '@/components/exam/DuplicateRemedialModal'
+import { useDuplicateGuard } from '@/components/exam/useDuplicateGuard'
 import { Plus, ChevronDown } from 'react-iconly'
 import { Loader2, Activity, Edit3, Trash2, GraduationCap, BarChart3, Copy, RefreshCw } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
@@ -69,6 +70,8 @@ function AdminUtsUasPageInner() {
     const [loading, setLoading] = useState(true)
     const [showCreate, setShowCreate] = useState(false)
     const [creating, setCreating] = useState(false)
+    // Guard duplikat-judul (pre-flight + dialog) — shared guru+admin (adil).
+    const dupGuard = useDuplicateGuard(labels.ulangan)
     const [submissionCounts, setSubmissionCounts] = useState<Record<string, { submitted: number; total: number }>>({})
     const [ulanganExams, setUlanganExams] = useState<any[]>([])
     const [ulanganCounts, setUlanganCounts] = useState<Record<string, { submitted: number; total: number }>>({})
@@ -305,6 +308,10 @@ function AdminUtsUasPageInner() {
                 // TA anchor = pengampu pertama (nama terkecil, deterministik);
                 // co-teacher lain tetap dapat akses via guard server co-teaching.
                 const anchorTAs = withTeachers.map(m => m.teachers[0])
+                // Pre-flight cek duplikat-judul per TA target (adil: guru & admin).
+                // Pakai ulanganExams in-memory (nol fetch tambahan).
+                const { proceed: dupOk, forceDuplicate: dupForce } = await dupGuard.guard(anchorTAs.map(t => t.id), form.title, ulanganExams)
+                if (!dupOk) return
                 const batchId = anchorTAs.length > 1 ? crypto.randomUUID() : null
                 const basePayload = {
                     title: form.title,
@@ -315,7 +322,8 @@ function AdminUtsUasPageInner() {
                     is_randomized: form.is_randomized,
                     max_violations: form.max_violations,
                     show_results_immediately: form.show_results_immediately,
-                    batch_id: batchId
+                    batch_id: batchId,
+                    force_duplicate: dupForce,
                 }
 
                 const results = await Promise.allSettled(
@@ -764,6 +772,10 @@ function AdminUtsUasPageInner() {
                         showToast('Tidak ada kelas terpilih yang memiliki guru pengampu untuk mapel ini.', 'error')
                         return
                     }
+                    // Pre-flight cek duplikat-judul per TA target (adil: guru & admin).
+                    // Pakai ulanganExams in-memory (nol fetch tambahan).
+                    const { proceed: dupOk, forceDuplicate: dupForce } = await dupGuard.guard(withTeachers.map(m => m.anchor.id), duplicateForm.title, ulanganExams)
+                    if (!dupOk) return
                     const batchId = withTeachers.length > 1 ? crypto.randomUUID() : null
                     const results = await Promise.allSettled(withTeachers.map(m =>
                         fetch('/api/exams', {
@@ -783,7 +795,8 @@ function AdminUtsUasPageInner() {
                                 show_results_immediately: duplicateExam.show_results_immediately ?? true,
                                 duplicate_from_exam_id: duplicateExam.id,
                                 duplicate_questions: true,
-                                batch_id: batchId
+                                batch_id: batchId,
+                                force_duplicate: dupForce,
                             })
                         }).then(r => {
                             if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -914,6 +927,16 @@ function AdminUtsUasPageInner() {
         subjectId: ulanganSubjectId,
         classId: ulanganClassId,
     })
+    // Deteksi duplikat lintas grup (same-TA + normalize-title sama) — badge
+    // "Kemungkinan Duplikat". Memoize atas ulanganGroups (anti recompute).
+    // Shared lib → guru & admin hasil identik (adil).
+    const ulanganDuplicateSuspects = useMemo(
+        () => detectDuplicateGroups(ulanganGroups, {
+            taId: (e: any) => ulanganTA(e)?.id,
+            title: (e: any) => e.title,
+        }),
+        [ulanganGroups],
+    )
 
     // Draft filter ulangan DISETELAH grouping: batch disembunyikan hanya bila
     // SEMUA member belum publish — batch campuran (ada yang publish) tetap
@@ -1129,6 +1152,22 @@ function AdminUtsUasPageInner() {
                                     ? { label: 'Lihat Hasil', href: `/dashboard/admin/uts-uas/${exam.id}?type=ulangan#hasil`, icon: <BarChart3 className="w-4 h-4" /> }
                                     : { label: 'Detail', href: `/dashboard/admin/uts-uas/${exam.id}?type=ulangan`, icon: <Edit3 className="w-4 h-4" /> }
 
+                            // Info per-kelas untuk section expandable (batch card).
+                            const batchMembers = group.isBatch
+                                ? group.members.map((m: any) => {
+                                    const ms = getExamStatus(m, nowMs)
+                                    const c = ulanganCounts[m.id]
+                                    return {
+                                        examId: m.id,
+                                        className: first(ulanganTA(m)?.class)?.name || null,
+                                        statusLabel: ms.label,
+                                        statusColor: ms.color,
+                                        submitted: c?.submitted || 0,
+                                        total: c?.total || 0,
+                                    }
+                                })
+                                : undefined
+
                             const menuItems: DropdownMenuItem[] = [
                                 {
                                     label: 'Monitor Live',
@@ -1172,6 +1211,8 @@ function AdminUtsUasPageInner() {
                                     primaryAction={primaryAction}
                                     menuItems={menuItems}
                                     now={serverNow()}
+                                    batchMembers={batchMembers}
+                                    isDuplicateSuspect={ulanganDuplicateSuspects.has(exam.id)}
                                 />
                             )
                         })}
@@ -1470,6 +1511,9 @@ function AdminUtsUasPageInner() {
                     </div>
                 </div>
             )}
+
+            {/* Guard duplikat-judul dialog (pre-flight) — shared guru+admin */}
+            {dupGuard.dialog}
         </div>
     )
 }

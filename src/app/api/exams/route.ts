@@ -197,7 +197,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { title, description, start_time, duration_minutes, window_end_time, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, duplicate_from_exam_id, show_results_immediately, batch_id, remedial_score_policy, remedial_max_score } = body
+        const { title, description, start_time, duration_minutes, window_end_time, teaching_assignment_id, is_randomized, max_violations, is_remedial, remedial_for_id, allowed_student_ids, duplicate_questions, duplicate_from_exam_id, show_results_immediately, batch_id, remedial_score_policy, remedial_max_score, force_duplicate } = body
 
         if (!title || !start_time || duration_minutes === undefined || !teaching_assignment_id) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -346,6 +346,57 @@ export async function POST(request: NextRequest) {
                     .single()
                 if (!targetTa || targetTa.subject_id !== srcTa?.subject_id || targetTa.class_id !== srcTa?.class_id) {
                     return NextResponse.json({ error: 'Ulangan remedial harus berasal dari kelas & mapel yang sama' }, { status: 400 })
+                }
+            }
+        }
+
+        // ── Guard duplikat-judul: cegah exam baru judul sama (normalize trim +
+        // lowercase) untuk TA yang sama di tahun aktif — akar duplikasi massal
+        // (kasus PIIS: 8 exam Biologi untuk 3 kelas, varian spasi-depan lolos).
+        // Remedial dikecualikan (make-up sah). force_duplicate = override guru/admin
+        // setelah dialog konfirmasi. Guard cover SEMUA jalur POST (create, Salin,
+        // Pakai Ulang, batch member, remedial-non-remedial) — 1 pintu, adil guru+admin.
+        if (!force_duplicate && !is_remedial) {
+            const normTitle = (title || '').trim().toLowerCase()
+            if (normTitle) {
+                // fetchAllRows + .order('id') tiebreaker (doctrine — stabil paginasi
+                // walau realistis <50 exam per TA; anti potong diam-diam 1000 baris).
+                const existingExams = await fetchAllRows(supabase
+                    .from('exams')
+                    .select('id, title, is_active, created_at, teaching_assignment:teaching_assignments(class:classes(name))')
+                    .eq('teaching_assignment_id', teaching_assignment_id)
+                    .neq('is_remedial', true)
+                    .order('created_at', { ascending: false })
+                    .order('id'))
+                const dupe = (existingExams || []).find((e: any) => {
+                    const eNorm = (e.title || '').trim().toLowerCase()
+                    return eNorm === normTitle
+                })
+                if (dupe) {
+                    // Hitung jumlah submission exam existing untuk konteks dialog
+                    let submissionCount = 0
+                    try {
+                        const { count } = await supabase
+                            .from('exam_submissions')
+                            .select('id', { count: 'exact', head: true })
+                            .eq('exam_id', dupe.id)
+                        submissionCount = count || 0
+                    } catch { /* non-fatal — info dialog saja */ }
+                    const taEmbed: any = Array.isArray(dupe.teaching_assignment)
+                        ? dupe.teaching_assignment[0]
+                        : dupe.teaching_assignment
+                    const className = taEmbed?.class?.name
+                    return NextResponse.json({
+                        error: 'DUPLICATE_TITLE',
+                        existing: {
+                            id: dupe.id,
+                            title: dupe.title,
+                            className: className || null,
+                            isActive: dupe.is_active,
+                            submissionCount,
+                            createdAt: dupe.created_at,
+                        }
+                    }, { status: 409 })
                 }
             }
         }

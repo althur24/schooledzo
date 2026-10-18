@@ -2,7 +2,7 @@
 
 import { ReactNode } from 'react'
 import { Shuffle } from 'lucide-react'
-import ExamCard, { ExamCardPrimaryAction } from './ExamCard'
+import ExamCard, { ExamCardPrimaryAction, type BatchMemberInfo } from './ExamCard'
 import type { DropdownMenuItem } from '@/components/ui/DropdownMenu'
 import {
     typeBadgeFor,
@@ -63,6 +63,10 @@ interface DailyExamCardProps {
     actionsDataTutorial?: string
     /** Waktu server (ms) untuk koreksi jam HP — dipassing ke getExamStatus */
     now?: number
+    /** Info per-kelas untuk section expandable (batch card). */
+    batchMembers?: BatchMemberInfo[]
+    /** Flag deteksi duplikat — badge merah "Kemungkinan Duplikat". */
+    isDuplicateSuspect?: boolean
 }
 
 /**
@@ -84,6 +88,8 @@ export default function DailyExamCard({
     dataTutorial,
     actionsDataTutorial,
     now,
+    batchMembers,
+    isDuplicateSuspect,
 }: DailyExamCardProps) {
     const status = getExamStatus(exam, now)
 
@@ -143,6 +149,8 @@ export default function DailyExamCard({
             onPendingGradingClick={onPendingGradingClick}
             batchSize={exam.batch_size ?? 1}
             batchClassNames={exam.batch_class_names ?? undefined}
+            batchMembers={batchMembers}
+            isDuplicateSuspect={isDuplicateSuspect}
             primaryAction={primaryAction}
             menuItems={menuItems}
             dataTutorial={dataTutorial}

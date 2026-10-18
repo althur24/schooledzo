@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { Button, Modal, EmptyState } from '@/components/ui'
+import { useDuplicateGuard } from '@/components/exam/useDuplicateGuard'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
@@ -201,6 +202,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     const [aiReviewEnabled, setAiReviewEnabled] = useState(false)
     const [teachingAssignments, setTeachingAssignments] = useState<any[]>([])
     const [batchMemberSaving, setBatchMemberSaving] = useState(false)
+    // Guard duplikat-judul (pre-flight + dialog) — shared guru+admin (adil).
+    const dupGuard = useDuplicateGuard(labels.ulangan)
     // Tahun ajaran exam — primitif utk dep effect classes (hindari refetch per fetchExam)
     const examYearId = isUlangan
         ? (exam as any)?.teaching_assignment?.academic_year?.id
@@ -874,8 +877,14 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
             .sort((a: any, b: any) => a.teacherName.localeCompare(b.teacherName))
         const anchor = tas[0]
         if (!anchor) { showToast(`Kelas ${className} belum punya guru pengampu mapel ini`, 'error'); return }
+        // setBatchMemberSaving(true) SEBELUM guard agar tombol disable selama
+        // pre-flight (anti double-click). Paritas guru [id] handleAddBatchMember.
         setBatchMemberSaving(true)
         try {
+            // Pre-flight cek duplikat-judul untuk TA kelas kandidat (adil: guru & admin).
+            const dupTitle = settingsForm.title || exam.title || ''
+            const { proceed: dupOk, forceDuplicate: dupForce } = await dupGuard.guard([anchor.id], dupTitle)
+            if (!dupOk) return
             const localDate = new Date(settingsForm.start_time || Date.now())
             const res = await fetch('/api/exams', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -888,6 +897,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     is_randomized: settingsForm.is_randomized, max_violations: settingsForm.max_violations,
                     show_results_immediately: settingsForm.show_results_immediately,
                     duplicate_from_exam_id: examId, duplicate_questions: true, batch_id: exam.batch_id,
+                    force_duplicate: dupForce,
                 })
             })
             if (res.ok) { showToast(`Kelas ${className} ditambahkan ke batch`, 'success'); await fetchExam() }
@@ -2114,6 +2124,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     </div>
                 </div>
             )}
+
+            {/* Guard duplikat-judul dialog (pre-flight) — shared guru+admin */}
+            {dupGuard.dialog}
         </div>
     )
 }

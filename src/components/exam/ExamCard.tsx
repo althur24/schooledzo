@@ -1,8 +1,8 @@
 'use client'
 
-import { ReactNode } from 'react'
+import { ReactNode, useState } from 'react'
 import Link from 'next/link'
-import { Layers } from 'lucide-react'
+import { Layers, ChevronDown, AlertTriangle } from 'lucide-react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import DropdownMenu, { DropdownMenuItem } from '@/components/ui/DropdownMenu'
@@ -19,6 +19,18 @@ export interface ExamCardPrimaryAction {
     label: string
     icon?: ReactNode
     href: string
+}
+
+/** Info per-kelas untuk section expandable kartu batch. */
+export interface BatchMemberInfo {
+    examId: string
+    className: string | null
+    /** Label status member (mis. "Live", "Selesai", "Belum Mulai", "Draft") */
+    statusLabel: string
+    /** Warna status member — kelas CSS tailwind untuk badge kecil */
+    statusColor?: string
+    submitted: number
+    total: number
 }
 
 interface ExamCardProps {
@@ -65,6 +77,10 @@ interface ExamCardProps {
     batchSize?: number
     /** Nama kelas dalam batch (tooltip badge "N Kelas Paralel") */
     batchClassNames?: string[]
+    /** Info per-kelas untuk section expandable "Lihat per kelas" (batch card). */
+    batchMembers?: BatchMemberInfo[]
+    /** Flag deteksi duplikat (same-TA + similar-title lintas grup) — badge merah. */
+    isDuplicateSuspect?: boolean
 
     /** Aksi utama kontekstual: Edit (draft) / Monitor (live) / Hasil (selesai) */
     primaryAction: ExamCardPrimaryAction
@@ -108,6 +124,8 @@ export default function ExamCard({
     onPendingGradingClick,
     batchSize = 1,
     batchClassNames,
+    batchMembers,
+    isDuplicateSuspect = false,
     primaryAction,
     menuItems = [],
     dataTutorial,
@@ -115,6 +133,8 @@ export default function ExamCard({
 }: ExamCardProps) {
     const labels = useSchoolLabels()
     const noQuestions = (questionCount ?? 0) === 0
+    const [batchExpanded, setBatchExpanded] = useState(false)
+    const showBatchMembers = batchSize > 1 && batchMembers && batchMembers.length > 1
 
     // Sel info meta. Bila jumlahnya ganjil, sel TERAKHIR dirender sebagai baris
     // pasangan label-kiri/nilai-kanan agar nilainya jatuh di rel kolom kanan
@@ -169,6 +189,14 @@ export default function ExamCard({
                             className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/20"
                         >
                             <Layers className="w-3.5 h-3.5" /> {batchSize} Kelas Paralel
+                        </span>
+                    )}
+                    {isDuplicateSuspect && (
+                        <span
+                            title={`Terdeteksi ${labelForGradeType(typeBadge.label, labels)} lain dengan judul & kelas yang sama. Periksa sebelum membuat ulang.`}
+                            className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/20"
+                        >
+                            <AlertTriangle className="w-3.5 h-3.5" /> Kemungkinan Duplikat
                         </span>
                     )}
                     {extraBadges}
@@ -235,6 +263,53 @@ export default function ExamCard({
                         <span className="text-amber-600 dark:text-amber-400 font-medium">Perlu Dikoreksi</span>
                         <span className="font-bold text-amber-600 dark:text-amber-400">{pendingGrading}</span>
                     </button>
+                )}
+
+                {/* Section expandable "Lihat per kelas" untuk kartu batch multi-kelas.
+                    Nama kelas + status + pengumpulan per member — sebelumnya hanya
+                    tooltip hover. Adil: guru & admin lihat sama (komponen shared). */}
+                {showBatchMembers && (
+                    <div className="border border-secondary/15 rounded-xl overflow-hidden">
+                        <button
+                            type="button"
+                            onClick={() => setBatchExpanded(v => !v)}
+                            className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-text-main dark:text-white hover:bg-secondary/5 transition-colors"
+                        >
+                            <span className="flex items-center gap-1.5">
+                                <Layers className="w-3.5 h-3.5 text-sky-500" />
+                                Lihat per kelas ({batchMembers!.length})
+                            </span>
+                            <ChevronDown className={`w-4 h-4 transition-transform ${batchExpanded ? 'rotate-180' : ''}`} />
+                        </button>
+                        {batchExpanded && (
+                            <div className="divide-y divide-secondary/10 border-t border-secondary/15">
+                                {batchMembers!.map(m => {
+                                    const pct = m.total > 0 ? m.submitted / m.total : 0
+                                    return (
+                                        <div
+                                            key={m.examId}
+                                            className="flex items-center justify-between px-3 py-2 text-xs"
+                                        >
+                                            <span className="font-bold text-text-main dark:text-white truncate">
+                                                {m.className || 'Kelas'}
+                                            </span>
+                                            <span className="flex items-center gap-2 flex-shrink-0">
+                                                <span className={`px-1.5 py-0.5 rounded font-medium ${m.statusColor || 'bg-secondary/10 text-text-secondary'}`}>
+                                                    {m.statusLabel}
+                                                </span>
+                                                <span className="text-text-secondary">
+                                                    {m.submitted}/{m.total} siswa
+                                                </span>
+                                                {pct >= 1 && m.total > 0 && (
+                                                    <span className="text-green-600 font-bold">✓</span>
+                                                )}
+                                            </span>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </div>
                 )}
             </div>
 
