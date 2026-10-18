@@ -77,18 +77,18 @@ export function examScheduleLabels(windowEndTime?: string | null): { start: stri
 export function getExamStatus(exam: ExamTimeFields & {
     is_active?: boolean | null
     pending_publish?: boolean | null
-}): ExamStatusInfo {
+}, nowMs?: number): ExamStatusInfo {
     if (exam.pending_publish) {
         return { label: '🔍 Under Review', color: STATUS_COLORS.underReview, isLive: false, isDone: false }
     }
-    return getOfficialExamStatus(exam)
+    return getOfficialExamStatus(exam, nowMs)
 }
 
 /** Status UTS/UAS: Draft → Terjadwal → Berlangsung → Selesai (tanpa Under Review). */
 export function getOfficialExamStatus(exam: ExamTimeFields & {
     is_active?: boolean | null
-}): ExamStatusInfo {
-    const now = Date.now()
+}, nowMs?: number): ExamStatusInfo {
+    const now = nowMs ?? Date.now()
     const start = new Date(exam.start_time).getTime()
     const end = new Date(getEffectiveEndTime(exam)).getTime()
 
@@ -107,12 +107,13 @@ export function getQuizStatus(quiz: {
     is_active?: boolean | null
     pending_publish?: boolean | null
     deadline?: string | null
-}): ExamStatusInfo {
+}, nowMs?: number): ExamStatusInfo {
+    const now = nowMs ?? Date.now()
     if (quiz.pending_publish) {
         return { label: '🔍 Under Review', color: STATUS_COLORS.underReview, isLive: false, isDone: false }
     }
     if (!quiz.is_active) return { label: 'Draft', color: STATUS_COLORS.draft, isLive: false, isDone: false }
-    if (quiz.deadline && Date.now() > new Date(quiz.deadline).getTime()) {
+    if (quiz.deadline && now > new Date(quiz.deadline).getTime()) {
         return { label: 'Berakhir', color: STATUS_COLORS.done, isLive: false, isDone: true }
     }
     return { label: 'Aktif', color: STATUS_COLORS.live, isLive: false, isDone: false }

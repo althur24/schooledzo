@@ -9,6 +9,8 @@ import { useRouter } from 'next/navigation'
 import { TimeCircle as Clock, Danger, Calendar, Document, Edit, ArrowRight, Notification } from 'react-iconly'
 import { PartyPopper, GraduationCap, Loader2, Megaphone } from 'lucide-react'
 import ProactiveRescueBanner from '@/components/ProactiveRescueBanner'
+import { useServerTimeOffset } from '@/hooks/useServerTimeOffset'
+import { ServerTimeWarning } from '@/components/dashboard/ServerTimeWarning'
 
 interface StudentData {
     id: string
@@ -42,6 +44,7 @@ export default function SiswaDashboard() {
     const { user } = useAuth()
     const labels = useSchoolLabels()
     const router = useRouter()
+    const { offsetRef, now: serverNow, minutes, dismissed, sync, dismiss } = useServerTimeOffset()
     const [student, setStudent] = useState<StudentData | null>(null)
     const [loading, setLoading] = useState(true)
     // True bila fetch data utama gagal — tanpa ini halaman menampilkan
@@ -121,6 +124,7 @@ export default function SiswaDashboard() {
                         fetch('/api/official-exams'),
                         fetch('/api/official-exam-submissions')
                     ])
+                    sync(examsRes)
 
                     const assignmentsData = await assignmentsRes.json()
                     const examsData = await examsRes.json()
@@ -152,7 +156,7 @@ export default function SiswaDashboard() {
                     const officialExams = Array.isArray(officialExamsData) ? officialExamsData : []
                     const officialExamSubs = Array.isArray(officialExamSubsData) ? officialExamSubsData : []
 
-                    const nowTime = new Date().getTime()
+                    const nowTime = serverNow()
                     const newDeadlines: DeadlineItem[] = []
 
                     // Process Assignments — show ALL that haven't been submitted (deadline not passed)
@@ -318,7 +322,7 @@ export default function SiswaDashboard() {
                         if (!e.is_submitted && e.exam?.is_active) {
                             // ends_at dari server: satu sumber kebenaran (mode serentak/jendela + override);
                             // fallback ke rumus lama bila tidak tersedia
-                            const now = Date.now()
+                            const now = serverNow()
                             const effectiveEnd = e.ends_at
                                 ? new Date(e.ends_at).getTime()
                                 : new Date(e.started_at).getTime() + (e.exam.duration_minutes || 0) * 60 * 1000
@@ -348,7 +352,7 @@ export default function SiswaDashboard() {
                     for (const q of quizzes) {
                         if (!q.submitted_at && q.quiz?.is_active) {
                             // ends_at dari server: min(started_at + durasi, deadline); fallback rumus lama
-                            const now = Date.now()
+                            const now = serverNow()
                             const effectiveEnd = q.ends_at
                                 ? new Date(q.ends_at).getTime()
                                 : new Date(q.started_at).getTime() + (q.quiz.duration_minutes || 0) * 60 * 1000
@@ -380,7 +384,7 @@ export default function SiswaDashboard() {
                     for (const oe of officialExamSubs) {
                         if (!oe.is_submitted && oe.exam?.is_active) {
                             // ends_at dari server: satu sumber kebenaran; fallback rumus lama
-                            const now = Date.now()
+                            const now = serverNow()
                             const effectiveEnd = oe.ends_at
                                 ? new Date(oe.ends_at).getTime()
                                 : new Date(oe.started_at).getTime() + (oe.exam.duration_minutes || 0) * 60 * 1000
@@ -427,12 +431,12 @@ export default function SiswaDashboard() {
         })
     }
 
-    // Auto-refresh state every minute for real-time countdowns
-    const [currentTimeMs, setCurrentTimeMs] = useState<number>(Date.now())
+    // Auto-refresh state every minute for real-time countdowns — pakai server time
+    const [currentTimeMs, setCurrentTimeMs] = useState<number>(serverNow())
     useEffect(() => {
-        const interval = setInterval(() => setCurrentTimeMs(Date.now()), 60000)
+        const interval = setInterval(() => setCurrentTimeMs(Date.now() + offsetRef.current), 60000)
         return () => clearInterval(interval)
-    }, [])
+    }, [offsetRef])
 
     // UI helpers
     const getCountdownText = (item: DeadlineItem, nowMs: number) => {
@@ -523,6 +527,7 @@ export default function SiswaDashboard() {
     return (
         <div className="space-y-5 md:space-y-8 animate-in fade-in duration-500">
             <ProactiveRescueBanner />
+            <ServerTimeWarning minutes={minutes} dismissed={dismissed} onDismiss={dismiss} />
             {/* Peringatan gagal memuat — jangan biarkan empty state perayaan
                 ("Semua Sudah Dikerjakan!" / "Libur!") menyembunyikan error */}
             {!loading && dataFailed && (

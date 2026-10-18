@@ -47,6 +47,8 @@ interface QuizCardProps {
     extraBadges?: ReactNode[]
     dataTutorial?: string
     actionsDataTutorial?: string
+    /** Waktu server (ms) untuk koreksi jam HP — dipassing ke getQuizStatus */
+    now?: number
 }
 
 /**
@@ -69,8 +71,9 @@ export default function QuizCard({
     extraBadges = [],
     dataTutorial,
     actionsDataTutorial,
+    now,
 }: QuizCardProps) {
-    const status = getQuizStatus(quiz)
+    const status = getQuizStatus(quiz, now)
 
     const ta = unwrapEmbed(quiz.teaching_assignment)
     const subjectName = unwrapEmbed(ta?.subject)?.name

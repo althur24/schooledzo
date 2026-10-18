@@ -61,6 +61,8 @@ interface DailyExamCardProps {
     extraBadges?: ReactNode[]
     dataTutorial?: string
     actionsDataTutorial?: string
+    /** Waktu server (ms) untuk koreksi jam HP — dipassing ke getExamStatus */
+    now?: number
 }
 
 /**
@@ -81,8 +83,9 @@ export default function DailyExamCard({
     extraBadges = [],
     dataTutorial,
     actionsDataTutorial,
+    now,
 }: DailyExamCardProps) {
-    const status = getExamStatus(exam)
+    const status = getExamStatus(exam, now)
 
     const ta = unwrapEmbed(exam.teaching_assignment)
     const subjectName = unwrapEmbed(ta?.subject)?.name

@@ -147,7 +147,9 @@ export async function GET(request: NextRequest) {
             quizzesWithBatch.forEach(q => { delete (q as any).allowed_student_ids })
         }
 
-        return NextResponse.json(quizzesWithBatch)
+        return NextResponse.json(quizzesWithBatch, {
+            headers: { 'x-server-time': new Date().toISOString() }
+        })
     } catch (error) {
         console.error('Error fetching quizzes:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

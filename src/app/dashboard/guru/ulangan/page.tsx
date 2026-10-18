@@ -13,6 +13,7 @@ import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
 import ShowDraftsToggle from '@/components/ShowDraftsToggle'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import TimeWindowFields from '@/components/TimeWindowFields'
+import { useServerTimeOffset } from '@/hooks/useServerTimeOffset'
 import { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import DuplicateRemedialModal from '@/components/exam/DuplicateRemedialModal'
 import { useAuth } from '@/contexts/AuthContext'
@@ -81,6 +82,7 @@ export default function GuruUlanganPage() {
     const { user } = useAuth()
     const router = useRouter()
     const labels = useSchoolLabels()
+    const { now: serverNow, sync } = useServerTimeOffset()
     const [exams, setExams] = useState<Exam[]>([])
     const [teachingAssignments, setTeachingAssignments] = useState<TeachingAssignment[]>([])
     const [submissionCounts, setSubmissionCounts] = useState<Record<string, number>>({})
@@ -165,6 +167,7 @@ export default function GuruUlanganPage() {
                 fetch('/api/school-settings'),
                 fetch('/api/dashboard/guru/grading-overview')
             ])
+            sync(examsRes)
 
             if (settingsRes.ok) {
                 const settings = await settingsRes.json()
@@ -988,11 +991,12 @@ export default function GuruUlanganPage() {
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                                 {renderedExamGroups.map((group) => {
                                     const exam = group.representative
-                                    const repStatus = getExamStatus(exam)
+                                    const nowMs = serverNow()
+                                    const repStatus = getExamStatus(exam, nowMs)
                                     // Status agregat batch: live bila ADA member live,
                                     // selesai bila SEMUA member selesai (representative
                                     // pending_publish otomatis jadi Under Review).
-                                    const memberStatuses = group.members.map(m => getExamStatus(m))
+                                    const memberStatuses = group.members.map(m => getExamStatus(m, nowMs))
                                     const isLive = group.isBatch ? memberStatuses.some(s => s.isLive) : repStatus.isLive
                                     const isDone = group.isBatch ? memberStatuses.every(s => s.isDone) : repStatus.isDone
                                     const isActive = group.isBatch ? group.members.some(m => m.is_active) : exam.is_active
@@ -1050,6 +1054,7 @@ export default function GuruUlanganPage() {
                                             onPendingGradingClick={() => router.push(`/dashboard/guru/ulangan/${exam.id}?tab=hasil`)}
                                             primaryAction={primaryAction}
                                             menuItems={menuItems}
+                                            now={serverNow()}
                                         />
                                     )
                                 })}
@@ -1077,7 +1082,7 @@ export default function GuruUlanganPage() {
                         ) : (
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                                 {visibleOfficialExams.map(exam => {
-                                    const status = getOfficialExamStatus(exam)
+                                    const status = getOfficialExamStatus(exam, serverNow())
                                     const isLive = status.isLive
                                     const isDone = status.isDone
 
@@ -1122,6 +1127,7 @@ export default function GuruUlanganPage() {
                                             primaryAction={primaryAction}
                                             menuItems={officialMenuItems}
                                             pendingGrading={pendingGradingCounts[exam.id] || 0}
+                                            now={serverNow()}
                                         />
                                     )
                                 })}

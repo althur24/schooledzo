@@ -10,6 +10,7 @@ import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
 import { useGradingCounts } from '@/hooks/useGradingCounts'
 import { formatScore } from '@/lib/formatScore'
+import { useServerTimeOffset } from '@/hooks/useServerTimeOffset'
 
 interface WarningItem {
     student_id: string
@@ -69,6 +70,7 @@ interface ScheduleEntry {
 export default function GuruDashboard() {
     const { user } = useAuth()
     const router = useRouter()
+    const { now: serverNow, sync } = useServerTimeOffset()
     const labels = useSchoolLabels()
     const { items: gradingItems, loaded: gradingLoaded } = useGradingCounts(user?.role === 'GURU')
     const [warnings, setWarnings] = useState<WarningsData | null>(null)
@@ -106,6 +108,7 @@ export default function GuruDashboard() {
                 ])
                 const warnData = await warnRes.json()
                 const scheduleData = await scheduleRes.json()
+                sync(examsRes)
                 const examsData = await examsRes.json()
                 const ulanganData = await ulanganRes.json()
                 const yearsData = await yearsRes.json()
@@ -121,7 +124,7 @@ export default function GuruDashboard() {
                 // Ujian "sedang berlangsung": is_active + sekarang dalam rentang
                 // berjalan (mode jendela: sampai window_end_time; mode serentak:
                 // start + durasi). Ulangan dan UTS/UAS sama-sama dihitung.
-                const nowMs = new Date().getTime()
+                const nowMs = serverNow()
                 const isRunning = (exam: any) => {
                     const startMs = new Date(exam.start_time).getTime()
                     const endMs = exam.window_end_time

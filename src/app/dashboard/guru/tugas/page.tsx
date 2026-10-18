@@ -12,6 +12,7 @@ import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
 import FileUpload from '@/components/FileUpload'
 import { SubmissionAttachment } from '@/lib/types'
+import { useServerTimeOffset } from '@/hooks/useServerTimeOffset'
 
 interface TeachingAssignment {
     id: string
@@ -37,6 +38,7 @@ interface Assignment {
 export default function TugasPage() {
     const { user } = useAuth()
     const labels = useSchoolLabels()
+    const { now: serverNow, sync } = useServerTimeOffset()
     const [assignments, setAssignments] = useState<Assignment[]>([])
     const [teachingAssignments, setTeachingAssignments] = useState<TeachingAssignment[]>([])
     const [studentCounts, setStudentCounts] = useState<Record<string, number>>({})
@@ -81,6 +83,7 @@ export default function TugasPage() {
                 fetch('/api/assignments'),
                 fetch('/api/academic-years')
             ])
+            sync(assignmentsRes)
             const [taData, assignmentsData, yearsData] = await Promise.all([
                 taRes.json(),
                 assignmentsRes.json(),
@@ -386,10 +389,10 @@ export default function TugasPage() {
                 <div className="space-y-4">
                     <div className="grid grid-cols-1 gap-4">
                         {paginatedAssignments.map((assignment, index) => {
-                            const now = new Date()
+                            const now = serverNow()
                             const dueDate = assignment.due_date ? new Date(assignment.due_date) : null
-                            const isOverdue = dueDate && dueDate < now
-                            const isNearing = dueDate && (dueDate.getTime() - now.getTime() < 3 * 24 * 60 * 60 * 1000) && !isOverdue
+                            const isOverdue = dueDate && dueDate.getTime() < now
+                            const isNearing = dueDate && (dueDate.getTime() - now < 3 * 24 * 60 * 60 * 1000) && !isOverdue
 
                             const borderClass = isOverdue ? 'border-red-500/50 hover:border-red-500 bg-red-50/10 dark:bg-red-900/5' : isNearing ? 'border-amber-500/50 hover:border-amber-500 bg-amber-50/10 dark:bg-amber-900/5' : 'hover:border-primary/30'
                             const submitCount = assignment.submissions?.[0]?.count || 0

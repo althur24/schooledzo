@@ -10,6 +10,8 @@ import ExpandableText from '@/components/ExpandableText'
 import { Loader2, GraduationCap, BookOpen } from 'lucide-react'
 import { Document, TimeCircle, Danger, Play, TickSquare, Chart, Calendar } from 'react-iconly'
 import { formatScore } from '@/lib/formatScore'
+import { useServerTimeOffset } from '@/hooks/useServerTimeOffset'
+import { ServerTimeWarning } from '@/components/dashboard/ServerTimeWarning'
 
 interface Exam {
     id: string
@@ -67,6 +69,7 @@ interface OfficialSubmission {
 export default function SiswaUlanganPage() {
     const { user } = useAuth()
     const labels = useSchoolLabels()
+    const { offsetRef, now: serverNow, minutes, dismissed, sync, dismiss } = useServerTimeOffset()
     const [exams, setExams] = useState<Exam[]>([])
     const [submissions, setSubmissions] = useState<ExamSubmission[]>([])
     const [officialExams, setOfficialExams] = useState<OfficialExam[]>([])
@@ -79,13 +82,13 @@ export default function SiswaUlanganPage() {
         if (user) fetchData()
     }, [user])
 
-    // Update current time every second for active countdowns
+    // Update current time every second for active countdowns — pakai server time
     useEffect(() => {
         const timer = setInterval(() => {
-            setCurrentTime(new Date())
+            setCurrentTime(new Date(Date.now() + offsetRef.current))
         }, 1000)
         return () => clearInterval(timer)
-    }, [])
+    }, [offsetRef])
 
     const fetchData = async () => {
         try {
@@ -96,6 +99,7 @@ export default function SiswaUlanganPage() {
                 fetch('/api/official-exams'),
                 fetch('/api/official-exam-submissions')
             ])
+            sync(examsRes)
             const examsData = await examsRes.json()
             const submissionsData = await submissionsRes.json()
             const officialData = await officialRes.json()
@@ -233,6 +237,8 @@ export default function SiswaUlanganPage() {
                 icon={<div className="text-red-500 flex"><TimeCircle set="bold" primaryColor="currentColor" size="small" /></div>}
                 backHref="/dashboard/siswa"
             />
+
+            <ServerTimeWarning minutes={minutes} dismissed={dismissed} onDismiss={dismiss} />
 
             {/* Warning card */}
             <div className="bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30 rounded-xl p-4">

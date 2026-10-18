@@ -10,6 +10,8 @@ import { Loader2 } from 'lucide-react'
 import { Edit, TimeCircle, TickSquare, Paper, Discovery, Calendar, Star, Document } from 'react-iconly'
 import FileUpload from '@/components/FileUpload'
 import { SubmissionAttachment } from '@/lib/types'
+import { useServerTimeOffset } from '@/hooks/useServerTimeOffset'
+import { ServerTimeWarning } from '@/components/dashboard/ServerTimeWarning'
 
 interface Assignment {
     id: string
@@ -48,6 +50,7 @@ export default function SiswaTugasPage() {
     const [detailing, setDetailing] = useState<Assignment | null>(null)
     const [saving, setSaving] = useState(false)
     const [submitError, setSubmitError] = useState<string | null>(null)
+    const { now: serverNow, minutes, dismissed, sync, dismiss } = useServerTimeOffset()
 
     useEffect(() => {
         const fetchData = async () => {
@@ -68,6 +71,7 @@ export default function SiswaTugasPage() {
                     fetch('/api/assignments'),
                     fetch(`/api/submissions?student_id=${myStudent.id}`)
                 ])
+                sync(assignmentsRes)
                 const [assignmentsData, submissionsData] = await Promise.all([
                     assignmentsRes.json(),
                     submissionsRes.json()
@@ -96,7 +100,7 @@ export default function SiswaTugasPage() {
 
     const isOverdue = (dueDate: string | null) => {
         if (!dueDate) return false
-        return new Date(dueDate) < new Date()
+        return new Date(dueDate).getTime() < serverNow()
     }
 
     const handleEditSubmission = (assignmentId: string, existingSub: Submission) => {
@@ -156,6 +160,8 @@ export default function SiswaTugasPage() {
                 icon={<div className="text-amber-500 flex"><Edit set="bold" primaryColor="currentColor" size="small" /></div>}
                 backHref="/dashboard/siswa"
             />
+
+            <ServerTimeWarning minutes={minutes} dismissed={dismissed} onDismiss={dismiss} />
 
             {loading ? (
                 <div className="flex justify-center py-12">

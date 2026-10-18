@@ -135,10 +135,14 @@ export async function GET(request: NextRequest) {
                 need_grading_count: countMap[a.id]?.ungraded || 0
             }))
 
-            return NextResponse.json(enriched)
+            return NextResponse.json(enriched, {
+                headers: { 'x-server-time': new Date().toISOString() }
+            })
         }
 
-        return NextResponse.json(data)
+        return NextResponse.json(data, {
+            headers: { 'x-server-time': new Date().toISOString() }
+        })
     } catch (error) {
         console.error('Error fetching assignments:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

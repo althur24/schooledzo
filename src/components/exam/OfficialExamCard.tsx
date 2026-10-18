@@ -48,6 +48,8 @@ interface OfficialExamCardProps {
     extraBadges?: ReactNode[]
     dataTutorial?: string
     actionsDataTutorial?: string
+    /** Waktu server (ms) untuk koreksi jam HP — dipassing ke getOfficialExamStatus */
+    now?: number
 }
 
 /**
@@ -66,8 +68,9 @@ export default function OfficialExamCard({
     extraBadges = [],
     dataTutorial,
     actionsDataTutorial,
+    now,
 }: OfficialExamCardProps) {
-    const status = getOfficialExamStatus(exam)
+    const status = getOfficialExamStatus(exam, now)
     const scheduleLabels = examScheduleLabels(exam.window_end_time)
     const nClasses = exam.target_class_ids?.length ?? 0
     // Tooltip nama kelas target — admin/guru bisa melihat kelas mana saja

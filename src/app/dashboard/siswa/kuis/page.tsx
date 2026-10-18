@@ -9,6 +9,8 @@ import ExpandableText from '@/components/ExpandableText'
 import { Loader2 } from 'lucide-react'
 import { Game, Calendar, TimeCircle, Document, TickSquare } from 'react-iconly'
 import { formatScore } from '@/lib/formatScore'
+import { useServerTimeOffset } from '@/hooks/useServerTimeOffset'
+import { ServerTimeWarning } from '@/components/dashboard/ServerTimeWarning'
 
 interface Quiz {
     id: string
@@ -40,6 +42,7 @@ interface QuizSubmission {
 export default function SiswaKuisPage() {
     const { user } = useAuth()
     const labels = useSchoolLabels()
+    const { now: serverNow, minutes, dismissed, sync, dismiss } = useServerTimeOffset()
     const [quizzes, setQuizzes] = useState<Quiz[]>([])
     const [submissions, setSubmissions] = useState<QuizSubmission[]>([])
     const [loading, setLoading] = useState(true)
@@ -62,6 +65,7 @@ export default function SiswaKuisPage() {
                     fetch('/api/quizzes'),
                     fetch(`/api/quiz-submissions?student_id=${myStudent.id}`)
                 ])
+                sync(quizzesRes)
                 const [quizzesData, subsData] = await Promise.all([
                     quizzesRes.json(),
                     subsRes.json()
@@ -98,6 +102,8 @@ export default function SiswaKuisPage() {
                 backHref="/dashboard/siswa"
             />
 
+            <ServerTimeWarning minutes={minutes} dismissed={dismissed} onDismiss={dismiss} />
+
             {loading ? (
                 <div className="flex justify-center py-12">
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -116,8 +122,8 @@ export default function SiswaKuisPage() {
                         const isInProgress = submission && !submission.submitted_at
                         const questionCount = quiz.questions?.[0]?.count || 0
                         // Jendela waktu kuis: jam buka & deadline hanya menggerbang attempt BARU
-                        const notYetOpen = !!quiz.available_from && Date.now() < new Date(quiz.available_from).getTime()
-                        const pastDeadline = !!quiz.deadline && Date.now() > new Date(quiz.deadline).getTime()
+                        const notYetOpen = !!quiz.available_from && serverNow() < new Date(quiz.available_from).getTime()
+                        const pastDeadline = !!quiz.deadline && serverNow() > new Date(quiz.deadline).getTime()
                         const canStartNew = !notYetOpen && !pastDeadline
                         const fmt = (iso: string) => new Date(iso).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 
@@ -205,7 +211,7 @@ export default function SiswaKuisPage() {
                                                 const perStudentEnd = durationMs > 0 ? startedAt + durationMs : null
                                                 const deadlineMs = quiz.deadline ? new Date(quiz.deadline).getTime() : null
                                                 const effectiveEnd = Math.min(...[perStudentEnd, deadlineMs].filter((v): v is number => v !== null))
-                                                const isExpired = Date.now() > (effectiveEnd + 60000)
+                                                const isExpired = serverNow() > (effectiveEnd + 60000)
 
                                                 if (isExpired) {
                                                     return (

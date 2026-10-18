@@ -176,7 +176,9 @@ export async function GET(request: NextRequest) {
             examsWithCount.forEach((e: any) => { delete (e as any).allowed_student_ids })
         }
 
-        return NextResponse.json(examsWithCount)
+        return NextResponse.json(examsWithCount, {
+            headers: { 'x-server-time': new Date().toISOString() }
+        })
     } catch (error) {
         console.error('Error fetching exams:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

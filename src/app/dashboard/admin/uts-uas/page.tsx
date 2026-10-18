@@ -16,6 +16,7 @@ import { Plus, ChevronDown } from 'react-iconly'
 import { Loader2, Activity, Edit3, Trash2, GraduationCap, BarChart3, Copy, RefreshCw } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { useIncrementalList } from '@/hooks/useIncrementalList'
+import { useServerTimeOffset } from '@/hooks/useServerTimeOffset'
 import { labelForGradeType } from '@/lib/labels'
 
 interface OfficialExam {
@@ -61,6 +62,7 @@ function AdminUtsUasPageInner() {
     const pathname = usePathname()
     const searchParams = useSearchParams()
     const labels = useSchoolLabels()
+    const { now: serverNow, sync } = useServerTimeOffset()
     const [exams, setExams] = useState<OfficialExam[]>([])
     const [subjects, setSubjects] = useState<Subject[]>([])
     const [classes, setClasses] = useState<ClassItem[]>([])
@@ -185,6 +187,7 @@ function AdminUtsUasPageInner() {
                 fetch('/api/subjects'),
                 fetch('/api/classes')
             ])
+            sync(examsRes)
             const examsData = await examsRes.json()
             const subjectsData = await subjectsRes.json()
             const classesData = await classesRes.json()
@@ -227,6 +230,7 @@ function AdminUtsUasPageInner() {
         setUlanganLoading(true)
         try {
             const res = await fetch('/api/exams')
+            sync(res)
             const data = await res.json()
             const list = Array.isArray(data) ? data : []
             setUlanganExams(list)
@@ -1021,7 +1025,7 @@ function AdminUtsUasPageInner() {
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {utsuasList.items.map((exam) => {
-                        const status = getOfficialExamStatus(exam)
+                        const status = getOfficialExamStatus(exam, serverNow())
                         const isLive = status.isLive
                         const isDone = status.isDone
                         const counts = submissionCounts[exam.id]
@@ -1073,6 +1077,7 @@ function AdminUtsUasPageInner() {
                                 submission={counts ? { submitted: counts.submitted } : undefined}
                                 primaryAction={primaryAction}
                                 menuItems={menuItems}
+                                now={serverNow()}
                             />
                         )
                     })}
@@ -1099,10 +1104,11 @@ function AdminUtsUasPageInner() {
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {ulanganList.items.map((group) => {
                             const exam = group.representative
-                            const repStatus = getExamStatus(exam)
+                            const nowMs = serverNow()
+                            const repStatus = getExamStatus(exam, nowMs)
                             // Status agregat batch: live bila ADA member live,
                             // selesai bila SEMUA member selesai.
-                            const memberStatuses = group.members.map(m => getExamStatus(m))
+                            const memberStatuses = group.members.map(m => getExamStatus(m, nowMs))
                             const isLive = group.isBatch ? memberStatuses.some(s => s.isLive) : repStatus.isLive
                             const isDone = group.isBatch ? memberStatuses.every(s => s.isDone) : repStatus.isDone
                             const isActive = group.isBatch ? group.members.some((m: any) => m.is_active) : exam.is_active
@@ -1165,6 +1171,7 @@ function AdminUtsUasPageInner() {
                                     submission={anyCounts ? { submitted: counts.submitted } : undefined}
                                     primaryAction={primaryAction}
                                     menuItems={menuItems}
+                                    now={serverNow()}
                                 />
                             )
                         })}

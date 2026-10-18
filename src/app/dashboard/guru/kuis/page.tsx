@@ -14,6 +14,7 @@ import ClassChipsSelector from '@/components/ClassChipsSelector'
 import RemedialPolicyFields, { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import { Plus, Game, Graph, Edit, Swap } from 'react-iconly'
 import { Loader2, CheckSquare, Square, RefreshCw, Copy, Trash2 } from 'lucide-react'
+import { useServerTimeOffset } from '@/hooks/useServerTimeOffset'
 
 interface Quiz {
     id: string
@@ -48,6 +49,7 @@ export default function GuruKuisPage() {
     const { user } = useAuth()
     const router = useRouter()
     const labels = useSchoolLabels()
+    const { now: serverNow, sync } = useServerTimeOffset()
     const [quizzes, setQuizzes] = useState<Quiz[]>([])
     const [teachingAssignments, setTeachingAssignments] = useState<TeachingAssignment[]>([])
     const [submissionCounts, setSubmissionCounts] = useState<Record<string, number>>({})
@@ -127,6 +129,7 @@ export default function GuruKuisPage() {
                 fetch('/api/quizzes/returned-counts'),
                 fetch('/api/school-settings')
             ])
+            sync(quizzesRes)
 
             if (settingsRes.ok) {
                 const settings = await settingsRes.json()
@@ -599,6 +602,7 @@ export default function GuruKuisPage() {
                                 onPendingGradingClick={() => router.push(`/dashboard/guru/kuis/${quiz.id}/hasil`)}
                                 primaryAction={primaryAction}
                                 menuItems={menuItems}
+                                now={serverNow()}
                                 {...(_qIdx === 0 ? { dataTutorial: 'quiz-card-first', actionsDataTutorial: 'quiz-card-actions' } : {})}
                             />
                         )
