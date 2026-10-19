@@ -8,6 +8,7 @@ import { syncExamBatch } from '@/lib/examBatch'
 import { canManageExamCoTaught, getTeacherScope, ownsTeachingAssignment } from '@/lib/teacherScope'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { hasStartedSubmissions } from '@/lib/hasSubmissions'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // GET single exam
 export async function GET(
@@ -127,7 +128,7 @@ export async function PUT(
         // Block writes to archived (COMPLETED) academic years
         const { data: examForYear } = await supabase
             .from('exams')
-            .select('teaching_assignment_id, results_released, start_time, is_active, is_remedial, batch_id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
+            .select('teaching_assignment_id, title, results_released, start_time, is_active, is_remedial, batch_id, teaching_assignment:teaching_assignments(teacher_id, subject_id, class_id, academic_year_id)')
             .eq('id', id)
             .single()
         if (examForYear?.teaching_assignment_id) {
@@ -153,7 +154,7 @@ export async function PUT(
         const { hasSubmissions: hasSubs } = await hasStartedSubmissions('exam_submissions', id)
 
         const body = await request.json()
-        const { title, description, start_time, duration_minutes, window_end_time, is_randomized, is_active, max_violations, show_results_immediately, results_released, batch_id } = body
+        const { title, description, start_time, duration_minutes, window_end_time, is_randomized, is_active, max_violations, show_results_immediately, results_released, batch_id, force_duplicate } = body
 
         // Field yang di-lock saat ada submission — skip validasi & penulisan.
         const effectiveStartTime = hasSubs ? undefined : start_time
@@ -298,6 +299,56 @@ export async function PUT(
                     }
                 }
                 bindBatch = true
+            }
+        }
+
+        // ── Guard duplikat-judul saat RENAME (paritas POST /api/exams guard) ──
+        // Hanya cek bila title berubah (normalized new ≠ normalized current).
+        // Scope per teaching_assignment_id — TA unik per (teacher+subject+class+year),
+        // jadi guru 4 tahun depan tetap bisa pakai judul sama (TA beda, tak collision).
+        // Remedial dikecualikan (make-up sah). force_duplicate = override eksplisit.
+        // Kontrak tahun-scoping: guard WAJIB scope per TA, BUKAN global per sekolah.
+        if (!force_duplicate && !examForYear?.is_remedial && title !== undefined) {
+            const normNew = (title || '').trim().toLowerCase()
+            const normCurrent = (examForYear?.title || '').trim().toLowerCase()
+            if (normNew && normNew !== normCurrent && examForYear?.teaching_assignment_id) {
+                const existingExams = await fetchAllRows(supabase
+                    .from('exams')
+                    .select('id, title, is_active, created_at, teaching_assignment:teaching_assignments(class:classes(name))')
+                    .eq('teaching_assignment_id', examForYear.teaching_assignment_id)
+                    .neq('is_remedial', true)
+                    .neq('id', id) // exclude diri sendiri
+                    .order('created_at', { ascending: false })
+                    .order('id'))
+                const dupe = (existingExams || []).find((e: any) => {
+                    const eNorm = (e.title || '').trim().toLowerCase()
+                    return eNorm === normNew
+                })
+                if (dupe) {
+                    let submissionCount = 0
+                    try {
+                        const { count } = await supabase
+                            .from('exam_submissions')
+                            .select('id', { count: 'exact', head: true })
+                            .eq('exam_id', dupe.id)
+                        submissionCount = count || 0
+                    } catch { /* non-fatal — info dialog saja */ }
+                    const taEmbed: any = Array.isArray(dupe.teaching_assignment)
+                        ? dupe.teaching_assignment[0]
+                        : dupe.teaching_assignment
+                    const className = taEmbed?.class?.name
+                    return NextResponse.json({
+                        error: 'DUPLICATE_TITLE',
+                        existing: {
+                            id: dupe.id,
+                            title: dupe.title,
+                            className: className || null,
+                            isActive: dupe.is_active,
+                            submissionCount,
+                            createdAt: dupe.created_at,
+                        }
+                    }, { status: 409 })
+                }
             }
         }
 

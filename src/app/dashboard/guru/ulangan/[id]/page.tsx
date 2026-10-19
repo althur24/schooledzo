@@ -33,6 +33,7 @@ import PDFDownloadButton from '@/components/analytics/pdf/PDFDownloadButton'
 import { detectTextDirection } from '@/lib/textDirection'
 import { Modal, PageHeader, Button, EmptyState, Toast, type ToastType } from '@/components/ui'
 import { useDuplicateGuard } from '@/components/exam/useDuplicateGuard'
+import { useDuplicate409Handler } from '@/components/exam/useDuplicate409Handler'
 import Card from '@/components/ui/Card'
 
 interface ExamQuestion {
@@ -279,6 +280,8 @@ function EditExamPageInner() {
     const [batchMemberSaving, setBatchMemberSaving] = useState(false)
     // Guard duplikat-judul (pre-flight + dialog) — shared guru+admin (adil).
     const dupGuard = useDuplicateGuard(labels.ulangan)
+    // Handler 409 DUPLICATE_TITLE dari PUT rename (server guard backstop).
+    const dup409 = useDuplicate409Handler(labels.ulangan)
 
     // Reset TA cache saat navigasi antar exam (komponen dipakai ulang oleh
     // Next.js App Router — tanpa ini, kandidat dari exam sebelumnya menetap).
@@ -903,6 +906,30 @@ function EditExamPageInner() {
                 setShowEditSettings(false)
                 fetchExam()
             } else {
+                const errData = await res.json().catch(() => null)
+                if (errData && dup409.handle409(errData, async () => {
+                    // Retry dgn force_duplicate: true
+                    const retryRes = await fetch(`/api/exams/${examId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: editForm.title, description: editForm.description,
+                            start_time: formattedStartTime, duration_minutes: editForm.duration_minutes,
+                            window_end_time: formattedWindowEnd, max_violations: editForm.max_violations,
+                            is_randomized: editForm.is_randomized,
+                            show_results_immediately: editForm.show_results_immediately,
+                            force_duplicate: true,
+                        })
+                    })
+                    if (retryRes.ok) {
+                        setToast({ message: 'Pengaturan tersimpan', type: 'success' })
+                        setShowEditSettings(false)
+                        fetchExam()
+                    } else {
+                        const retryErr = await retryRes.json().catch(() => ({}))
+                        setAlertInfo({ type: 'error', title: 'Gagal', message: retryErr?.error || 'Gagal menyimpan setelah bypass duplikat.' })
+                    }
+                })) return
                 setAlertInfo({ type: 'error', title: 'Gagal', message: 'Gagal menyimpan pengaturan.' })
             }
         } catch (error) {
@@ -3468,6 +3495,8 @@ function EditExamPageInner() {
             )}
             {/* Guard duplikat-judul dialog (pre-flight) — shared guru+admin */}
             {dupGuard.dialog}
+            {/* Handler 409 DUPLICATE_TITLE dari PUT rename (server guard backstop) */}
+            {dup409.dialog}
         </div >
     )
 }

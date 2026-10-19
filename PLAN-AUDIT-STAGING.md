@@ -148,3 +148,38 @@
 - Kode: `git revert` (perubahan aplikasi tidak menulis skema).
 - DB: float8 ← integer aman (desimal akan dibulatkan Postgres — **restore dari backup dulu** bila ada skor desimal production; migrasi normalisasi kunci tidak merusak format JSON valid).
 - Migrasi tertulis idempotent-safe namun `ALTER TYPE` tidak trivially reversible → **backup snapshot sebelum push production** (wajib).
+
+## 7. Update 19 Okt 2026 — Audit 6 Commit Pasca-Fitur (`4469556`..`2ea9f3c`)
+
+Audit komprehensif 6 commit 26 jam terakhir (unifikasi modal dup/remedial, server-time offset, guard duplikat-judul + kartu batch). 3 bug HIGH terkonfirmasi via 3 script permanen baru, 2 bug MEDIUM via code-review, regresi gold standard semua hijau.
+
+### Script test baru permanen (masuk regresi)
+
+| Script | Prefix UUID | Asersi | Hasil | Bug/diverifikasi |
+|---|---|---|---|---|
+| `e2e-server-time-race-staging.cjs` | `e25a` | 11 | **11/11 PASS** | HIGH #1 — auto-submit prematur saat offset belum sync (header absent di exam-submissions, race window path B < path A, server terima PUT submit dalam grace) |
+| `e2e-duplicate-rename-staging.cjs` | `e25b` | 9 | **9/9 PASS** | HIGH #2 — guard duplikat-judul tak jalan di PUT rename (B1-B3 duplicate confirmed, Y1-Y3 tahun-scoping kontrak) |
+| `e2e-duplicate-official-staging.cjs` | `e25c` | 15 | **15/15 PASS** | HIGH #3 — guard tak cover UTS/UAS (D1-D3 guru parsial duplicate, G0-G5 gk_grading_mode propagasi OK, C1-C3 admin create-new, Y1-Y3 tahun-scoping) |
+
+### Baseline 4 script existing (sebelumnya unverified — sekarang HIJAU)
+
+| Script | Hasil | Catatan |
+|---|---|---|
+| `e2e-duplicate-guard-staging.cjs` | **24/24 PASS** | 409 guard POST /api/exams |
+| `e2e-server-time-staging.cjs` | **44/44 PASS** | header x-server-time 4 route |
+| `e2e-browser-smoke.cjs` | **9/9 PASS** | Chrome tak exit bersih (kill manual) — hasil valid |
+| `smoke-test-dup-remedial.cjs` | **OK** | smoke pattern (no formal PASS count) |
+
+### Regresi gold standard (6 commit tak regress kode shared)
+
+| Suite | Hasil |
+|---|---|
+| `e2e-gk-staging.cjs` | **153/0** |
+| `e2e-extend-time-staging.cjs` | **26/26** |
+| `e2e-rescue-staging.cjs` | **21/21** |
+
+### Rekomendasi FIX (SELESAI — semua fix di-deploy & terverifikasi)
+
+Semua 3 bug HIGH + 2 MEDIUM terfix dalam 1 sesi: (1) HIGH #2 + #3 guard rename + UTS/UAS — backport guard POST ke PUT + tambah guard ke official-exams (helper `src/lib/officialExamDuplicateCheck.ts`, scope per TA / per school+subject+year+class overlap); (2) HIGH #1 auto-submit race — tambah `sync(examRes)` + `sync(officialExamSubRes)` di checkIncomplete + header `x-server-time` ke `/api/exam-submissions` & `/api/official-exam-submissions` GET; (3) MED #1 + #2 UX polish (duration disable + localStorage persist dismissal). Pasca-fix: 3 script baru **11/11 + 12/12 + 19/19** + 3 gold standard **153/0 + 26/26 + 21/21** = SEMUA HIJAU. tsc 0 error; lint 0 error baru.
+
+Detail lengkap bug + lokasi file:line + fix description ada di section "Audit 6 Commit Pasca-Fitur" `CLAUDE.md`.

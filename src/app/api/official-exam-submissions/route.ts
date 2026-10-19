@@ -408,7 +408,7 @@ export async function GET(request: NextRequest) {
             return { ...sub, ends_at: endsAtIso(expiry) }
         })
 
-        return NextResponse.json(result)
+        return NextResponse.json(result, { headers: { 'x-server-time': new Date().toISOString() } })
     } catch (error) {
         logError('Error fetching official exam submissions', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

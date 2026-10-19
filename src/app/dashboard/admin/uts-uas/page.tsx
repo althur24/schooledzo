@@ -9,10 +9,11 @@ import { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import DailyExamCard from '@/components/exam/DailyExamCard'
 import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
-import { groupExamsByBatch, detectDuplicateGroups, type ExamBatchGroup } from '@/lib/examBatchGrouping'
+import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
 import ShowDraftsToggle from '@/components/ShowDraftsToggle'
 import DuplicateRemedialModal from '@/components/exam/DuplicateRemedialModal'
 import { useDuplicateGuard } from '@/components/exam/useDuplicateGuard'
+import { useDuplicate409Handler } from '@/components/exam/useDuplicate409Handler'
 import { Plus, ChevronDown } from 'react-iconly'
 import { Loader2, Activity, Edit3, Trash2, GraduationCap, BarChart3, Copy, RefreshCw } from 'lucide-react'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
@@ -72,6 +73,9 @@ function AdminUtsUasPageInner() {
     const [creating, setCreating] = useState(false)
     // Guard duplikat-judul (pre-flight + dialog) — shared guru+admin (adil).
     const dupGuard = useDuplicateGuard(labels.ulangan)
+    // Handler 409 DUPLICATE_TITLE dari POST official-exams (UTS/UAS) — server guard
+    // sebagai PRIMARY UX (pre-flight belum cover official_exams). Reuse DuplicateConfirmDialog.
+    const dup409 = useDuplicate409Handler(labels.uts || labels.uas || 'UTS/UAS')
     const [submissionCounts, setSubmissionCounts] = useState<Record<string, { submitted: number; total: number }>>({})
     const [ulanganExams, setUlanganExams] = useState<any[]>([])
     const [ulanganCounts, setUlanganCounts] = useState<Record<string, { submitted: number; total: number }>>({})
@@ -408,6 +412,22 @@ function AdminUtsUasPageInner() {
                 router.push(`/dashboard/admin/uts-uas/${newExam.id}`)
             } else {
                 const errData = await res.json().catch(() => ({}))
+                if (dup409.handle409(errData, async () => {
+                    // Retry dgn force_duplicate: true
+                    const retryRes = await fetch('/api/official-exams', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ...form, start_time: startTimeIso, window_end_time: windowEndIso, force_duplicate: true })
+                    })
+                    if (retryRes.ok) {
+                        const newExam = await retryRes.json()
+                        setShowCreate(false)
+                        router.push(`/dashboard/admin/uts-uas/${newExam.id}`)
+                    } else {
+                        const retryErr = await retryRes.json().catch(() => ({}))
+                        alert(retryErr?.error || 'Gagal membuat ujian setelah bypass duplikat.')
+                    }
+                })) return
                 alert(errData?.error || 'Gagal membuat ujian. Periksa isian lalu coba lagi.')
             }
         } finally {
@@ -842,8 +862,24 @@ function AdminUtsUasPageInner() {
                 if (res.ok) {
                     newExam = await res.json()
                 } else {
-                    const err = await res.json()
-                    showToast(err.error || 'Gagal menduplikasi ujian', 'error')
+                    const err = await res.json().catch(() => null)
+                    if (err && dup409.handle409(err, async () => {
+                        // Retry dgn force_duplicate: true
+                        const retryRes = await fetch('/api/official-exams/duplicate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ...payload, force_duplicate: true })
+                        })
+                        if (retryRes.ok) {
+                            newExam = await retryRes.json()
+                            setShowDuplicate(false)
+                            if (newExam?.id) router.push(`/dashboard/admin/uts-uas/${newExam.id}`)
+                        } else {
+                            const retryErr = await retryRes.json().catch(() => ({}))
+                            showToast(retryErr?.error || 'Gagal menduplikasi setelah bypass', 'error')
+                        }
+                    })) return
+                    showToast(err?.error || 'Gagal menduplikasi ujian', 'error')
                     return
                 }
             }
@@ -927,16 +963,6 @@ function AdminUtsUasPageInner() {
         subjectId: ulanganSubjectId,
         classId: ulanganClassId,
     })
-    // Deteksi duplikat lintas grup (same-TA + normalize-title sama) — badge
-    // "Kemungkinan Duplikat". Memoize atas ulanganGroups (anti recompute).
-    // Shared lib → guru & admin hasil identik (adil).
-    const ulanganDuplicateSuspects = useMemo(
-        () => detectDuplicateGroups(ulanganGroups, {
-            taId: (e: any) => ulanganTA(e)?.id,
-            title: (e: any) => e.title,
-        }),
-        [ulanganGroups],
-    )
 
     // Draft filter ulangan DISETELAH grouping: batch disembunyikan hanya bila
     // SEMUA member belum publish — batch campuran (ada yang publish) tetap
@@ -1212,7 +1238,6 @@ function AdminUtsUasPageInner() {
                                     menuItems={menuItems}
                                     now={serverNow()}
                                     batchMembers={batchMembers}
-                                    isDuplicateSuspect={ulanganDuplicateSuspects.has(exam.id)}
                                 />
                             )
                         })}
@@ -1514,6 +1539,8 @@ function AdminUtsUasPageInner() {
 
             {/* Guard duplikat-judul dialog (pre-flight) — shared guru+admin */}
             {dupGuard.dialog}
+            {/* Handler 409 DUPLICATE_TITLE dari POST official-exams (server guard backstop) */}
+            {dup409.dialog}
         </div>
     )
 }

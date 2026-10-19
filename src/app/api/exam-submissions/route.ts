@@ -390,7 +390,7 @@ export async function GET(request: NextRequest) {
             return { ...sub, ends_at: endsAtIso(expiry) }
         })
 
-        return NextResponse.json(finalData)
+        return NextResponse.json(finalData, { headers: { 'x-server-time': new Date().toISOString() } })
     } catch (error) {
         console.error('Error fetching exam submissions:', error)
         return NextResponse.json({ error: 'Server error' }, { status: 500 })

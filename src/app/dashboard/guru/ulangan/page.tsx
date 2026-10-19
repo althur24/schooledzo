@@ -9,7 +9,7 @@ import Card from '@/components/ui/Card'
 import DailyExamCard from '@/components/exam/DailyExamCard'
 import OfficialExamCard from '@/components/exam/OfficialExamCard'
 import { getExamStatus, getOfficialExamStatus } from '@/lib/exam'
-import { groupExamsByBatch, detectDuplicateGroups, type ExamBatchGroup } from '@/lib/examBatchGrouping'
+import { groupExamsByBatch, type ExamBatchGroup } from '@/lib/examBatchGrouping'
 import ShowDraftsToggle from '@/components/ShowDraftsToggle'
 import ClassChipsSelector from '@/components/ClassChipsSelector'
 import TimeWindowFields from '@/components/TimeWindowFields'
@@ -17,6 +17,7 @@ import { useServerTimeOffset } from '@/hooks/useServerTimeOffset'
 import { RemedialPolicyValue } from '@/components/RemedialPolicyFields'
 import DuplicateRemedialModal from '@/components/exam/DuplicateRemedialModal'
 import { useDuplicateGuard } from '@/components/exam/useDuplicateGuard'
+import { useDuplicate409Handler } from '@/components/exam/useDuplicate409Handler'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { useIncrementalList } from '@/hooks/useIncrementalList'
@@ -139,6 +140,9 @@ export default function GuruUlanganPage() {
     const [dupKkm, setDupKkm] = useState(75)
     // Guard duplikat-judul (pre-flight + dialog konfirmasi) — shared guru+admin.
     const dupGuard = useDuplicateGuard(labels.ulangan)
+    // Handler 409 DUPLICATE_TITLE dari POST official-exams (UTS/UAS) — server guard
+    // sebagai PRIMARY UX (pre-flight belum cover official_exams). Reuse DuplicateConfirmDialog.
+    const dup409 = useDuplicate409Handler(labels.uts || labels.uas || 'UTS/UAS')
     useEffect(() => {
         const openHandler = () => setShowCreate(true)
         const closeHandler = () => setShowCreate(false)
@@ -300,6 +304,31 @@ export default function GuruUlanganPage() {
             })
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}))
+                if (dup409.handle409(err, async () => {
+                    // Retry dgn force_duplicate: true
+                    const retryRes = await fetch('/api/official-exams', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            exam_type: examKind, title: form.title, description: form.description,
+                            subject_id: subjectIds[0], start_time: new Date(form.start_time).toISOString(),
+                            duration_minutes: form.duration_minutes,
+                            window_end_time: form.schedule_mode === 'window' && form.window_end_time ? new Date(form.window_end_time).toISOString() : null,
+                            is_randomized: form.is_randomized, max_violations: form.max_violations,
+                            target_class_ids: targetClassIds, show_results_immediately: form.show_results_immediately,
+                            force_duplicate: true,
+                        })
+                    })
+                    if (retryRes.ok) {
+                        setShowCreate(false)
+                        resetCreateForm()
+                        const created = await retryRes.json()
+                        router.push(`/dashboard/guru/uts-uas/${created.id}`)
+                    } else {
+                        const retryErr = await retryRes.json().catch(() => ({}))
+                        alert(retryErr?.error || 'Gagal membuat ujian setelah bypass duplikat.')
+                    }
+                })) return
                 alert(err.error || 'Gagal membuat ujian. Silakan coba lagi.')
                 return
             }
@@ -783,6 +812,22 @@ export default function GuruUlanganPage() {
                     newExam = await res.json()
                 } else {
                     const err = await res.json().catch(() => null)
+                    if (err && dup409.handle409(err, async () => {
+                        // Retry dgn force_duplicate: true
+                        const retryRes = await fetch('/api/official-exams/duplicate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ...payload, force_duplicate: true })
+                        })
+                        if (retryRes.ok) {
+                            newExam = await retryRes.json()
+                            setDupShow(false)
+                            if (newExam?.id) router.push(`/dashboard/guru/uts-uas/${newExam.id}`)
+                        } else {
+                            const retryErr = await retryRes.json().catch(() => ({}))
+                            alert(retryErr?.error || 'Gagal menduplikasi setelah bypass duplikat.')
+                        }
+                    })) return
                     alert(err?.error || 'Gagal menduplikasi ujian')
                     return
                 }
@@ -808,16 +853,6 @@ export default function GuruUlanganPage() {
     // diagregasi dari member yang TERLIHAT (co-teacher parsial hanya kelasnya);
     // badge "N Kelas Paralel" dari server tetap mencerminkan batch penuh.
     const examGroups = groupExamsByBatch(exams, { subjectId: subjectIdOf, classId: classIdOf })
-    // Deteksi duplikat lintas grup (same-TA + normalize-title sama) — badge
-    // "Kemungkinan Duplikat" bantu identifikasi duplikat lama. Memoize atas
-    // examGroups (anti recompute tiap render). Shared lib → guru & admin identik.
-    const duplicateSuspects = useMemo(
-        () => detectDuplicateGroups(examGroups, {
-            taId: (e) => taOf(e)?.id,
-            title: (e) => e.title,
-        }),
-        [examGroups],
-    )
     const classFilteredGroups = classFilter
         ? examGroups.filter(g => g.classIds.includes(classFilter))
         : examGroups
@@ -1097,7 +1132,6 @@ export default function GuruUlanganPage() {
                                             menuItems={menuItems}
                                             now={serverNow()}
                                             batchMembers={batchMembers}
-                                            isDuplicateSuspect={duplicateSuspects.has(exam.id)}
                                         />
                                     )
                                 })}
@@ -1351,6 +1385,8 @@ export default function GuruUlanganPage() {
 
             {/* Guard duplikat-judul dialog (pre-flight) — shared guru+admin */}
             {dupGuard.dialog}
+            {/* Handler 409 DUPLICATE_TITLE dari POST official-exams (server guard backstop) */}
+            {dup409.dialog}
         </div>
     )
 }

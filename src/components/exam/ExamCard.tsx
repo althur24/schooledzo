@@ -2,7 +2,7 @@
 
 import { ReactNode, useState } from 'react'
 import Link from 'next/link'
-import { Layers, ChevronDown, AlertTriangle } from 'lucide-react'
+import { Layers, ChevronDown } from 'lucide-react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import DropdownMenu, { DropdownMenuItem } from '@/components/ui/DropdownMenu'
@@ -79,8 +79,6 @@ interface ExamCardProps {
     batchClassNames?: string[]
     /** Info per-kelas untuk section expandable "Lihat per kelas" (batch card). */
     batchMembers?: BatchMemberInfo[]
-    /** Flag deteksi duplikat (same-TA + similar-title lintas grup) — badge merah. */
-    isDuplicateSuspect?: boolean
 
     /** Aksi utama kontekstual: Edit (draft) / Monitor (live) / Hasil (selesai) */
     primaryAction: ExamCardPrimaryAction
@@ -125,7 +123,6 @@ export default function ExamCard({
     batchSize = 1,
     batchClassNames,
     batchMembers,
-    isDuplicateSuspect = false,
     primaryAction,
     menuItems = [],
     dataTutorial,
@@ -189,14 +186,6 @@ export default function ExamCard({
                             className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/20"
                         >
                             <Layers className="w-3.5 h-3.5" /> {batchSize} Kelas Paralel
-                        </span>
-                    )}
-                    {isDuplicateSuspect && (
-                        <span
-                            title={`Terdeteksi ${labelForGradeType(typeBadge.label, labels)} lain dengan judul & kelas yang sama. Periksa sebelum membuat ulang.`}
-                            className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/20"
-                        >
-                            <AlertTriangle className="w-3.5 h-3.5" /> Kemungkinan Duplikat
                         </span>
                     )}
                     {extraBadges}

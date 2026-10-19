@@ -6,6 +6,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows'
 import { logError } from '@/lib/logError'
 import { canManageOfficialExam, getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { validateTargetClassIds } from '@/lib/targetClassValidation'
+import { checkOfficialExamDuplicate } from '@/lib/officialExamDuplicateCheck'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { hasStartedSubmissions } from '@/lib/hasSubmissions'
 
@@ -95,15 +96,13 @@ export async function PUT(
 
         // Kepemilikan: ADMIN hanya di sekolahnya sendiri (tenant guard di
         // canManageOfficialExam); GURU hanya bila mapel & kelas target ujian ini diajarnya
-        {
-            const { data: examScope } = await supabase
-                .from('official_exams')
-                .select('subject_id, target_class_ids, academic_year_id, school_id')
-                .eq('id', id)
-                .single()
-            if (!examScope || !(await canManageOfficialExam(user, examScope))) {
-                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
-            }
+        const { data: examScope } = await supabase
+            .from('official_exams')
+            .select('subject_id, target_class_ids, academic_year_id, school_id, title, is_remedial')
+            .eq('id', id)
+            .single()
+        if (!examScope || !(await canManageOfficialExam(user, examScope))) {
+            return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
         }
 
         // ── Lock settings setelah siswa mulai mengerjakan ──
@@ -118,7 +117,8 @@ export async function PUT(
         const {
             title, description, start_time, duration_minutes, window_end_time,
             is_randomized, is_active, max_violations,
-            target_class_ids, subject_id, show_results_immediately, results_released
+            target_class_ids, subject_id, show_results_immediately, results_released,
+            force_duplicate
         } = body
 
         // Field yang di-lock saat ada submission — skip validasi & penulisan.
@@ -171,6 +171,40 @@ export async function PUT(
                 .eq('exam_id', id)
             if (!questionCount || questionCount === 0) {
                 return NextResponse.json({ error: 'Tidak bisa mengaktifkan ujian tanpa soal. Tambahkan minimal 1 soal terlebih dahulu.' }, { status: 400 })
+            }
+        }
+
+        // ── Guard duplikat-judul saat RENAME (paritas PUT /api/exams/[id]) ──
+        // Scope: school_id + subject_id + academic_year_id + target_class overlap.
+        // Kontrak tahun-scoping: tahun beda = tidak collision. Remedial dikecualikan.
+        // force_duplicate = override eksplisit. Hanya cek bila title berubah.
+        if (!force_duplicate && !examScope?.is_remedial && title !== undefined) {
+            const normNew = (title || '').trim().toLowerCase()
+            const normCurrent = (examScope?.title || '').trim().toLowerCase()
+            if (normNew && normNew !== normCurrent) {
+                const effectiveTargets = (effectiveTargetClassIds !== undefined ? effectiveTargetClassIds : examScope?.target_class_ids) || []
+                const dupe = await checkOfficialExamDuplicate({
+                    supabase,
+                    schoolId: examScope.school_id,
+                    subjectId: examScope.subject_id,
+                    academicYearId: examScope.academic_year_id,
+                    title,
+                    targetClassIds: effectiveTargets,
+                    excludeId: id,
+                })
+                if (dupe) {
+                    return NextResponse.json({
+                        error: 'DUPLICATE_TITLE',
+                        existing: {
+                            id: dupe.id,
+                            title: dupe.title,
+                            subjectName: dupe.className,
+                            isActive: dupe.isActive,
+                            submissionCount: dupe.submissionCount,
+                            createdAt: dupe.createdAt,
+                        }
+                    }, { status: 409 })
+                }
             }
         }
 

@@ -6,6 +6,7 @@ import { logError } from '@/lib/logError'
 import { getTeacherScope, canTeachScope } from '@/lib/teacherScope'
 import { batchedIn } from '@/lib/batchedIn'
 import { validateTargetClassIds } from '@/lib/targetClassValidation'
+import { checkOfficialExamDuplicate } from '@/lib/officialExamDuplicateCheck'
 
 /**
  * Bentuk baris official_exams yang dipakai filter/mapping GET ini.
@@ -244,7 +245,7 @@ export async function POST(request: NextRequest) {
             exam_type, title, description, subject_id,
             start_time, duration_minutes, window_end_time, is_randomized,
             max_violations, target_class_ids, academic_year_id,
-            show_results_immediately
+            show_results_immediately, is_remedial, force_duplicate
         } = body
 
         if (!exam_type || !title || !subject_id || !start_time || !target_class_ids?.length) {
@@ -286,6 +287,31 @@ export async function POST(request: NextRequest) {
             const scope = await getTeacherScope(user.id, yearId)
             if (!canTeachScope(scope, subject_id, target_class_ids)) {
                 return NextResponse.json({ error: 'Anda hanya dapat membuat ujian untuk mapel dan kelas yang Anda ajar' }, { status: 403 })
+            }
+        }
+
+        // ── Guard duplikat-judul (paritas POST /api/exams) ──
+        // Scope: school_id + subject_id + academic_year_id + target_class overlap.
+        // Kontrak tahun-scoping: tahun beda = tidak collision (guru 4 tahun depan
+        // tetap bisa pakai judul sama). Remedial dikecualikan (make-up sah).
+        // force_duplicate = override eksplisit setelah dialog konfirmasi.
+        if (!force_duplicate && !is_remedial && schoolId) {
+            const dupe = await checkOfficialExamDuplicate({
+                supabase, schoolId, subjectId: subject_id, academicYearId: yearId,
+                title, targetClassIds: target_class_ids,
+            })
+            if (dupe) {
+                return NextResponse.json({
+                    error: 'DUPLICATE_TITLE',
+                    existing: {
+                        id: dupe.id,
+                        title: dupe.title,
+                        subjectName: dupe.className,
+                        isActive: dupe.isActive,
+                        submissionCount: dupe.submissionCount,
+                        createdAt: dupe.createdAt,
+                    }
+                }, { status: 409 })
             }
         }
 

@@ -311,6 +311,16 @@ export default function SiswaDashboard() {
                     fetch('/api/official-exam-submissions')
                 ])
 
+                // Sync server-time offset dari exam-submissions response header.
+                // Ini menutup race HIGH #1: sebelumnya checkIncomplete pakai serverNow()
+                // dgn offsetRef=0 (offset hanya di-sync dari fetchData /api/exams yang
+                // berjalan paralel). Bila HP siswa meleset & ujian baru berakhir,
+                // checkIncomplete bisa PUT submit:true prematur — server terima karena
+                // masih dalam grace. Sekarang sync dari exam-submissions (yang juga
+                // bawa header x-server-time) sebelum expiry check di bawah.
+                sync(examRes)
+                sync(officialExamSubRes)
+
                 const quizzes = await quizRes.json()
                 const exams = await examRes.json()
                 const officialExamSubs = await officialExamSubRes.json()

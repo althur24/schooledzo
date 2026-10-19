@@ -3,7 +3,8 @@
  *
  * Menguja RENDERING di Chrome asli (bukan cuma data layer):
  *  1. Page guru/ulangan load tanpa crash (no console error)
- *  2. Badge "Kemungkinan Duplikat" muncul di kartu exam duplikat
+ *  2. Badge "Kemungkinan Duplikat" TIDAK muncul di kartu (removed per request —
+ *     peringatan duplikat cukup saat create/duplicate via dialog)
  *  3. Expandable "Lihat per kelas" muncul di kartu batch + expandable works
  *  4. Badge konsisten di admin tab Ulangan (adil)
  *
@@ -175,7 +176,8 @@ async function seed() {
     ]))
     const dupTitle = 'Ulangan Browser Smoke Dup'
     const batchTitle = 'Ulangan Browser Smoke Batch'
-    // 2 exam duplikat (TA1, judul sama) → trigger badge "Kemungkinan Duplikat"
+    // 2 exam duplikat (TA1, judul sama) — sebelumnya trigger badge, sekarang
+    // badge dihapus; kartu tetap render normal tanpa badge merah.
     await must('dup1', supabase.from('exams').insert({
         id: P.examDup1, title: dupTitle, description: 'e2b0 dup1', start_time: iso(120_000),
         duration_minutes: 30, teaching_assignment_id: P.ta1, is_active: true, is_randomized: false,
@@ -230,9 +232,10 @@ async function main() {
         const errs = cdp.consoleErrors.filter(e => !e.includes('favicon') && !e.includes('404'))
         check('B2: no fatal React exception', errs.length === 0, errs.slice(0, 3))
 
-        // B3: badge "Kemungkinan Duplikat" muncul (ada 2 exam duplikat TA1)
+        // B3: badge "Kemungkinan Duplikat" TIDAK muncul (dihapus per request user —
+        // peringatan cukup saat create/duplicate, bukan badge persistent di kartu)
         const bodyText = await evalInPage(cdp, 'document.body.innerText')
-        check('B3: badge "Kemungkinan Duplikat" muncul', bodyText?.includes('Kemungkinan Duplikat'), 'badge text tidak ditemukan')
+        check('B3: badge "Kemungkinan Duplikat" TIDAK muncul di kartu (removed)', !bodyText?.includes('Kemungkinan Duplikat'), 'badge masih tampil')
 
         // B4: expandable "Lihat per kelas" muncul (batch card ada)
         const hasExpandBtn = await evalInPage(cdp, `document.body.innerText.includes('Lihat per kelas')`)
@@ -268,7 +271,7 @@ async function main() {
 
         const bodyText = await evalInPage(cdp, 'document.body.innerText')
         check('A1: page admin tab Ulangan load', !!bodyText && bodyText.length > 10)
-        check('A2: badge "Kemungkinan Duplikat" muncul di admin (adil)', bodyText?.includes('Kemungkinan Duplikat'), 'badge tidak ditemukan di admin')
+        check('A2: badge "Kemungkinan Duplikat" TIDAK muncul di admin (removed)', !bodyText?.includes('Kemungkinan Duplikat'), 'badge masih tampil di admin')
         check('A3: expandable "Lihat per kelas" di admin (adil)', bodyText?.includes('Lihat per kelas'), 'expand tidak ditemukan di admin')
 
         const errs = cdp.consoleErrors.filter(e => !e.includes('favicon') && !e.includes('404'))

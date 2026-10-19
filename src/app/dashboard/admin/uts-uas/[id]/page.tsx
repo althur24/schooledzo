@@ -6,6 +6,7 @@ import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { Button, Modal, EmptyState } from '@/components/ui'
 import { useDuplicateGuard } from '@/components/exam/useDuplicateGuard'
+import { useDuplicate409Handler } from '@/components/exam/useDuplicate409Handler'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
@@ -204,6 +205,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     const [batchMemberSaving, setBatchMemberSaving] = useState(false)
     // Guard duplikat-judul (pre-flight + dialog) — shared guru+admin (adil).
     const dupGuard = useDuplicateGuard(labels.ulangan)
+    // Handler 409 DUPLICATE_TITLE dari PUT rename (server guard backstop).
+    const dup409 = useDuplicate409Handler(labels.uts || labels.uas || 'UTS/UAS')
     // Tahun ajaran exam — primitif utk dep effect classes (hindari refetch per fetchExam)
     const examYearId = isUlangan
         ? (exam as any)?.teaching_assignment?.academic_year?.id
@@ -955,6 +958,28 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 await fetchExam()
             } else {
                 const err = await res.json().catch(() => null)
+                if (err && dup409.handle409(err, async () => {
+                    // Retry dgn force_duplicate: true
+                    const retryRes = await fetch(`${examApi}/${examId}`, {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: settingsForm.title, description: settingsForm.description,
+                            start_time: localDate.toISOString(), duration_minutes: settingsForm.duration_minutes,
+                            window_end_time: windowEndIso,
+                            is_randomized: settingsForm.is_randomized, max_violations: settingsForm.max_violations,
+                            show_results_immediately: settingsForm.show_results_immediately,
+                            ...(isUlangan ? {} : { target_class_ids: settingsForm.target_class_ids }),
+                            force_duplicate: true,
+                        })
+                    })
+                    if (retryRes.ok) {
+                        showToast('Pengaturan berhasil disimpan!', 'success')
+                        await fetchExam()
+                    } else {
+                        const retryErr = await retryRes.json().catch(() => null)
+                        showToast(retryErr?.error || 'Gagal menyimpan setelah bypass duplikat.', 'error')
+                    }
+                })) return
                 showToast(err?.error || 'Gagal menyimpan pengaturan.', 'error')
             }
         } catch {
@@ -2127,6 +2152,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
 
             {/* Guard duplikat-judul dialog (pre-flight) — shared guru+admin */}
             {dupGuard.dialog}
+            {/* Handler 409 DUPLICATE_TITLE dari PUT rename (server guard backstop) */}
+            {dup409.dialog}
         </div>
     )
 }

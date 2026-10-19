@@ -65,8 +65,6 @@ interface DailyExamCardProps {
     now?: number
     /** Info per-kelas untuk section expandable (batch card). */
     batchMembers?: BatchMemberInfo[]
-    /** Flag deteksi duplikat — badge merah "Kemungkinan Duplikat". */
-    isDuplicateSuspect?: boolean
 }
 
 /**
@@ -89,7 +87,6 @@ export default function DailyExamCard({
     actionsDataTutorial,
     now,
     batchMembers,
-    isDuplicateSuspect,
 }: DailyExamCardProps) {
     const status = getExamStatus(exam, now)
 
@@ -150,7 +147,6 @@ export default function DailyExamCard({
             batchSize={exam.batch_size ?? 1}
             batchClassNames={exam.batch_class_names ?? undefined}
             batchMembers={batchMembers}
-            isDuplicateSuspect={isDuplicateSuspect}
             primaryAction={primaryAction}
             menuItems={menuItems}
             dataTutorial={dataTutorial}

@@ -135,6 +135,7 @@ export default function DuplicateRemedialModal({
     const submitDisabled = !form.title || !form.start_time
         || (showTargetClassSelector && form.target_class_ids.length === 0)
         || (isRemedial && selectedStudentIds.length === 0)
+        || (form.duration_minutes !== undefined && form.duration_minutes < 5)
         || extraSubmitDisabled
 
     return (
