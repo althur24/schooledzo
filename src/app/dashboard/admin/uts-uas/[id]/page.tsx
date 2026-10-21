@@ -997,13 +997,19 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
             const r = await fetch(`${submissionsApi}?exam_id=${memberId}`)
             if (r.ok) { const subs = await r.json(); if (Array.isArray(subs) && subs.length > 0) { showToast(`Tidak bisa hapus ${className}: sudah ada ${subs.length} submission. Tarik ujian ke draft & hapus jawaban dulu.`, 'error'); return } }
         } catch { }
-        if (!confirm(`Hapus kelas ${className} dari batch ini? Soal & data kelas ini akan dihapus (member lain tak terpengaruh).`)) return
-        setBatchMemberSaving(true)
-        try {
-            const res = await fetch(`${examApi}/${memberId}`, { method: 'DELETE' })
-            if (res.ok) { showToast(`Kelas ${className} dihapus dari batch`, 'success'); await fetchExam() }
-            else { const err = await res.json().catch(() => null); showToast(err?.error || 'Gagal menghapus kelas', 'error') }
-        } finally { setBatchMemberSaving(false) }
+        setConfirmDialog({
+            title: `Hapus Kelas ${className}`,
+            message: `Kelas ${className} akan dihapus dari kelas paralel ini. Soal & data kelas ini akan dihapus (kelas lain tidak terpengaruh).`,
+            onConfirm: async () => {
+                setConfirmDialog(null)
+                setBatchMemberSaving(true)
+                try {
+                    const res = await fetch(`${examApi}/${memberId}`, { method: 'DELETE' })
+                    if (res.ok) { showToast(`Kelas ${className} dihapus dari kelas paralel`, 'success'); await fetchExam() }
+                    else { const err = await res.json().catch(() => null); showToast(err?.error || 'Gagal menghapus kelas', 'error') }
+                } finally { setBatchMemberSaving(false) }
+            }
+        })
     }
 
     // Save settings
@@ -1059,7 +1065,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                         await fetchExam()
                     } else {
                         const retryErr = await retryRes.json().catch(() => null)
-                        showToast(retryErr?.error || 'Gagal menyimpan setelah bypass duplikat.', 'error')
+                        showToast(retryErr?.error || 'Gagal menyimpan setelah konfirmasi duplikat.', 'error')
                     }
                 })) return
                 showToast(err?.error || 'Gagal menyimpan pengaturan.', 'error')
@@ -1075,30 +1081,37 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
         const memberIds = (isUlangan && isBatchView)
             ? [examId, ...((exam as any)?.batch_siblings || []).map((s: any) => s.id)]
             : [examId]
-        if (!confirm(memberIds.length > 1
-            ? `Apakah Anda yakin ingin membagikan hasil ke siswa SEMUA ${memberIds.length} kelas sekarang? Siswa akan bisa melihat nilai mereka.`
-            : 'Apakah Anda yakin ingin membagikan hasil ke siswa sekarang? Siswa akan bisa melihat nilai mereka.')) return
-
-        try {
-            const results = await Promise.allSettled(memberIds.map(id =>
-                fetch(`${examApi}/${id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ results_released: true })
-                }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r })
-            ))
-            const failed = results.filter(r => r.status !== 'fulfilled').length
-            if (failed === 0) {
-                showToast(`Hasil ujian telah dibagikan ke siswa${memberIds.length > 1 ? ` ${memberIds.length} kelas` : ''}.`, 'success')
-            } else if (failed === memberIds.length) {
-                throw new Error('Gagal membagikan hasil')
-            } else {
-                showToast(`Hasil dibagikan di ${memberIds.length - failed} kelas; gagal di ${failed} kelas. Coba ulangi.`, 'warning')
+        setConfirmDialog({
+            title: 'Bagikan Hasil ke Siswa',
+            message: memberIds.length > 1
+                ? `Apakah Anda yakin ingin membagikan hasil ke siswa SEMUA ${memberIds.length} kelas sekarang? Siswa akan bisa melihat nilai mereka.`
+                : 'Apakah Anda yakin ingin membagikan hasil ke siswa sekarang? Siswa akan bisa melihat nilai mereka.',
+            confirmLabel: 'Bagikan Hasil',
+            variant: 'warning',
+            onConfirm: async () => {
+                setConfirmDialog(null)
+                try {
+                    const results = await Promise.allSettled(memberIds.map(id =>
+                        fetch(`${examApi}/${id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ results_released: true })
+                        }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r })
+                    ))
+                    const failed = results.filter(r => r.status !== 'fulfilled').length
+                    if (failed === 0) {
+                        showToast(`Hasil ujian telah dibagikan ke siswa${memberIds.length > 1 ? ` ${memberIds.length} kelas` : ''}.`, 'success')
+                    } else if (failed === memberIds.length) {
+                        throw new Error('Gagal membagikan hasil')
+                    } else {
+                        showToast(`Hasil dibagikan di ${memberIds.length - failed} kelas; gagal di ${failed} kelas. Coba ulangi.`, 'warning')
+                    }
+                    fetchExam()
+                } catch (error: any) {
+                    showToast(error.message, 'error')
+                }
             }
-            fetchExam() // Refresh to update button visibility
-        } catch (error: any) {
-            showToast(error.message, 'error')
-        }
+        })
     }
 
     // Balance points — UI hanya diubah bila SEMUA update server berhasil
@@ -1633,7 +1646,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                         <div className="p-4 rounded-xl border border-secondary/20 bg-secondary/5 space-y-3">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <label className="block text-sm font-bold text-text-main dark:text-white">Kelas Paralel (Batch)</label>
+                                    <label className="block text-sm font-bold text-text-main dark:text-white">Kelas Paralel</label>
                                     <p className="text-xs text-text-secondary mt-0.5">
                                         {exam.is_active ? 'Member tak bisa diubah saat ujian aktif.' : `Sesuaikan kelas sebelum publish. ${batchMembers.length} kelas saat ini.`}
                                     </p>
