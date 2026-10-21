@@ -13,5 +13,7 @@ export default function GuruUlanganMonitorPage({ params, searchParams }: {
     const { id } = use(params)
     const sp = use(searchParams ?? Promise.resolve({}))
     const batch = (sp as { batch?: string } | undefined)?.batch === '1'
-    return <ExamMonitorPage examId={id} mode="ulangan" batch={batch} />
+    // backHref eksplisit ke DETAIL editor (bukan list) — paritas admin monitor
+    // (default ExamMonitorPage backHref = '/dashboard/guru/ulangan' = list).
+    return <ExamMonitorPage examId={id} mode="ulangan" batch={batch} backHref={`/dashboard/guru/ulangan/${id}`} />
 }

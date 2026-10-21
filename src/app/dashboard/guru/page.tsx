@@ -172,9 +172,9 @@ export default function GuruDashboard() {
         switch (type) {
             case 'TUGAS': return `/dashboard/guru/tugas/${id}/hasil`
             case 'KUIS': return `/dashboard/guru/kuis/${id}/hasil`
-            // Halaman hasil ulangan adalah tab di editor ulangan (?tab=hasil) —
-            // bukan route /hasil (yang hanya ada per-submission: /hasil/[submissionId])
-            case 'ULANGAN': return `/dashboard/guru/ulangan/${id}?tab=hasil`
+            // Halaman hasil ulangan adalah tab di editor ulangan — dibuka via
+            // deep-link hash #hasil (dibaca saat mount di admin component).
+            case 'ULANGAN': return `/dashboard/guru/ulangan/${id}#hasil`
             // Idem UTS/UAS: tab di editor, dibuka via deep-link hash #hasil
             default: return `/dashboard/guru/uts-uas/${id}#hasil`
         }

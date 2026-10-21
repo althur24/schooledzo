@@ -1075,7 +1075,7 @@ export default function GuruUlanganPage() {
                                     const primaryAction = isLive
                                         ? { label: 'Monitor Live', href: monitorHref, icon: <Activity className="w-4 h-4" /> }
                                         : isActive && isDone
-                                            ? { label: 'Lihat Hasil', href: `/dashboard/guru/ulangan/${exam.id}?tab=hasil`, icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> }
+                                            ? { label: 'Lihat Hasil', href: `/dashboard/guru/ulangan/${exam.id}#hasil`, icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={16} /></span> }
                                             : { label: exam.pending_publish ? 'Perbaiki Soal' : 'Edit Soal', href: `/dashboard/guru/ulangan/${exam.id}`, icon: <Edit set="bold" primaryColor="currentColor" size={16} /> }
 
                                     // Info per-kelas untuk section expandable (batch card).
@@ -1099,7 +1099,7 @@ export default function GuruUlanganPage() {
                                             label: 'Lihat Hasil',
                                             show: isActive,
                                             icon: <span className="text-secondary"><Graph set="bold" primaryColor="currentColor" size={14} /></span>,
-                                            onClick: () => router.push(`/dashboard/guru/ulangan/${exam.id}?tab=hasil`),
+                                            onClick: () => router.push(`/dashboard/guru/ulangan/${exam.id}#hasil`),
                                         },
                                         {
                                             label: 'Buat Remedial',
@@ -1127,7 +1127,7 @@ export default function GuruUlanganPage() {
                                             exam={exam}
                                             submission={{ submitted, total }}
                                             pendingGrading={pendingGrading}
-                                            onPendingGradingClick={() => router.push(`/dashboard/guru/ulangan/${exam.id}?tab=hasil`)}
+                                            onPendingGradingClick={() => router.push(`/dashboard/guru/ulangan/${exam.id}#hasil`)}
                                             primaryAction={primaryAction}
                                             menuItems={menuItems}
                                             now={serverNow()}

@@ -12,5 +12,12 @@ export default function GuruUtsUasMonitorPage({ params, searchParams }: {
     const { id: examId } = use(params)
     const spRaw = use(searchParams ?? Promise.resolve({}))
     const isUlangan = (spRaw as { type?: string } | undefined)?.type === 'ulangan'
-    return <ExamMonitorPage examId={examId} mode={isUlangan ? 'ulangan' : 'official'} />
+    // backHref eksplisit ke detail editor (paritas guru/ulangan/[id]/monitor).
+    // Tanpa ini default ExamMonitorPage = '/dashboard/guru/ulangan' → guru UTS/UAS
+    // klik "Kembali" ke list ulangan (salah rute). ?type=ulangan legacy tetap
+    // di-redirect ke detail ulangan.
+    const backHref = isUlangan
+        ? `/dashboard/guru/ulangan/${examId}`
+        : `/dashboard/guru/uts-uas/${examId}`
+    return <ExamMonitorPage examId={examId} mode={isUlangan ? 'ulangan' : 'official'} backHref={backHref} />
 }

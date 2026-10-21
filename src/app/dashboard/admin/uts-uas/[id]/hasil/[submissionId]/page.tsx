@@ -52,21 +52,33 @@ interface SubmissionDetail {
     }
 }
 
-export default function AdminUtsUasGradingPage({ params, searchParams }: {
+export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsUlangan }: {
     params: Promise<{ id: string, submissionId: string }>
     searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
+    /**
+     * Force mode ulangan (tabel exams). Dipakai wrapper guru/ulangan/[id]/hasil
+     * agar mode ulangan ditentukan oleh rute, BUKAN searchParams — paritas
+     * pola guru/ulangan/[id] detail (lihat komentar di admin [id]/page.tsx).
+     */
+    forcedIsUlangan?: boolean
 }) {
     const { id: examId, submissionId } = use(params)
     const spRaw = use(searchParams ?? Promise.resolve({}))
     const router = useRouter()
     // Halaman ini dipakai admin & guru (via wrapper guru/uts-uas/[id]/hasil/[submissionId])
     const { user } = useAuth()
-    const basePath = user?.role === 'GURU' ? '/dashboard/guru/uts-uas' : '/dashboard/admin/uts-uas'
-
-    // Mode ulangan (tabel exams): endpoint & format payload berbeda dari official
-    const isUlangan = (spRaw as { type?: string } | undefined)?.type === 'ulangan'
+    // basePath role+mode-aware: paritas admin [id]/page.tsx — guru mode ulangan
+    // → /dashboard/guru/ulangan, guru mode official → /dashboard/guru/uts-uas,
+    // admin → /dashboard/admin/uts-uas. Tanpa ini tombol back/Batal terlempar
+    // ke rute peran lain.
+    const isUlangan = forcedIsUlangan ?? ((spRaw as { type?: string } | undefined)?.type === 'ulangan')
+    const basePath = user?.role === 'GURU'
+        ? (isUlangan ? '/dashboard/guru/ulangan' : '/dashboard/guru/uts-uas')
+        : '/dashboard/admin/uts-uas'
     const submissionsApi = isUlangan ? '/api/exam-submissions' : '/api/official-exam-submissions'
-    const typeParam = isUlangan ? '?type=ulangan' : ''
+    // typeParam hanya saat mode dari searchParams (admin atau legacy); wrapper
+    // guru/ulangan force via prop → kosong (link tetap di rute /dashboard/guru/ulangan).
+    const typeParam = (!forcedIsUlangan && isUlangan) ? '?type=ulangan' : ''
 
     const [submission, setSubmission] = useState<SubmissionDetail | null>(null)
     // Extracted & deduplicated questions from answers[].question

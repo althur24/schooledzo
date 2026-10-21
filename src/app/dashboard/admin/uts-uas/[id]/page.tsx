@@ -7,6 +7,7 @@ import dynamic from 'next/dynamic'
 import { Button, Modal, EmptyState } from '@/components/ui'
 import { useDuplicateGuard } from '@/components/exam/useDuplicateGuard'
 import { useDuplicate409Handler } from '@/components/exam/useDuplicate409Handler'
+import ResetAttemptMenu from '@/components/exam/ResetAttemptMenu'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
@@ -14,7 +15,7 @@ import { Edit, Discovery, Folder, Plus, Delete, Document } from 'react-iconly'
 import {
     Loader2, ArrowLeft, Trash2, Save, Eye, EyeOff,
     Settings, FileText, BarChart3, Sparkles, Activity,
-    ChevronUp, CheckCircle, Download
+    ChevronUp, CheckCircle, Download, RotateCcw
 } from 'lucide-react'
 import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
 import PDFDownloadButton from '@/components/analytics/pdf/PDFDownloadButton'
@@ -83,9 +84,15 @@ interface Question {
 type TabType = 'soal' | 'pengaturan' | 'hasil' | 'monitor'
 type SoalMode = 'list' | 'manual' | 'clean' | 'bank'
 
-export default function AdminUtsUasDetailPage({ params, searchParams }: {
+export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUlangan }: {
     params: Promise<{ id: string }>
     searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
+    /**
+     * Force mode ulangan (tabel exams). Dipakai wrapper guru/ulangan/[id]
+     * agar mode ulangan ditentukan oleh rute, BUKAN searchParams — link
+     * lama tanpa ?type=ulangan tetap benar (paritas pola monitor).
+     */
+    forcedIsUlangan?: boolean
 }) {
     const { id: examId } = use(params)
     const spRaw = use(searchParams ?? Promise.resolve({}))
@@ -94,19 +101,28 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     // mengikuti role pemakai agar tidak terlempar ke area peran lain
     const { user } = useAuth()
     const labels = useSchoolLabels()
-    const basePath = user?.role === 'GURU' ? '/dashboard/guru/uts-uas' : '/dashboard/admin/uts-uas'
-    // Mode ulangan (tabel exams, dikelola guru): semua endpoint & shape data di-switch
-    // mengikuti pola ?type=ulangan yang sudah ada di halaman monitor
-    const isUlangan = (spRaw as { type?: string } | undefined)?.type === 'ulangan'
+    // Mode ulangan (tabel exams, dikelola guru): semua endpoint & shape data di-switch.
+    // forcedIsUlangan (dari wrapper guru/ulangan) lebih prioritas dari searchParams
+    // — mencegah mode turun ke official saat user buka tanpa ?type=ulangan.
+    const isUlangan = forcedIsUlangan ?? ((spRaw as { type?: string } | undefined)?.type === 'ulangan')
+    // basePath role+mode-aware: guru mode ulangan → /dashboard/guru/ulangan,
+    // guru mode official → /dashboard/guru/uts-uas, admin → /dashboard/admin/uts-uas.
+    // Tanpa ini link internal (Koreksi, Kembali, Monitor) terlempar ke rute peran lain.
+    const basePath = user?.role === 'GURU'
+        ? (isUlangan ? '/dashboard/guru/ulangan' : '/dashboard/guru/uts-uas')
+        : '/dashboard/admin/uts-uas'
     // Guru tidak punya halaman list uts-uas lagi (terpadu di halaman ulangan) — tombol
     // Kembali langsung ke sana, tanpa lewat redirect. Admin kembali ke tab asalnya
     // (tab list kini hidup di URL — tanpa ?tab=ulangan akan jatuh ke tab UTS/UAS).
     const backPath = user?.role === 'GURU'
-        ? '/dashboard/guru/ulangan'
+        ? (isUlangan ? '/dashboard/guru/ulangan' : '/dashboard/guru/uts-uas')
         : (isUlangan ? '/dashboard/admin/uts-uas?tab=ulangan' : '/dashboard/admin/uts-uas')
     const examApi = isUlangan ? '/api/exams' : '/api/official-exams'
     const submissionsApi = isUlangan ? '/api/exam-submissions' : '/api/official-exam-submissions'
-    const typeParam = isUlangan ? '?type=ulangan' : ''
+    // typeParam hanya relevant saat mode datang dari searchParams (admin, atau guru
+    // lewat rute uts-uas lama). Wrapper guru/ulangan force via prop → "" (link
+    // internal tetap di rute /dashboard/guru/ulangan/... tanpa param mode).
+    const typeParam = (!forcedIsUlangan && isUlangan) ? '?type=ulangan' : ''
 
     const [exam, setExam] = useState<ExamDetail | null>(null)
     const [questions, setQuestions] = useState<Question[]>([])
@@ -121,7 +137,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
 
     // Toast & confirm dialog (replacing browser alerts)
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null)
-    const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null)
+    // confirmLabel: opsional utk label tombol konfirmasi non-hapus (mis. "Hard Reset").
+    // Default "Hapus" bila tidak diisi agar backward-compatible dgn call-site lama.
+    const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel?: string; variant?: 'danger' | 'warning'; onConfirm: () => void } | null>(null)
 
     const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
         setToast({ message, type })
@@ -204,9 +222,26 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     const [teachingAssignments, setTeachingAssignments] = useState<any[]>([])
     const [batchMemberSaving, setBatchMemberSaving] = useState(false)
     // Guard duplikat-judul (pre-flight + dialog) — shared guru+admin (adil).
-    const dupGuard = useDuplicateGuard(labels.ulangan)
+    // Label mode-aware: ulangan → "Ulangan Harian" (atau custom label), UTS/UAS →
+    // "UTS/UAS" generik (bukan labels.uts yang selalu menang, salah utk UAS —
+    // hook instantiate sebelum exam termuat, tidak bisa baca exam_type).
+    // Mirror bug 3+4.
+    const dupGuard = useDuplicateGuard(isUlangan ? labels.ulangan : 'UTS/UAS')
     // Handler 409 DUPLICATE_TITLE dari PUT rename (server guard backstop).
-    const dup409 = useDuplicate409Handler(labels.uts || labels.uas || 'UTS/UAS')
+    const dup409 = useDuplicate409Handler(isUlangan ? labels.ulangan : 'UTS/UAS')
+    // Reset attempt (Soft/Hard) di tab Hasil — paritas guru/ulangan.
+    // submissionsApi sudah mode-aware (exam-submissions / official-exam-submissions),
+    // jadi reset berfungsi penuh di mode ulangan MAUPUN UTS/UAS (paritas konduktor
+    // Monitor Live yang juga pakai ResetAttemptMenu utk dua mode).
+    const [resettingId, setResettingId] = useState<string | null>(null)
+    const [resetMenuId, setResetMenuId] = useState<string | null>(null)
+    // Salin Ulang Soal retry — paritas kuis [id] (guru/kuis/[id]:431,534,561,611,629,1363).
+    // Publish multi-kelas: bila syncExamBatch di server gagal parsial, client
+    // AUTO-RETRY di background (silent, max 3x dengan delay). Selama retry,
+    // tampilkan loading "Sedang mengirim soal ke semua kelas..." — guru tidak
+    // perlu tau istilah teknis sync/sibling/salin. Kalau setelah retry masih
+    // gagal → toast sederhana, tanpa tombol manual (guru handle via tarik-publish ulang).
+    const [autoRetrying, setAutoRetrying] = useState(false)
     // Tahun ajaran exam — primitif utk dep effect classes (hindari refetch per fetchExam)
     const examYearId = isUlangan
         ? (exam as any)?.teaching_assignment?.academic_year?.id
@@ -364,6 +399,20 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
     useEffect(() => {
         if (window.location.hash === '#hasil') setActiveTab('hasil')
     }, [])
+
+    // Legacy `?siblings=` consumer — paritas kuis [id]:474-485.
+    // Untuk ujian lama (sebelum fitur batch_id), sibling IDs disimpan di
+    // sessionStorage agar bisa di-retry via syncToSiblings() bila sync gagal.
+    // Ujian baru pakai batch_id (DB source of truth) → param diabaikan (no-op).
+    useEffect(() => {
+        const siblingParam = (spRaw as { siblings?: string } | undefined)?.siblings
+        if (!isUlangan || !siblingParam) return
+        const ids = siblingParam.split(',').filter(Boolean)
+        if (ids.length > 0) {
+            sessionStorage.setItem(`exam_siblings_${examId}`, JSON.stringify(ids))
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [examId, isUlangan])
 
     const fetchResults = useCallback(async () => {
         // Race guard: increment id — hanya request dengan id terbaru yang boleh
@@ -607,7 +656,40 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                     if (updated.pending_publish) {
                         showToast(`Publish ditahan — ada soal yang masih menunggu review. ${labels.ulangan} otomatis terkirim setelah semua soal disetujui.`, 'warning')
                     } else {
-                        showToast(`${labels.ulangan} berhasil dipublish!`, 'success')
+                        // Konsumsi batch_sync dari respons — paritas kuis
+                        // (guru/kuis/[id]/page.tsx:611). Saat syncExamBatch di server
+                        // gagal parsial, AUTO-RETRY di background (UX clean — guru tidak
+                        // lihat tombol teknis). SyncOnce: jalur baru (batch_id) atau
+                        // legacy fallback (sessionStorage untuk ujian lama tanpa batch_id).
+                        const batchSync = updated.batch_sync
+                        if (batchSync && (batchSync.total ?? 0) > 0 && (batchSync.failed?.length ?? 0) > 0) {
+                            // Sync gagal parsial → trigger auto-retry di background.
+                            // Jangan showToast duluan — startAutoRetry handle toast di
+                            // akhir (sukses: "berhasil dipublish! Soal sudah sampai ke
+                            // semua kelas." / gagal: "Beberapa kelas belum dapat soal,
+                            // coba tarik ke draft lalu publish ulang.").
+                            startAutoRetry(batchSync.failed.length)
+                        } else if (batchSync && (batchSync.total ?? 0) > 0) {
+                            // Sync sukses di server-side (batchSync.failed kosong)
+                            sessionStorage.removeItem(`exam_siblings_${examId}`)
+                            showToast(`${labels.ulangan} berhasil dipublish! Soal sudah sampai ke semua kelas.`, 'success')
+                        } else if (!exam?.batch_id) {
+                            // Legacy fallback: ujian lama tanpa batch_id. Sync via
+                            // sessionStorage (copy-questions endpoint). Bila sync
+                            // gagal → auto-retry; bila nothing-to-sync (sessionStorage
+                            // kosong) → toast sukses saja (ujian utama tetap aktif).
+                            const syncOk = await syncOnce()
+                            if (syncOk === true) {
+                                showToast(`${labels.ulangan} berhasil dipublish! Soal sudah sampai ke semua kelas.`, 'success')
+                            } else if (syncOk === null) {
+                                showToast(`${labels.ulangan} berhasil dipublish!`, 'success')
+                            } else {
+                                // syncOk === false → trigger auto-retry
+                                startAutoRetry(1)
+                            }
+                        } else {
+                            showToast(`${labels.ulangan} berhasil dipublish!`, 'success')
+                        }
                     }
                 }
             } else if (isUlangan) {
@@ -1047,6 +1129,131 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
         }
     }
 
+    // Reset attempt (Soft/Hard) — paritas guru/ulangan tab Hasil. Memakai
+    // confirmDialog (bukan window.confirm) utk konsistensi pola admin.
+    // submissionsApi sudah isUlangan-aware → kompatibel ulangan + UTS/UAS.
+    const handleResetAttempt = (submissionId: string, studentName: string, mode: 'soft' | 'hard') => {
+        const isHard = mode === 'hard'
+        const label = isUlangan ? labels.ulangan : (exam?.exam_type === 'UTS' ? labels.uts : labels.uas)
+        const message = isHard
+            ? `PERINGATAN HARD RESET!\n\nApakah Anda yakin ingin melakukan HARD RESET untuk ${label.toLowerCase()} milik ${studentName}?\n\nSELURUH JAWABAN SAAT INI AKAN DIHAPUS dan siswa akan mengulang dari awal dengan durasi penuh baru, terhitung sejak saat reset (terlepas dari jadwal berakhir ${label.toLowerCase()}).`
+            : `Konfirmasi Soft Reset\n\nApakah Anda yakin ingin membuka akses kembali (Soft Reset) untuk ${label.toLowerCase()} milik ${studentName}?\n\nJawaban sebelumnya tidak akan dihapus, dan timer melanjutkan sisa waktu jendela ${label.toLowerCase()} (semua siswa selesai serentak). Hanya bisa dilakukan selama jendela waktu masih terbuka.`
+        setConfirmDialog({
+            title: isHard ? 'Hard Reset Submission' : 'Soft Reset Submission',
+            message,
+            confirmLabel: isHard ? 'Lakukan Hard Reset' : 'Lakukan Soft Reset',
+            variant: isHard ? 'danger' : 'warning',
+            onConfirm: async () => {
+                setResettingId(submissionId)
+                setResetMenuId(null)
+                setConfirmDialog(null)
+                try {
+                    const res = await fetch(submissionsApi, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            submission_id: submissionId,
+                            reset_attempt: mode
+                        })
+                    })
+                    const data = await res.json()
+                    if (data.error) throw new Error(data.error)
+                    showToast(data.message || (isHard ? 'Hard reset berhasil diproses.' : 'Soft reset berhasil diproses.'), 'success')
+                    fetchResults()
+                } catch (error: any) {
+                    showToast('Gagal memproses reset: ' + error.message, 'error')
+                } finally {
+                    setResettingId(null)
+                }
+            }
+        })
+    }
+
+    // Click outside reset menu: tutup menu (panel dirender via portal, jadi
+    // click-outside harus cek attribute data-reset-menu di trigger & panel).
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as HTMLElement
+            if (!target.closest('[data-reset-menu]')) {
+                setResetMenuId(null)
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [])
+
+    // Coba sync 1x — pakai sync-batch bila ada batch_id, fallback ke copy-questions
+    // via sessionStorage bila ujian lama. Return: true=sukses, false=gagal, null=
+    // nothing-to-sync (sessionStorage kosong). Dipakai startAutoRetry untuk loop.
+    const syncOnce = async (): Promise<boolean | null> => {
+        if (exam?.batch_id) {
+            try {
+                const res = await fetch(`/api/exams/${examId}/sync-batch`, { method: 'POST' })
+                const data = await res.json().catch(() => null)
+                return !!res.ok && !!data && (data.failed?.length || 0) === 0
+            } catch {
+                return false
+            }
+        }
+        // Legacy fallback: copy-questions via sessionStorage siblings
+        const stored = sessionStorage.getItem(`exam_siblings_${examId}`)
+        if (!stored) return null
+        let ids: string[] = []
+        try { ids = JSON.parse(stored) } catch { return null }
+        if (ids.length === 0) return null
+        try {
+            const res = await fetch('/api/exams/copy-questions', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source_exam_id: examId, target_exam_ids: ids, also_publish: true })
+            })
+            const syncData = await res.json().catch(() => null)
+            const failedTargets: string[] = syncData?.failed_targets || []
+            if (!res.ok || failedTargets.length > 0) return false
+            sessionStorage.removeItem(`exam_siblings_${examId}`)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    // Auto-retry background — UX clean untuk guru: tidak ada istilah teknis,
+    // tidak ada tombol "Salin Ulang Soal". Saat publish multi-kelas gagal parsial,
+    // sistem otomatis coba ulang di background (silent, max 3x delay 2s). Guru
+    // lihat loading "Sedang mengirim soal ke semua kelas...". Kalau retry habis
+    // masih gagal → toast sederhana, guru handle via tarik ke draft + publish ulang.
+    const startAutoRetry = async (initialFailedCount: number) => {
+        void initialFailedCount
+        setAutoRetrying(true)
+        const MAX_RETRIES = 3
+        const DELAY_MS = 2000
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            // Delay sebelum coba (skip delay di iterasi pertama biar cepat)
+            if (attempt > 0) {
+                await new Promise(r => setTimeout(r, DELAY_MS))
+            }
+            const result = await syncOnce()
+            if (result === true) {
+                // Sukses — soal sudah sampai ke semua kelas
+                setAutoRetrying(false)
+                showToast(`${labels.ulangan} berhasil dipublish! Soal sudah sampai ke semua kelas.`, 'success')
+                fetchExam()
+                return
+            }
+            if (result === null) {
+                // Nothing to sync (sessionStorage kosong untuk legacy) — bukan
+                // kegagalan, ujian utama sudah aktif. Stop loop, toast sukses.
+                setAutoRetrying(false)
+                showToast(`${labels.ulangan} berhasil dipublish!`, 'success')
+                fetchExam()
+                return
+            }
+            // result === false → coba lagi (atau habis retry)
+        }
+        // Retry habis, masih gagal — toast sederhana (guru handle via tarik-publish ulang)
+        setAutoRetrying(false)
+        showToast(`Beberapa kelas belum dapat soal. Coba tarik ${labels.ulangan.toLowerCase()} ke draft lalu publish ulang.`, 'warning')
+    }
+
     if (loading) {
         return <div className="flex justify-center py-20"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>
     }
@@ -1128,6 +1335,27 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 </div>
             )}
 
+            {/* Auto-retry sync indicator — muncul saat sync gagal parsial dan client
+                sedang auto-retry di background (silent, max 3x). UX clean untuk guru:
+                tidak ada istilah teknis "salin/sibling/batch_sync", hanya loading
+                state yang ramah. Kalau retry habis masih gagal → toast sederhana
+                (handle di startAutoRetry), tanpa banner merah + tombol manual. */}
+            {autoRetrying && isUlangan && (
+                <div className="p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700 rounded-xl animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-3">
+                        <Loader2 className="w-5 h-5 animate-spin text-amber-500 flex-shrink-0" />
+                        <div>
+                            <h4 className="font-bold text-amber-800 dark:text-amber-300 text-sm">
+                                Sedang mengirim soal ke semua kelas...
+                            </h4>
+                            <p className="text-xs text-amber-600/70 dark:text-amber-400/70 mt-0.5">
+                                Mohon tunggu sebentar, sistem sedang memastikan soal sampai ke setiap kelas.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Tabs */}
             <div className="flex gap-1 bg-secondary/5 p-1 rounded-xl border border-secondary/10 overflow-x-auto custom-scrollbar">
                 {([{ key: 'soal' as TabType, label: 'Soal', icon: FileText }, { key: 'pengaturan' as TabType, label: 'Pengaturan', icon: Settings }, { key: 'hasil' as TabType, label: 'Hasil', icon: BarChart3 }, { key: 'monitor' as TabType, label: 'Monitor Live', icon: Activity }]).map(tab => {
@@ -1139,11 +1367,15 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                             title={isMonitorDisabled ? 'Aktifkan ujian dulu untuk menggunakan Monitor' : undefined}
                             onClick={() => {
                                 if (tab.key === 'monitor') {
-                                    // Ulangan batch: monitor multi-kelas (semua kelas
-                                    // batch + saring kelas) — tanpa &batch=1 halaman
-                                    // jatuh ke mode single-kelas exam ini saja.
-                                    const batchParam = isUlangan && (exam as any).batch_id ? '&batch=1' : ''
-                                    router.push(`${basePath}/${examId}/monitor${typeParam}${batchParam}`)
+                                    // Ulangan batch: monitor multi-kelas (?batch=1) —
+                                    // dibangun via URLSearchParams agar prefix ? benar
+                                    // (sebelumnya: typeParam='' (forced) + batchParam='&batch=1'
+                                    // → URL rusak '/monitor&batch=1' tanpa '?').
+                                    const monitorParams = new URLSearchParams()
+                                    if (!forcedIsUlangan && isUlangan) monitorParams.set('type', 'ulangan')
+                                    if (isUlangan && (exam as any).batch_id) monitorParams.set('batch', '1')
+                                    const monitorQs = monitorParams.toString()
+                                    router.push(`${basePath}/${examId}/monitor${monitorQs ? `?${monitorQs}` : ''}`)
                                     return
                                 }
                                 setActiveTab(tab.key);
@@ -1671,6 +1903,16 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                                                                 >
                                                                     Detail
                                                                 </button>
+                                                                {exam?.is_active && (
+                                                                    <ResetAttemptMenu
+                                                                        menuId={sub.id}
+                                                                        openMenuId={resetMenuId}
+                                                                        onToggle={setResetMenuId}
+                                                                        onSelect={(m) => handleResetAttempt(sub.id, sub.student?.user?.full_name || 'Siswa', m)}
+                                                                        busy={resettingId === sub.id}
+                                                                        label="Izinkan Ulang"
+                                                                    />
+                                                                )}
                                                             </div>
                                                         ) : (
                                                             <span className="text-text-secondary text-xs">—</span>
@@ -2129,26 +2371,40 @@ export default function AdminUtsUasDetailPage({ params, searchParams }: {
                 </div>
             )}
 
-            {/* Confirm Dialog */}
-            {confirmDialog && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                    <div className="bg-white dark:bg-surface-dark rounded-2xl p-6 max-w-sm w-full text-center shadow-2xl animate-in zoom-in-95 duration-200">
-                        <div className="w-16 h-16 mx-auto bg-red-100 dark:bg-red-900/30 text-red-500 rounded-full flex items-center justify-center mb-4">
-                            <Trash2 className="w-7 h-7" />
-                        </div>
-                        <h3 className="text-lg font-bold text-text-main dark:text-white mb-2">{confirmDialog.title}</h3>
-                        <p className="text-text-secondary mb-6">{confirmDialog.message}</p>
-                        <div className="flex gap-3">
-                            <button onClick={() => setConfirmDialog(null)} className="flex-1 py-3 bg-gray-200 dark:bg-slate-700 text-text-main dark:text-white rounded-xl font-bold hover:bg-gray-300 transition-colors">
-                                Batal
-                            </button>
-                            <button onClick={confirmDialog.onConfirm} className="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-colors">
-                                Hapus
-                            </button>
+{/* Confirm Dialog */}
+            {confirmDialog && (() => {
+                // Variant-aware chrome: 'warning' (Soft Reset, non-destruktif) =
+                // amber icon RotateCcw + amber button; 'danger' (Hapus, Hard Reset)
+                // = red icon Trash2 + red button. Default 'danger' utk backward-compat.
+                const v = confirmDialog.variant ?? 'danger'
+                const isWarn = v === 'warning'
+                const Icon = isWarn ? RotateCcw : Trash2
+                const iconWrap = isWarn
+                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-500'
+                    : 'bg-red-100 dark:bg-red-900/30 text-red-500'
+                const btn = isWarn
+                    ? 'bg-amber-500 hover:bg-amber-600'
+                    : 'bg-red-500 hover:bg-red-600'
+                return (
+                    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                        <div className="bg-white dark:bg-surface-dark rounded-2xl p-6 max-w-sm w-full text-center shadow-2xl animate-in zoom-in-95 duration-200">
+                            <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4 ${iconWrap}`}>
+                                <Icon className="w-7 h-7" />
+                            </div>
+                            <h3 className="text-lg font-bold text-text-main dark:text-white mb-2">{confirmDialog.title}</h3>
+                            <p className="text-text-secondary mb-6 whitespace-pre-line">{confirmDialog.message}</p>
+                            <div className="flex gap-3">
+                                <button onClick={() => setConfirmDialog(null)} className="flex-1 py-3 bg-gray-200 dark:bg-slate-700 text-text-main dark:text-white rounded-xl font-bold hover:bg-gray-300 transition-colors">
+                                    Batal
+                                </button>
+                                <button onClick={confirmDialog.onConfirm} className={`flex-1 py-3 text-white rounded-xl font-bold transition-colors ${btn}`}>
+                                    {confirmDialog.confirmLabel || 'Hapus'}
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            })()}
 
             {/* Guard duplikat-judul dialog (pre-flight) — shared guru+admin */}
             {dupGuard.dialog}
