@@ -267,8 +267,6 @@ async function main() {
     const audioCount = await evalInPage(cdp, `document.querySelectorAll('audio').length`)
     check('A5: audio listening (<audio>) tampil', audioCount >= 1, `audio=${audioCount}`)
     check('A6: label grup Listening tampil', await evalInPage(cdp, `document.body.innerText.includes('Listening')`))
-    console.log('  DEBUG[A] buttons:', await evalInPage(cdp, `[...document.querySelectorAll('button')].map(b=>b.textContent.trim()).filter(Boolean).slice(0,25).join(' | ')`))
-    console.log('  DEBUG[A] hasPublishUlangan:', await evalInPage(cdp, `document.body.innerText.includes('Publish Ulangan')`), '| hasPublish:', await evalInPage(cdp, `document.body.innerText.includes('Publish')`))
 
     // Klik Publish → harus buka modal konfirmasi (tidak langsung publish)
     const publishClicked = await evalInPage(cdp, `(() => { const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Publish'); if(b) b.click(); return !!b })()`)
@@ -290,8 +288,6 @@ async function main() {
     check('B2: badge Dikembalikan tampil', await evalInPage(cdp, `document.body.innerText.includes('Dikembalikan')`))
     check('B3: catatan admin tampil', await evalInPage(cdp, `document.body.innerText.includes('Catatan uji browser E2BD')`))
     check('B4: alasan pengembalian tampil', await evalInPage(cdp, `document.body.innerText.includes('Soal kurang jelas')`))
-    console.log('  DEBUG[B] buttons:', await evalInPage(cdp, `[...document.querySelectorAll('button')].map(b=>b.textContent.trim()).filter(Boolean).slice(0,25).join(' | ')`))
-    console.log('  DEBUG[B] hasJudul:', await evalInPage(cdp, `document.body.innerText.includes('Judul Ujian')`), '| hasStatusSoal:', await evalInPage(cdp, `document.body.innerText.includes('Status Soal')`))
 
     // Buka tab Pengaturan
     await evalInPage(cdp, `(() => { const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Pengaturan'); if(b) b.click(); return !!b })()`)
