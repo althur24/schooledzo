@@ -36,9 +36,9 @@ const bcrypt = require('bcrypt')
 
 const BASE = process.env.E2E_BASE || 'http://localhost:3457'
 const PASS = 'E2pg1234!'
-const SCHOOL = '63e125e8-b0fe-43aa-a2e6-fe4a16e46fda'
-const YEAR = '228189ac-55c5-470b-88cf-033c040144fb'
-const SUBJECT = 'e2152481-75b7-47da-ace6-3fae4a46a1e2' // Matematika STG
+const SCHOOL = process.env.T_SCHOOL || '63e125e8-b0fe-43aa-a2e6-fe4a16e46fda'
+const YEAR = process.env.T_YEAR || '228189ac-55c5-470b-88cf-033c040144fb'
+const SUBJECT = process.env.T_SUBJECT || 'e2152481-75b7-47da-ace6-3fae4a46a1e2' // Matematika
 
 // PFX hex-only (kolom uuid)
 const PFX = 'e2a90000-0000-4000-8000-'

@@ -34,10 +34,12 @@ const WebSocket = require('ws')
 
 const BASE = process.env.E2E_BASE || 'http://localhost:3457'
 const PASS = 'E2bd1234!'
-const SCHOOL = '63e125e8-b0fe-43aa-a2e6-fe4a16e46fda'
-const YEAR = '228189ac-55c5-470b-88cf-033c040144fb'
-const SUBJECT = 'e2152481-75b7-47da-ace6-3fae4a46a1e2'
-const CLASS = '7da71f34-b051-4aa9-ab4d-967ae741f61c'
+const SCHOOL = process.env.T_SCHOOL || '63e125e8-b0fe-43aa-a2e6-fe4a16e46fda'
+const YEAR = process.env.T_YEAR || '228189ac-55c5-470b-88cf-033c040144fb'
+const SUBJECT = process.env.T_SUBJECT || 'e2152481-75b7-47da-ace6-3fae4a46a1e2'
+const CLASS = process.env.T_CLASS || '7da71f34-b051-4aa9-ab4d-967ae741f61c'
+// ai_review_enabled sekolah (SSA=false): ringkasan review AI & poll hanya aktif bila true.
+const AI_REVIEW = process.env.T_AI_REVIEW === undefined ? true : process.env.T_AI_REVIEW === '1'
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const CDP_PORT = 9226
 
@@ -284,7 +286,14 @@ async function main() {
     await sleep(4000)
     await waitFor(cdp, `document.body.innerText.includes('E2BD Uji Detail B')`, 20000)
 
-    check('B1: ringkasan Status Soal tampil', await waitFor(cdp, `document.body.innerText.includes('Status Soal:')`, 15000))
+    let b1Shown = false
+    if (AI_REVIEW) {
+        b1Shown = await waitFor(cdp, `document.body.innerText.includes('Status Soal:')`, 15000)
+    } else {
+        await sleep(1500)
+        b1Shown = await evalInPage(cdp, `document.body.innerText.includes('Status Soal:')`)
+    }
+    check(AI_REVIEW ? 'B1: ringkasan Status Soal tampil (ai_review=true)' : 'B1: ringkasan review TIDAK tampil (ai_review=false)', AI_REVIEW ? b1Shown : !b1Shown, `shown=${b1Shown}`)
     check('B2: badge Dikembalikan tampil', await evalInPage(cdp, `document.body.innerText.includes('Dikembalikan')`))
     check('B3: catatan admin tampil', await evalInPage(cdp, `document.body.innerText.includes('Catatan uji browser E2BD')`))
     check('B4: alasan pengembalian tampil', await evalInPage(cdp, `document.body.innerText.includes('Soal kurang jelas')`))
@@ -308,6 +317,7 @@ async function main() {
     // Tunggu >1 siklus poll (5 dtk)
     await sleep(6500)
     const titleAfter = await evalInPage(cdp, `(() => { const el=document.querySelector('[data-testid="e2bd-title"]'); return el?el.value:null })()`)
+    if (!AI_REVIEW) console.log('  (catatan: poll review tidak aktif — ai_review=false; B6 memverifikasi input tidak hilang)')
     check('B6: judul TIDAK ter-reset poll setelah 6,5 dtk', titleAfter === 'E2BD JUDUL BARU', `value=${titleAfter}`)
     check('B7: tidak ada exception fatal (fase B)', cleanErrors(cdp).length === 0, cleanErrors(cdp).slice(0, 2))
 
