@@ -30,6 +30,12 @@
  *  [G] Reset attempt: PUT /api/exam-submissions { submission_id,
  *      reset_attempt: 'soft' } → 200 dengan { reset_success, message,
  *      effective_ends_at }. Verifikasi endpoint untuk ResetAttemptMenu.
+ *  [H] Grading halaman koreksi (shared admin+guru): PUT payload paritas client
+ *      (iterasi QUESTIONS) → soal tanpa baris jawaban tetap dibuat & dinilai,
+ *      feedback per soal tersimpan, total_score direkap server. Regresi 2 bug
+ *      HIGH unifikasi (feedback hilang + nilai esai kosong silent-drop).
+ *  [I] Reorder soal (drag & drop): POST /api/exams/<id>/questions { reorder }
+ *      mengubah order_index. Kontrak yang dipakai fitur drag halaman shared.
  *
  * Cleanup penuh di akhir (semua baris ber-prefix e2b1).
  *
@@ -55,6 +61,15 @@ const TA1_ID = `${PFX}a0000000000a`
 const TA2_ID = `${PFX}a0000000000b`
 const EXAM_A = `${PFX}e00000000001`
 const EXAM_B = `${PFX}e00000000002`
+// Exam terpisah khusus Fase H (grading) — TIDAK dipakai fase lain. Fase C
+// (publish sync-batch) & E (copy-questions) menimpa/menyalin soal exam A,
+// sehingga soal Fase H harus hidup di exam sendiri agar deterministik.
+// ID unik per run (jam epoch hex → 8 hex char): examQuestionsCache server
+// punya TTL 10 mnt keyed by exam_id — ID tetap antar-run menyajikan soal run
+// sebelumnya → PUT grading ditolak "Soal tidak ditemukan" walau DB sudah baru.
+const RUN_TAG = Date.now().toString(16).slice(-3)          // 3 hex terakhir
+const EXAM_C = `e2b1c${RUN_TAG}-0000-4000-8000-e0000000000c`
+const HQ_PFX = `e2b1c${RUN_TAG}`                            // 8 char: e2b1c+3
 const TEACHER1 = `${PFX}100000000001`
 const TEACHER2 = `${PFX}100000000002`
 const ADMIN_ID = `${PFX}100000000003`
@@ -91,6 +106,12 @@ async function api(path, cookie, method = 'GET', body) {
 }
 
 async function cleanupAll() {
+    // Exam + soal Fase H (ID dinamis per run — tidak ber-prefix PFX utuh)
+    await supabase.from('exam_submissions').delete().eq('exam_id', EXAM_C)
+    await supabase.from('exam_questions').delete().eq('exam_id', EXAM_C)
+    await supabase.from('exams').delete().eq('id', EXAM_C)
+    // Sisa soal Fase H (UUID ber-prefix e2b1c, tidak terikat prefix exam)
+    await supabase.from('exam_questions').delete().like('id', 'e2b1c%')
     // Hapus exam fixture
     const { data: exams } = await supabase.from('exams').select('id').like('id', `${PFX}e%`)
     for (const ex of (exams || [])) {
@@ -288,6 +309,104 @@ async function main() {
         // Cleanup submission
         await supabase.from('exam_answers').delete().eq('submission_id', sub.id)
         await supabase.from('exam_submissions').delete().eq('id', sub.id)
+    }
+
+    console.log('═══ FASE H — Grading halaman koreksi (feedback + soal tanpa jawaban) ══')
+    {
+        // Regresi 2 bug HIGH pada unifikasi halaman koreksi admin/guru:
+        //  #1 feedback per soal hilang (state grades hanya {score}, payload tanpa feedback)
+        //  #2 soal yang TIDAK dijawab siswa (esai/isian kosong) tak ada baris
+        //     exam_answers → hilang dari payload saat client iterasi answers →
+        //     nilai guru silent-drop & total_score salah.
+        // Kontrak server yang WAJIB dipenuhi: upsert menerima feedback dan membuat
+        // baris baru untuk soal yang belum punya jawaban, lalu merekap total.
+        //
+        // CATATAN: server punya cache in-memory daftar soal (examQuestionsCache,
+        // TTL 10 mnt) — grading terhadap exam yang sama setelah soal dihapus/insert
+        // ulang bisa ditolak "Soal tidak ditemukan" bila cache menyimpan ID lama.
+        // Karena itu Fase H memakai EXAM_C yang soalnya dibuat SEKALI di sini
+        // (tidak pernah diganti fase lain) dan UUID soal unik per run.
+        const cookieGuru = await login('e2b1_guru1')
+        await supabase.from('exams').insert({
+            id: EXAM_C, title: 'e2b1 Ulangan Grading (Fase H)', teaching_assignment_id: TA1_ID,
+            start_time: T0, duration_minutes: 60, is_active: true,
+            is_randomized: false, max_violations: 3, show_results_immediately: true, created_by: ids.admin,
+        })
+        const { data: qs, error: qErr } = await supabase.from('exam_questions').insert([
+            { id: `${HQ_PFX}-0001-4000-8000-000000000001`, exam_id: EXAM_C, question_text: 'H soal 1 (dijawab)', question_type: 'MULTIPLE_CHOICE', options: ['A', 'B', 'C', 'D'], correct_answer: 'A', points: 50, order_index: 0 },
+            { id: `${HQ_PFX}-0002-4000-8000-000000000002`, exam_id: EXAM_C, question_text: 'H soal 2 (kosong)', question_type: 'ESSAY', options: null, correct_answer: null, points: 50, order_index: 1 },
+        ]).select('id, points, order_index')
+        if (qErr) throw new Error(`seed soal Fase H: ${qErr.message}`)
+        const q1 = (qs || []).find(q => q.order_index === 0)
+        const q2 = (qs || []).find(q => q.order_index === 1)
+        if (!q1 || !q2) throw new Error('seed soal Fase H tidak lengkap')
+
+        const { data: sub, error: subErr } = await supabase.from('exam_submissions').insert({
+            exam_id: EXAM_C, student_id: STUDENT1, is_submitted: true, is_graded: false,
+            total_score: 0, max_score: 100, violation_count: 0, started_at: T0, submitted_at: T0,
+        }).select('id').single()
+        if (subErr) throw new Error(`seed submission Fase H: ${subErr.message}`)
+        // q1 dijawab, q2 KOSONG (tidak ada baris exam_answers — mensimulasikan esai kosong)
+        await supabase.from('exam_answers').insert({
+            submission_id: sub.id, question_id: q1.id, answer: 'A', is_correct: true, points_earned: 50,
+        })
+        // Payload paritas client (iterasi QUESTIONS, bukan answers):
+        const { status, data } = await api(`/api/exam-submissions/${sub.id}`, cookieGuru, 'PUT', {
+            answers: [
+                { question_id: q1.id, score: 45, feedback: 'Kurang teliti di langkah 2' },
+                { question_id: q2.id, score: 40, feedback: '', answer: null, is_correct: null },
+            ],
+            total_score: 85,
+            is_graded: true,
+        })
+        check('H1: PUT grading → 200', status === 200, `got ${status} ${JSON.stringify(data)}`)
+        const { data: rows } = await supabase
+            .from('exam_answers').select('question_id, points_earned, feedback').eq('submission_id', sub.id)
+        const rowQ2 = (rows || []).find(r => r.question_id === q2.id)
+        check('H2: soal TANPA jawaban tetap dibuatkan baris (bukan silent-drop)', !!rowQ2, rows)
+        check('H3: nilai soal tanpa jawaban tersimpan (40)', rowQ2?.points_earned === 40, rowQ2)
+        const rowQ1 = (rows || []).find(r => r.question_id === q1.id)
+        check('H4: feedback tersimpan di DB', rowQ1?.feedback === 'Kurang teliti di langkah 2', rowQ1)
+        const { data: subAfter } = await supabase
+            .from('exam_submissions').select('total_score, is_graded').eq('id', sub.id).single()
+        check('H5: total_score direkap server = 85', subAfter?.total_score === 85, subAfter)
+        check('H6: is_graded true', subAfter?.is_graded === true, subAfter)
+        // Cleanup
+        await supabase.from('exam_answers').delete().eq('submission_id', sub.id)
+        await supabase.from('exam_submissions').delete().eq('id', sub.id)
+        await supabase.from('exam_questions').delete().eq('exam_id', EXAM_C)
+        await supabase.from('exams').delete().eq('id', EXAM_C)
+    }
+
+    console.log('═══ FASE I — Reorder soal (drag & drop) ══')
+    {
+        // Kontrak client drag-reorder: POST /api/exams/:id/questions { reorder }
+        // harus mengubah order_index. Exam draft TANPA batch & TANPA submission
+        // (reorder diblok saat aktif / sudah ada yang mengerjakan).
+        const cookieGuru = await login('e2b1_guru1')
+        const EXAM_R = `${PFX}e0000000000d`
+        await supabase.from('exams').insert({
+            id: EXAM_R, title: 'e2b1 Reorder (Fase I)', teaching_assignment_id: TA1_ID,
+            start_time: T0, duration_minutes: 60, is_active: false,
+            is_randomized: false, max_violations: 3, show_results_immediately: true, created_by: ids.admin,
+        })
+        const { data: rq, error: rqErr } = await supabase.from('exam_questions').insert([
+            { exam_id: EXAM_R, question_text: 'I soal 1', question_type: 'MULTIPLE_CHOICE', options: ['A', 'B', 'C', 'D'], correct_answer: 'A', points: 50, order_index: 0 },
+            { exam_id: EXAM_R, question_text: 'I soal 2', question_type: 'MULTIPLE_CHOICE', options: ['A', 'B', 'C', 'D'], correct_answer: 'B', points: 50, order_index: 1 },
+        ]).select('id, order_index')
+        if (rqErr) throw new Error(`seed soal Fase I: ${rqErr.message}`)
+        const sorted = [...rq].sort((a, b) => a.order_index - b.order_index)
+        // Tukar urutan: q2 → 0, q1 → 1
+        const { status: s1 } = await api(`/api/exams/${EXAM_R}/questions`, cookieGuru, 'POST', {
+            reorder: [{ id: sorted[1].id, order_index: 0 }, { id: sorted[0].id, order_index: 1 }],
+        })
+        check('I1: POST reorder → 200', s1 === 200, `got ${s1}`)
+        const { data: after } = await supabase.from('exam_questions')
+            .select('id, order_index, question_text').eq('exam_id', EXAM_R).order('order_index')
+        check('I2: urutan tersimpan (soal 2 jadi pertama)', (after || [])[0]?.question_text === 'I soal 2', after)
+        check('I3: order_index kontigu 0,1', JSON.stringify((after || []).map(r => r.order_index)) === '[0,1]', after)
+        await supabase.from('exam_questions').delete().eq('exam_id', EXAM_R)
+        await supabase.from('exams').delete().eq('id', EXAM_R)
     }
 
     console.log('═══ SUMMARY ══')

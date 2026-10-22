@@ -86,8 +86,9 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
 
-    // Local state for grading edits
-    const [grades, setGrades] = useState<Record<string, { score: number }>>({})
+    // Local state for grading edits. Feedback disimpan per soal (paritas halaman
+    // ulangan guru lama) — tanpa ini guru kehilangan fitur catatan koreksi.
+    const [grades, setGrades] = useState<Record<string, { score: number; feedback: string }>>({})
 
     useEffect(() => {
         fetchData()
@@ -102,13 +103,16 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
             setSubmission({ ...data, answers })
 
             const questionMap = new Map<string, Question>()
-            const initialGrades: Record<string, { score: number }> = {}
+            const initialGrades: Record<string, { score: number; feedback: string }> = {}
 
             if (isUlangan) {
                 // Mode ulangan: soal di-join di exam.questions, skor di field `score`
                 (data.exam?.questions || []).forEach((q: Question) => questionMap.set(q.id, q))
                 answers.forEach((ans: any) => {
-                    initialGrades[ans.question_id] = { score: ans.score ?? 0 }
+                    initialGrades[ans.question_id] = {
+                        score: ans.score ?? 0,
+                        feedback: ans.feedback || ''
+                    }
                 })
             } else {
                 // Official: soal di-join per answer, skor di field `points_earned`
@@ -116,7 +120,10 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
                     if (ans.question) {
                         questionMap.set(ans.question.id, ans.question as Question)
                     }
-                    initialGrades[ans.question_id] = { score: ans.points_earned ?? 0 }
+                    initialGrades[ans.question_id] = {
+                        score: ans.points_earned ?? 0,
+                        feedback: ans.feedback || ''
+                    }
                 })
             }
 
@@ -134,18 +141,25 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
         }
     }
 
-    const handleGradeChange = (qId: string, value: string | number) => {
-        setGrades(prev => ({
-            ...prev,
-            [qId]: {
-                // Desimal sah (koreksi GK proporsional). parseFloat mentah tidak
-                // cukup: "1e999" → Infinity (truthy, lolos dari || 0) — koerce
-                // finite dulu lalu round-2 (server tetap clamp & rekonsiliasi).
-                score: typeof value === 'string'
-                    ? (Number.isFinite(parseFloat(value)) ? round2(parseFloat(value)) : 0)
-                    : value
+    const handleGradeChange = (qId: string, field: 'score' | 'feedback', value: string | number) => {
+        setGrades(prev => {
+            const current = prev[qId] || { score: 0, feedback: '' }
+            if (field === 'feedback') {
+                return { ...prev, [qId]: { ...current, feedback: String(value ?? '') } }
             }
-        }))
+            return {
+                ...prev,
+                [qId]: {
+                    ...current,
+                    // Desimal sah (koreksi GK proporsional). parseFloat mentah tidak
+                    // cukup: "1e999" → Infinity (truthy, lolos dari || 0) — koerce
+                    // finite dulu lalu round-2 (server tetap clamp & rekonsiliasi).
+                    score: typeof value === 'string'
+                        ? (Number.isFinite(parseFloat(value)) ? round2(parseFloat(value)) : 0)
+                        : value
+                }
+            }
+        })
     }
 
     const handleSave = async () => {
@@ -155,15 +169,24 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
         try {
             let response: Response
             if (isUlangan) {
-                // API exams: { answers: [{question_id, score, ...}], is_graded }
+                // API exams: { answers: [{question_id, score, feedback}], is_graded }
+                // Iterasi QUESTIONS (bukan submission.answers): soal yang TIDAK
+                // dijawab siswa (esai/isian kosong → tak ada baris exam_answers dari
+                // autosave) tetap harus menerima nilai guru. Iterasi answers membuat
+                // baris itu hilang dari payload → nilai koreksi silent-drop dan
+                // total_score server salah (regresi fix 45f6589).
                 let totalScore = 0
-                const answersPayload = submission.answers.map(ans => {
-                    const grade = grades[ans.question_id]
-                    const currentScore = grade ? grade.score : (ans.score || 0)
+                const answersPayload = questions.map(q => {
+                    const ans = submission.answers.find(a => a.question_id === q.id)
+                    const grade = grades[q.id]
+                    const currentScore = grade ? grade.score : (ans?.score || 0)
+                    const currentFeedback = grade ? grade.feedback : (ans?.feedback || '')
                     totalScore += currentScore
                     return {
-                        ...ans,
-                        score: currentScore
+                        ...(ans || { question_id: q.id, answer: null, is_correct: null }),
+                        question_id: q.id,
+                        score: currentScore,
+                        feedback: currentFeedback
                     }
                 })
                 response = await fetch(`${submissionsApi}/${submissionId}`, {
@@ -177,6 +200,9 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
                 })
             } else {
                 // API official: { grades: [{answer_id, points_earned}] }
+                // Official tidak punya jalur soal-tanpa-baris-jawaban (soal di-join
+                // per answer via API, tidak ada questions terpisah) — iterasi answers
+                // tetap benar di sini.
                 const gradesPayload = submission.answers.map(ans => {
                     const grade = grades[ans.question_id]
                     const currentScore = grade ? grade.score : (ans.points_earned || 0)
@@ -243,7 +269,7 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
             <div className="space-y-6 max-w-4xl mx-auto px-4">
                 {questions.map((q, idx) => {
                     const ans = submission.answers.find(a => a.question_id === q.id)
-                    const grade = grades[q.id] || { score: 0 }
+                    const grade = grades[q.id] || { score: 0, feedback: '' }
                     const isCorrect = ans?.is_correct
 
                     return (
@@ -292,7 +318,11 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
                                 </div>
                             </div>
 
-                            <div className="pl-12 grid grid-cols-1 md:grid-cols-2 gap-4 bg-secondary/5 dark:bg-white/5 p-4 rounded-xl mt-4">
+                            {/* Grid 2 kolom: feedback hanya mode ulangan. API official
+                                (official-exam-submissions PUT) hanya menulis points_earned
+                                — tidak ada kolom feedback, jadi input disembunyikan agar
+                                guru UTS/UAS tidak mengisi catatan yang tak tersimpan. */}
+                            <div className={`pl-12 grid grid-cols-1 ${isUlangan ? 'md:grid-cols-2' : ''} gap-4 bg-secondary/5 dark:bg-white/5 p-4 rounded-xl mt-4`}>
                                 <div>
                                     <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Nilai</label>
                                     <div className="flex items-center gap-2">
@@ -301,7 +331,7 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
                                             value={grade.score ?? 0}
                                             onChange={(e) => {
                                                 const val = Math.min(q.points, Math.max(0, parseFloat(e.target.value) || 0))
-                                                handleGradeChange(q.id, val)
+                                                handleGradeChange(q.id, 'score', val)
                                             }}
                                             className={`w-24 px-3 py-2 bg-secondary/5 dark:bg-white/5 border rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 ${(q.question_type === 'ESSAY' || q.question_type === 'SHORT_ANSWER') ? 'border-amber-500 focus:ring-amber-500' : 'border-secondary/30 dark:border-white/20 focus:ring-primary'} ${isAutoGradeable(q.question_type) ? 'opacity-50 cursor-not-allowed bg-secondary/10' : ''}`}
                                             max={q.points}
@@ -312,6 +342,19 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
                                         <span className="text-text-secondary text-sm">/ {formatScore(q.points)}</span>
                                     </div>
                                 </div>
+                                {isUlangan && (
+                                    <div>
+                                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Feedback</label>
+                                        <input
+                                            type="text"
+                                            value={grade.feedback ?? ''}
+                                            onChange={(e) => handleGradeChange(q.id, 'feedback', e.target.value)}
+                                            className={`w-full px-3 py-2 bg-secondary/5 dark:bg-white/5 border border-secondary/30 dark:border-white/20 rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary placeholder-text-secondary/50 ${isAutoGradeable(q.question_type) ? 'opacity-50 cursor-not-allowed bg-secondary/10' : ''}`}
+                                            placeholder={isAutoGradeable(q.question_type) ? 'Sistem otomatis menilai soal ini' : 'Berikan catatan...'}
+                                            disabled={isAutoGradeable(q.question_type)}
+                                        />
+                                    </div>
+                                )}
                             </div>
                         </Card>
                     )

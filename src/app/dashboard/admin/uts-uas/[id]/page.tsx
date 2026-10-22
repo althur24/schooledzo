@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, use, useCallback, useRef } from 'react'
+import { useEffect, useState, use, useCallback, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
@@ -10,6 +10,7 @@ import { useDuplicate409Handler } from '@/components/exam/useDuplicate409Handler
 import ResetAttemptMenu from '@/components/exam/ResetAttemptMenu'
 import Card from '@/components/ui/Card'
 import SmartText from '@/components/SmartText'
+import PassageBlock from '@/components/PassageBlock'
 import { isCorrectOption, validateCorrectAnswer } from '@/lib/questionTypeUtils'
 import { Edit, Discovery, Folder, Plus, Delete, Document } from 'react-iconly'
 import {
@@ -73,6 +74,8 @@ interface Question {
     options: string[] | null; correct_answer: string | null; points: number
     order_index: number; difficulty: string | null; passage_text: string | null
     passage_audio_url?: string | null; image_url?: string | null; status?: string
+    /** Catatan admin saat soal dikembalikan (status 'returned') — datang dari GET questions */
+    admin_review?: { notes?: string | null; return_reasons?: string[] | null } | null
     teacher_hots_claim?: boolean
     text_direction?: 'ltr' | 'rtl'
     content_format?: 'html' | 'plain'
@@ -188,6 +191,31 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
     const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(new Set())
     const [isBulkSelectMode, setIsBulkSelectMode] = useState(false)
 
+    // Drag & drop reorder (pointer events — support layar sentuh) — paritas halaman
+    // guru lama. Reorder hanya mengubah order_index anggota grup, tanpa menyentuh
+    // soal di luar grup.
+    const [drag, setDrag] = useState<{
+        groupKey: string; questionId: string; ids: string[]; slotHeights: number[]
+        fromIndex: number; toIndex: number; offsetY: number; active: boolean
+    } | null>(null)
+    const dragMeta = useRef<{
+        startY: number; rects: DOMRect[]
+        bounds: { top: number; bottom: number; left: number; right: number }
+    } | null>(null)
+    const dragRef = useRef<typeof drag>(null)
+    // Tahun ajaran yang sudah dimuat untuk daftar TA kandidat batch
+    const taYearRef = useRef<string | null>(null)
+    // Ref questions untuk commitReorder (hindari closure stale selama drag)
+    const questionsRef = useRef<Question[]>([])
+    useEffect(() => { questionsRef.current = questions }, [questions])
+
+    // Publish flow (fresh-fetch + konfirmasi) + status sync batch manual retry
+    const [showPublishConfirm, setShowPublishConfirm] = useState(false)
+    const [publishingCheck, setPublishingCheck] = useState(false)
+    const [publishing, setPublishing] = useState(false)
+    const [syncFailedCount, setSyncFailedCount] = useState(0)
+    const [retryingSync, setRetryingSync] = useState(false)
+
     // Rapih AI
     const [rapihSaving, setRapihSaving] = useState(false)
 
@@ -218,7 +246,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
     const [classRoster, setClassRoster] = useState<{ id: string; name: string; nis: string; classId: string; className: string; memberId: string }[]>([])
 
     // AI Review setting
-    const [aiReviewEnabled, setAiReviewEnabled] = useState(false)
+    const [aiReviewEnabled, setAiReviewEnabled] = useState(true)
+    // AI Generate (flag sekolah) — GURU hanya boleh generate bila diizinkan admin
+    const [aiGenerateEnabled, setAiGenerateEnabled] = useState(false)
     const [teachingAssignments, setTeachingAssignments] = useState<any[]>([])
     const [batchMemberSaving, setBatchMemberSaving] = useState(false)
     // Guard duplikat-judul (pre-flight + dialog) — shared guru+admin (adil).
@@ -355,6 +385,28 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
         }
     }, [examId, examApi, isUlangan])
 
+    // Refresh RINGAN untuk poll review: hanya data ujian + jumlah submission.
+    // TIDAK menyentuh `settingsForm`/KKM — tanpa ini, poll 5 dtk akan menghapus
+    // ketikan guru yang sedang mengisi tab Pengaturan.
+    const refreshExamMeta = useCallback(async () => {
+        try {
+            const res = await fetch(`${examApi}/${examId}`)
+            if (!res.ok) return
+            const data = await res.json()
+            setExam(data)
+            try {
+                const countsRes = await fetch(`${examApi}/submission-counts`)
+                if (countsRes.ok) {
+                    const counts = await countsRes.json()
+                    const entry = counts?.[examId]
+                    setHasSubmissions(entry ? (entry.total > 0) : false)
+                }
+            } catch { /* biarkan nilai hasSubmissions terakhir */ }
+        } catch (error) {
+            console.error('Error refreshing exam meta:', error)
+        }
+    }, [examId, examApi])
+
     const fetchQuestions = useCallback(async () => {
         try {
             const res = await fetch(`${examApi}/${examId}/questions`)
@@ -370,9 +422,30 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
         fetchExam()
         fetchQuestions()
         fetch('/api/school-settings').then(r => r.ok ? r.json() : null).then(d => {
-            if (d) setAiReviewEnabled(d.ai_review_enabled !== false)
+            if (d) {
+                setAiReviewEnabled(d.ai_review_enabled !== false)
+                setAiGenerateEnabled(d.ai_generate_enabled === true)
+            }
         }).catch(() => {})
     }, [fetchExam, fetchQuestions])
+
+    // Auto-poll status review AI. Menunggu AI (draft/ai_reviewing) berlaku untuk
+    // semua mode; menunggu review admin / pending publish hanya relevan di ulangan
+    // (UI review & pending_publish hanya ada di tabel exams). Segarkan daftar soal
+    // + meta ujian ringan (TANPA reset form Pengaturan).
+    useEffect(() => {
+        if (!aiReviewEnabled) return
+        const aiPending = questions.some(q => q.status === 'draft' || q.status === 'ai_reviewing')
+        const adminPending = isUlangan && (
+            questions.some(q => q.status === 'admin_review') || !!exam?.pending_publish
+        )
+        if (!aiPending && !adminPending) return
+        const interval = setInterval(() => {
+            fetchQuestions()
+            refreshExamMeta()
+        }, 5000)
+        return () => clearInterval(interval)
+    }, [aiReviewEnabled, questions, exam?.pending_publish, isUlangan, fetchQuestions, refreshExamMeta])
 
     // Kelas di-scope ke tahun ajaran exam — tanpa ini, kelas senama dari tahun
     // ajaran lain (hasil fitur Salin Kelas saat pergantian tahun) tampil dobel
@@ -394,10 +467,36 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [exam?.id, examYearId, isUlangan])
 
-    // Deep-link #hasil (dari kartu list / redirect setelah koreksi) — setelah mount,
-    // hash sudah pasti terbaca (initializer state berisiko race saat client-side nav)
+    // Deep-link tab Hasil: dukung #hasil (link baru) DAN ?tab=hasil (bookmark/PWA
+    // lama dari sebelum unifikasi). Dibaca setelah mount agar aman dari hydration.
     useEffect(() => {
-        if (window.location.hash === '#hasil') setActiveTab('hasil')
+        const legacyTab = (spRaw as { tab?: string } | undefined)?.tab
+        if (window.location.hash === '#hasil' || legacyTab === 'hasil') setActiveTab('hasil')
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    // Tutorial interaktif (driver.js): listener event untuk memandu guru —
+    // buka dropdown tambah soal, pilih manual, kembali ke daftar. Tanpa ini
+    // langkah tur `waitForClick`/`dispatchEvent` tidak bisa menggerakkan UI.
+    useEffect(() => {
+        const openDropdown = () => setShowAddDropdown(true)
+        const clickManual = () => {
+            setManualForm(prev => ({
+                ...prev, points: 10, question_text: '', options: ['', '', '', ''],
+                correct_answer: '', difficulty: 'MEDIUM', question_type: 'MULTIPLE_CHOICE', tags: []
+            }))
+            setSoalMode('manual')
+            setShowAddDropdown(false)
+        }
+        const backToList = () => setSoalMode('list')
+        window.addEventListener('tutorial:open-exam-dropdown', openDropdown)
+        window.addEventListener('tutorial:click-manual-exam', clickManual)
+        window.addEventListener('tutorial:exam-back-to-list', backToList)
+        return () => {
+            window.removeEventListener('tutorial:open-exam-dropdown', openDropdown)
+            window.removeEventListener('tutorial:click-manual-exam', clickManual)
+            window.removeEventListener('tutorial:exam-back-to-list', backToList)
+        }
     }, [])
 
     // Legacy `?siblings=` consumer — paritas kuis [id]:474-485.
@@ -586,6 +685,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                 'Kelas': submissionClassName(sub),
                 'Skor': `${sub.total_score || 0}/${sub.max_score || 0}`,
                 'Nilai': percentage,
+                'Durasi': sub.submitted_at ? formatDuration(sub.started_at, sub.submitted_at) : '-',
                 'Pelanggaran': sub.violation_count || 0,
                 'Status': status,
                 'Waktu Submit': sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'
@@ -629,12 +729,70 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
         XLSX.writeFile(wb, fileName)
     }
 
-    // Publish / Unpublish
+    // Publish dua langkah (paritas halaman guru lama): cek soal fresh → konfirmasi
+    // → eksekusi. Unpublish (Tarik Draft) langsung. Guard review: publish ditahan
+    // bila masih ada soal draft/ai_reviewing/returned.
+    const handlePublishClick = async () => {
+        if (!exam || exam.is_active) return
+        if (exam.pending_publish) {
+            showToast('Masih menunggu review — tarik ke draft untuk mengubah soal.', 'warning')
+            return
+        }
+        setPublishingCheck(true)
+        try {
+            const res = await fetch(`${examApi}/${examId}/questions`)
+            const fresh = await res.json().catch(() => [])
+            const freshQuestions: Question[] = Array.isArray(fresh) ? fresh : []
+            if (freshQuestions.length === 0) {
+                showToast('Minimal harus ada 1 soal untuk mempublish!', 'warning')
+                return
+            }
+            if (isUlangan && aiReviewEnabled && freshQuestions.some(q =>
+                q.status === 'draft' || q.status === 'ai_reviewing' || q.status === 'returned')) {
+                setQuestions(freshQuestions)
+                showToast('Masih ada soal yang menunggu AI/review atau dikembalikan. Selesaikan dulu sebelum publish.', 'warning')
+                return
+            }
+            setQuestions(freshQuestions)
+            setShowPublishConfirm(true)
+        } catch {
+            showToast('Tidak bisa memeriksa soal. Periksa koneksi lalu coba lagi.', 'error')
+        } finally { setPublishingCheck(false) }
+    }
+
+    // Unpublish (Tarik ke Draft) — langsung tanpa konfirmasi.
     const handleToggleActive = async () => {
         if (!exam) return
-        const newActive = !exam.is_active
+        if (!exam.is_active) { handlePublishClick(); return }
+        setSaving(true)
+        try {
+            const res = await fetch(`${examApi}/${examId}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_active: false })
+            })
+            if (res.ok) {
+                const updated = await res.json()
+                setExam(prev => prev ? {
+                    ...prev,
+                    is_active: updated.is_active ?? false,
+                    ...(updated.pending_publish !== undefined && { pending_publish: updated.pending_publish }),
+                } : null)
+                showToast('Ujian ditarik ke draft.', 'success')
+            } else {
+                const err = await res.json().catch(() => null)
+                showToast(err?.error || 'Gagal menarik ujian ke draft.', 'error')
+            }
+        } finally { setSaving(false) }
+    }
+
+    // Publish (dipanggil dari modal konfirmasi) — selalu mengaktifkan, bukan toggle.
+    const confirmPublish = async () => {
+        setShowPublishConfirm(false)
+        if (!exam) return
+        const newActive = true
         if (newActive && questions.length === 0) { showToast('Tambahkan soal dulu!', 'warning'); return }
         setSaving(true)
+        setPublishing(true)
         try {
             const res = await fetch(`${examApi}/${examId}`, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -651,6 +809,11 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                     ...(updated.pending_publish !== undefined && { pending_publish: updated.pending_publish }),
                     ...(updated.results_released !== undefined && { results_released: updated.results_released }),
                 } : null)
+                // Publish sukses (cabang mana pun) → banner sync gagal sebelumnya
+                // tidak relevan lagi. startAutoRetry akan mengisi ulang bila retry gagal.
+                setSyncFailedCount(0)
+                // Mode official tidak punya alur batch/review — cukup konfirmasi sukses.
+                if (!isUlangan) showToast('Ujian berhasil dipublish!', 'success')
                 // Gerbang khas ulangan: publish ditahan sampai semua soal selesai direview
                 if (isUlangan && newActive) {
                     if (updated.pending_publish) {
@@ -692,15 +855,18 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                         }
                     }
                 }
-            } else if (isUlangan) {
+            } else {
+                // Berlaku untuk DUA mode — dulu mode official gagal senyap (tanpa pesan)
                 const err = await res.json().catch(() => null)
-                showToast(err?.error || `Gagal mempublikasikan ${labels.ulangan}.`, 'error')
+                const noun = isUlangan ? labels.ulangan : (exam?.exam_type === 'UTS' ? labels.uts : labels.uas)
+                showToast(err?.error || `Gagal mempublikasikan ${noun}.`, 'error')
             }
-        } finally { setSaving(false) }
+        } finally { setSaving(false); setPublishing(false) }
     }
 
-    // Add question manually (normal + passage)
-    const handleAddManualQuestion = async () => {
+    // Add question manually (normal + passage). addMore=true = "Simpan & Tambah
+    // Lagi": pertahankan tipe/opsi/kesulitan/poin, hanya kosongkan teks & jawaban.
+    const handleAddManualQuestion = async (addMore = false) => {
         if (isPassageMode) {
             if ((!passageText.trim() && !passageAudioUrl) || passageQuestions.length === 0) return
             setSaving(true)
@@ -744,8 +910,19 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                 showToast(errData?.error || 'Gagal menambah soal.', 'error')
                 return
             }
-            setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false, text_direction: 'ltr', content_format: 'html', tags: [], gk_grading_mode: 'PROPORTIONAL' })
-            setSoalMode('list'); fetchQuestions()
+            if (addMore) {
+                // Reset HANYA teks & jawaban; tipe/opsi/kesulitan/poin dipertahankan
+                setManualForm(prev => ({
+                    ...prev,
+                    question_text: '',
+                    options: prev.question_type === 'TRUE_FALSE' ? ['Benar', 'Salah'] : prev.options ? prev.options.map(() => '') : null,
+                    correct_answer: prev.question_type === 'MULTIPLE_ANSWER' ? '[]' : ''
+                }))
+            } else {
+                setManualForm({ id: '', question_text: '', question_type: 'MULTIPLE_CHOICE', options: ['', '', '', ''], correct_answer: '', points: 10, order_index: 0, difficulty: 'MEDIUM', passage_text: null, teacher_hots_claim: false, text_direction: 'ltr', content_format: 'html', tags: [], gk_grading_mode: 'PROPORTIONAL' })
+                setSoalMode('list')
+            }
+            fetchQuestions()
         } finally { setSaving(false) }
     }
 
@@ -775,18 +952,24 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
             title: 'Hapus Soal',
             message: `Yakin ingin menghapus ${selectedQuestionIds.size} soal?`,
             onConfirm: async () => {
-                let failed = 0
+                let failed = false
+                const deletedOk = new Set<string>()
                 for (const qId of selectedQuestionIds) {
                     const res = await deleteQuestion(qId)
                     if (!res.ok) {
-                        failed++
                         const errData = await res.json().catch(() => null)
                         showToast(errData?.error || 'Gagal menghapus sebagian soal.', 'error')
+                        failed = true
                         break
                     }
+                    deletedOk.add(qId)
                 }
-                if (failed === 0) {
+                if (!failed) {
                     setSelectedQuestionIds(new Set()); setIsBulkSelectMode(false)
+                } else {
+                    // Buang ID yang sudah terhapus — tombol "Hapus N" hanya
+                    // menghitung sisa yang benar-benar ada (anti loop 404).
+                    setSelectedQuestionIds(prev => new Set([...prev].filter(id => !deletedOk.has(id))))
                 }
                 fetchQuestions()
                 setConfirmDialog(null)
@@ -928,12 +1111,19 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
     }
 
     const fetchTeachingAssignmentsIfNeeded = async () => {
-        if (teachingAssignments.length > 0) return teachingAssignments
+        const targetYear = examYearId || null
+        // Cache hanya valid untuk tahun ajaran yang sama — exam tahun lalu harus
+        // memakai TA tahun itu, bukan tahun aktif (bug kandidat batch salah tahun).
+        if (teachingAssignments.length > 0 && taYearRef.current === targetYear) return teachingAssignments
         try {
-            const res = await fetch('/api/teaching-assignments')
+            // GURU: hanya penugasan sendiri (scope per-teacher). ADMIN: semua TA sekolah.
+            const base = user?.role === 'GURU' ? '/api/my-teaching-assignments' : '/api/teaching-assignments'
+            const url = targetYear ? `${base}?academic_year_id=${targetYear}` : base
+            const res = await fetch(url)
             const data = await res.json()
             const arr = Array.isArray(data) ? data : []
             setTeachingAssignments(arr)
+            taYearRef.current = targetYear
             return arr
         } catch (e) {
             console.error('Error fetching TA', e)
@@ -1135,7 +1325,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                 showToast('Poin soal diseimbangkan', 'success')
             } else {
                 showToast('Sebagian poin gagal disimpan. Tarik ujian ke draft untuk mengubah poin.', 'error')
-                fetchExam()
+                // fetchExam TIDAK memuat daftar soal (dipisah sejak refactor) — pakai
+                // fetchQuestions agar poin di layar sinkron dengan server.
+                fetchQuestions()
             }
         } finally {
             setBalancing(false)
@@ -1203,7 +1395,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
             try {
                 const res = await fetch(`/api/exams/${examId}/sync-batch`, { method: 'POST' })
                 const data = await res.json().catch(() => null)
-                return !!res.ok && !!data && (data.failed?.length || 0) === 0
+                const ok = !!res.ok && !!data && (data.failed?.length || 0) === 0
+                if (!ok) setSyncFailedCount(data?.failed?.length || 1)
+                return ok
             } catch {
                 return false
             }
@@ -1221,11 +1415,47 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
             })
             const syncData = await res.json().catch(() => null)
             const failedTargets: string[] = syncData?.failed_targets || []
-            if (!res.ok || failedTargets.length > 0) return false
+            // publish_blocked = soal tersalin tapi penerbitan sibling ditahan karena
+            // masih ada soal belum selesai review. Dulu diabaikan → toast "berhasil"
+            // padahal kelas lain belum terbit. Kini dianggap belum sukses.
+            const publishBlocked: string[] = syncData?.publish_blocked || []
+            if (!res.ok || failedTargets.length > 0 || publishBlocked.length > 0) {
+                setSyncFailedCount(Math.max(failedTargets.length, publishBlocked.length, 1))
+                return false
+            }
             sessionStorage.removeItem(`exam_siblings_${examId}`)
+            setSyncFailedCount(0)
             return true
         } catch {
             return false
+        }
+    }
+
+    // Retry sync manual (banner) — paritas halaman guru lama. Tidak perlu
+    // unpublish→publish ulang; tombol ini memanggil ulang sync-batch/copy-questions.
+    const handleRetrySync = async () => {
+        setRetryingSync(true)
+        let ok = false
+        try {
+            if (exam?.batch_id) {
+                const res = await fetch(`/api/exams/${examId}/sync-batch`, { method: 'POST' })
+                const data = await res.json().catch(() => null)
+                ok = !!res.ok && !!data && (data.failed?.length || 0) === 0
+                if (!ok) setSyncFailedCount(data?.failed?.length || 1)
+            } else {
+                ok = (await syncOnce()) === true
+            }
+        } catch {
+            ok = false
+        } finally {
+            setRetryingSync(false)
+        }
+        if (ok) {
+            setSyncFailedCount(0)
+            showToast('Soal berhasil disalin ke semua kelas.', 'success')
+            fetchExam()
+        } else {
+            showToast('Penyalinan soal masih gagal. Coba lagi beberapa saat.', 'error')
         }
     }
 
@@ -1248,6 +1478,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
             if (result === true) {
                 // Sukses — soal sudah sampai ke semua kelas
                 setAutoRetrying(false)
+                setSyncFailedCount(0)
                 showToast(`${labels.ulangan} berhasil dipublish! Soal sudah sampai ke semua kelas.`, 'success')
                 fetchExam()
                 return
@@ -1262,9 +1493,185 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
             }
             // result === false → coba lagi (atau habis retry)
         }
-        // Retry habis, masih gagal — toast sederhana (guru handle via tarik-publish ulang)
+        // Retry habis, masih gagal — tampilkan banner manual retry + toast
         setAutoRetrying(false)
-        showToast(`Beberapa kelas belum dapat soal. Coba tarik ${labels.ulangan.toLowerCase()} ke draft lalu publish ulang.`, 'warning')
+        setSyncFailedCount(prev => prev || 1)
+        showToast(`Beberapa kelas belum dapat soal. Klik "Salin Ulang Soal" untuk mencoba lagi.`, 'warning')
+    }
+
+    // ===== Drag & Drop Reorder soal (khusus ulangan — endpoint reorder hanya
+    // ada di /api/exams/[id]/questions). Terkunci saat aktif/menunggu review,
+    // form edit terbuka, atau mode pilih-banyak. =====
+    const canReorder = isUlangan && !!exam && !exam.is_active && !exam.pending_publish
+        && !editingQuestionId && !isBulkSelectMode
+
+    const handleDragStart = (e: ReactPointerEvent, q: Question, groupKey: string) => {
+        if (!canReorder || !q.id) return
+        e.preventDefault()
+        const els = Array.from(document.querySelectorAll('[data-drag-group]'))
+            .filter(el => el.getAttribute('data-drag-group') === groupKey) as HTMLElement[]
+        const rects = els.map(el => el.getBoundingClientRect())
+        const ids = els.map(el => el.getAttribute('data-drag-id') || '')
+        const fromIndex = ids.indexOf(q.id)
+        if (fromIndex === -1 || rects.length === 0) return
+        const slotHeights = rects.map((r, i) => (i + 1 < rects.length ? rects[i + 1].top - r.top : r.height))
+        dragMeta.current = {
+            startY: e.clientY,
+            rects,
+            bounds: {
+                top: Math.min(...rects.map(r => r.top)),
+                bottom: Math.max(...rects.map(r => r.bottom)),
+                left: Math.min(...rects.map(r => r.left)),
+                right: Math.max(...rects.map(r => r.right)),
+            },
+        }
+        const initial = { groupKey, questionId: q.id, ids, slotHeights, fromIndex, toIndex: fromIndex, offsetY: 0, active: false }
+        dragRef.current = initial
+        setDrag(initial)
+    }
+
+    // Reorder HANYA anggota grup: mereka menerima kembali order_index yang dulu
+    // ditempati grup, sesuai urutan visual baru. Soal di luar grup tak tersentuh.
+    const commitReorder = async (ids: string[], fromIndex: number, toIndex: number) => {
+        const prev = questionsRef.current
+        const byId = new Map(prev.map(q => [q.id, q]))
+        const occupied = ids.map(id => byId.get(id)?.order_index ?? 0).sort((a, b) => a - b)
+        const newIds = ids.filter((_, i) => i !== fromIndex)
+        newIds.splice(toIndex, 0, ids[fromIndex])
+        const newIndexById = new Map<string, number>()
+        newIds.forEach((id, k) => newIndexById.set(id, occupied[k]))
+        const changed = newIds.filter(id => newIndexById.get(id) !== byId.get(id)?.order_index)
+        if (changed.length === 0) return
+
+        setQuestions(prevQ => prevQ
+            .map(q => (q.id && newIndexById.has(q.id) ? { ...q, order_index: newIndexById.get(q.id)! } : q))
+            .sort((a, b) => a.order_index - b.order_index))
+
+        try {
+            const res = await fetch(`${examApi}/${examId}/questions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reorder: changed.map(id => ({ id, order_index: newIndexById.get(id)! })) })
+            })
+            if (!res.ok) throw new Error('Reorder gagal')
+            showToast('Urutan disimpan', 'success')
+        } catch {
+            setQuestions(prev)
+            showToast('Gagal menyimpan urutan. Urutan dikembalikan.', 'error')
+        }
+    }
+
+    useEffect(() => {
+        if (!drag) return
+        document.body.style.userSelect = 'none'
+        const onMove = (e: PointerEvent) => {
+            const meta = dragMeta.current
+            if (!meta) return
+            const dy = e.clientY - meta.startY
+            setDrag(prev => {
+                if (!prev) return prev
+                const active = prev.active || Math.abs(dy) > 5
+                let toIndex = prev.toIndex
+                if (active) {
+                    const draggedCenter = meta.rects[prev.fromIndex].top + meta.rects[prev.fromIndex].height / 2 + dy
+                    let count = 0
+                    meta.rects.forEach((r, i) => {
+                        if (i !== prev.fromIndex && r.top + r.height / 2 < draggedCenter) count++
+                    })
+                    toIndex = count
+                }
+                const next = { ...prev, active, offsetY: dy, toIndex }
+                dragRef.current = next
+                return next
+            })
+        }
+        const onUp = (e: PointerEvent) => {
+            const meta = dragMeta.current
+            const cur = dragRef.current
+            dragMeta.current = null
+            dragRef.current = null
+            setDrag(null)
+            if (!meta || !cur || !cur.active) return
+            const M = 40
+            const b = meta.bounds
+            const inside = e.clientX >= b.left - M && e.clientX <= b.right + M && e.clientY >= b.top - M && e.clientY <= b.bottom + M
+            if (!inside) return
+            if (cur.toIndex !== cur.fromIndex) commitReorder(cur.ids, cur.fromIndex, cur.toIndex)
+        }
+        const onCancel = () => {
+            dragMeta.current = null
+            dragRef.current = null
+            setDrag(null)
+        }
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+        window.addEventListener('pointercancel', onCancel)
+        return () => {
+            window.removeEventListener('pointermove', onMove)
+            window.removeEventListener('pointerup', onUp)
+            window.removeEventListener('pointercancel', onCancel)
+            document.body.style.userSelect = ''
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [!!drag])
+
+    const getDragItemProps = (id: string | undefined, groupKey: string): { className: string; style: CSSProperties } => {
+        if (!drag || !id || drag.groupKey !== groupKey || !drag.active) return { className: '', style: {} }
+        const i = drag.ids.indexOf(id)
+        if (i === -1) return { className: '', style: {} }
+        if (i === drag.fromIndex) {
+            return {
+                className: 'relative z-40 shadow-2xl rounded-xl pointer-events-none',
+                style: { transform: `translateY(${drag.offsetY}px)` }
+            }
+        }
+        const size = drag.slotHeights[drag.fromIndex]
+        let shift = 0
+        if (drag.fromIndex < drag.toIndex && i > drag.fromIndex && i <= drag.toIndex) shift = -size
+        else if (drag.toIndex < drag.fromIndex && i >= drag.toIndex && i < drag.fromIndex) shift = size
+        return {
+            className: 'transition-transform duration-150 ease-out',
+            style: shift ? { transform: `translateY(${shift}px)` } : {}
+        }
+    }
+
+    // ===== Quick-add "+" — preset dari soal tepat di atasnya (paritas guru) =====
+    const openQuickAdd = (afterQ: Question) => {
+        const type = afterQ.question_type
+        let options: string[] | null = null
+        let correctAnswer: string | null = ''
+        if (type === 'MULTIPLE_CHOICE' || type === 'MULTIPLE_ANSWER') {
+            const count = Math.max(afterQ.options?.length || 4, 2)
+            options = Array(count).fill('')
+            correctAnswer = type === 'MULTIPLE_ANSWER' ? '[]' : ''
+        } else if (type === 'TRUE_FALSE') {
+            options = ['Benar', 'Salah']
+        }
+        setIsPassageMode(false)
+        setManualForm({
+            id: '', question_text: '', question_type: type, options, correct_answer: correctAnswer,
+            difficulty: afterQ.difficulty, points: afterQ.points || 10, order_index: 0,
+            passage_text: null, teacher_hots_claim: false, text_direction: 'ltr', content_format: 'html',
+            tags: [], gk_grading_mode: 'PROPORTIONAL'
+        })
+        setSoalMode('manual')
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+
+    const renderQuickAdd = (q: Question) => {
+        if (isBulkSelectMode || exam?.is_active || exam?.pending_publish) return null
+        return (
+            <div className="flex justify-center py-1">
+                <button
+                    type="button"
+                    aria-label="Tambah soal di sini"
+                    title="Tambah soal di sini"
+                    onClick={() => openQuickAdd(q)}
+                    className="w-8 h-8 rounded-full border-2 border-dashed border-secondary/40 text-text-secondary flex items-center justify-center transition-all hover:scale-125 hover:border-primary hover:text-primary hover:bg-primary/5 cursor-pointer"
+                >
+                    <Plus set="bold" primaryColor="currentColor" size={14} />
+                </button>
+            </div>
+        )
     }
 
     if (loading) {
@@ -1278,6 +1685,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
     // isDone = published & jendela waktu sudah lewat — ujian selesai tidak
     // boleh dipublish/ditarik lagi (tarik akan membalik status ke "Draft").
     const examStatus = getExamStatus(exam)
+    // Label tipe ujian mode-aware (dipakai review banner, publish, dsb.)
+    const typeLabel = isUlangan ? labels.ulangan : (exam.exam_type === 'UTS' ? labels.uts : labels.uas)
 
     return (
         <div className="space-y-6">
@@ -1313,8 +1722,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                 </div>
                 <div className="flex items-center gap-3">
                     <Button variant="secondary" onClick={() => setShowPreview(true)} disabled={questions.length === 0}><Eye className="w-4 h-4 mr-1" /> Preview</Button>
-                    {!examStatus.isDone && (
-                        <Button onClick={handleToggleActive} loading={saving} className={exam.is_active ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}>
+                    {!examStatus.isDone && !(exam as any).pending_publish && (
+                        <Button onClick={handleToggleActive} loading={saving || publishingCheck} data-tutorial="exam-activate-btn" className={exam.is_active ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}>
                             {exam.is_active ? <><EyeOff className="w-4 h-4 mr-1" /> Tarik (Draft)</> : <><Eye className="w-4 h-4 mr-1" /> Publish</>}
                         </Button>
                     )}
@@ -1369,7 +1778,23 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                 </div>
             )}
 
-            {/* Tabs */}
+            {/* Sync batch gagal parsial — banner manual retry (paritas guru lama) */}
+            {syncFailedCount > 0 && isUlangan && !autoRetrying && (
+                <div className="flex items-center justify-between gap-3 p-4 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-700 rounded-xl">
+                    <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-red-500/15 flex items-center justify-center text-red-500 flex-shrink-0"><Activity className="w-5 h-5" /></div>
+                        <div>
+                            <h4 className="font-bold text-red-700 dark:text-red-300 text-sm">Soal belum sampai ke {syncFailedCount} kelas</h4>
+                            <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-0.5">
+                                {labels.ulangan} utama sudah terbit. Tekan tombol di samping untuk menyalin ulang soal ke kelas lainnya.
+                            </p>
+                        </div>
+                    </div>
+                    <Button size="sm" onClick={handleRetrySync} loading={retryingSync}>
+                        Salin Ulang Soal
+                    </Button>
+                </div>
+            )}
             <div className="flex gap-1 bg-secondary/5 p-1 rounded-xl border border-secondary/10 overflow-x-auto custom-scrollbar">
                 {([{ key: 'soal' as TabType, label: 'Soal', icon: FileText }, { key: 'pengaturan' as TabType, label: 'Pengaturan', icon: Settings }, { key: 'hasil' as TabType, label: 'Hasil', icon: BarChart3 }, { key: 'monitor' as TabType, label: 'Monitor Live', icon: Activity }]).map(tab => {
                     const isMonitorDisabled = tab.key === 'monitor' && !exam.is_active;
@@ -1392,6 +1817,12 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                                     return
                                 }
                                 setActiveTab(tab.key);
+                                // Sinkronkan tab ke URL agar refresh tidak kembali ke Soal
+                                // (bookmark lama ?tab=hasil juga tetap bekerja).
+                                const tabQs = new URLSearchParams()
+                                if (!forcedIsUlangan && isUlangan) tabQs.set('type', 'ulangan')
+                                tabQs.set('tab', tab.key)
+                                router.replace(`${basePath}/${examId}?${tabQs.toString()}`, { scroll: false })
                             }} 
                             className={`flex-1 min-w-max flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all ${isMonitorDisabled ? 'opacity-40 cursor-not-allowed' : ''} ${activeTab === tab.key ? 'bg-white dark:bg-surface-dark text-primary shadow-sm' : 'text-text-secondary hover:text-text-main'}`}
                         >
@@ -1407,21 +1838,21 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                     {/* Dropdown Tambah Soal */}
                     {soalMode === 'list' && (
                         <div className="relative inline-block">
-                            <button onClick={() => setShowAddDropdown(!showAddDropdown)} disabled={hasSubmissions} className="flex items-center gap-2 px-5 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 active:scale-95 transition-all shadow-md shadow-primary/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                            <button onClick={() => setShowAddDropdown(!showAddDropdown)} disabled={hasSubmissions} data-tutorial="exam-add-section" className="flex items-center gap-2 px-5 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 active:scale-95 transition-all shadow-md shadow-primary/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
                                 <Plus set="bold" primaryColor="currentColor" size={20} /> Tambah Soal
                             </button>
                             {showAddDropdown && (<>
                                 <div className="fixed inset-0 z-40" onClick={() => setShowAddDropdown(false)} />
-                                <div className="absolute left-0 top-full mt-2 z-50 w-64 bg-white dark:bg-surface-dark rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 py-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                                    <button onClick={() => { setManualForm({ ...manualForm, points: getDefaultPoints(), question_text: '', correct_answer: '', options: ['', '', '', ''] }); setSoalMode('manual'); setShowAddDropdown(false) }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer">
+                                <div data-tutorial="exam-add-dropdown" className="absolute left-0 top-full mt-2 z-50 w-64 bg-white dark:bg-surface-dark rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 py-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                                    <button onClick={() => { setManualForm({ ...manualForm, points: getDefaultPoints(), question_text: '', correct_answer: '', options: ['', '', '', ''] }); setSoalMode('manual'); setShowAddDropdown(false) }} data-tutorial="exam-add-manual" className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer">
                                         <div className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0"><Edit set="bold" primaryColor="currentColor" size={16} /></div>
                                         <div className="text-left"><div className="text-sm font-semibold text-text-main dark:text-white">Manual</div><div className="text-xs text-text-secondary">Ketik soal satu per satu</div></div>
                                     </button>
-                                    <button onClick={() => { setSoalMode('clean'); setShowAddDropdown(false) }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors cursor-pointer">
+                                    <button onClick={() => { setSoalMode('clean'); setShowAddDropdown(false) }} data-tutorial="exam-add-ai" className="w-full flex items-center gap-3 px-4 py-3 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors cursor-pointer">
                                         <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0"><Discovery set="bold" primaryColor="currentColor" size={16} /></div>
                                         <div className="text-left"><div className="text-sm font-semibold text-text-main dark:text-white">Rapih AI</div><div className="text-xs text-text-secondary">Rapikan, generate, atau upload soal</div></div>
                                     </button>
-                                    <button onClick={async () => { setShowAddDropdown(false); setSoalMode('bank'); setBankLoading(true); try { const subjectId = examSubject?.id || ''; const [qR, pR] = await Promise.all([fetch(`/api/question-bank?subject_id=${subjectId}`), fetch(`/api/passages?subject_id=${subjectId}`)]); setBankQuestions(Array.isArray(await qR.json()) ? await [] : []); const qData = await fetch(`/api/question-bank?subject_id=${subjectId}`).then(r => r.json()); const pData = await fetch(`/api/passages?subject_id=${subjectId}`).then(r => r.json()); setBankQuestions(Array.isArray(qData) ? qData : []); setBankPassages(Array.isArray(pData) ? pData : []) } catch(e) { console.error(e) } finally { setBankLoading(false) } }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors cursor-pointer">
+                                    <button onClick={async () => { setShowAddDropdown(false); setSoalMode('bank'); setBankLoading(true); try { const subjectId = examSubject?.id || ''; const [qR, pR] = await Promise.all([fetch(`/api/question-bank?subject_id=${subjectId}`), fetch(`/api/passages?subject_id=${subjectId}`)]); setBankQuestions(Array.isArray(await qR.json()) ? await [] : []); const qData = await fetch(`/api/question-bank?subject_id=${subjectId}`).then(r => r.json()); const pData = await fetch(`/api/passages?subject_id=${subjectId}`).then(r => r.json()); setBankQuestions(Array.isArray(qData) ? qData : []); setBankPassages(Array.isArray(pData) ? pData : []) } catch(e) { console.error(e) } finally { setBankLoading(false) } }} data-tutorial="exam-add-bank" className="w-full flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors cursor-pointer">
                                         <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center flex-shrink-0"><Folder set="bold" primaryColor="currentColor" size={16} /></div>
                                         <div className="text-left"><div className="text-sm font-semibold text-text-main dark:text-white">Bank Soal</div><div className="text-xs text-text-secondary">Pilih dari soal tersimpan</div></div>
                                     </button>
@@ -1431,7 +1862,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                     )}
 
                     {/* Bulk Selection Toolbar */}
-                    {soalMode === 'list' && questions.length > 0 && !exam?.is_active && (
+                    {soalMode === 'list' && questions.length > 0 && !exam?.is_active && !exam?.pending_publish && (
                         <div className="flex items-center justify-between bg-white dark:bg-surface-dark rounded-xl p-3 border border-secondary/20">
                             <div className="flex items-center gap-3">
                                 <Button variant={isBulkSelectMode ? 'primary' : 'secondary'} onClick={() => { setIsBulkSelectMode(!isBulkSelectMode); setSelectedQuestionIds(new Set()) }} className="text-sm">
@@ -1456,93 +1887,204 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                     {soalMode === 'list' && (questions.length === 0 ? (
                         <EmptyState icon={<div className="text-secondary"><Document set="bold" primaryColor="currentColor" size={48} /></div>} title="Belum Ada Soal" description="Pilih salah satu metode di atas untuk menambahkan soal." />
                     ) : (
-                        <div className="space-y-4">
-                            {questions.map((q, idx) => (
-                                <Card key={q.id} className={`p-5 ${selectedQuestionIds.has(q.id) ? 'ring-2 ring-primary' : ''}`}>
-                                    <div className="flex items-start gap-5">
-                                        {isBulkSelectMode && (<input type="checkbox" checked={selectedQuestionIds.has(q.id)} onChange={(e) => { const s = new Set(selectedQuestionIds); e.target.checked ? s.add(q.id) : s.delete(q.id); setSelectedQuestionIds(s) }} className="w-5 h-5 mt-1 rounded bg-secondary/10 border-secondary/30 text-primary focus:ring-primary cursor-pointer" />)}
-                                        <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold text-lg flex-shrink-0">{idx + 1}</div>
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-2 mb-3">
-                                                <span className={`px-2.5 py-1 text-xs font-bold rounded-full border bg-secondary/10 text-text-main dark:text-white border-secondary/20`}>{q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}</span>
-                                                {q.passage_text && <span className="px-2 py-0.5 text-xs rounded-full bg-teal-500/20 text-teal-600 dark:text-teal-400">📖 Passage</span>}
-                                                {q.status === 'approved' && <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">✅</span>}
-                                                {q.difficulty && <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/10 text-text-secondary font-medium">{q.difficulty}</span>}
-                                            </div>
+                        <div className="space-y-4" data-tutorial="exam-question-list">
+                            {/* Ringkasan status review AI — khusus ulangan (alur review
+                                & admin_review hanya dipakai tabel exams; UTS/UAS tidak) */}
+                            {isUlangan && aiReviewEnabled && (() => {
+                                const approved = questions.filter(q => q.status === 'approved').length
+                                const reviewing = questions.filter(q => q.status === 'ai_reviewing' || q.status === 'draft').length
+                                const needReview = questions.filter(q => q.status === 'admin_review').length
+                                const returned = questions.filter(q => q.status === 'returned').length
+                                if (reviewing + needReview + returned === 0) return null
+                                return (
+                                    <div className="px-4 py-3 rounded-xl bg-secondary/5 border border-secondary/10 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+                                        <span className="font-bold text-text-main dark:text-white">Status Soal:</span>
+                                        <span className="text-green-600 dark:text-green-400">✅ {approved} disetujui</span>
+                                        {reviewing > 0 && <span className="text-blue-600 dark:text-blue-400 animate-pulse">⏳ {reviewing} diproses AI</span>}
+                                        {needReview > 0 && <span className="text-amber-600 dark:text-amber-400">🔍 {needReview} menunggu review</span>}
+                                        {returned > 0 && <span className="text-red-600 dark:text-red-400">↩️ {returned} dikembalikan</span>}
+                                    </div>
+                                )
+                            })()}
 
-                                            {/* Tag soal — editable langsung di card (read-only saat ujian aktif/menunggu review) */}
-                                            {q.id && (
-                                                <InlineQuestionTags
-                                                    questionId={q.id}
-                                                    tags={q.tags}
-                                                    suggestions={tagSuggestions}
-                                                    readOnly={!!exam.is_active || !!(exam as any).pending_publish}
-                                                    onSave={async (nextTags) => {
-                                                        try {
-                                                            const res = await fetch(`${examApi}/${examId}/questions`, {
-                                                                method: 'PUT',
-                                                                headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({ question_id: q.id, tags: nextTags })
-                                                            })
-                                                            if (!res.ok) return false
-                                                            setQuestions(prev => prev.map(pq => pq.id === q.id ? { ...pq, tags: nextTags } : pq))
-                                                            return true
-                                                        } catch {
-                                                            return false
-                                                        }
-                                                    }}
-                                                />
-                                            )}
-                                            {q.passage_text && (<div className="mb-3 p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-lg overflow-hidden"><p className="text-xs text-teal-600 dark:text-teal-400 font-bold mb-1">📖 Bacaan:</p><p className="text-sm text-text-main dark:text-white whitespace-pre-wrap line-clamp-3">{q.passage_text}</p></div>)}
-                                            <div dir={q.text_direction || 'ltr'}>
-                                                <SmartText text={q.question_text} className={`prose dark:prose-invert max-w-none text-text-main dark:text-white mb-4 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
-                                            </div>
-                                            {q.image_url && (
-                                                <div className="mb-4">
-                                                    <img src={q.image_url} alt="Gambar soal" className="max-h-60 rounded-xl border border-secondary/20" />
-                                                </div>
-                                            )}
-                                            {['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(q.question_type) && q.options && (
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm" dir={q.text_direction || 'ltr'}>
-                                                    {q.options.map((opt: string, optIdx: number) => (
-                                                        <div key={optIdx} className={`px-4 py-3 rounded-xl border flex items-center gap-3 ${isCorrectOption(q.question_type, q.correct_answer, optIdx) ? 'bg-green-500/10 border-green-200 text-green-700 dark:border-green-500/30 dark:text-green-400' : 'bg-secondary/5 border-transparent text-text-secondary'}`}>
-                                                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isCorrectOption(q.question_type, q.correct_answer, optIdx) ? 'bg-green-500 text-white' : 'bg-secondary/20 text-text-secondary'}`}>{String.fromCharCode(65 + optIdx)}</span>
-                                                            <SmartText text={opt} as="span" />
+                            {/* Banner soal dikembalikan admin — khusus ulangan */}
+                            {isUlangan && questions.some(q => q.status === 'returned') && (
+                                <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-between gap-3">
+                                    <div>
+                                        <h3 className="font-bold text-red-600 dark:text-red-400 text-sm">Ada {questions.filter(q => q.status === 'returned').length} soal yang dikembalikan admin</h3>
+                                        <p className="text-xs text-red-500 dark:text-red-300 mt-0.5">Perbaiki soal sesuai catatan admin agar {typeLabel.toLowerCase()} bisa dipublikasikan.</p>
+                                    </div>
+                                    <Button size="sm" onClick={() => { const f = questions.find(q => q.status === 'returned'); if (f?.id) document.getElementById(`question-${f.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }} className="!bg-red-600 hover:!bg-red-700 text-white whitespace-nowrap">Lihat Soal</Button>
+                                </div>
+                            )}
+
+                            {(() => {
+                                // Kelompokkan soal yang berbagi audio listening jadi satu
+                                // pemutar audio (paritas halaman guru lama).
+                                type DisplayItem =
+                                    | { type: 'standalone'; q: Question; idx: number }
+                                    | { type: 'audio'; audioUrl: string; passageText?: string | null; members: { q: Question; idx: number }[] }
+                                const items: DisplayItem[] = []
+                                const audioMap = new Map<string, Extract<DisplayItem, { type: 'audio' }>>()
+                                questions.forEach((q, idx) => {
+                                    if (q.passage_audio_url) {
+                                        let g = audioMap.get(q.passage_audio_url)
+                                        if (!g) {
+                                            g = { type: 'audio', audioUrl: q.passage_audio_url, passageText: q.passage_text, members: [] }
+                                            audioMap.set(q.passage_audio_url, g)
+                                            items.push(g)
+                                        }
+                                        g.members.push({ q, idx })
+                                    } else {
+                                        items.push({ type: 'standalone', q, idx })
+                                    }
+                                })
+
+                                const locked = !!exam?.is_active || !!exam?.pending_publish || hasSubmissions
+
+                                const renderCard = (q: Question, idx: number, groupKey: string) => {
+                                    const isInGroup = groupKey !== 'standalone'
+                                    const dp = getDragItemProps(q.id, groupKey)
+                                    return (
+                                        <div key={q.id || idx} id={`question-${q.id}`} data-drag-id={q.id} data-drag-group={groupKey} className={dp.className} style={dp.style}>
+                                            <Card className={`p-5 ${selectedQuestionIds.has(q.id) ? 'ring-2 ring-primary' : ''}`}>
+                                                <div className="flex items-start gap-5">
+                                                    {isBulkSelectMode && (<input type="checkbox" checked={selectedQuestionIds.has(q.id)} onChange={(e) => { const s = new Set(selectedQuestionIds); e.target.checked ? s.add(q.id) : s.delete(q.id); setSelectedQuestionIds(s) }} className="w-5 h-5 mt-1 rounded bg-secondary/10 border-secondary/30 text-primary focus:ring-primary cursor-pointer" />)}
+                                                    {/* Drag handle (hanya ulangan + tidak terkunci) */}
+                                                    {canReorder && q.id && (
+                                                        <button type="button" onPointerDown={(e) => handleDragStart(e, q, groupKey)} className="p-1 mt-1 text-text-secondary/50 hover:text-primary cursor-grab active:cursor-grabbing touch-none" title="Geser untuk mengubah urutan" aria-label="Geser untuk mengubah urutan">
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>
+                                                        </button>
+                                                    )}
+                                                    <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold text-lg flex-shrink-0">{idx + 1}</div>
+                                                    <div className="flex-1">
+                                                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                                                            <span className={`px-2.5 py-1 text-xs font-bold rounded-full border bg-secondary/10 text-text-main dark:text-white border-secondary/20`}>{q.question_type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : q.question_type === 'MULTIPLE_ANSWER' ? 'Ganda Kompleks' : q.question_type === 'TRUE_FALSE' ? 'Benar Salah' : q.question_type === 'SHORT_ANSWER' ? 'Isian Singkat' : 'Essay'}</span>
+                                                            {q.passage_text && <span className="px-2 py-0.5 text-xs rounded-full bg-teal-500/20 text-teal-600 dark:text-teal-400">📖 Passage</span>}
+                                                            {q.status === 'approved' && <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">✅ Disetujui</span>}
+                                                            {isUlangan && aiReviewEnabled && q.status === 'admin_review' && <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">🔍 Menunggu Review</span>}
+                                                            {isUlangan && q.status === 'returned' && <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">↩️ Dikembalikan</span>}
+                                                            {isUlangan && aiReviewEnabled && q.status === 'ai_reviewing' && <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 animate-pulse">🤖 AI Menganalisis...</span>}
+                                                            {isUlangan && aiReviewEnabled && q.status === 'draft' && <span className="px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 animate-pulse">⏳ Menunggu AI...</span>}
+                                                            {q.difficulty && <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/10 text-text-secondary font-medium">{q.difficulty}</span>}
                                                         </div>
-                                                    ))}
+
+                                                        {/* Catatan admin saat soal dikembalikan */}
+                                                        {isUlangan && q.status === 'returned' && q.admin_review && (
+                                                            <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg">
+                                                                <p className="text-xs font-bold text-red-600 dark:text-red-400 mb-1">Catatan admin:</p>
+                                                                <p className="text-sm text-red-700 dark:text-red-300 whitespace-pre-line">{q.admin_review.notes || 'Silakan periksa dan perbaiki soal Anda.'}</p>
+                                                                {Array.isArray(q.admin_review.return_reasons) && q.admin_review.return_reasons.length > 0 && (
+                                                                    <ul className="mt-1.5 list-disc list-inside text-xs text-red-600/80 dark:text-red-400/80">
+                                                                        {q.admin_review.return_reasons.map((rr, i) => <li key={i}>{rr}</li>)}
+                                                                    </ul>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Tag soal — editable langsung di card (read-only saat ujian aktif/menunggu review) */}
+                                                        {q.id && (
+                                                            <InlineQuestionTags
+                                                                questionId={q.id}
+                                                                tags={q.tags}
+                                                                suggestions={tagSuggestions}
+                                                                readOnly={!!exam?.is_active || !!exam?.pending_publish}
+                                                                onSave={async (nextTags) => {
+                                                                    try {
+                                                                        const res = await fetch(`${examApi}/${examId}/questions`, {
+                                                                            method: 'PUT',
+                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                            body: JSON.stringify({ question_id: q.id, tags: nextTags })
+                                                                        })
+                                                                        if (!res.ok) return false
+                                                                        setQuestions(prev => prev.map(pq => pq.id === q.id ? { ...pq, tags: nextTags } : pq))
+                                                                        return true
+                                                                    } catch {
+                                                                        return false
+                                                                    }
+                                                                }}
+                                                            />
+                                                        )}
+
+                                                        {/* Audio/passage: mode standalone (grup audio render di header) */}
+                                                        {!isInGroup && q.passage_audio_url && (
+                                                            <div className="mb-3 p-3 bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-700 rounded-lg">
+                                                                <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-1">🎧 Listening:</p>
+                                                                <audio controls controlsList="nodownload" className="w-full" src={q.passage_audio_url} />
+                                                            </div>
+                                                        )}
+                                                        {!isInGroup && q.passage_text && (
+                                                            <div className="mb-3"><PassageBlock text={q.passage_text} /></div>
+                                                        )}
+
+                                                        <div dir={q.text_direction || 'ltr'}>
+                                                            <SmartText text={q.question_text} className={`prose dark:prose-invert max-w-none text-text-main dark:text-white mb-4 ${q.text_direction === 'rtl' ? 'text-right' : ''}`} />
+                                                        </div>
+                                                        {q.image_url && (
+                                                            <div className="mb-4">
+                                                                <img src={q.image_url} alt="Gambar soal" className="max-h-60 rounded-xl border border-secondary/20" />
+                                                            </div>
+                                                        )}
+                                                        {['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE'].includes(q.question_type) && q.options && (
+                                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm" dir={q.text_direction || 'ltr'}>
+                                                                {q.options.map((opt: string, optIdx: number) => (
+                                                                    <div key={optIdx} className={`px-4 py-3 rounded-xl border flex items-center gap-3 ${isCorrectOption(q.question_type, q.correct_answer, optIdx) ? 'bg-green-500/10 border-green-200 text-green-700 dark:border-green-500/30 dark:text-green-400' : 'bg-secondary/5 border-transparent text-text-secondary'}`}>
+                                                                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isCorrectOption(q.question_type, q.correct_answer, optIdx) ? 'bg-green-500 text-white' : 'bg-secondary/20 text-text-secondary'}`}>{String.fromCharCode(65 + optIdx)}</span>
+                                                                        <SmartText text={opt} as="span" />
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex flex-col gap-3 items-end border-l border-secondary/10 pl-5">
+                                                        <div className="flex flex-col items-center">
+                                                            <input type="number" value={q.points} onChange={(e) => { const v = Math.round((parseFloat(e.target.value) || 0) * 100) / 100; setQuestions(questions.map((qq, i) => i === idx ? { ...qq, points: v } : qq)) }} onBlur={async (e) => { if (q.id) { const res = await fetch(`${examApi}/${examId}/questions`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: q.id, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 }) }); if (!res.ok) { showToast('Gagal menyimpan poin.', 'error'); fetchQuestions() } } }} className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary" min={0.01} step={0.01} disabled={locked} />
+                                                            <span className="text-[10px] uppercase font-bold text-text-secondary mt-1">Poin</span>
+                                                        </div>
+                                                        <div className="w-full h-px bg-secondary/10 my-1"></div>
+                                                        <QuestionImageUpload
+                                                            imageUrl={q.image_url}
+                                                            onImageChange={async (url) => {
+                                                                if (q.id) {
+                                                                    await fetch(`${examApi}/${examId}/questions`, {
+                                                                        method: 'PUT',
+                                                                        headers: { 'Content-Type': 'application/json' },
+                                                                        body: JSON.stringify({ question_id: q.id, image_url: url })
+                                                                    })
+                                                                    fetchQuestions()
+                                                                }
+                                                            }}
+                                                            disabled={locked}
+                                                        />
+                                                        <button onClick={() => { setEditingQuestionId(q.id); setEditQuestionForm({ ...q, question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text), options: q.options ? q.options.map((opt: string) => q.content_format === 'html' ? opt : plainToHtml(opt)) : null, passage_text: q.passage_text ? (q.content_format === 'html' ? q.passage_text : plainToHtml(q.passage_text)) : null, content_format: 'html' }) }} className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors" disabled={locked} title="Edit soal">
+                                                            <Edit set="bold" primaryColor="currentColor" size={20} />
+                                                        </button>
+                                                        <button onClick={() => handleDeleteQuestion(q.id)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors" disabled={locked}>
+                                                            <Delete set="bold" primaryColor="currentColor" size={20} />
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                            )}
+                                            </Card>
+                                            {renderQuickAdd(q)}
                                         </div>
-                                        <div className="flex flex-col gap-3 items-end border-l border-secondary/10 pl-5">
-                                            <div className="flex flex-col items-center">
-                                                <input type="number" value={q.points} onChange={(e) => { const v = Math.round((parseFloat(e.target.value) || 0) * 100) / 100; setQuestions(questions.map((qq, i) => i === idx ? { ...qq, points: v } : qq)) }} onBlur={async (e) => { if (q.id) { const res = await fetch(`${examApi}/${examId}/questions`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: q.id, points: Math.round((parseFloat(e.target.value) || 0) * 100) / 100 }) }); if (!res.ok) { showToast('Gagal menyimpan poin.', 'error'); fetchQuestions() } } }} className="w-16 px-2 py-1.5 bg-secondary/5 border border-secondary/20 rounded-lg text-text-main dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary" min={0.01} step={0.01} disabled={exam?.is_active || hasSubmissions} />
-                                                <span className="text-[10px] uppercase font-bold text-text-secondary mt-1">Poin</span>
-                                            </div>
-                                            <div className="w-full h-px bg-secondary/10 my-1"></div>
-                                            <QuestionImageUpload
-                                                imageUrl={q.image_url}
-                                                onImageChange={async (url) => {
-                                                    if (q.id) {
-                                                        await fetch(`${examApi}/${examId}/questions`, {
-                                                            method: 'PUT',
-                                                            headers: { 'Content-Type': 'application/json' },
-                                                            body: JSON.stringify({ question_id: q.id, image_url: url })
-                                                        })
-                                                        fetchQuestions()
-                                                    }
-                                                }}
-                                                disabled={exam?.is_active || hasSubmissions}
-                                            />
-                                            <button onClick={() => { setEditingQuestionId(q.id); setEditQuestionForm({ ...q, question_text: q.content_format === 'html' ? q.question_text : plainToHtml(q.question_text), options: q.options ? q.options.map((opt: string) => q.content_format === 'html' ? opt : plainToHtml(opt)) : null, passage_text: q.passage_text ? (q.content_format === 'html' ? q.passage_text : plainToHtml(q.passage_text)) : null, content_format: 'html' }) }} className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors" disabled={exam?.is_active || hasSubmissions} title="Edit soal">
-                                                <Edit set="bold" primaryColor="currentColor" size={20} />
-                                            </button>
-                                            <button onClick={() => handleDeleteQuestion(q.id)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors" disabled={exam?.is_active || hasSubmissions}>
-                                                <Delete set="bold" primaryColor="currentColor" size={20} />
-                                            </button>
+                                    )
+                                }
+
+                                return items.map(item => item.type === 'audio' ? (
+                                    <div key={`audio-${item.audioUrl}`} className="border-2 border-violet-300 dark:border-violet-700 rounded-2xl overflow-hidden bg-surface-light dark:bg-surface-dark">
+                                        <div className="p-4 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-700">
+                                            <p className="text-xs text-violet-600 dark:text-violet-400 font-bold mb-2">🎧 Listening — {item.members.length} soal</p>
+                                            <audio controls controlsList="nodownload" className="w-full mb-2" src={item.audioUrl} />
+                                            {item.passageText && <PassageBlock text={item.passageText} />}
+                                        </div>
+                                        <div className="divide-y divide-violet-100 dark:divide-violet-800">
+                                            {item.members.map(({ q, idx }) => renderCard(q, idx, `audio:${item.audioUrl}`))}
                                         </div>
                                     </div>
-                                </Card>
-                            ))}
+                                ) : (
+                                    <div key={`std-${item.q.id}`}>{renderCard(item.q, item.idx, 'standalone')}</div>
+                                ))
+                            })()}
                         </div>
                     ))}
                 </div>
@@ -1998,7 +2540,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                         <Button variant="ghost" onClick={() => { setSoalMode('list'); setIsPassageMode(false) }}>✕</Button>
                     </div>
                     <div className="space-y-5">
-                        <div>
+                        <div data-tutorial="exam-manual-type">
                             <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tipe Soal</label>
                             <div className="flex gap-2">
                                         <select
@@ -2107,7 +2649,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                                 </div>
                                 <div className="flex gap-3 pt-6 border-t border-secondary/10">
                                     <Button variant="secondary" onClick={() => { setSoalMode('list'); setIsPassageMode(false) }} className="flex-1">Batal</Button>
-                                    <Button onClick={handleAddManualQuestion} disabled={saving || (!passageText.trim() && !passageAudioUrl) || !passageQuestions.some(q => q.question_text.trim())} loading={saving} className="flex-1 !bg-teal-600 hover:!bg-teal-700">{saving ? 'Menyimpan...' : `Simpan Passage + ${passageQuestions.filter(q => q.question_text.trim()).length} Soal`}</Button>
+                                    <Button onClick={() => handleAddManualQuestion()} disabled={saving || (!passageText.trim() && !passageAudioUrl) || !passageQuestions.some(q => q.question_text.trim())} loading={saving} className="flex-1 !bg-teal-600 hover:!bg-teal-700">{saving ? 'Menyimpan...' : `Simpan Passage + ${passageQuestions.filter(q => q.question_text.trim()).length} Soal`}</Button>
                                 </div>
                             </div>
                         ) : (
@@ -2120,10 +2662,11 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                                             <button type="button" onClick={() => setManualForm({ ...manualForm, text_direction: 'rtl' })} className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors ${manualForm.text_direction === 'rtl' ? 'bg-primary text-white' : 'bg-secondary/10 text-text-secondary hover:bg-secondary/20'}`}>Arab (RTL)</button>
                                         </div>
                                     </div>
-                                    <div dir={manualForm.text_direction || 'ltr'}>
+                                    <div dir={manualForm.text_direction || 'ltr'} data-tutorial="exam-manual-question">
                                         <RichTextEditor value={manualForm.question_text} onChange={(val: string) => setManualForm({ ...manualForm, question_text: val })} placeholder="Tulis pertanyaan..." />
                                     </div>
                                 </div>
+                                <div data-tutorial="exam-manual-options">
                                 <QuestionOptionsEditor
                                     questionType={manualForm.question_type}
                                     options={manualForm.options}
@@ -2133,7 +2676,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                                     gkGradingMode={manualForm.gk_grading_mode ?? 'PROPORTIONAL'}
                                     onGkGradingModeChange={(mode) => setManualForm({ ...manualForm, gk_grading_mode: mode })}
                                 />
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-tutorial="exam-manual-difficulty">
                                     <div>
                                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Tingkat Kesulitan <span className="text-red-500">*</span></label>
                                         <select value={manualForm.difficulty || ''} onChange={(e) => setManualForm({ ...manualForm, difficulty: e.target.value as any })} className={`w-full px-3 py-2 bg-secondary/5 border rounded-lg text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary ${!manualForm.difficulty ? 'border-red-300' : 'border-secondary/30'}`}>
@@ -2169,7 +2713,8 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                                 )}
                                 <div className="flex gap-3 pt-6 border-t border-secondary/10">
                                     <Button variant="secondary" onClick={() => setSoalMode('list')} className="flex-1">Batal</Button>
-                                    <Button onClick={handleAddManualQuestion} disabled={saving || !manualForm.question_text || !manualForm.difficulty || (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(manualForm.question_type) && !manualForm.correct_answer)} loading={saving} className="flex-1">{saving ? 'Menyimpan...' : 'Tambah Soal'}</Button>
+                                    <Button variant="secondary" onClick={() => handleAddManualQuestion(true)} disabled={saving || !manualForm.question_text || !manualForm.difficulty || (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(manualForm.question_type) && !manualForm.correct_answer)} loading={saving} className="flex-1">Simpan &amp; Tambah Lagi</Button>
+                                    <Button onClick={() => handleAddManualQuestion(false)} data-tutorial="exam-manual-submit" disabled={saving || !manualForm.question_text || !manualForm.difficulty || (['MULTIPLE_CHOICE', 'MULTIPLE_ANSWER', 'TRUE_FALSE', 'SHORT_ANSWER'].includes(manualForm.question_type) && !manualForm.correct_answer)} loading={saving} className="flex-1">{saving ? 'Menyimpan...' : 'Tambah Soal'}</Button>
                                 </div>
                             </>
                         )}
@@ -2184,9 +2729,9 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                 onSaveResults={handleRapihSaveToExam}
                 onSaveToBank={handleRapihSaveToBank}
                 saving={rapihSaving}
-                targetLabel={`${labels.uts}/${labels.uas}`}
+                targetLabel={isUlangan ? labels.ulangan : `${labels.uts}/${labels.uas}`}
                 aiReviewEnabled={aiReviewEnabled}
-                canGenerate={true}
+                canGenerate={user?.role === 'ADMIN' || aiGenerateEnabled}
                 showBankSoal={false}
                 tagSuggestions={tagSuggestions}
             />
@@ -2202,7 +2747,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                     onClose={() => setSoalMode('list')}
                     onConfirm={handleAddBankQuestions}
                     saving={saving}
-                    targetLabel={`${labels.uts}/${labels.uas}`}
+                    targetLabel={isUlangan ? labels.ulangan : `${labels.uts}/${labels.uas}`}
                 />
             )}
 
@@ -2383,6 +2928,21 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                     <button onClick={() => setToast(null)} className="ml-2 opacity-70 hover:opacity-100">✕</button>
                 </div>
             )}
+
+            {/* Publish Confirmation Modal — publish mengunci soal & mengirim
+                notifikasi ke siswa, jadi minta konfirmasi dulu (paritas guru). */}
+            <Modal open={showPublishConfirm} onClose={() => setShowPublishConfirm(false)} title={`Publish ${isUlangan ? labels.ulangan : (exam?.exam_type === 'UTS' ? labels.uts : labels.uas)}`}>
+                <div className="space-y-4">
+                    <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-sm text-amber-700 dark:text-amber-300">
+                        Setelah dipublish, soal terkunci dan tidak bisa diubah sampai ditarik ke draft. Pastikan jumlah soal ({questions.length}) dan total poin ({formatScore(totalPoints)}) sudah benar.
+                        {totalPoints !== 100 && <span className="block mt-1 font-bold">Catatan: total poin saat ini {formatScore(totalPoints)}, disarankan 100.</span>}
+                    </div>
+                    <div className="flex gap-3">
+                        <Button variant="secondary" onClick={() => setShowPublishConfirm(false)} className="flex-1">Batal</Button>
+                        <Button onClick={confirmPublish} loading={publishing} className="flex-1 bg-green-600 hover:bg-green-700 text-white">Ya, Publish</Button>
+                    </div>
+                </div>
+            </Modal>
 
 {/* Confirm Dialog */}
             {confirmDialog && (() => {
