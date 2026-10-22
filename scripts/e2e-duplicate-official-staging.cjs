@@ -95,6 +95,15 @@ async function cleanupAll() {
     await supabase.from('official_exam_questions').delete().in('id', [P.qMc, P.qGk])
     await supabase.from('official_exam_submissions').delete().in('exam_id', [P.examSrc, P.examPast, P.examDup, P.examNew])
     await supabase.from('official_exams').delete().in('id', [P.examSrc, P.examPast, P.examDup, P.examNew])
+    // Exam hasil create/duplicate bisa punya ID AC AK (route generates id sendiri) —
+    // hapus SEMUA official_exams milik fixture users agar FK created_by tidak
+    // memblokir delete users (dulu menyisakan user + exam → run berikutnya duplicate key).
+    const { data: mineExams } = await supabase.from('official_exams').select('id').in('created_by', [P.adminUser, P.guruUser])
+    for (const ex of (mineExams || [])) {
+        await supabase.from('official_exam_questions').delete().eq('exam_id', ex.id)
+        await supabase.from('official_exam_submissions').delete().eq('exam_id', ex.id)
+        await supabase.from('official_exams').delete().eq('id', ex.id)
+    }
     await supabase.from('teaching_assignments').delete().eq('id', P.taGuru)
     await supabase.from('classes').delete().eq('id', CLASS_PAST)
     await supabase.from('sessions').delete().in('user_id', [P.adminUser, P.guruUser])

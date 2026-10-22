@@ -295,8 +295,11 @@ async function main() {
         // Buat submission untuk siswa1 di exam A
         const { data: sub } = await supabase.from('exam_submissions').insert({
             exam_id: EXAM_A, student_id: STUDENT1, is_submitted: true, is_graded: false,
-            total_score: 0, max_score: 100, violation_count: 0, started_at: T0, submitted_at: T0,
+            total_score: 50, max_score: 100, violation_count: 0, started_at: T0, submitted_at: T0,
         }).select('id').single()
+        // Jawaban tersimpan — HARD reset WAJIB menghapusnya (bukti data benar-benar direset)
+        const { data: qA } = await supabase.from('exam_questions').select('id').eq('exam_id', EXAM_A).order('order_index').limit(1).single()
+        await supabase.from('exam_answers').insert({ submission_id: sub.id, question_id: qA.id, answer: 'A', is_correct: true, points_earned: 50 })
         // PUT reset_attempt hard (soft butuh window masih aktif — start_time di masa lalu
         // membuat soft reset 400 "jendela waktu berakhir". Hard reset selalu valid.)
         const { status, data } = await api('/api/exam-submissions', cookieGuru, 'PUT', {
@@ -306,6 +309,10 @@ async function main() {
         check('G2: response reset_success true', data?.reset_success === true, data)
         check('G3: response mengandung message', !!data?.message, data)
         check('G4: response mengandung effective_ends_at', !!data?.effective_ends_at, data)
+        check('G5: submission.is_submitted false setelah hard reset', data?.submission?.is_submitted === false, data?.submission)
+        check('G6: timer_override_until terisi (durasi penuh baru)', !!data?.submission?.timer_override_until, data?.submission)
+        const { data: ansAfterHard } = await supabase.from('exam_answers').select('id').eq('submission_id', sub.id)
+        check('G7: jawaban DIHAPUS oleh hard reset', (ansAfterHard || []).length === 0, ansAfterHard)
         // Cleanup submission
         await supabase.from('exam_answers').delete().eq('submission_id', sub.id)
         await supabase.from('exam_submissions').delete().eq('id', sub.id)
@@ -407,6 +414,63 @@ async function main() {
         check('I3: order_index kontigu 0,1', JSON.stringify((after || []).map(r => r.order_index)) === '[0,1]', after)
         await supabase.from('exam_questions').delete().eq('exam_id', EXAM_R)
         await supabase.from('exams').delete().eq('id', EXAM_R)
+    }
+
+    console.log('═══ FASE J — Reset attempt (soft reset) ══')
+    {
+        // Soft reset: hanya boleh saat jendela waktu masih terbuka; jawaban TIDAK
+        // dihapus (siswa melanjutkan sisa waktu). Bandingkan dengan Fase G (hard).
+        const cookieGuru = await login('e2b1_guru1')
+        const EXAM_S = `${PFX}e0000000000e`
+        const now = Date.now()
+        const { error: exErr } = await supabase.from('exams').insert({
+            id: EXAM_S, title: 'e2b1 Soft Reset (Fase J)', teaching_assignment_id: TA1_ID,
+            start_time: new Date(now - 10 * 60000).toISOString(),
+            duration_minutes: 60,
+            window_end_time: new Date(now + 50 * 60000).toISOString(),
+            is_active: true, is_randomized: false, max_violations: 3,
+            show_results_immediately: true, created_by: ids.admin,
+        })
+        if (exErr) throw new Error(`seed exam soft: ${exErr.message}`)
+        const { data: qS } = await supabase.from('exam_questions').insert({
+            exam_id: EXAM_S, question_text: 'J soal', question_type: 'MULTIPLE_CHOICE',
+            options: ['A', 'B', 'C', 'D'], correct_answer: 'A', points: 100, order_index: 0,
+        }).select('id').single()
+        const { data: sub } = await supabase.from('exam_submissions').insert({
+            exam_id: EXAM_S, student_id: STUDENT1, is_submitted: true, is_graded: true,
+            total_score: 100, max_score: 100, violation_count: 2,
+            started_at: new Date(now - 5 * 60000).toISOString(),
+            submitted_at: new Date(now - 60000).toISOString(),
+        }).select('id').single()
+        await supabase.from('exam_answers').insert({
+            submission_id: sub.id, question_id: qS.id, answer: 'A', is_correct: true, points_earned: 100,
+        })
+
+        const { status, data } = await api('/api/exam-submissions', cookieGuru, 'PUT', {
+            submission_id: sub.id, reset_attempt: 'soft',
+        })
+        check('J1: PUT reset_attempt soft (window aktif) → 200', status === 200, `got ${status} ${JSON.stringify(data)}`)
+        check('J2: reset_success true', data?.reset_success === true, data)
+        check('J3: submission.is_submitted false', data?.submission?.is_submitted === false, data?.submission)
+        check('J4: timer_override_until null (soft ikut jendela)', data?.submission?.timer_override_until === null, data?.submission)
+        const { data: ansAfterSoft } = await supabase.from('exam_answers').select('id').eq('submission_id', sub.id)
+        check('J5: jawaban TIDAK dihapus oleh soft reset', (ansAfterSoft || []).length === 1, ansAfterSoft)
+
+        // Negatif: soft reset saat jendela sudah lewat → 400 (harus pakai Hard Reset)
+        const { data: sub2 } = await supabase.from('exam_submissions').insert({
+            exam_id: EXAM_A, student_id: STUDENT1, is_submitted: true, is_graded: false,
+            total_score: 0, max_score: 100, violation_count: 0, started_at: T0, submitted_at: T0,
+        }).select('id').single()
+        const neg = await api('/api/exam-submissions', cookieGuru, 'PUT', {
+            submission_id: sub2.id, reset_attempt: 'soft',
+        })
+        check('J6: soft reset saat window lewat → 400', neg.status === 400, `got ${neg.status} ${JSON.stringify(neg.data)}`)
+
+        await supabase.from('exam_answers').delete().eq('submission_id', sub.id)
+        await supabase.from('exam_submissions').delete().eq('id', sub.id)
+        await supabase.from('exam_submissions').delete().eq('id', sub2.id)
+        await supabase.from('exam_questions').delete().eq('exam_id', EXAM_S)
+        await supabase.from('exams').delete().eq('id', EXAM_S)
     }
 
     console.log('═══ SUMMARY ══')
