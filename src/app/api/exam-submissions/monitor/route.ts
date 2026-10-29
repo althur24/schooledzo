@@ -9,6 +9,7 @@ import { getAnswerStats } from '@/lib/monitorAnswerStats'
 import { resolveWindowExpiry, isSweepDue, endsAtIso } from '@/lib/examExpiry'
 import { getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { findExamsOutsideSchool } from '@/lib/tenantGuard'
+import { applySusulanCap } from '@/lib/susulan'
 
 // Monitor ulangan reguler (tabel exams/exam_submissions/exam_answers/exam_questions).
 // Mirror dari /api/official-exam-submissions/monitor, dengan roster diturunkan dari
@@ -118,6 +119,7 @@ export async function GET(request: NextRequest) {
             window_end_time: string | null
             is_remedial: boolean | null
             allowed_student_ids: string[]
+            is_active: boolean
             classId: string
             classObj: any
             academicYearId: string | null
@@ -129,6 +131,7 @@ export async function GET(request: NextRequest) {
             window_end_time: exam.window_end_time,
             is_remedial: exam.is_remedial,
             allowed_student_ids: Array.isArray(exam.allowed_student_ids) ? exam.allowed_student_ids : [],
+            is_active: !!exam.is_active,
             classId,
             classObj,
             academicYearId: ta?.academic_year_id ?? null,
@@ -138,7 +141,7 @@ export async function GET(request: NextRequest) {
             const { data: siblingRows } = await supabase
                 .from('exams')
                 .select(`
-                    id, start_time, duration_minutes, window_end_time, is_remedial, allowed_student_ids,
+                    id, start_time, duration_minutes, window_end_time, is_remedial, allowed_student_ids, is_active,
                     teaching_assignment:teaching_assignments(
                         teacher_id, subject_id, class_id, academic_year_id,
                         class:classes(id, name, school_level, grade_level)
@@ -174,6 +177,7 @@ export async function GET(request: NextRequest) {
                     window_end_time: row.window_end_time,
                     is_remedial: row.is_remedial,
                     allowed_student_ids: Array.isArray(row.allowed_student_ids) ? row.allowed_student_ids : [],
+                    is_active: !!(row as any).is_active,
                     classId: rta.class_id,
                     classObj: rcls,
                     academicYearId: rta.academic_year_id ?? null,
@@ -277,7 +281,7 @@ export async function GET(request: NextRequest) {
                     .from('exam_submissions')
                     .select(`
                         id, student_id, is_submitted, is_graded, violation_count, started_at, submitted_at, timer_override_until,
-                        total_score, max_score
+                        total_score, max_score, susulan_granted_at, susulan_expires_at, susulan_max_percent
                     `)
                     .eq('exam_id', m.id)
                     .in('student_id', chunk)
@@ -326,7 +330,11 @@ export async function GET(request: NextRequest) {
                         const sub = subs.find(s => s.id === subId)
                         if (!sub) return
 
-                        const totalScore = stats.get(subId)?.points || 0
+                        const totalScore = applySusulanCap(
+                            stats.get(subId)?.points || 0,
+                            sub.max_score,
+                            (sub as any).susulan_max_percent,
+                        )
 
                         const expiry = resolveWindowExpiry(
                             { start_time: m.start_time, duration_minutes: m.duration_minutes, window_end_time: m.window_end_time },
@@ -366,6 +374,13 @@ export async function GET(request: NextRequest) {
             const submissionMap = new Map()
             subs.forEach(sub => submissionMap.set(sub.student_id, sub))
 
+            // Batas global member (bukan batas per siswa) untuk tombol Susulan.
+            const examGlobalExpiry = resolveWindowExpiry(
+                { start_time: m.start_time, duration_minutes: m.duration_minutes, window_end_time: m.window_end_time },
+                { started_at: null, timer_override_until: null }
+            )
+            const examEnded = examGlobalExpiry.limited && nowTime > examGlobalExpiry.endAt
+
             for (const student of roster) {
                 const sub = submissionMap.get(student.id)
                 let status = 'not_started'
@@ -375,6 +390,10 @@ export async function GET(request: NextRequest) {
                     if (sub.is_submitted) {
                         status = 'submitted'
                         submittedCount++
+                    } else if (!sub.started_at) {
+                        // Placeholder grant susulan: belum mengerjakan.
+                        status = 'not_started'
+                        notStartedCount++
                     } else {
                         status = 'working'
                         workingCount++
@@ -394,6 +413,18 @@ export async function GET(request: NextRequest) {
                 }
 
                 const answeredCount = sub ? (stats.get(sub.id)?.count || 0) : 0
+                const susulan = (sub as any)?.susulan_granted_at
+                    ? {
+                        granted_at: (sub as any).susulan_granted_at as string,
+                        expires_at: ((sub as any).susulan_expires_at as string | null) ?? null,
+                        max_percent: (sub as any).susulan_max_percent as number | null,
+                        // Expired hanya relevan untuk grant yang BELUM dimulai.
+                        // Attempt yang sedang berjalan jangan berlabel kedaluwarsa.
+                        expired: !sub?.started_at
+                            && (!((sub as any).susulan_expires_at as string | null)
+                                || new Date((sub as any).susulan_expires_at).getTime() <= nowTime),
+                    }
+                    : null
 
                 processedStudents.push({
                     student_id: student.id,
@@ -410,7 +441,13 @@ export async function GET(request: NextRequest) {
                     time_remaining_seconds: timeRemainingSec,
                     total_score: sub?.total_score ?? null,
                     max_score: sub?.max_score ?? null,
-                    is_graded: sub?.is_graded ?? false
+                    is_graded: sub?.is_graded ?? false,
+                    // Konteks fitur Susulan (per member batch — jadwal bisa beda)
+                    exam_id: m.id,
+                    exam_ended: examEnded,
+                    exam_active: m.is_active,
+                    duration_minutes: m.duration_minutes,
+                    susulan,
                 })
             }
         }

@@ -54,10 +54,12 @@ export async function GET(
         if (user.role === 'SISWA') {
             const { data: examTa } = await supabase
                 .from('exams')
-                .select('is_active, start_time, teaching_assignment:teaching_assignments(class_id)')
+                .select('is_active, start_time, duration_minutes, window_end_time, teaching_assignment:teaching_assignments(class_id, academic_year_id)')
                 .eq('id', id)
                 .single()
-            const taClassId = (examTa?.teaching_assignment as any)?.class_id
+            const examTaAny: any = examTa?.teaching_assignment
+            const taClassId = (Array.isArray(examTaAny) ? examTaAny[0] : examTaAny)?.class_id
+            const taYearId = (Array.isArray(examTaAny) ? examTaAny[0] : examTaAny)?.academic_year_id
 
             const { data: student } = await supabase
                 .from('students')
@@ -65,20 +67,69 @@ export async function GET(
                 .eq('user_id', user.id)
                 .single()
 
-            if (!student || !taClassId || student.class_id !== taClassId) {
+            // Sumber kelas = enrollment ACTIVE tahun TA (paritas grant Susulan &
+            // roster monitor). Fallback students.class_id untuk data legacy.
+            let studentClassId = student?.class_id ?? null
+            if (student?.id && taYearId) {
+                const { data: enrollment } = await supabase
+                    .from('student_enrollments')
+                    .select('class_id')
+                    .eq('student_id', student.id)
+                    .eq('academic_year_id', taYearId)
+                    .eq('status', 'ACTIVE')
+                    .maybeSingle()
+                if (enrollment?.class_id) studentClassId = enrollment.class_id
+            }
+
+            if (!student) {
                 return notFound()
             }
 
             const { data: mySubmission } = await supabase
                 .from('exam_submissions')
-                .select('id')
+                .select('id, started_at, susulan_granted_at, susulan_expires_at, is_submitted')
                 .eq('exam_id', id)
                 .eq('student_id', student.id)
                 .limit(1)
-            const hasAttempt = (mySubmission || []).length > 0
+            const firstSub = (mySubmission || [])[0] as
+                { started_at: string | null; susulan_granted_at: string | null; susulan_expires_at: string | null; is_submitted: boolean | null } | undefined
+
+            const placeholderGrant = !!firstSub && !firstSub.started_at && !!firstSub.susulan_granted_at && !firstSub.is_submitted
+            const grantExpiresMs = firstSub?.susulan_expires_at
+                ? new Date(firstSub.susulan_expires_at).getTime()
+                : NaN
+            const grantActive = placeholderGrant && Number.isFinite(grantExpiresMs) && Date.now() <= grantExpiresMs
+
+            // Grant aktif: wajib POST start dulu (tutup baca soal tanpa timer).
+            if (grantActive) {
+                return NextResponse.json({ error: 'Mulai susulan terlebih dahulu untuk membuka soal' }, { status: 403 })
+            }
+
+            // Baris legacy (started_at NULL tanpa grant) tetap dianggap attempt.
+            // Placeholder grant kedaluwarsa diperlakukan sebagai belum attempt.
+            const hasAttempt = !!firstSub && !placeholderGrant
             const started = examTa?.start_time ? new Date(examTa.start_time).getTime() <= Date.now() : true
-            if (!hasAttempt && (!examTa?.is_active || !started)) {
-                return NextResponse.json({ error: 'Ulangan belum tersedia' }, { status: 403 })
+            // Tanpa attempt, soal juga tidak boleh dibaca setelah ujian berakhir
+            // (sebelumnya start_time lewat saja dianggap cukup).
+            const globalExpiry = resolveWindowExpiry(
+                {
+                    start_time: examTa?.start_time ?? null,
+                    duration_minutes: examTa?.duration_minutes ?? null,
+                    window_end_time: examTa?.window_end_time ?? null,
+                },
+                { started_at: null, timer_override_until: null },
+            )
+            const ended = globalExpiry.limited && Date.now() > globalExpiry.endAt
+            if (!hasAttempt) {
+                // Cek kelas hanya untuk attempt BARU. Attempt yang sudah berjalan
+                // (termasuk susulan) harus tetap bisa memuat soal walau siswa
+                // dipindahkan/dinaikkan kelas — mencegah attempt hangus.
+                if (!taClassId || studentClassId !== taClassId) {
+                    return notFound()
+                }
+                if (!examTa?.is_active || !started || ended) {
+                    return NextResponse.json({ error: 'Ulangan belum tersedia' }, { status: 403 })
+                }
             }
         }
 

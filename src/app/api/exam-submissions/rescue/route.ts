@@ -5,6 +5,7 @@ import { findExamsOutsideSchool } from '@/lib/tenantGuard'
 import { gradeAnswer, needsManualGrading } from '@/lib/questionTypeUtils'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { logGradeChange } from '@/lib/gradeHistory'
+import { applySusulanCap } from '@/lib/susulan'
 
 /**
  * POST /api/exam-submissions/rescue — selamatkan draft jawaban offline yang
@@ -114,7 +115,7 @@ export async function POST(request: NextRequest) {
 
         const { data: submission, error: eSub } = await supabase
             .from(subTable)
-            .select('id, exam_id, student_id, is_submitted, submitted_at, total_score, max_score, is_graded')
+            .select('id, exam_id, student_id, is_submitted, submitted_at, total_score, max_score, is_graded, susulan_max_percent')
             .eq('id', submissionId)
             .single()
         if (eSub || !submission) {
@@ -232,9 +233,12 @@ export async function POST(request: NextRequest) {
         const answerRows = (allAnswers || []) as { points_earned: number | null; is_correct: boolean | null }[]
         const essayPending = hasEssay
             && answerRows.some(a => a.points_earned === null && a.is_correct === null)
-        const totalScore = Math.round(
-            answerRows.reduce((sum, a) => sum + (a.points_earned || 0), 0) * 100
-        ) / 100
+        // Cap susulan: rescue tetap tidak boleh melewati batas nilai yang dipilih guru.
+        const totalScore = applySusulanCap(
+            Math.round(answerRows.reduce((sum, a) => sum + (a.points_earned || 0), 0) * 100) / 100,
+            submission.max_score,
+            (submission as any).susulan_max_percent,
+        )
 
         const { data: updated, error: eUpd } = await supabase
             .from(subTable)

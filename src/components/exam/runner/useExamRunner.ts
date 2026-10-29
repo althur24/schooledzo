@@ -6,6 +6,19 @@ import useOnlineStatus from '@/hooks/useOnlineStatus'
 import useExamZoom from '@/hooks/useExamZoom'
 import type { ExamData, ExamRunnerConfig, ExamRunnerState, RunnerQuestion, RunnerSubmission } from './types'
 
+type StartSubmissionResponse = Partial<RunnerSubmission> & {
+    error?: string
+    code?: string
+    server_time?: string
+    ends_at?: string | null
+    question_order?: string[] | null
+    saved_answers?: { question_id: string; answer: string }[]
+}
+
+type StartedSubmission = RunnerSubmission & {
+    saved_answers?: { question_id: string; answer: string }[]
+}
+
 /**
  * useExamRunner — SEMUA perilaku ruang ujian siswa (load, resume, autosave,
  * timer, fullscreen, pelanggaran, offline, submit). Dipakai ulangan & UTS/UAS;
@@ -516,18 +529,65 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         hasStarted.current = true
 
         try {
-            // Fetch exam details
-            const [examRes, questionsRes] = await Promise.all([
+            // Fetch exam details + soal paralel. Untuk SUSULAN, gate soal menolak
+            // placeholder sampai attempt dimulai — jadi POST start dilakukan dulu,
+            // lalu soal di-fetch ulang. Menutup celah baca soal selama masa grant
+            // tanpa menjalankan timer, tanpa mengubah alur ujian normal.
+            const [examRes, firstQuestionsRes] = await Promise.all([
                 fetch(`${configRef.current.examApiBase}/${examId}`),
                 fetch(`${configRef.current.examApiBase}/${examId}/questions`)
             ])
             const examData = await examRes.json()
-            const questionsData = await questionsRes.json()
+            const susulanPending = examData?.susulan_pending === true
+
+            let questionsRes = firstQuestionsRes
+            let questionsData = await firstQuestionsRes.json()
+            let subData: StartSubmissionResponse | null = null
+            // true hanya bila POST start susulan benar-benar sukses (timer jalan).
+            // Retry expired → false, agar kegagalan soal memakai jalur normal.
+            let susulanStarted = false
+
+            if (susulanPending) {
+                const startRes = await fetch(configRef.current.submissionApi, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ exam_id: examId })
+                })
+                subData = await startRes.json()
+                if (subData?.error) {
+                    if (subData.code === 'SUSULAN_EXPIRED_RETRY') {
+                        // Server sudah membersihkan placeholder kedaluwarsa.
+                        // Muat soal & lanjut ke alur start normal di bawah.
+                        subData = null
+                    } else {
+                        alert(subData.error)
+                        router.push(configRef.current.listRoute)
+                        return
+                    }
+                } else {
+                    susulanStarted = true
+                }
+                questionsRes = await fetch(`${configRef.current.examApiBase}/${examId}/questions`)
+                questionsData = await questionsRes.json()
+            }
 
             // Abort bila soal gagal dimuat (mis. gate jadwal/kelas menolak) —
             // tanpa ini POST start tetap jalan dan siswa masuk ujian 0 soal.
             if (!questionsRes.ok || !Array.isArray(questionsData)) {
-                alert(typeof questionsData?.error === 'string' ? questionsData.error : `Gagal memuat soal ${configRef.current.fallbackLabel.toLowerCase()}`)
+                const message = typeof questionsData?.error === 'string'
+                    ? questionsData.error
+                    : `Gagal memuat soal ${configRef.current.fallbackLabel.toLowerCase()}`
+
+                // Susulan sudah POST start (timer berjalan). Jangan redirect &
+                // buang kesempatan retry — tampilkan layar Coba Lagi. retryLoad
+                // akan masuk alur normal/resume karena started_at sudah terisi.
+                if (susulanStarted) {
+                    setLoadError(message)
+                    setLoading(false)
+                    return
+                }
+
+                alert(message)
                 router.push(configRef.current.listRoute)
                 return
             }
@@ -538,13 +598,38 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             examLabelRef.current = label
             setExamLabel(label)
 
-            // Start submission
-            const subRes = await fetch(configRef.current.submissionApi, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ exam_id: examId })
-            })
-            const subData = await subRes.json()
+            // Start submission (alur normal; susulan sudah start di atas)
+            if (!subData) {
+                const subRes = await fetch(configRef.current.submissionApi, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ exam_id: examId })
+                })
+                subData = await subRes.json()
+            }
+
+            if (!subData) {
+                alert(`Gagal memulai ${configRef.current.fallbackLabel.toLowerCase()}`)
+                router.push(configRef.current.listRoute)
+                return
+            }
+
+            // Grant susulan kedaluwarsa dibersihkan server → retry sekali
+            // sebagai start normal (jika jadwal ujian memang masih terbuka).
+            if (subData.code === 'SUSULAN_EXPIRED_RETRY') {
+                const retryRes = await fetch(configRef.current.submissionApi, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ exam_id: examId })
+                })
+                subData = await retryRes.json()
+            }
+
+            if (!subData) {
+                alert(`Gagal memulai ${configRef.current.fallbackLabel.toLowerCase()}`)
+                router.push(configRef.current.listRoute)
+                return
+            }
 
             if (subData.error) {
                 alert(subData.error)
@@ -558,13 +643,14 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             }
             endsAtRef.current = subData.ends_at ? new Date(subData.ends_at).getTime() : null
 
-            setSubmission(subData)
-            setViolationCount(subData.violation_count || 0)
+            const startedSub = subData as unknown as StartedSubmission
+            setSubmission(startedSub)
+            setViolationCount(startedSub.violation_count || 0)
 
             // Order questions based on submission's question_order (randomized)
             const questionArr = Array.isArray(questionsData) ? questionsData : []
-            if (subData.question_order && subData.question_order.length > 0) {
-                const orderedQuestions = subData.question_order
+            if (startedSub.question_order && startedSub.question_order.length > 0) {
+                const orderedQuestions = startedSub.question_order
                     .map((qId: string) => questionArr.find((q: RunnerQuestion) => q.id === qId))
                     .filter(Boolean)
                 setQuestions(orderedQuestions)
@@ -582,7 +668,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     // artinya ini adalah attempt baru dari Hard Reset. Abaikan & hapus cache lokal yang lama.
                     // Margin 2 detik: restart attempt yang nyaris bersamaan tidak boleh
                     // menghapus draft sah siswa.
-                    const startedAtTime = new Date(subData.started_at).getTime()
+                    const startedAtTime = new Date(startedSub.started_at).getTime()
                     const lastSavedTime = parsed.lastSaved ? new Date(parsed.lastSaved).getTime() : 0
 
                     if (startedAtTime > lastSavedTime + 2000) {
@@ -606,8 +692,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             //     pakai server (bisa jadi device lain sudah memperbaruinya)
             const syncedSnapshot = loadSyncedSnapshot()
             const dbAnswers: Record<string, string> = {}
-            if (Array.isArray(subData.saved_answers)) {
-                subData.saved_answers.forEach((a: { question_id: string; answer: string }) => {
+            if (Array.isArray(startedSub.saved_answers)) {
+                startedSub.saved_answers.forEach((a: { question_id: string; answer: string }) => {
                     if (a?.question_id) dbAnswers[a.question_id] = a.answer
                 })
             }
@@ -628,7 +714,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             }
 
             // Check for Resume — sisa waktu dari patokan server (ends_at + offset), bukan jam HP
-            const elapsed = Date.now() - new Date(subData.started_at).getTime()
+            const elapsed = Date.now() - new Date(startedSub.started_at).getTime()
             const remaining = computeRemaining()
 
             if (remaining !== null && remaining <= 0) {
@@ -643,7 +729,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            submission_id: subData.id,
+                            submission_id: startedSub.id,
                             answers: formattedAnswers,
                             submit: true
                         })

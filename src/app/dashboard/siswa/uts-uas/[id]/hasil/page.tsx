@@ -18,6 +18,8 @@ interface ExamResult {
     total_score: number | null
     max_score: number | null
     results_hidden?: boolean
+    /** Batas nilai susulan (persen); < 100 = nilai akhir dibatasi. */
+    susulan_max_percent?: number | null
     violation_count: number
     started_at: string
     submitted_at: string
@@ -138,7 +140,12 @@ export default function OfficialExamResultPage() {
                         masih sementara — indikator yang sama dengan halaman hasil ulangan. */}
                     {result.is_graded === false && (
                         <p className="mt-3 text-sm font-medium bg-amber-500/30 border border-amber-300/40 inline-block px-4 py-1.5 rounded-full backdrop-blur-sm">
-                            ⏳ Menunggu koreksi guru — nilai sementara, bisa berubah setelah soal esai dinilai
+                            Menunggu koreksi guru — nilai sementara, bisa berubah setelah soal esai dinilai
+                        </p>
+                    )}
+                    {typeof result.susulan_max_percent === 'number' && result.susulan_max_percent < 100 && (
+                        <p className="mt-3 text-sm font-medium bg-white/20 border border-white/30 inline-block px-4 py-1.5 rounded-full backdrop-blur-sm">
+                            Nilai susulan dibatasi maksimal {result.susulan_max_percent}% dari total
                         </p>
                     )}
                 </div>

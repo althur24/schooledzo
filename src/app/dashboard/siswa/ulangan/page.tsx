@@ -36,8 +36,11 @@ interface ExamSubmission {
     total_score: number | null
     max_score: number | null
     results_hidden?: boolean
-    started_at: string
+    started_at: string | null
     timer_override_until?: string | null
+    susulan_granted_at?: string | null
+    susulan_expires_at?: string | null
+    susulan_max_percent?: number | null
 }
 
 interface OfficialExam {
@@ -62,8 +65,11 @@ interface OfficialSubmission {
     total_score: number | null
     max_score: number | null
     results_hidden?: boolean
-    started_at: string
+    started_at: string | null
     timer_override_until?: string | null
+    susulan_granted_at?: string | null
+    susulan_expires_at?: string | null
+    susulan_max_percent?: number | null
 }
 
 export default function SiswaUlanganPage() {
@@ -132,13 +138,30 @@ export default function SiswaUlanganPage() {
             return { status: 'submitted', label: 'Sudah Dikumpulkan', icon: TickSquare, color: 'bg-green-100 text-green-600 dark:bg-green-500/20 dark:text-green-400' }
         }
 
-        if (submission && !submission.is_submitted) {
+        // Grant susulan (belum dimulai): tampil tombol Mulai Susulan selama berlaku.
+        // Grant kedaluwarsa diperlakukan sebagai tidak ada attempt agar siswa
+        // bisa masuk lewat jadwal normal bila guru memperpanjang jendela.
+        if (submission && !submission.is_submitted && !submission.started_at) {
+            if (submission.susulan_granted_at) {
+                const expMs = submission.susulan_expires_at
+                    ? new Date(submission.susulan_expires_at).getTime()
+                    : NaN
+                if (Number.isFinite(expMs) && currentTime.getTime() <= expMs) {
+                    return { status: 'susulan', label: 'Mulai Susulan', icon: Play, color: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400' }
+                }
+                // expired → jatuh ke evaluasi jadwal normal di bawah
+            } else {
+                return { status: 'ended', label: 'Waktu Habis', icon: TimeCircle, color: 'bg-slate-100 text-slate-500 dark:bg-slate-500/20 dark:text-slate-400' }
+            }
+        }
+
+        if (submission && !submission.is_submitted && submission.started_at) {
             // Check personal expiration — min(started_at + durasi, jam tutup), buffer 1 menit.
             // timer_override_until (Tambah Waktu/Hard Reset) = keputusan eksplisit guru:
             // endAt = max(batas efektif, override) dan override TIDAK dipotong jam tutup
             // (paritas resolveWindowExpiry di src/lib/examExpiry.ts) — tanpa ini kartu
             // tampil "Waktu Habis" padahal sesi di server masih terbuka.
-            const subStartedAt = new Date(submission.started_at).getTime()
+            const subStartedAt = new Date(submission.started_at!).getTime()
             const durationMs = exam.duration_minutes * 60000
             const perStudentEnd = durationMs > 0 ? subStartedAt + durationMs : null
             const overrideEnd = submission.timer_override_until
@@ -187,10 +210,23 @@ export default function SiswaUlanganPage() {
         if (submission?.is_submitted) {
             return { status: 'submitted', label: 'Sudah Dikumpulkan', icon: TickSquare, color: 'bg-green-100 text-green-600 dark:bg-green-500/20 dark:text-green-400' }
         }
-        if (submission && !submission.is_submitted) {
+        // Grant susulan (belum dimulai) — paritas getExamStatus.
+        if (submission && !submission.is_submitted && !submission.started_at) {
+            if (submission.susulan_granted_at) {
+                const expMs = submission.susulan_expires_at
+                    ? new Date(submission.susulan_expires_at).getTime()
+                    : NaN
+                if (Number.isFinite(expMs) && currentTime.getTime() <= expMs) {
+                    return { status: 'susulan', label: 'Mulai Susulan', icon: Play, color: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400' }
+                }
+            } else {
+                return { status: 'ended', label: 'Waktu Habis', icon: TimeCircle, color: 'bg-slate-100 text-slate-500 dark:bg-slate-500/20 dark:text-slate-400' }
+            }
+        }
+        if (submission && !submission.is_submitted && submission.started_at) {
             // Paritas override dengan getExamStatus — lihat komentar di atas
             // (override TIDAK dipotong jam tutup, paritas resolveWindowExpiry).
-            const subStartedAt = new Date(submission.started_at).getTime()
+            const subStartedAt = new Date(submission.started_at!).getTime()
             const durationMs = exam.duration_minutes * 60000
             const perStudentEnd = durationMs > 0 ? subStartedAt + durationMs : null
             const overrideEnd = submission.timer_override_until
@@ -294,7 +330,15 @@ export default function SiswaUlanganPage() {
                                     // ujian sudah lewat masa tapi tombol "Mulai Ujian" tetap tampil aktif.
                                     // Status dievaluasi tiap detik dari jam HP; server tetap gate otoritatif
                                     // bila jam device meleset.
-                                    const canStart = status === 'available' || status === 'in_progress'
+                                    const canStart = status === 'available' || status === 'in_progress' || status === 'susulan'
+                                    const susulanExpiryMs = submission?.susulan_expires_at
+                                        ? new Date(submission.susulan_expires_at).getTime()
+                                        : NaN
+                                    const susulanActive = !!submission?.susulan_granted_at
+                                        && !submission.is_submitted
+                                        && !submission.started_at
+                                        && Number.isFinite(susulanExpiryMs)
+                                        && currentTime.getTime() <= susulanExpiryMs
 
                                     return (
                                         <div key={exam.id} className="bg-white dark:bg-surface-dark border-2 border-indigo-300 dark:border-indigo-500/40 rounded-xl p-4 md:p-5 hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-500/10 transition-all">
@@ -315,8 +359,23 @@ export default function SiswaUlanganPage() {
                                                                     REMEDIAL
                                                                 </span>
                                                             )}
+                                                            {susulanActive && (
+                                                                <span className="px-2.5 py-1 bg-indigo-500 text-white text-[10px] font-bold rounded-full shadow-sm">
+                                                                    SUSULAN{typeof submission?.susulan_max_percent === 'number' && submission.susulan_max_percent < 100
+                                                                        ? ` · MAKS ${submission.susulan_max_percent}%`
+                                                                        : ''}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                         <h3 className="font-bold text-text-main dark:text-white text-base md:text-lg">{exam.title}</h3>
+                                                        {susulanActive && (
+                                                            <p className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 mt-1">
+                                                                Berlaku sampai {submission?.susulan_expires_at ? formatDateTime(submission.susulan_expires_at) : '-'}
+                                                                {typeof submission?.susulan_max_percent === 'number' && submission.susulan_max_percent < 100
+                                                                    ? ` • nilai maks ${submission.susulan_max_percent}%`
+                                                                    : ''}
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 </div>
 
@@ -383,7 +442,7 @@ export default function SiswaUlanganPage() {
                                                         >
                                                             <div className="flex items-center justify-center gap-2">
                                                                 <Play set="bold" primaryColor="currentColor" size={20} />
-                                                                {status === 'in_progress' ? 'Lanjutkan Ujian' : 'Mulai Ujian'}
+                                                                {status === 'in_progress' ? 'Lanjutkan Ujian' : status === 'susulan' ? 'Mulai Susulan' : 'Mulai Ujian'}
                                                             </div>
                                                         </Link>
                                                     ) : status === 'scheduled' || status === 'ended' ? (
@@ -445,7 +504,15 @@ export default function SiswaUlanganPage() {
                                     // ujian sudah lewat masa tapi tombol "Mulai" tetap tampil aktif.
                                     // Status dievaluasi tiap detik dari jam HP; server tetap gate otoritatif
                                     // bila jam device meleset.
-                                    const canStart = status === 'available' || status === 'in_progress'
+                                    const canStart = status === 'available' || status === 'in_progress' || status === 'susulan'
+                                    const susulanExpiryMs = submission?.susulan_expires_at
+                                        ? new Date(submission.susulan_expires_at).getTime()
+                                        : NaN
+                                    const susulanActive = !!submission?.susulan_granted_at
+                                        && !submission.is_submitted
+                                        && !submission.started_at
+                                        && Number.isFinite(susulanExpiryMs)
+                                        && currentTime.getTime() <= susulanExpiryMs
 
                                     return (
                                         <div key={exam.id} className="bg-white dark:bg-surface-dark border-2 border-primary/30 rounded-xl p-4 md:p-5 hover:border-primary hover:shadow-lg hover:shadow-primary/10 active:scale-[0.98] transition-all cursor-pointer">
@@ -457,8 +524,23 @@ export default function SiswaUlanganPage() {
                                                                 <StatusIcon set="bold" primaryColor="currentColor" size={14} />
                                                                 {label}
                                                             </span>
+                                                            {susulanActive && (
+                                                                <span className="px-2.5 py-1 bg-indigo-500 text-white text-[10px] font-bold rounded-full shadow-sm">
+                                                                    SUSULAN{typeof submission?.susulan_max_percent === 'number' && submission.susulan_max_percent < 100
+                                                                        ? ` · MAKS ${submission.susulan_max_percent}%`
+                                                                        : ''}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                         <h3 className="font-bold text-text-main dark:text-white text-base md:text-lg">{exam.title}</h3>
+                                                        {susulanActive && (
+                                                            <p className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 mt-1">
+                                                                Berlaku sampai {submission?.susulan_expires_at ? formatDateTime(submission.susulan_expires_at) : '-'}
+                                                                {typeof submission?.susulan_max_percent === 'number' && submission.susulan_max_percent < 100
+                                                                    ? ` • nilai maks ${submission.susulan_max_percent}%`
+                                                                    : ''}
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 </div>
 
@@ -529,7 +611,7 @@ export default function SiswaUlanganPage() {
                                                         >
                                                             <div className="flex items-center justify-center gap-2">
                                                                 <Play set="bold" primaryColor="currentColor" size={20} />
-                                                                {status === 'in_progress' ? `Lanjutkan ${labels.ulangan}` : `Mulai ${labels.ulangan}`}
+                                                                {status === 'in_progress' ? `Lanjutkan ${labels.ulangan}` : status === 'susulan' ? 'Mulai Susulan' : `Mulai ${labels.ulangan}`}
                                                             </div>
                                                         </Link>
                                                     ) : (status === 'scheduled' || status === 'ended') && (

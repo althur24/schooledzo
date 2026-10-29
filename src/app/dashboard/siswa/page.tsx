@@ -27,6 +27,8 @@ interface DeadlineItem {
     link: string
     expirationTime: number
     startTime: number
+    /** Item grant susulan: deadline = batas berlaku grant, bukan jam ujian. */
+    susulan?: boolean
 }
 
 interface ScheduleEntry {
@@ -62,6 +64,7 @@ export default function SiswaDashboard() {
         title: string
         link: string
         remainingTime?: string
+        kind?: 'susulan'
     } | null>(null)
     const [showResumeModal, setShowResumeModal] = useState(false)
 
@@ -187,8 +190,32 @@ export default function SiswaDashboard() {
                     // Process Exams — show ALL active & not submitted, with remaining time
                     exams.forEach((e: any) => {
                         if (e.teaching_assignment?.class?.id !== myStudent.class.id) return
-                        if (examSubmissions.some((s: any) => s.exam_id === e.id && s.is_submitted)) return
+                        const mine = examSubmissions.find((s: any) => s.exam_id === e.id)
+                        if (mine?.is_submitted) return
                         if (!e.is_active) return
+
+                        // Grant susulan (belum dimulai) — tampil persisten dengan
+                        // batas berlaku grant, bukan jam ujian yang sudah lewat.
+                        if (mine && !mine.started_at && mine.susulan_granted_at) {
+                            const expMs = mine.susulan_expires_at
+                                ? new Date(mine.susulan_expires_at).getTime()
+                                : NaN
+                            if (Number.isFinite(expMs) && expMs > nowTime) {
+                                newDeadlines.push({
+                                    id: e.id,
+                                    type: 'ULANGAN',
+                                    title: e.title,
+                                    subject: e.teaching_assignment?.subject?.name || 'Mapel',
+                                    deadline: new Date(expMs).toISOString(),
+                                    link: `/dashboard/siswa/ulangan/${e.id}`,
+                                    expirationTime: expMs,
+                                    startTime: nowTime,
+                                    susulan: true,
+                                })
+                                return
+                            }
+                            // Grant expired/invalid → lanjut evaluasi jadwal normal.
+                        }
 
                         const startTime = new Date(e.start_time).getTime()
                         // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
@@ -244,8 +271,30 @@ export default function SiswaDashboard() {
 
                     // Process Official Exams (UTS/UAS) — show active AND upcoming scheduled exams
                     officialExams.forEach((oe: any) => {
+                        const mine = officialExamSubs.find((s: any) => s.exam_id === oe.id)
                         // Check if already submitted
-                        if (officialExamSubs.some((s: any) => s.exam_id === oe.id && s.is_submitted)) return
+                        if (mine?.is_submitted) return
+
+                        // Grant susulan (belum dimulai) — paritas ulangan.
+                        if (mine && !mine.started_at && mine.susulan_granted_at) {
+                            const expMs = mine.susulan_expires_at
+                                ? new Date(mine.susulan_expires_at).getTime()
+                                : NaN
+                            if (Number.isFinite(expMs) && expMs > nowTime) {
+                                newDeadlines.push({
+                                    id: oe.id,
+                                    type: oe.exam_type === 'UAS' ? 'UAS' : 'UTS',
+                                    title: oe.title,
+                                    subject: oe.subject?.name || 'Mapel',
+                                    deadline: new Date(expMs).toISOString(),
+                                    link: `/dashboard/siswa/uts-uas/${oe.id}`,
+                                    expirationTime: expMs,
+                                    startTime: nowTime,
+                                    susulan: true,
+                                })
+                                return
+                            }
+                        }
 
                         const startTime = new Date(oe.start_time).getTime()
                         // Mode jendela: akhir = jam tutup; mode serentak = start + durasi
@@ -325,11 +374,39 @@ export default function SiswaDashboard() {
                 const exams = await examRes.json()
                 const officialExamSubs = await officialExamSubRes.json()
 
-                let foundResumeItem = null
+                type ResumeCandidate = {
+                    type: 'Kuis' | 'Ulangan' | 'UTS/UAS'
+                    title: string
+                    link: string
+                    kind?: 'susulan'
+                }
+                let foundResumeItem: ResumeCandidate | null = null
+                // Placeholder susulan dipisah: attempt yang SUDAH berjalan selalu
+                // menang prioritas, dan copy modal susulan tidak boleh berbunyi
+                // "sedang mengerjakan / Lanjutkan".
+                let susulanCandidate: ResumeCandidate | null = null
 
                 if (Array.isArray(exams)) {
                     for (const e of exams) {
-                        if (!e.is_submitted && e.exam?.is_active) {
+                        if (e.is_submitted) continue
+
+                        // Placeholder susulan diproses DI LUAR guard exam.is_active:
+                        // embed GET exam-submissions tidak memuat is_active (pre-existing),
+                        // sehingga tanpa ini prompt susulan ulangan tidak pernah muncul.
+                        if (!e.started_at && e.susulan_granted_at) {
+                            const expMs = e.susulan_expires_at ? new Date(e.susulan_expires_at).getTime() : null
+                            if (expMs !== null && serverNow() <= expMs && !susulanCandidate) {
+                                susulanCandidate = {
+                                    type: 'Ulangan' as const,
+                                    title: e.exam?.title || '',
+                                    link: `/dashboard/siswa/ulangan/${e.exam_id}`,
+                                    kind: 'susulan' as const,
+                                }
+                            }
+                            continue
+                        }
+
+                        if (e.exam?.is_active) {
                             // ends_at dari server: satu sumber kebenaran (mode serentak/jendela + override);
                             // fallback ke rumus lama bila tidak tersedia
                             const now = serverNow()
@@ -393,6 +470,19 @@ export default function SiswaDashboard() {
                 if (Array.isArray(officialExamSubs)) {
                     for (const oe of officialExamSubs) {
                         if (!oe.is_submitted && oe.exam?.is_active) {
+                            // Placeholder susulan (belum mulai) — jangan auto-submit.
+                            if (!oe.started_at && oe.susulan_granted_at) {
+                                const expMs = oe.susulan_expires_at ? new Date(oe.susulan_expires_at).getTime() : null
+                                if (expMs !== null && serverNow() <= expMs && !susulanCandidate) {
+                                    susulanCandidate = {
+                                        type: 'UTS/UAS' as const,
+                                        title: oe.exam?.title || 'Ujian Tanpa Judul',
+                                        link: `/dashboard/siswa/uts-uas/${oe.exam_id}`,
+                                        kind: 'susulan' as const,
+                                    }
+                                }
+                                continue
+                            }
                             // ends_at dari server: satu sumber kebenaran; fallback rumus lama
                             const now = serverNow()
                             const effectiveEnd = oe.ends_at
@@ -419,6 +509,10 @@ export default function SiswaDashboard() {
                         }
                     }
                 }
+
+                // Attempt yang sudah berjalan menang; susulan hanya diprompt
+                // bila tidak ada attempt berjalan yang perlu dilanjutkan.
+                if (!foundResumeItem && susulanCandidate) foundResumeItem = susulanCandidate
 
                 if (foundResumeItem) {
                     setResumeItem(foundResumeItem)
@@ -450,6 +544,18 @@ export default function SiswaDashboard() {
 
     // UI helpers
     const getCountdownText = (item: DeadlineItem, nowMs: number) => {
+        // Grant susulan: countdown ke batas berlaku grant (bukan jam ujian).
+        if (item.susulan) {
+            const diffMs = item.expirationTime - nowMs
+            if (diffMs <= 0) return 'Masa susulan berakhir'
+            const days = Math.floor(diffMs / 86400000)
+            const hours = Math.floor((diffMs % 86400000) / 3600000)
+            const minutes = Math.floor((diffMs % 3600000) / 60000)
+            if (days > 0) return `Susulan berlaku ${days} hari ${hours > 0 ? `${hours} jm` : ''} lagi`
+            if (hours > 0) return `Susulan berlaku ${hours} jm ${minutes > 0 ? `${minutes} mnt` : ''} lagi`
+            return `Susulan berlaku ${Math.max(1, minutes)} menit lagi`
+        }
+
         // Items without deadline
         if (!item.deadline) {
             if (item.type === 'KUIS') return '📝 Kerjakan kapan saja'
@@ -628,7 +734,7 @@ export default function SiswaDashboard() {
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 mb-2">
                                                         <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wider ${styles.badge}`}>
-                                                            {labelForGradeType(item.type, labels)}
+                                                            {item.susulan ? 'SUSULAN' : labelForGradeType(item.type, labels)}
                                                         </span>
                                                         <span className={`text-xs font-bold flex items-center gap-1 ${styles.text}`}>
                                                             <span className={styles.iconPulse ? "animate-pulse" : ""}>
@@ -830,22 +936,29 @@ export default function SiswaDashboard() {
                                 <Clock set="bold" size={40} />
                             </div>
                             <h3 className="text-2xl font-bold text-text-main dark:text-white mb-2">
-                                Ada {resumeItem.type === 'Kuis' ? labels.kuis : resumeItem.type === 'Ulangan' ? labels.ulangan : `${labels.uts}/${labels.uas}`} Belum Selesai!
+                                {resumeItem.kind === 'susulan'
+                                    ? 'Susulan Tersedia!'
+                                    : `Ada ${resumeItem.type === 'Kuis' ? labels.kuis : resumeItem.type === 'Ulangan' ? labels.ulangan : `${labels.uts}/${labels.uas}`} Belum Selesai!`}
                             </h3>
                             <div className="bg-surface-ground/50 dark:bg-surface-ground/30 rounded-xl p-4 my-6 border border-secondary/10">
                                 <p className="text-sm text-text-secondary dark:text-zinc-400 mb-1">
-                                    Kamu sedang mengerjakan:
+                                    {resumeItem.kind === 'susulan' ? 'Kamu mendapat kesempatan susulan untuk:' : 'Kamu sedang mengerjakan:'}
                                 </p>
                                 <p className="text-lg font-bold text-primary truncate px-2">
                                     {resumeItem.title}
                                 </p>
+                                {resumeItem.kind === 'susulan' && (
+                                    <p className="text-xs text-text-secondary dark:text-zinc-400 mt-2">
+                                        Timer pengerjaan dimulai saat kamu menekan tombol di bawah.
+                                    </p>
+                                )}
                             </div>
                             <div className="space-y-3">
                                 <Link
                                     href={resumeItem.link}
                                     className="w-full block py-3.5 bg-gradient-to-r from-primary to-blue-600 text-white rounded-xl font-bold shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:scale-[1.02] transition-all"
                                 >
-                                    🚀 Lanjutkan Sekarang
+                                    {resumeItem.kind === 'susulan' ? 'Mulai Susulan' : 'Lanjutkan Sekarang'}
                                 </Link>
                                 <button
                                     onClick={() => setShowResumeModal(false)}

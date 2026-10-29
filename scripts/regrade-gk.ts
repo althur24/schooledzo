@@ -28,6 +28,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { gradeAnswer, parseAnswerLetters, needsManualGrading } from '../src/lib/questionTypeUtils'
+import { applySusulanCap } from '../src/lib/susulan'
 
 // ── Env guard (paritas loadtest/e2e/helpers.cjs loadEnvGuarded) ──
 const envFile = process.env.ENV_FILE || '.env.local'
@@ -203,7 +204,7 @@ async function regradeTableAnswers(
     console.log(`\n══ ${label.toUpperCase()} (${subTable}) ══`)
     const subs = await fetchAllRows<any>(
         supabase.from(subTable)
-            .select('id, exam_id, total_score')
+            .select('id, exam_id, total_score, max_score, susulan_max_percent')
             .eq('is_submitted', true)
             .order('id')
     )
@@ -287,7 +288,8 @@ async function regradeTableAnswers(
                 pendingUpdates.push({ id: a.id, points_earned: g.pointsEarned, is_correct: g.isCorrect })
             }
         }
-        total = round2(total)
+        // Cap susulan wajib dipertahankan saat regrade retro-aktif.
+        total = applySusulanCap(round2(total), sub.max_score, sub.susulan_max_percent)
         if (!changed && total !== sub.total_score) changed = true
         if (!changed) continue
 

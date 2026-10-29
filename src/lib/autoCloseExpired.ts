@@ -20,6 +20,7 @@ import { getExamQuestionsForGrading } from './examQuestionsCache'
 import { gradeAnswer, isAutoGradeable, needsManualGrading } from './questionTypeUtils'
 import { resolveWindowExpiry, resolveQuizExpiry, isSweepDue } from './examExpiry'
 import { logError } from './logError'
+import { applySusulanCap } from './susulan'
 
 const DISCOVERY_LIMIT = 500 // batas atas kandidat per tipe per tick — tick tidak pernah raksasa
 const CHUNK = 50            // penutupan paralel per chunk, menjaga DB saat massal (TO 1000 siswa)
@@ -47,10 +48,13 @@ export async function forceCloseExamSubmission(
         // Guard dulu: sudah ditutup jalur lain (race dgn scheduler/lazy sweep) → jangan sentuh jawaban
         const { data: current } = await supabase
             .from('exam_submissions')
-            .select('is_submitted')
+            .select('is_submitted, started_at, susulan_granted_at, max_score, susulan_max_percent')
             .eq('id', submissionId)
             .single()
         if (!current || current.is_submitted) return null
+        // Placeholder grant susulan yang belum dimulai TIDAK boleh ditutup:
+        // submission belum punya attempt; nilai 0 di sini akan mengonsumsi grant.
+        if (!current.started_at && current.susulan_granted_at) return null
 
         if (Array.isArray(incomingAnswers) && incomingAnswers.length > 0) {
             const questions = await getExamQuestionsForGrading('exam_questions', examId)
@@ -101,8 +105,13 @@ export async function forceCloseExamSubmission(
 
         const { data: answers } = await supabase
             .from('exam_answers').select('points_earned').eq('submission_id', submissionId)
-        // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float
-        const totalScore = Math.round((answers || []).reduce((s, a) => s + (a.points_earned || 0), 0) * 100) / 100
+        // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float.
+        // Cap susulan: nilai akhir tidak boleh melebihi batas yang dipilih guru.
+        const totalScore = applySusulanCap(
+            Math.round((answers || []).reduce((s, a) => s + (a.points_earned || 0), 0) * 100) / 100,
+            current.max_score,
+            current.susulan_max_percent,
+        )
         const examQuestions = await getExamQuestionsForGrading('exam_questions', examId)
         const hasEssays = examQuestions.some(q => needsManualGrading(q.question_type))
         const isGraded = !hasEssays
@@ -136,10 +145,11 @@ export async function forceCloseOfficialSubmission(
         // Guard dulu: sudah ditutup jalur lain (race dgn scheduler/lazy sweep) → jangan sentuh jawaban
         const { data: current } = await supabase
             .from('official_exam_submissions')
-            .select('is_submitted')
+            .select('is_submitted, started_at, susulan_granted_at, max_score, susulan_max_percent')
             .eq('id', submissionId)
             .single()
         if (!current || current.is_submitted) return null
+        if (!current.started_at && current.susulan_granted_at) return null
 
         if (Array.isArray(incomingAnswers) && incomingAnswers.length > 0) {
             const questions = await getExamQuestionsForGrading('official_exam_questions', examId)
@@ -190,8 +200,13 @@ export async function forceCloseOfficialSubmission(
 
         const { data: answers } = await supabase
             .from('official_exam_answers').select('points_earned').eq('submission_id', submissionId)
-        // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float
-        const totalScore = Math.round((answers || []).reduce((s: number, a: any) => s + (a.points_earned || 0), 0) * 100) / 100
+        // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float.
+        // Cap susulan: nilai akhir tidak boleh melebihi batas yang dipilih guru.
+        const totalScore = applySusulanCap(
+            Math.round((answers || []).reduce((s: number, a: any) => s + (a.points_earned || 0), 0) * 100) / 100,
+            current.max_score,
+            current.susulan_max_percent,
+        )
         const examQuestions = await getExamQuestionsForGrading('official_exam_questions', examId)
         const hasEssays = examQuestions.some(q => needsManualGrading(q.question_type))
         const isGraded = !hasEssays
@@ -292,6 +307,8 @@ export async function closeExpiredSubmissions(now: number = Date.now()): Promise
             .select('id, exam_id, started_at, timer_override_until, exam:exams!inner(start_time, duration_minutes, window_end_time, is_active)')
             .eq('is_submitted', false)
             .eq('exam.is_active', true)
+            // Placeholder susulan (started_at NULL) belum punya attempt — jangan disapu.
+            .not('started_at', 'is', null)
             .limit(DISCOVERY_LIMIT)
         if (error) throw error
         const due = (subs || []).filter((s: any) =>
@@ -317,6 +334,8 @@ export async function closeExpiredSubmissions(now: number = Date.now()): Promise
             .select('id, exam_id, started_at, timer_override_until, exam:official_exams!inner(start_time, duration_minutes, window_end_time, is_active)')
             .eq('is_submitted', false)
             .eq('exam.is_active', true)
+            // Placeholder susulan (started_at NULL) belum punya attempt — jangan disapu.
+            .not('started_at', 'is', null)
             .limit(DISCOVERY_LIMIT)
         if (error) throw error
         const due = (subs || []).filter((s: any) =>

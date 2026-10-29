@@ -6,13 +6,14 @@ import Link from 'next/link'
 import { Card } from '@/components/ui'
 import ResetAttemptMenu from '@/components/exam/ResetAttemptMenu'
 import ExtEndTimeMenu from '@/components/exam/ExtEndTimeMenu'
+import SusulanModal, { type SusulanTarget } from '@/components/exam/SusulanModal'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
 import { getOfficialExamStatus } from '@/lib/exam'
 import { round2, formatScore } from '@/lib/formatScore'
 import {
     Loader2, ArrowLeft, GraduationCap, Users,
-    CheckCircle, AlertTriangle, Clock, PlayCircle, RefreshCw,
+    CheckCircle, AlertTriangle, Clock, PlayCircle, RefreshCw, CalendarClock,
 } from 'lucide-react'
 
 /**
@@ -41,6 +42,17 @@ interface StudentProgress {
     total_score: number | null
     max_score: number | null
     is_graded: boolean
+    /** Exam member yang berlaku untuk siswa (batch ulangan bisa beda per kelas). */
+    exam_id?: string
+    exam_ended?: boolean
+    exam_active?: boolean
+    duration_minutes?: number
+    susulan?: {
+        granted_at: string
+        expires_at: string | null
+        max_percent: number | null
+        expired: boolean
+    } | null
 }
 
 interface MonitorData {
@@ -83,6 +95,7 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
     const monitorEndpoint = mode === 'ulangan' ? '/api/exam-submissions/monitor' : '/api/official-exam-submissions/monitor'
     // Endpoint reset = endpoint monitor tanpa suffix /monitor (PUT reset_attempt soft/hard)
     const resetEndpoint = mode === 'ulangan' ? '/api/exam-submissions' : '/api/official-exam-submissions'
+    const susulanEndpoint = mode === 'ulangan' ? '/api/exam-submissions/susulan' : '/api/official-exam-submissions/susulan'
     const backHref = backHrefProp ?? '/dashboard/guru/ulangan'
 
     const [data, setData] = useState<MonitorData | null>(null)
@@ -97,6 +110,8 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
     // Reset attempt (soft/hard) langsung dari monitor live
     const [resettingId, setResettingId] = useState<string | null>(null)
     const [resetMenuId, setResetMenuId] = useState<string | null>(null)
+    // Susulan (attempt make-up setelah ujian berakhir)
+    const [susulanTarget, setSusulanTarget] = useState<SusulanTarget | null>(null)
     const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
     const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -177,6 +192,11 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
         toastTimerRef.current = setTimeout(() => setToast(null), 4000)
     }
+
+    // Bersihkan timer toast saat unmount (hindari setState di komponen mati)
+    useEffect(() => () => {
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    }, [])
 
     // Reset attempt langsung dari monitor live — paritas guru & admin
     const handleResetAttempt = async (submissionId: string, studentName: string, resetMode: 'soft' | 'hard') => {
@@ -487,7 +507,26 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
                                     <tr key={student.student_id} className={`hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors ${isWorking ? 'bg-blue-50/30 dark:bg-blue-900/10' : ''}`}>
                                         <td className="p-4 text-center text-sm text-text-secondary font-medium">{idx + 1}</td>
                                         <td className="p-4">
-                                            <div className="font-bold text-text-main dark:text-white">{student.student_name}</div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="font-bold text-text-main dark:text-white">{student.student_name}</span>
+                                                {student.susulan && (
+                                                    <span
+                                                        className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
+                                                            student.susulan.expired
+                                                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'
+                                                                : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-400'
+                                                        }`}
+                                                        title={student.susulan.expires_at
+                                                            ? `Susulan berlaku sampai ${new Date(student.susulan.expires_at).toLocaleString('id-ID')}`
+                                                            : 'Susulan dibuka'}
+                                                    >
+                                                        Susulan{typeof student.susulan.max_percent === 'number' && student.susulan.max_percent < 100
+                                                            ? ` · maks ${student.susulan.max_percent}%`
+                                                            : ''}
+                                                        {student.susulan.expired ? ' (kedaluwarsa)' : ''}
+                                                    </span>
+                                                )}
+                                            </div>
                                             <div className="text-xs text-text-secondary">NIS: {student.nis}</div>
                                         </td>
                                         <td className="p-4">
@@ -584,7 +623,7 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
                                             })()}
                                         </td>
 
-                                        {/* Aksi: Soft/Hard Reset (hanya untuk siswa yang sudah submit) */}
+                                        {/* Aksi: Susulan (belum mulai, ujian berakhir) & Soft/Hard Reset (sudah submit) */}
                                         <td className="p-4 text-center">
                                             {student.submission_id && student.status === 'submitted' ? (
                                                 <ResetAttemptMenu
@@ -595,6 +634,33 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
                                                     busy={resettingId === student.submission_id}
                                                     label="Reset"
                                                 />
+                                            ) : student.status === 'not_started'
+                                                && (!!student.susulan || (student.exam_ended && student.exam_active !== false)) ? (
+                                                <button
+                                                    onClick={() => setSusulanTarget({
+                                                        examId: student.exam_id || examId,
+                                                        studentId: student.student_id,
+                                                        studentName: student.student_name,
+                                                        submissionId: student.susulan ? (student.submission_id || null) : null,
+                                                        durationMinutes: student.duration_minutes ?? exam.duration_minutes,
+                                                        existing: student.susulan || null,
+                                                    })}
+                                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                                        student.susulan
+                                                            ? student.susulan.expired
+                                                                ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-500/30'
+                                                                : 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-500/30'
+                                                            : 'bg-teal-100 dark:bg-teal-500/20 text-teal-700 dark:text-teal-400 hover:bg-teal-200 dark:hover:bg-teal-500/30'
+                                                    }`}
+                                                    title={student.susulan
+                                                        ? 'Kelola susulan siswa ini'
+                                                        : 'Buka kesempatan susulan setelah ujian berakhir'}
+                                                >
+                                                    <CalendarClock className="w-3.5 h-3.5" />
+                                                    {student.susulan
+                                                        ? (student.susulan.expired ? 'Perpanjang' : 'Susulan')
+                                                        : 'Susulan'}
+                                                </button>
                                             ) : (
                                                 <span className="text-text-secondary">-</span>
                                             )}
@@ -606,6 +672,17 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
                     </table>
                 </div>
             </Card>
+
+            {/* Modal Susulan — satu modal untuk semua baris */}
+            <SusulanModal
+                target={susulanTarget}
+                endpoint={susulanEndpoint}
+                onClose={() => setSusulanTarget(null)}
+                onResult={(ok, message) => {
+                    showToast(message, ok ? 'success' : 'error')
+                    if (ok) fetchMonitorData(true)
+                }}
+            />
 
             {/* Toast */}
             {toast && (

@@ -7,6 +7,7 @@ import { logGradeChange } from '@/lib/gradeHistory'
 import { needsManualGrading } from '@/lib/questionTypeUtils'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { resolveWindowExpiry } from '@/lib/examExpiry'
+import { applySusulanCap } from '@/lib/susulan'
 
 // GET single exam submission with questions and answers
 export async function GET(
@@ -58,6 +59,17 @@ export async function GET(
                 .from('students').select('id').eq('user_id', user.id).single()
             if (!student || (data as any)?.student?.id !== student.id) {
                 return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+            }
+
+            // Placeholder susulan belum boleh membaca detail submission:
+            // endpoint ini meng-embed exam.questions(*) (teks/opsi/gambar), jadi
+            // tanpa guard ini soal bisa dipelajari selama masa grant tanpa timer.
+            // Sama seperti gate /questions & PUT — start dulu.
+            if (!(data as any)?.started_at && (data as any)?.susulan_granted_at && !(data as any)?.is_submitted) {
+                return NextResponse.json({
+                    code: 'NOT_STARTED',
+                    error: 'Mulai susulan terlebih dahulu untuk membuka soal',
+                }, { status: 409 })
             }
         }
 
@@ -200,7 +212,7 @@ export async function PUT(
         // total_score/exam ikut diambil untuk audit trail grade_history.
         const { data: subCheck } = await supabase
             .from('exam_submissions')
-            .select('is_submitted, student_id, total_score, exam:exams(id, title)')
+            .select('is_submitted, student_id, total_score, max_score, susulan_max_percent, exam:exams(id, title)')
             .eq('id', id)
             .single()
         if (!subCheck) {
@@ -319,8 +331,14 @@ export async function PUT(
             .select('points_earned')
             .eq('submission_id', id)
 
-        // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float
-        const totalScore = Math.round((allAnswers?.reduce((sum, a) => sum + (a.points_earned || 0), 0) || 0) * 100) / 100
+        // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float.
+        // Cap susulan tetap berlaku saat guru mengoreksi (nilai akhir tidak boleh
+        // melewati batas yang dipilih saat grant).
+        const totalScore = applySusulanCap(
+            Math.round((allAnswers?.reduce((sum, a) => sum + (a.points_earned || 0), 0) || 0) * 100) / 100,
+            subCheck.max_score,
+            (subCheck as any).susulan_max_percent,
+        )
 
         // Update the submission record with server-calculated total_score and is_graded
         const { data, error } = await supabase

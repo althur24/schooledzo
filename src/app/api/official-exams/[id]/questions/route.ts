@@ -4,6 +4,7 @@ import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
 import { validateCorrectAnswer, gkMaxPicks } from '@/lib/questionTypeUtils'
 import { logError } from '@/lib/logError'
+import { enrollmentClassAt, type EnrollmentInterval } from '@/lib/enrollmentClassAt'
 import { canManageOfficialExam, getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
 import { resolveWindowExpiry } from '@/lib/examExpiry'
 import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
@@ -40,7 +41,7 @@ export async function GET(
         if (user.role === 'SISWA') {
             const { data: examScope } = await supabase
                 .from('official_exams')
-                .select('is_active, start_time, target_class_ids, academic_year_id')
+                .select('is_active, start_time, duration_minutes, window_end_time, target_class_ids, academic_year_id')
                 .eq('id', id)
                 .single()
             if (!examScope) {
@@ -58,27 +59,57 @@ export async function GET(
 
             const { data: mySubmission } = await supabase
                 .from('official_exam_submissions')
-                .select('id')
+                .select('id, started_at, susulan_granted_at, susulan_expires_at, is_submitted')
                 .eq('exam_id', id)
                 .eq('student_id', student.id)
                 .limit(1)
-            const hasAttempt = (mySubmission || []).length > 0
+            const firstSub = (mySubmission || [])[0] as
+                { started_at: string | null; susulan_granted_at: string | null; susulan_expires_at: string | null; is_submitted: boolean | null } | undefined
+
+            const placeholderGrant = !!firstSub && !firstSub.started_at && !!firstSub.susulan_granted_at && !firstSub.is_submitted
+            const grantExpiresMs = firstSub?.susulan_expires_at
+                ? new Date(firstSub.susulan_expires_at).getTime()
+                : NaN
+            const grantActive = placeholderGrant && Number.isFinite(grantExpiresMs) && Date.now() <= grantExpiresMs
+
+            // Placeholder grant aktif wajib start dulu (paritas ulangan).
+            if (grantActive) {
+                return NextResponse.json({ error: 'Mulai susulan terlebih dahulu untuk membuka soal' }, { status: 403 })
+            }
+            const hasAttempt = !!firstSub && !placeholderGrant
 
             if (!hasAttempt) {
-                // Kelas siswa: utamakan enrollment ACTIVE di tahun ujian (selaras gate attempt)
-                let studentClassId = student.class_id
-                const { data: enrollment } = await supabase
-                    .from('student_enrollments')
-                    .select('class_id')
-                    .eq('student_id', student.id)
-                    .eq('academic_year_id', examScope.academic_year_id)
-                    .eq('status', 'ACTIVE')
-                    .maybeSingle()
-                if (enrollment?.class_id) studentClassId = enrollment.class_id
+                // Kelas siswa = enrollment yang berlaku saat ujian dimulai
+                // (paritas grant Susulan & roster monitor historis). Fallback
+                // students.class_id untuk data legacy tanpa enrollment.
+                const targetIds: string[] = examScope.target_class_ids || []
+                let classAllowed = false
+                if (targetIds.length > 0) {
+                    const { data: enrollmentRows } = await supabase
+                        .from('student_enrollments')
+                        .select('student_id, class_id, academic_year_id, status, enrolled_at, ended_at, created_at, updated_at')
+                        .eq('student_id', student.id)
+                        .in('class_id', targetIds)
+                        .order('id')
+                    const picked = enrollmentClassAt(
+                        (enrollmentRows || []) as EnrollmentInterval[],
+                        examScope.start_time,
+                    )
+                    classAllowed = !!picked && targetIds.includes(picked.class_id)
+                }
+                if (!classAllowed) classAllowed = targetIds.includes(student.class_id)
 
-                const classAllowed = examScope.target_class_ids?.includes(studentClassId)
                 const started = examScope.start_time ? new Date(examScope.start_time).getTime() <= Date.now() : true
-                if (!classAllowed || !examScope.is_active || !started) {
+                const globalExpiry = resolveWindowExpiry(
+                    {
+                        start_time: examScope.start_time ?? null,
+                        duration_minutes: examScope.duration_minutes ?? null,
+                        window_end_time: examScope.window_end_time ?? null,
+                    },
+                    { started_at: null, timer_override_until: null },
+                )
+                const ended = globalExpiry.limited && Date.now() > globalExpiry.endAt
+                if (!classAllowed || !examScope.is_active || !started || ended) {
                     return NextResponse.json({ error: 'Ujian belum tersedia' }, { status: 403 })
                 }
             }

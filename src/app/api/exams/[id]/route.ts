@@ -100,7 +100,26 @@ export async function GET(
         // juga tidak dikirim (daftar kelas paralel sekolah bukan miliknya).
         if (user.role === 'SISWA') {
             delete (data as any).allowed_student_ids
-            return NextResponse.json(data)
+            // Penanda untuk ExamRunner: placeholder susulan harus di-start
+            // sebelum soal dimuat (mencegah baca soal tanpa timer berjalan).
+            const { data: student } = await supabase
+                .from('students').select('id').eq('user_id', user.id).single()
+            let susulanPending = false
+            if (student) {
+                const { data: pending } = await supabase
+                    .from('exam_submissions')
+                    .select('id')
+                    .eq('exam_id', id)
+                    .eq('student_id', student.id)
+                    .is('started_at', null)
+                    .not('susulan_granted_at', 'is', null)
+                    // Grant kedaluwarsa bukan "pending" — jangan memicu alur
+                    // start-sebelum-soal yang pasti ditolak server.
+                    .gt('susulan_expires_at', new Date().toISOString())
+                    .maybeSingle()
+                susulanPending = !!pending
+            }
+            return NextResponse.json({ ...(data as any), susulan_pending: susulanPending })
         }
 
         return NextResponse.json({ ...data, batch_siblings: batchSiblings })
@@ -385,6 +404,22 @@ export async function PUT(
                     error: `Tidak bisa menarik ke draft — ${submittedCount} siswa sudah mengumpulkan ${labels.ulangan.toLowerCase()} ini. Nilai historis harus dijaga.`,
                 }, { status: 409 })
             }
+
+            // Grant susulan yang belum dimulai akan menjadi tidak terlihat &
+            // tidak bisa dikelola bila ujian ditarik ke draft. Minta guru
+            // membatalkannya dulu dari Monitor Live.
+            const { count: pendingSusulan } = await supabase
+                .from('exam_submissions')
+                .select('id', { count: 'exact', head: true })
+                .eq('exam_id', id)
+                .eq('is_submitted', false)
+                .is('started_at', null)
+                .not('susulan_granted_at', 'is', null)
+            if ((pendingSusulan || 0) > 0) {
+                return NextResponse.json({
+                    error: `Tidak bisa menarik ke draft — masih ada ${pendingSusulan} grant susulan yang belum dimulai. Batalkan susulan dulu di Monitor Live.`,
+                }, { status: 409 })
+            }
         }
 
         // ── M3 (audit eksternal): optimistic-concurrency pada transisi is_active ──
@@ -626,13 +661,32 @@ export async function DELETE(
         // exam_answers secara permanen → data loss siswa. Atau FK RESTRICT
         // → 500 generic yang membingungkan. Client ada yang cek (batch member
         // remove), ada yang tidak (list page delete) — ini pelindung mutlak.
-        const { count: submissionCount } = await supabase
+        // Placeholder susulan BUKAN attempt — jangan salah menyuruh "Reset attempt".
+        // Semua baris selain placeholder grant (termasuk baris legacy started_at
+        // NULL) tetap dianggap data nyata dan memblokir delete.
+        const { count: allSubmissionCount } = await supabase
             .from('exam_submissions')
             .select('id', { count: 'exact', head: true })
             .eq('exam_id', id)
-        if ((submissionCount || 0) > 0) {
+
+        const { count: pendingSusulanCount } = await supabase
+            .from('exam_submissions')
+            .select('id', { count: 'exact', head: true })
+            .eq('exam_id', id)
+            .eq('is_submitted', false)
+            .is('started_at', null)
+            .not('susulan_granted_at', 'is', null)
+
+        const realSubmissionCount = Math.max(0, (allSubmissionCount || 0) - (pendingSusulanCount || 0))
+        if (realSubmissionCount > 0) {
             return NextResponse.json({
-                error: `Tidak bisa menghapus: sudah ada ${submissionCount} submission. Reset attempt di halaman detail dulu, lalu hapus.`
+                error: `Tidak bisa menghapus: sudah ada ${realSubmissionCount} submission. Reset attempt di halaman detail dulu, lalu hapus.`
+            }, { status: 409 })
+        }
+
+        if ((pendingSusulanCount || 0) > 0) {
+            return NextResponse.json({
+                error: `Tidak bisa menghapus: masih ada ${pendingSusulanCount} grant susulan yang belum dimulai. Batalkan susulan dulu di Monitor Live.`
             }, { status: 409 })
         }
 

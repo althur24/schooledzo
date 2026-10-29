@@ -30,6 +30,8 @@ export interface ExamData {
     max_violations: number
     subjectName: string
     exam_type?: 'UTS' | 'UAS'
+    /** Placeholder susulan: runner wajib POST start sebelum menarik soal. */
+    susulan_pending?: boolean
 }
 
 export interface RunnerSubmission {

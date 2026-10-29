@@ -9,6 +9,7 @@ import { validateTargetClassIds } from '@/lib/targetClassValidation'
 import { checkOfficialExamDuplicate } from '@/lib/officialExamDuplicateCheck'
 import { getMenuLabelsForSchool } from '@/lib/serverLabels'
 import { hasStartedSubmissions } from '@/lib/hasSubmissions'
+import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 
 // GET single official exam
 export async function GET(
@@ -70,6 +71,24 @@ export async function GET(
         // jalur detail ini sebelumnya terlewat (bocor via inspect network).
         if (ctx.user?.role === 'SISWA') {
             delete (data as any).allowed_student_ids
+            // Paritas ulangan: ExamRunner memakai flag ini untuk start dulu
+            // sebelum menarik soal pada placeholder susulan.
+            const { data: student } = await supabase
+                .from('students').select('id').eq('user_id', ctx.user.id).single()
+            let susulanPending = false
+            if (student) {
+                const { data: pending } = await supabase
+                    .from('official_exam_submissions')
+                    .select('id')
+                    .eq('exam_id', id)
+                    .eq('student_id', student.id)
+                    .is('started_at', null)
+                    .not('susulan_granted_at', 'is', null)
+                    .gt('susulan_expires_at', new Date().toISOString())
+                    .maybeSingle()
+                susulanPending = !!pending
+            }
+            return NextResponse.json({ ...(data as any), susulan_pending: susulanPending })
         }
 
         return NextResponse.json(data)
@@ -144,6 +163,26 @@ export async function PUT(
             if (!targetValidation.ok) {
                 return NextResponse.json({ error: targetValidation.errorMessage }, { status: 400 })
             }
+
+            // Grant susulan pending bergantung pada roster/kelas target. Ubah
+            // target class saat grant masih hidup = grant bisa menunjuk siswa
+            // yang sudah bukan target. Minta revoke dulu.
+            const prev = [...(examScope.target_class_ids || [])].sort().join(',')
+            const next = [...(effectiveTargetClassIds || [])].sort().join(',')
+            if (prev !== next) {
+                const { count: pendingSusulan } = await supabase
+                    .from('official_exam_submissions')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('exam_id', id)
+                    .eq('is_submitted', false)
+                    .is('started_at', null)
+                    .not('susulan_granted_at', 'is', null)
+                if ((pendingSusulan || 0) > 0) {
+                    return NextResponse.json({
+                        error: `Tidak bisa mengubah kelas target — masih ada ${pendingSusulan} grant susulan yang belum dimulai. Batalkan susulan dulu di Monitor Live.`
+                    }, { status: 409 })
+                }
+            }
         }
 
         // Validasi jendela waktu: jam tutup harus setelah jam buka (pakai start_time
@@ -171,6 +210,23 @@ export async function PUT(
                 .eq('exam_id', id)
             if (!questionCount || questionCount === 0) {
                 return NextResponse.json({ error: 'Tidak bisa mengaktifkan ujian tanpa soal. Tambahkan minimal 1 soal terlebih dahulu.' }, { status: 400 })
+            }
+        }
+
+        // Grant susulan pending tidak boleh "hilang" karena ujian ditarik ke draft
+        // (paritas guard PUT /api/exams/[id]).
+        if (is_active === false) {
+            const { count: pendingSusulan } = await supabase
+                .from('official_exam_submissions')
+                .select('id', { count: 'exact', head: true })
+                .eq('exam_id', id)
+                .eq('is_submitted', false)
+                .is('started_at', null)
+                .not('susulan_granted_at', 'is', null)
+            if ((pendingSusulan || 0) > 0) {
+                return NextResponse.json({
+                    error: `Tidak bisa menarik ke draft — masih ada ${pendingSusulan} grant susulan yang belum dimulai. Batalkan susulan dulu di Monitor Live.`,
+                }, { status: 409 })
             }
         }
 
@@ -445,14 +501,49 @@ export async function DELETE(
 
         // Kepemilikan: ADMIN hanya di sekolahnya sendiri (tenant guard di
         // canManageOfficialExam); GURU hanya boleh hapus ujian resmi pada mapel & kelas yang diajarnya
+        const { data: examScope } = await supabase
+            .from('official_exams')
+            .select('subject_id, target_class_ids, academic_year_id, school_id')
+            .eq('id', id)
+            .single()
+        if (!examScope || !(await canManageOfficialExam(user, examScope))) {
+            return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+        }
+
+        // Tahun ajaran arsip tidak boleh dihapus (paritas exams DELETE).
+        if (examScope.academic_year_id) {
+            const yearStatus = await getYearStatusById(examScope.academic_year_id)
+            if (yearStatus === 'COMPLETED') return archivedYearResponse()
+        }
+
+        // Guard DATA LOSS: jangan cascade hapus attempt/jawaban/nilai nyata.
+        // (Paritas DELETE /api/exams/[id]; pre-existing route ini tidak punya guard.)
         {
-            const { data: examScope } = await supabase
-                .from('official_exams')
-                .select('subject_id, target_class_ids, academic_year_id, school_id')
-                .eq('id', id)
-                .single()
-            if (!examScope || !(await canManageOfficialExam(user, examScope))) {
-                return NextResponse.json({ error: 'Anda tidak memiliki akses ke ujian ini' }, { status: 403 })
+            const { count: realSubmissionCount } = await supabase
+                .from('official_exam_submissions')
+                .select('id', { count: 'exact', head: true })
+                .eq('exam_id', id)
+                .or('started_at.not.is.null,is_submitted.eq.true')
+            if ((realSubmissionCount || 0) > 0) {
+                return NextResponse.json({
+                    error: `Tidak bisa menghapus: sudah ada ${realSubmissionCount} submission siswa. Nilai & jawaban historis harus dijaga.`
+                }, { status: 409 })
+            }
+        }
+
+        // Grant susulan pending jangan hilang diam-diam karena delete cascade.
+        {
+            const { count: pendingSusulanCount } = await supabase
+                .from('official_exam_submissions')
+                .select('id', { count: 'exact', head: true })
+                .eq('exam_id', id)
+                .eq('is_submitted', false)
+                .is('started_at', null)
+                .not('susulan_granted_at', 'is', null)
+            if ((pendingSusulanCount || 0) > 0) {
+                return NextResponse.json({
+                    error: `Tidak bisa menghapus: masih ada ${pendingSusulanCount} grant susulan yang belum dimulai. Batalkan susulan dulu di Monitor Live.`
+                }, { status: 409 })
             }
         }
 

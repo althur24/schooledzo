@@ -13,6 +13,7 @@ import { batchedIn } from '@/lib/batchedIn'
 import { enrollmentClassAt, EnrollmentInterval } from '@/lib/enrollmentClassAt'
 import { mergeViolations, IncomingViolation } from '@/lib/violationBatch'
 import { logGradeChange } from '@/lib/gradeHistory'
+import { applySusulanCap, SUSULAN_VALIDITY_MS } from '@/lib/susulan'
 
 // GET official exam submissions
 interface RemedialRow {
@@ -35,6 +36,7 @@ export async function GET(request: NextRequest) {
         const SUBMISSIONS_SELECT = `
                 id, exam_id, student_id, started_at, submitted_at, is_submitted,
                 total_score, max_score, violation_count, violations_log, is_graded, created_at, timer_override_until,
+                susulan_granted_at, susulan_expires_at, susulan_max_percent,
                 student:students(id, nis, class_id, user:users!students_user_id_fkey(full_name), class:classes(id, school_level, grade_level)),
                 exam:official_exams(
                     id, title, exam_type, duration_minutes, start_time, window_end_time, is_active, subject_id, school_id,
@@ -110,6 +112,14 @@ export async function GET(request: NextRequest) {
         }
 
         let result = data || []
+
+        // Placeholder susulan (belum dimulai) bukan attempt — sembunyikan dari
+        // daftar hasil/detail ujian. Baris legacy started_at NULL yang sudah
+        // submitted TETAP tampil (jangan menyembunyikan data historis).
+        // Daftar siswa memakai GET tanpa exam_id.
+        if (examId) {
+            result = result.filter((s: any) => !(!s.started_at && s.susulan_granted_at && !s.is_submitted))
+        }
 
         // Scope multi-tenant: submission hanya milik sekolah user
         if (schoolId) {
@@ -213,6 +223,8 @@ export async function GET(request: NextRequest) {
         if (['GURU', 'ADMIN', 'SISWA'].includes(user.role)) {
             const expiredSubs = result.filter((sub: any) => {
                 if (sub.is_submitted) return false
+                // Placeholder susulan (belum mulai) tidak boleh di-auto-submit.
+                if (!sub.started_at) return false
                 const examObj = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
                 const expiry = resolveWindowExpiry(
                     { start_time: examObj?.start_time ?? null, duration_minutes: examObj?.duration_minutes ?? null, window_end_time: examObj?.window_end_time ?? null },
@@ -300,6 +312,9 @@ export async function GET(request: NextRequest) {
                         )
                     `)
                     .in('exam_id', remedialIds)
+                    // Hanya attempt remedial final yang ikut merge (paritas ulangan):
+                    // placeholder susulan / attempt berjalan tidak boleh menurunkan nilai.
+                    .eq('is_submitted', true)
                     .order('id'))
 
                 if (remedialSubmissions && remedialSubmissions.length > 0) {
@@ -401,6 +416,11 @@ export async function GET(request: NextRequest) {
         // client (dashboard siswa) memakainya untuk kartu "Lanjutkan" & auto-submit.
         result = result.map((sub: any) => {
             const examObj = Array.isArray(sub.exam) ? sub.exam[0] : sub.exam
+            // Placeholder susulan belum punya timer — jangan kirim ends_at lama
+            // (jam tutup) yang memicu auto-submit prematur di dashboard siswa.
+            if (!sub.started_at && sub.susulan_granted_at && !sub.is_submitted) {
+                return { ...sub, ends_at: null }
+            }
             const expiry = resolveWindowExpiry(
                 { start_time: examObj?.start_time ?? null, duration_minutes: examObj?.duration_minutes ?? null, window_end_time: examObj?.window_end_time ?? null },
                 { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
@@ -463,7 +483,7 @@ export async function POST(request: NextRequest) {
         // amplifikasi duplikat. Constraint UNIQUE kini juga menjaga di level DB.
         const { data: existingSubmission } = await supabase
             .from('official_exam_submissions')
-            .select('id, is_submitted, question_order, started_at, violation_count, max_score, timer_override_until')
+            .select('id, is_submitted, question_order, started_at, violation_count, max_score, timer_override_until, susulan_granted_at, susulan_expires_at, susulan_max_percent')
             .eq('exam_id', exam_id)
             .eq('student_id', student.id)
             .maybeSingle()
@@ -488,8 +508,123 @@ export async function POST(request: NextRequest) {
             })
         }
 
+        // Urutan soal & max_score dihitung SEKALI — sesi baru maupun susulan.
+        const buildSessionMeta = async () => {
+            // Sort eksplisit by order_index (tiebreaker id) — urutan return embed
+            // adalah urutan fisik baris dan bisa acak (paritas fix ulangan).
+            const sortedQuestions = [...((exam as any).official_exam_questions || [])].sort((a: any, b: any) =>
+                (a.order_index ?? 0) - (b.order_index ?? 0) || String(a.id).localeCompare(String(b.id)))
+            const questionIds = sortedQuestions.map((q: any) => q.id)
+            const questionOrder = exam.is_randomized
+                ? [...questionIds].sort(() => Math.random() - 0.5)
+                : questionIds
+
+            const { data: questions, error: questionsError } = await supabase
+                .from('official_exam_questions')
+                .select('points')
+                .eq('exam_id', exam_id)
+            if (questionsError) throw questionsError
+            const maxScore = Math.round((questions?.reduce((sum: number, q: any) => sum + (q.points || 10), 0) || 0) * 100) / 100
+            return { questionOrder, maxScore }
+        }
+
+        /**
+         * Placeholder susulan (started_at NULL) mulai dikerjakan dengan durasi
+         * penuh dari sekarang lewat timer_override_until (tidak dipotong jam tutup).
+         */
+        const startSusulanAttempt = async (existing: NonNullable<typeof existingSubmission>) => {
+            if (!exam.is_active) {
+                return NextResponse.json({
+                    error: 'Ujian sudah ditarik/ditutup. Hubungi guru untuk membuka kembali.'
+                }, { status: 400 })
+            }
+            if (exam.is_remedial && Array.isArray(exam.allowed_student_ids) && exam.allowed_student_ids.length > 0
+                && !exam.allowed_student_ids.includes(student.id)) {
+                return NextResponse.json({ error: 'Anda tidak terdaftar untuk ujian remedial ini' }, { status: 403 })
+            }
+            if (!exam.duration_minutes || exam.duration_minutes <= 0) {
+                return NextResponse.json({
+                    error: 'Ujian ini tidak memiliki durasi pengerjaan yang valid. Hubungi guru.'
+                }, { status: 400 })
+            }
+            // Fail-closed: grant tanpa masa berlaku valid tidak boleh abadi.
+            const expiresMs = existing.susulan_expires_at
+                ? new Date(existing.susulan_expires_at).getTime()
+                : NaN
+            if (!Number.isFinite(expiresMs) || Date.now() > expiresMs) {
+                const expiredNowIso = new Date().toISOString()
+                const deleteExpired = supabase
+                    .from('official_exam_submissions')
+                    .delete()
+                    .eq('id', existing.id)
+                    .is('started_at', null)
+                    .eq('is_submitted', false)
+                await (existing.susulan_expires_at
+                    ? deleteExpired.lt('susulan_expires_at', expiredNowIso)
+                    : deleteExpired.is('susulan_expires_at', null))
+                return NextResponse.json({
+                    code: 'SUSULAN_EXPIRED_RETRY',
+                    error: 'Masa berlaku susulan sudah berakhir/tidak valid. Mencoba mulai seperti biasa...'
+                }, { status: 400 })
+            }
+
+            const { questionOrder, maxScore } = await buildSessionMeta()
+            const nowMs = Date.now()
+            const durationMs = (exam.duration_minutes || 0) * 60_000
+            const overrideMs = nowMs + (durationMs > 0 ? durationMs : SUSULAN_VALIDITY_MS)
+
+            const { data: started, error } = await supabase
+                .from('official_exam_submissions')
+                .update({
+                    started_at: new Date(nowMs).toISOString(),
+                    timer_override_until: new Date(overrideMs).toISOString(),
+                    question_order: questionOrder,
+                    max_score: maxScore,
+                })
+                .eq('id', existing.id)
+                .is('started_at', null)
+                .select()
+                .single()
+
+            if (error || !started) {
+                const { data: raced } = await supabase
+                    .from('official_exam_submissions')
+                    .select('id, is_submitted, question_order, started_at, violation_count, max_score, timer_override_until, susulan_granted_at, susulan_expires_at, susulan_max_percent')
+                    .eq('id', existing.id)
+                    .maybeSingle()
+                if (raced?.is_submitted) {
+                    return NextResponse.json({ error: 'Anda sudah mengumpulkan ujian ini' }, { status: 400 })
+                }
+                if (raced?.started_at) return resumeResponse(raced)
+                return NextResponse.json({ error: 'Gagal memulai susulan. Coba lagi.' }, { status: 500 })
+            }
+
+            const { data: savedAnswers } = await supabase
+                .from('official_exam_answers')
+                .select('question_id, answer')
+                .eq('submission_id', started.id)
+            const expiry = resolveWindowExpiry(
+                { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
+                { started_at: started.started_at, timer_override_until: started.timer_override_until }
+            )
+            return NextResponse.json({
+                ...started,
+                saved_answers: savedAnswers || [],
+                server_time: new Date().toISOString(),
+                ends_at: endsAtIso(expiry)
+            })
+        }
+
         if (existingSubmission?.is_submitted) {
             return NextResponse.json({ error: 'Anda sudah mengumpulkan ujian ini' }, { status: 400 })
+        }
+
+        if (existingSubmission?.started_at) {
+            return resumeResponse(existingSubmission)
+        }
+
+        if (existingSubmission?.susulan_granted_at) {
+            return startSusulanAttempt(existingSubmission)
         }
 
         if (existingSubmission) {
@@ -501,31 +636,30 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Ujian belum dibuka' }, { status: 400 })
         }
 
-        // Kelas siswa: utamakan enrollment ACTIVE di tahun aktif (selaras jalur notifikasi)
-        let studentClassId = student.class_id
-        if (schoolId) {
-            const { data: activeYears } = await supabase
-                .from('academic_years')
-                .select('id')
-                .eq('is_active', true)
-                .eq('school_id', schoolId)
-                .order('created_at', { ascending: false })
-                .limit(1)
-            const yearId = activeYears?.[0]?.id
-            if (yearId) {
-                const { data: enrollment } = await supabase
-                    .from('student_enrollments')
-                    .select('class_id')
-                    .eq('student_id', student.id)
-                    .eq('academic_year_id', yearId)
-                    .eq('status', 'ACTIVE')
-                    .maybeSingle()
-                if (enrollment?.class_id) studentClassId = enrollment.class_id
-            }
+        // Tenant guard ujian resmi.
+        if (schoolId && (exam as any).school_id && (exam as any).school_id !== schoolId) {
+            return NextResponse.json({ error: 'Ujian tidak ditemukan' }, { status: 404 })
         }
 
-        // Check if student's class is in target_class_ids
-        if (!exam.target_class_ids?.includes(studentClassId)) {
+        // Kelas siswa = enrollment yang berlaku saat ujian dimulai (sumber
+        // SAMA dengan gate soal & grant Susulan), fallback students.class_id.
+        const targetIds: string[] = exam.target_class_ids || []
+        let classAllowed = false
+        if (targetIds.length > 0) {
+            const { data: enrollmentRows } = await supabase
+                .from('student_enrollments')
+                .select('student_id, class_id, academic_year_id, status, enrolled_at, ended_at, created_at, updated_at')
+                .eq('student_id', student.id)
+                .in('class_id', targetIds)
+                .order('id')
+            const picked = enrollmentClassAt(
+                (enrollmentRows || []) as EnrollmentInterval[],
+                exam.start_time,
+            )
+            classAllowed = !!picked && targetIds.includes(picked.class_id)
+        }
+        if (!classAllowed) classAllowed = targetIds.includes(student.class_id)
+        if (!classAllowed) {
             return NextResponse.json({ error: 'Anda tidak terdaftar dalam ujian ini' }, { status: 403 })
         }
 
@@ -555,24 +689,7 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Create randomized question order if enabled
-        // Sort eksplisit by order_index (tiebreaker id) — urutan return embed
-        // adalah urutan fisik baris dan bisa acak (paritas fix ulangan).
-        const sortedQuestions = [...(exam.official_exam_questions || [])].sort((a: any, b: any) =>
-            (a.order_index ?? 0) - (b.order_index ?? 0) || String(a.id).localeCompare(String(b.id)))
-        const questionIds = sortedQuestions.map((q: any) => q.id)
-        const questionOrder = exam.is_randomized
-            ? [...questionIds].sort(() => Math.random() - 0.5)
-            : questionIds
-
-        // Calculate max score
-        const { data: questions } = await supabase
-            .from('official_exam_questions')
-            .select('points')
-            .eq('exam_id', exam_id)
-
-        // Round 2 desimal — poin soal kini bisa desimal (3.33 dsb), jumlah bisa berdebu float
-        const maxScore = Math.round((questions?.reduce((sum: number, q: any) => sum + (q.points || 10), 0) || 0) * 100) / 100
+        const { questionOrder, maxScore } = await buildSessionMeta()
 
         // Create new submission
         // K3 Security Fix: race double-POST — dua request bersamaan bisa sama-sama
@@ -597,10 +714,12 @@ export async function POST(request: NextRequest) {
             if (insertError.code === '23505') {
                 const { data: raced } = await supabase
                     .from('official_exam_submissions')
-                    .select('id, is_submitted, question_order, started_at, violation_count, max_score, timer_override_until')
+                    .select('id, is_submitted, question_order, started_at, violation_count, max_score, timer_override_until, susulan_granted_at, susulan_expires_at, susulan_max_percent')
                     .eq('exam_id', exam_id)
                     .eq('student_id', student.id)
                     .maybeSingle()
+                if (raced?.started_at) return resumeResponse(raced)
+                if (raced?.susulan_granted_at) return startSusulanAttempt(raced)
                 if (raced && !raced.is_submitted) return resumeResponse(raced)
                 if (raced?.is_submitted) {
                     return NextResponse.json({ error: 'Anda sudah mengumpulkan ujian ini' }, { status: 400 })
@@ -843,7 +962,11 @@ export async function PUT(request: NextRequest) {
                         .from('official_exam_answers')
                         .select('points_earned, is_correct')
                         .eq('submission_id', submission_id)
-                    const rescueTotal = Math.round((rescueAll || []).reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) * 100) / 100
+                    const rescueTotal = applySusulanCap(
+                        Math.round((rescueAll || []).reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) * 100) / 100,
+                        currentSubmission.max_score,
+                        currentSubmission.susulan_max_percent,
+                    )
                     const hasEssay = rescueQuestions.some(q => needsManualGrading(q.question_type))
                     const essayPending = hasEssay
                         && (rescueAll || []).some((a: any) => a.points_earned === null && a.is_correct === null)
@@ -867,6 +990,14 @@ export async function PUT(request: NextRequest) {
 
         if (currentSubmission.is_submitted) {
             return NextResponse.json({ error: 'Already submitted' }, { status: 400 })
+        }
+
+        // Placeholder susulan BELUM dimulai bukan attempt sah (paritas ulangan).
+        if (!currentSubmission.started_at && currentSubmission.susulan_granted_at) {
+            return NextResponse.json({
+                code: 'NOT_STARTED',
+                error: 'Susulan belum dimulai. Buka halaman ujian dan klik Mulai Susulan terlebih dahulu.'
+            }, { status: 409 })
         }
 
         // Penegakan batas waktu di server: mode serentak / jendela (src/lib/examExpiry.ts).
@@ -1025,8 +1156,13 @@ export async function PUT(request: NextRequest) {
                 const examQuestions = await getExamQuestionsForGrading('official_exam_questions', currentSubmission.exam_id)
                 hasEssays = hasEssays || examQuestions.some(q => needsManualGrading(q.question_type))
 
-                // Round 2 desimal — anti debu float tersimpan ke DB
-                const roundedTotal = Math.round(totalScore * 100) / 100
+                // Round 2 desimal — anti debu float tersimpan ke DB.
+                // Cap susulan diterapkan sebelum menyimpan total.
+                const roundedTotal = applySusulanCap(
+                    Math.round(totalScore * 100) / 100,
+                    currentSubmission.max_score,
+                    currentSubmission.susulan_max_percent,
+                )
                 await supabase
                     .from('official_exam_submissions')
                     .update({
@@ -1059,8 +1195,13 @@ export async function PUT(request: NextRequest) {
                 .select('points_earned')
                 .eq('submission_id', submission_id)
 
-            // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float
-            const totalScore = Math.round((allAnswers?.reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) || 0) * 100) / 100
+            // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa berdebu float.
+            // Cap susulan diterapkan sebelum menyimpan nilai akhir.
+            const totalScore = applySusulanCap(
+                Math.round((allAnswers?.reduce((sum: number, a: any) => sum + (a.points_earned || 0), 0) || 0) * 100) / 100,
+                currentSubmission.max_score,
+                currentSubmission.susulan_max_percent,
+            )
 
             const examQuestions = await getExamQuestionsForGrading('official_exam_questions', currentSubmission.exam_id)
 

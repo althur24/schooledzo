@@ -73,7 +73,11 @@ export async function GET(request: NextRequest) {
             (async () => ({ data: await batchedFetchAll('quiz_id', quizIds, (chunk) =>
                 supabase.from('quiz_submissions').select('total_score, student_id, quiz_id').in('quiz_id', chunk)) }))(),
             (async () => ({ data: await batchedFetchAll('exam_id', examIds, (chunk) =>
-                supabase.from('exam_submissions').select('total_score, student_id, exam_id').in('exam_id', chunk)) }))()
+                supabase.from('exam_submissions')
+                    .select('total_score, student_id, exam_id')
+                    .in('exam_id', chunk)
+                    // Placeholder susulan bukan attempt/nilai — jangan turunkan rata-rata.
+                    .eq('is_submitted', true)) }))()
         ])
 
         // C. Aggregate

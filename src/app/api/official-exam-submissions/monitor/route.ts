@@ -8,6 +8,7 @@ import { enrollmentClassAt, EnrollmentInterval } from '@/lib/enrollmentClassAt'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { getAnswerStats } from '@/lib/monitorAnswerStats'
 import { resolveWindowExpiry, isSweepDue, endsAtIso } from '@/lib/examExpiry'
+import { applySusulanCap } from '@/lib/susulan'
 
 export async function GET(request: NextRequest) {
     try {
@@ -193,7 +194,7 @@ export async function GET(request: NextRequest) {
                 .from('official_exam_submissions')
                 .select(`
                     id, student_id, is_submitted, is_graded, violation_count, started_at, submitted_at, timer_override_until,
-                    total_score, max_score
+                    total_score, max_score, susulan_granted_at, susulan_expires_at, susulan_max_percent
                 `)
                 .eq('exam_id', examId)
                 .in('student_id', chunk)
@@ -225,7 +226,8 @@ export async function GET(request: NextRequest) {
         const expiredSubmissionIds: string[] = []
         if (submissions) {
             for (const sub of submissions) {
-                if (!sub.is_submitted) {
+                // Placeholder susulan (belum mulai) tidak punya attempt — jangan disapu.
+                if (!sub.is_submitted && sub.started_at) {
                     const expiry = resolveWindowExpiry(
                         { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
                         { started_at: sub.started_at, timer_override_until: sub.timer_override_until }
@@ -252,7 +254,11 @@ export async function GET(request: NextRequest) {
                     const sub = submissions!.find(s => s.id === subId)
                     if (!sub) return
 
-                    const totalScore = answerStats.get(subId)?.points || 0
+                    const totalScore = applySusulanCap(
+                        answerStats.get(subId)?.points || 0,
+                        sub.max_score,
+                        (sub as any).susulan_max_percent,
+                    )
 
                     const expiry = resolveWindowExpiry(
                         { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
@@ -284,6 +290,13 @@ export async function GET(request: NextRequest) {
         let submittedCount = 0
 
         // 6. Assemble the final student progress list
+        // Batas global ujian (bukan per siswa) untuk tombol Susulan.
+        const examGlobalExpiry = resolveWindowExpiry(
+            { start_time: exam.start_time, duration_minutes: exam.duration_minutes, window_end_time: exam.window_end_time },
+            { started_at: null, timer_override_until: null }
+        )
+        const examEnded = examGlobalExpiry.limited && nowTime > examGlobalExpiry.endAt
+
         const processedStudents = students.map(student => {
             const sub = submissionMap.get(student.id)
             let status = 'not_started'
@@ -293,6 +306,10 @@ export async function GET(request: NextRequest) {
                 if (sub.is_submitted) {
                     status = 'submitted'
                     submittedCount++
+                } else if (!sub.started_at) {
+                    // Placeholder grant susulan: belum mengerjakan.
+                    status = 'not_started'
+                    notStartedCount++
                 } else {
                     status = 'working'
                     workingCount++
@@ -312,6 +329,16 @@ export async function GET(request: NextRequest) {
             }
 
             const answeredCount = sub ? (answerStats.get(sub.id)?.count || 0) : 0
+            const susulan = (sub as any)?.susulan_granted_at
+                ? {
+                    granted_at: (sub as any).susulan_granted_at as string,
+                    expires_at: ((sub as any).susulan_expires_at as string | null) ?? null,
+                    max_percent: (sub as any).susulan_max_percent as number | null,
+                    expired: !sub?.started_at
+                        && (!((sub as any).susulan_expires_at as string | null)
+                            || new Date((sub as any).susulan_expires_at).getTime() <= nowTime),
+                }
+                : null
 
             return {
                 student_id: student.id,
@@ -328,7 +355,12 @@ export async function GET(request: NextRequest) {
                 time_remaining_seconds: timeRemainingSec,
                 total_score: sub?.total_score ?? null,
                 max_score: sub?.max_score ?? null,
-                is_graded: sub?.is_graded ?? false
+                is_graded: sub?.is_graded ?? false,
+                exam_id: examId,
+                exam_ended: examEnded,
+                exam_active: !!exam.is_active,
+                duration_minutes: exam.duration_minutes,
+                susulan,
             }
         })
 

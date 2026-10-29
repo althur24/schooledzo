@@ -1,5 +1,33 @@
 # LMS YPP — Catatan Workflow
 
+## Fitur Susulan Ulangan & UTS/UAS (29 Okt 2026)
+
+Fitur make-up attempt untuk siswa **Belum Mulai** setelah ujian berakhir, dari Monitor Live guru/admin.
+
+- **Mekanisme**: baris `exam_submissions` / `official_exam_submissions` placeholder (`started_at = NULL`) dengan kolom `susulan_granted_at`, `susulan_expires_at`, `susulan_max_percent`, `susulan_granted_by` (migrasi `20261029165239_susulan_exam.sql`). Saat siswa mulai, `started_at` diisi dan `timer_override_until = now + durasi` (durasi penuh dari mulai, tidak dipotong jam tutup).
+- **Grant**: `POST /api/{exam,official-exam}-submissions/susulan` `{ exam_id, student_id, max_percent }`; `DELETE` `{ submission_id }` (hanya sebelum mulai). Guard di `src/lib/susulanGrant.ts`: tenant/owner/co-teacher, ujian sudah berakhir & aktif, siswa masih roster, remedial allow-list. Grant berlaku **7 hari**, bisa diperpanjang dengan POST ulang.
+- **Cap nilai**: `susulan_max_percent` 1–100 (100 = tanpa cap); nilai akhir = `min(nilai asli, cap% × max_score)`. Diterapkan di SEMUA jalur tulis skor: submit/force-submit/rescue (2 route), `autoCloseExpired`, monitor sweep, koreksi guru `[id]`, rescue route, dan `scripts/regrade-gk.ts`.
+- **Anti sweep**: placeholder `started_at NULL` dikecualikan dari scheduler sweep, lazy sweep GET submissions, auto-submit official, dan force-close helper — tanpa ini grant langsung tertutup nilai 0. GET submissions dengan `exam_id`/batch menyembunyikan placeholder dari daftar hasil guru; daftar siswa & dashboard tetap melihatnya (`ends_at = null`, kartu “Mulai Susulan”).
+- **UI**: tombol **Susulan** di `ExamMonitorPage` (muncul hanya `not_started` + `exam_ended` + `exam_active`), modal `SusulanModal` (nilai penuh / batasi X%), badge Susulan + cap di monitor & kartu siswa, banner cap di halaman koreksi. Dashboard siswa `checkIncomplete` menampilkan ajakan mulai susulan, bukan auto-submit.
+- **E2E**: `scripts/e2e-susulan-staging.cjs` **35/35** (grant guard/live/expired/revoke/non-owner, start pasca jam tutup, cap 80%, full 100%, official, sweep safety). Regresi: e2e-gk **153/0**, ulangan-unification **39/0**, admin-parity **24/0**, extend-time **26/0**, rescue **21/0**.
+- **Deploy**: migrasi dulu (staging + production), baru kode. Staging sudah ter-push & teruji; production belum.
+
+### Hardening pasca-audit 4-agent (29 Okt 2026)
+
+- **PUT placeholder ditolak** (`409 NOT_STARTED`) sebelum write-gate/upsert — mencegah baris `submitted` tanpa `started_at`, `max_score` NULL, dan cap fail-open.
+- **Cap fail-closed** (`src/lib/susulan.ts`): cap aktif + `max_score` tidak valid → 0; `max_score` diisi sejak grant.
+- **Remedial merge** hanya memakai submission `is_submitted=true` — placeholder/attempt berjalan tidak menurunkan nilai via AVERAGE dan tidak jadi ghost row.
+- **Filter placeholder dipersempit** ke `!started_at && susulan_granted_at`; baris legacy `started_at NULL` yang sudah submitted tetap tampil.
+- **Celah baca soal ditutup**: `GET /api/{exam,official-exam}/[id]` mengirim `susulan_pending` (SISWA, hanya grant aktif); gate `/questions` menolak placeholder aktif, memakai kelas historis/enrollment yang sama dengan grant, dan memblokir baca soal setelah ujian berakhir tanpa attempt; `GET /api/exam-submissions/[id]` menolak SISWA placeholder (`409 NOT_STARTED`) agar `exam.questions` tidak bocor; `useExamRunner` POST start dulu lalu refetch soal khusus susulan (gagal muat → layar Coba Lagi, bukan redirect).
+- **Lifecycle**: start susulan cek `is_active` + remedial allow-list; unpublish & delete exam diblokir bila ada grant pending; delete resmi memblokir attempt nyata (anti cascade data loss); tahun `COMPLETED` ditolak; grant existing boleh diperbarui walau “Tambah Waktu” menggeser jadwal; tombol kelola di monitor tampil bila grant ada.
+- **Grant kedaluwarsa**: tidak lagi membayangi start normal — placeholder dibersihkan saat start dan runner retry sebagai start normal bila jendela ujian masih terbuka.
+- **Revoke atomik** (`.select('id')`, 0 baris → 409) + UTS/UAS memakai kelas historis `enrollmentClassAt`.
+- **Validasi persen** client/server: wajib integer 1–100, field eksplisit; migrasi `20261029175838_susulan_constraints_counts.sql` menambah CHECK + RPC counts (`NOT (started_at IS NULL AND susulan_granted_at IS NOT NULL)`) + GRANT service_role.
+- **Kapasitas/error**: `max_score` dihitung dengan error handling (tidak pernah menulis 0 saat query gagal); `duration_minutes <= 0` ditolak untuk grant.
+- **Adoption legacy**: baris `started_at NULL` tanpa grant boleh diadopsi dan dinormalisasi `is_submitted:false`.
+- **UX**: dashboard punya item susulan persisten + copy berbeda (bukan “sedang mengerjakan”), prioritas attempt berjalan, prompt ulangan tetap jalan meski embed `is_active` absen; kartu siswa menampilkan expiry/cap; badge expired; banner cap di halaman hasil; KPI eksternal memfilter `is_submitted`.
+- **Test**: `scripts/e2e-susulan-staging.cjs` diperluas dengan fase F (unpublish/delete block, official), G (remedial AVERAGE), H (RPC list-counts) + PUT-before-start, detail-submission leak, gate soal, persen desimal/missing, expiry cleanup. **Belum dijalankan** karena migrasi follow-up belum di-push ke staging (menunggu izin).
+
 ## Fix 2 Bug HIGH Unifikasi Halaman Koreksi (21 Okt 2026) — pasca `6e5c201`/`59b9655`
 
 Audit 2 commit staging (`6e5c201` refactor `guru/ulangan/[id]` 3510 baris → 19 baris wrapper ke komponen admin via prop `forcedIsUlangan`; `59b9655` cleanup teks teknis + `confirm()` → custom dialog). Arsitektur unifikasi sound, tapi **2 bug HIGH silent data-loss** tidak tertangkap test (script e2e lama tidak menguji halaman koreksi).

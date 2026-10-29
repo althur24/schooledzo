@@ -490,6 +490,10 @@ export type Database = {
           started_at: string | null
           student_id: string
           submitted_at: string | null
+          susulan_expires_at: string | null
+          susulan_granted_at: string | null
+          susulan_granted_by: string | null
+          susulan_max_percent: number | null
           timer_override_until: string | null
           total_score: number | null
           violation_count: number | null
@@ -506,6 +510,10 @@ export type Database = {
           started_at?: string | null
           student_id: string
           submitted_at?: string | null
+          susulan_expires_at?: string | null
+          susulan_granted_at?: string | null
+          susulan_granted_by?: string | null
+          susulan_max_percent?: number | null
           timer_override_until?: string | null
           total_score?: number | null
           violation_count?: number | null
@@ -522,6 +530,10 @@ export type Database = {
           started_at?: string | null
           student_id?: string
           submitted_at?: string | null
+          susulan_expires_at?: string | null
+          susulan_granted_at?: string | null
+          susulan_granted_by?: string | null
+          susulan_max_percent?: number | null
           timer_override_until?: string | null
           total_score?: number | null
           violation_count?: number | null
@@ -921,6 +933,10 @@ export type Database = {
           started_at: string | null
           student_id: string
           submitted_at: string | null
+          susulan_expires_at: string | null
+          susulan_granted_at: string | null
+          susulan_granted_by: string | null
+          susulan_max_percent: number | null
           timer_override_until: string | null
           total_score: number | null
           violation_count: number | null
@@ -937,6 +953,10 @@ export type Database = {
           started_at?: string | null
           student_id: string
           submitted_at?: string | null
+          susulan_expires_at?: string | null
+          susulan_granted_at?: string | null
+          susulan_granted_by?: string | null
+          susulan_max_percent?: number | null
           timer_override_until?: string | null
           total_score?: number | null
           violation_count?: number | null
@@ -953,6 +973,10 @@ export type Database = {
           started_at?: string | null
           student_id?: string
           submitted_at?: string | null
+          susulan_expires_at?: string | null
+          susulan_granted_at?: string | null
+          susulan_granted_by?: string | null
+          susulan_max_percent?: number | null
           timer_override_until?: string | null
           total_score?: number | null
           violation_count?: number | null

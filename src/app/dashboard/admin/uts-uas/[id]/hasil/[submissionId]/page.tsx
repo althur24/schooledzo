@@ -42,6 +42,8 @@ interface SubmissionDetail {
     total_score: number
     max_score: number
     violation_count: number
+    /** Batas nilai susulan (persen); < 100 = nilai akhir dibatasi. */
+    susulan_max_percent?: number | null
     student: {
         user: { full_name: string }
         nis: string
@@ -246,6 +248,15 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
     // Round 2 desimal — jumlah skor desimal (GK proporsional) bisa menghasilkan debu float
     const currentTotalScore = Math.round(Object.values(grades).reduce((acc, curr) => acc + (curr.score || 0), 0) * 100) / 100
 
+    // Cap susulan: nilai yang disimpan server tidak melebihi batas yang dipilih guru.
+    const susulanCapPercent = typeof submission.susulan_max_percent === 'number' && submission.susulan_max_percent < 100
+        ? submission.susulan_max_percent
+        : null
+    const susulanCapActive = susulanCapPercent !== null && submission.max_score > 0
+    const cappedTotalScore = susulanCapActive
+        ? Math.min(currentTotalScore, round2(((susulanCapPercent ?? 0) / 100) * submission.max_score))
+        : currentTotalScore
+
     return (
         <div className="space-y-6 pb-24">
             {/* Header Sticky wrapper */}
@@ -257,13 +268,28 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
                     action={
                         <div className="text-right">
                             <span className="text-2xl md:text-3xl font-bold text-primary">
-                                {formatScore(currentTotalScore)}
+                                {formatScore(cappedTotalScore)}
                             </span>
                             <span className="text-sm text-text-secondary ml-1">/{formatScore(submission.max_score)}</span>
                         </div>
                     }
                 />
             </div>
+
+            {susulanCapActive && (
+                <div className="max-w-4xl mx-auto px-4">
+                    <div className="text-xs bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/20 rounded-xl p-3">
+                        <p className="font-bold text-indigo-800 dark:text-indigo-300">
+                            Siswa susulan — nilai akhir dibatasi maksimal {susulanCapPercent}%
+                        </p>
+                        <p className="text-indigo-700 dark:text-indigo-400 mt-0.5">
+                            Total skor per soal tetap bisa melebihi batas, tetapi nilai yang disimpan adalah{' '}
+                            <strong>{formatScore(cappedTotalScore)}</strong> dari {formatScore(submission.max_score)}
+                            {' '}(batas {formatScore(round2((susulanCapPercent / 100) * submission.max_score))} poin).
+                        </p>
+                    </div>
+                </div>
+            )}
 
             {/* Grading List */}
             <div className="space-y-6 max-w-4xl mx-auto px-4">
