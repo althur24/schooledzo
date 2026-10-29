@@ -26,7 +26,9 @@ Fitur make-up attempt untuk siswa **Belum Mulai** setelah ujian berakhir, dari M
 - **Kapasitas/error**: `max_score` dihitung dengan error handling (tidak pernah menulis 0 saat query gagal); `duration_minutes <= 0` ditolak untuk grant.
 - **Adoption legacy**: baris `started_at NULL` tanpa grant boleh diadopsi dan dinormalisasi `is_submitted:false`.
 - **UX**: dashboard punya item susulan persisten + copy berbeda (bukan “sedang mengerjakan”), prioritas attempt berjalan, prompt ulangan tetap jalan meski embed `is_active` absen; kartu siswa menampilkan expiry/cap; badge expired; banner cap di halaman hasil; KPI eksternal memfilter `is_submitted`.
-- **Test**: `scripts/e2e-susulan-staging.cjs` diperluas dengan fase F (unpublish/delete block, official), G (remedial AVERAGE), H (RPC list-counts) + PUT-before-start, detail-submission leak, gate soal, persen desimal/missing, expiry cleanup. **Belum dijalankan** karena migrasi follow-up belum di-push ke staging (menunggu izin).
+- **Test**: `scripts/e2e-susulan-staging.cjs` diperluas menjadi **66 asersi** (A–H): guard waktu/persen/roster, placeholder + anti-sweep, detail-submission leak, PUT-before-start, gate soal sebelum/sesudah start, cap 80%, revoke/expired cleanup, official full 100%, unpublish/delete block (ulangan+official), remedial AVERAGE, RPC counts. **66/66 PASS lokal (staging DB) dan remote Railway staging**. Regresi lokal+remote: gk **153/0**, ulangan-unification **39/0**, admin-parity **24/0**, extend-time **26/0**, rescue **21/0**, roster-asof **15/0**.
+- **Staging deploy 29 Okt 2026**: migrations `20261029165239` + `20261029175838` applied; kode commit `a4fa3ab` deployed ke Railway staging `hopeful-serenity`. E2E dijalankan dengan `E2E_BASE=https://schooledzo-production-e036.up.railway.app`.
+- **Demo fixture staging** (sengaja ditinggal untuk uji manual): guru `esus_guru` / siswa `esus_s1..s5`, password `Susulan123!`; ulangan `esus_Ulangan Berakhir` & UTS `esus_UTS Berakhir`. Bersihkan dengan `CLEANUP_ONLY=1 ENV_FILE=.env.staging node scripts/e2e-susulan-staging.cjs`.
 
 ## Fix 2 Bug HIGH Unifikasi Halaman Koreksi (21 Okt 2026) — pasca `6e5c201`/`59b9655`
 
