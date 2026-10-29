@@ -37,6 +37,26 @@ export type GkGradingMode = 'PROPORTIONAL' | 'ALL_OR_NOTHING'
  * Dipakai gradeAnswer, isCorrectOption, GradingAnswerDisplay, dan
  * normalizeQuestionTypes supaya tampilan guru = penilaian, by construction.
  */
+/**
+ * Normalisasi kolom jsonb `options` — data UI baru berupa array, tetapi data
+ * legacy/import bisa tersimpan sebagai STRING JSON ('["A","B"]'). Tanpa
+ * normalisasi, `options.map` di runner/analytics melempar TypeError.
+ */
+export function parseQuestionOptions(raw: unknown): string[] | null {
+    if (Array.isArray(raw)) return raw.map(v => String(v))
+    if (typeof raw === 'string') {
+        const trimmed = raw.trim()
+        if (!trimmed) return null
+        try {
+            const parsed = JSON.parse(trimmed)
+            return Array.isArray(parsed) ? parsed.map(v => String(v)) : null
+        } catch {
+            return null
+        }
+    }
+    return null
+}
+
 export function parseAnswerLetters(raw: string | null | undefined): string[] {
     if (!raw) return []
     const trimmed = raw.trim()

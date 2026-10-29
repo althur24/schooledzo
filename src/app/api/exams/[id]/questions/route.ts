@@ -3,7 +3,7 @@ import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { tenantMismatch, notFound, resolveExamSchoolId } from '@/lib/tenantGuard'
 import { triggerHOTSAnalysis, triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
-import { validateCorrectAnswer, gkMaxPicks } from '@/lib/questionTypeUtils'
+import { validateCorrectAnswer, gkMaxPicks, parseQuestionOptions } from '@/lib/questionTypeUtils'
 import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { syncQuestionsToBank } from '@/lib/questionBankSync'
 import { canManageExamCoTaught, getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
@@ -161,7 +161,7 @@ export async function GET(
 
         if (error) throw error
 
-        let questions = data || []
+        let questions = (data || []).map((q: any) => ({ ...q, options: parseQuestionOptions(q.options) }))
 
         // Enrich returned questions with admin review data
         if (user.role === 'GURU') {

@@ -128,7 +128,7 @@ async function main() {
     for (let i = 0; i < 10; i++) {
         examQs.push(await ins('exam_questions', {
             exam_id: exam.id, question_text: `${P}soal ${i + 1}`,
-            question_type: 'MULTIPLE_CHOICE', options: JSON.stringify(['A', 'B', 'C', 'D']),
+            question_type: 'MULTIPLE_CHOICE', options: ['A', 'B', 'C', 'D'],
             correct_answer: 'A', points: 10, order_index: i, status: 'approved',
             difficulty: 'EASY', content_format: 'plain',
         }))
@@ -169,7 +169,7 @@ async function main() {
     for (let i = 0; i < 10; i++) {
         offQs.push(await ins('official_exam_questions', {
             exam_id: off.id, question_text: `${P}uts soal ${i + 1}`,
-            question_type: 'MULTIPLE_CHOICE', options: JSON.stringify(['A', 'B', 'C', 'D']),
+            question_type: 'MULTIPLE_CHOICE', options: ['A', 'B', 'C', 'D'],
             correct_answer: 'A', points: 10, order_index: i, status: 'approved',
             difficulty: 'EASY', content_format: 'plain',
         }))

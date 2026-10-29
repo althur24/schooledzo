@@ -207,6 +207,16 @@ async function main() {
         check('D5 tombol Susulan UTS admin tampil', text.includes('Susulan'))
     })
 
+    if (process.env.START_FLOW === '1') {
+        console.log('\n[E] Start Susulan (mutasi — reseed demo setelah ini)')
+        await withBrowser(`${P}s2`, `/dashboard/siswa/ulangan/${exam.id}`, async (cdp) => {
+            const text = await bodyText(cdp)
+            check('E1 runner susulan tidak crash', !/Application error|client-side exception/i.test(text), text.slice(0, 200))
+            check('E2 soal susulan tampil', /susa_soal|Soal\s*1/i.test(text))
+            check('E3 timer/sisa waktu tampil', /\d{1,2}:\d{2}/.test(text) || /sisa waktu/i.test(text))
+        })
+    }
+
     console.log(`\n=== BROWSER SUSULAN: ${pass} pass, ${fail} fail ===`)
     process.exit(fail > 0 ? 1 : 0)
 }

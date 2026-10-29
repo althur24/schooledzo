@@ -5,7 +5,7 @@ import { tenantMismatch, notFound, findExamsOutsideSchool } from '@/lib/tenantGu
 import { resolveKkm } from '@/lib/resolveKkm'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
-import { parseAnswerLetters } from '@/lib/questionTypeUtils'
+import { parseAnswerLetters, parseQuestionOptions } from '@/lib/questionTypeUtils'
 import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 
 /**
@@ -367,8 +367,9 @@ export async function GET(
                 : 0
 
             let optionDistribution: { option: string; count: number; isCorrect: boolean }[] | undefined
-            if (q.question_type === 'MULTIPLE_CHOICE' && q.options) {
-                optionDistribution = (q.options as string[]).map((_: string, optIdx: number) => {
+            const optionList = parseQuestionOptions(q.options)
+            if (q.question_type === 'MULTIPLE_CHOICE' && optionList) {
+                optionDistribution = optionList.map((_: string, optIdx: number) => {
                     const letter = String.fromCharCode(65 + optIdx)
                     return {
                         option: letter,
@@ -382,8 +383,8 @@ export async function GET(
                     count: answersForQ.filter(a => a.answer?.toUpperCase() === val).length,
                     isCorrect: q.correct_answer?.toUpperCase() === val
                 }))
-            } else if (q.question_type === 'MULTIPLE_ANSWER' && q.options) {
-                optionDistribution = (q.options as string[]).map((_: string, optIdx: number) => {
+            } else if (q.question_type === 'MULTIPLE_ANSWER' && optionList) {
+                optionDistribution = optionList.map((_: string, optIdx: number) => {
                     const letter = String.fromCharCode(65 + optIdx)
                     // parseAnswerLetters (paritas grading) — kunci format koma/lowercase tetap terbaca
                     const correctLetters = parseAnswerLetters(q.correct_answer)

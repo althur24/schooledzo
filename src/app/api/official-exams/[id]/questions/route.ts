@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin as supabase } from '@/lib/supabase'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { triggerBulkHOTSAnalysis, isAIReviewEnabled, type TriggerHOTSInput } from '@/lib/triggerHOTS'
-import { validateCorrectAnswer, gkMaxPicks } from '@/lib/questionTypeUtils'
+import { validateCorrectAnswer, gkMaxPicks, parseQuestionOptions } from '@/lib/questionTypeUtils'
 import { logError } from '@/lib/logError'
 import { enrollmentClassAt, type EnrollmentInterval } from '@/lib/enrollmentClassAt'
 import { canManageOfficialExam, getTeacherScope, coTeachesClassSubject } from '@/lib/teacherScope'
@@ -144,7 +144,7 @@ export async function GET(
 
         if (error) throw error
 
-        let questions = data || []
+        let questions = (data || []).map((q: any) => ({ ...q, options: parseQuestionOptions(q.options) }))
 
         // Strip correct_answer untuk SISWA — H2 (keputusan produk "tahan kunci
         // s/d jam tutup", paritas official-exam-submissions/[id]): siswa yang
