@@ -135,6 +135,10 @@ async function main() {
     const guru = await ins('teachers', { user_id: guruU.id, school_id: SCHOOL })
     const guru2U = await ins('users', { username: uname('guru2'), password_hash: hash, full_name: 'Guru Lain', role: 'GURU', school_id: SCHOOL })
     const guru2 = await ins('teachers', { user_id: guru2U.id, school_id: SCHOOL })
+    const adminU = await ins('users', {
+        username: uname('admin'), password_hash: hash, full_name: 'Admin Susulan',
+        role: 'ADMIN', school_id: SCHOOL, must_change_password: false, is_locked: false,
+    })
     const kelas = await ins('classes', { name: `${P}kelas`, grade_level: 8, school_level: 'SMP', academic_year_id: YEAR })
     const ta = await ins('teaching_assignments', {
         teacher_id: guru.id, subject_id: SUBJECT, class_id: kelas.id, academic_year_id: YEAR,
@@ -337,6 +341,7 @@ async function main() {
 
     const guruCookie = await login(uname('guru'), PASS)
     const guru2Cookie = await login(uname('guru2'), PASS)
+    const adminCookie = await login(uname('admin'), PASS)
     const cookieOf = {}
     for (const s of students) cookieOf[s.key] = await login(uname(s.key), PASS)
 
@@ -692,10 +697,48 @@ async function main() {
         check('submitted tetap 1', Number(row?.submitted) === 1, JSON.stringify(row || {}))
     }
 
+    console.log('\nI. ADMIN dapat monitor & mengelola susulan')
+    {
+        const mon = await api(adminCookie, `/api/exam-submissions/monitor?exam_id=${examEnded.id}`)
+        const monBody = await mon.json()
+        const monRow = (monBody.students || []).find(s => s.student_id === s3.student.id)
+        check('admin monitor ulangan 200', mon.ok && !!monRow, JSON.stringify(monBody).slice(0, 160))
+
+        const g = await api(adminCookie, '/api/exam-submissions/susulan', {
+            method: 'POST',
+            body: JSON.stringify({ exam_id: examEnded.id, student_id: s3.student.id, max_percent: 90 }),
+        })
+        const gBody = await g.json()
+        check('admin grant susulan ulangan 200', g.ok && gBody.success === true, JSON.stringify(gBody).slice(0, 160))
+
+        const rev = await api(adminCookie, '/api/exam-submissions/susulan', {
+            method: 'DELETE',
+            body: JSON.stringify({ submission_id: gBody.submission_id }),
+        })
+        check('admin revoke susulan ulangan 200', rev.ok)
+
+        const offMon = await api(adminCookie, `/api/official-exam-submissions/monitor?exam_id=${off.id}`)
+        check('admin monitor UTS/UAS 200', offMon.ok, `status=${offMon.status}`)
+
+        const offG = await api(adminCookie, '/api/official-exam-submissions/susulan', {
+            method: 'POST',
+            body: JSON.stringify({ exam_id: off.id, student_id: s3.student.id, max_percent: 90 }),
+        })
+        const offGBody = await offG.json()
+        check('admin grant susulan UTS/UAS 200', offG.ok && offGBody.success === true, JSON.stringify(offGBody).slice(0, 160))
+
+        const offRev = await api(adminCookie, '/api/official-exam-submissions/susulan', {
+            method: 'DELETE',
+            body: JSON.stringify({ submission_id: offGBody.submission_id }),
+        })
+        check('admin revoke susulan UTS/UAS 200', offRev.ok)
+    }
+
     // ── Cleanup ──────────────────────────────────────────────────────────
     if (KEEP_FIXTURE) {
         console.log('\n=== FIXTURE DIPERTAHANKAN UNTUK UJI MANUAL ===')
         console.log(`Guru : ${uname('guru')} / ${PASS}`)
+        console.log(`Admin: ${uname('admin')} / ${PASS}`)
         console.log(`Siswa: ${uname('s1')}..${uname('s5')} / ${PASS}`)
         console.log(`Siswa luar roster: ${uname('outsider')} (tidak bisa di-grant)`)
         console.log(`Ulangan: ${P}Ulangan Berakhir  id=${examEnded.id}`)
