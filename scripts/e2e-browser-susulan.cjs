@@ -133,7 +133,7 @@ async function openSusulanModalFor(cdp, studentName) {
     return await evalInPage(cdp, `(() => {
         const row = [...document.querySelectorAll('tr')].find(r => r.innerText.includes(${JSON.stringify(studentName)}))
         if (!row) return 'row-not-found'
-        const btn = [...row.querySelectorAll('button')].find(b => b.innerText.trim().startsWith('Susulan'))
+        const btn = [...row.querySelectorAll('button')].find(b => /Buka Susulan|Kelola|Perpanjang/.test(b.innerText))
         if (!btn) return 'button-not-found'
         btn.click()
         return 'clicked'
