@@ -147,7 +147,8 @@ export default function SusulanModal({ target, endpoint, onClose, onResult }: Su
             >
                 <div className="flex items-center justify-between px-5 py-4 border-b border-secondary/10">
                     <h3 id="susulan-modal-title" className="font-bold text-text-main dark:text-white flex items-center gap-2">
-                        <CalendarClock className="w-5 h-5 text-primary" /> Susulan — {target.studentName}
+                        <CalendarClock className="w-5 h-5 text-primary" />
+                        {target.existing ? 'Kelola Susulan' : 'Buka Susulan'} — {target.studentName}
                     </h3>
                     <button
                         onClick={() => !busy && !revoking && onClose()}
@@ -160,6 +161,38 @@ export default function SusulanModal({ target, endpoint, onClose, onResult }: Su
                 </div>
 
                 <div className="p-5 space-y-5">
+                    {target.existing && (
+                        <div className={`rounded-xl border p-3 flex items-start gap-3 ${
+                            target.existing.expired
+                                ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/30'
+                                : 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-900/30'
+                        }`}>
+                            <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                                target.existing.expired
+                                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'
+                                    : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400'
+                            }`}>
+                                <CalendarClock className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                                <p className={`text-sm font-bold ${target.existing.expired ? 'text-amber-800 dark:text-amber-300' : 'text-emerald-800 dark:text-emerald-300'}`}>
+                                    {target.existing.expired ? 'Susulan sudah kedaluwarsa' : 'Susulan sedang aktif'}
+                                </p>
+                                <p className="text-xs text-text-secondary mt-0.5">
+                                    {typeof target.existing.max_percent === 'number' && target.existing.max_percent < 100
+                                        ? `Batas nilai: maksimal ${target.existing.max_percent}%`
+                                        : 'Batas nilai: tanpa cap (100%)'}
+                                    {expiresLabel ? <> · berlaku sampai <strong>{expiresLabel}</strong></> : ''}
+                                </p>
+                                <p className="text-[11px] text-text-secondary mt-1">
+                                    {target.existing.expired
+                                        ? 'Simpan untuk memperpanjang 7 hari dari sekarang.'
+                                        : 'Ubah batas nilai atau perpanjang masa berlaku. Siswa belum mulai, jadi perubahan aman.'}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="text-xs bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/20 rounded-xl p-3 space-y-1.5">
                         <p className="font-bold text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
                             <ShieldCheck className="w-4 h-4" /> Siswa mengerjakan attempt susulan
@@ -170,12 +203,6 @@ export default function SusulanModal({ target, endpoint, onClose, onResult }: Su
                         <p className="text-blue-700 dark:text-blue-400">
                             • Berlaku <strong>{SUSULAN_VALIDITY_DAYS} hari</strong> sejak dibuka/diperpanjang. Bisa dibatalkan selama siswa belum mulai.
                         </p>
-                        {expiresLabel && (
-                            <p className={`font-bold ${target.existing?.expired ? 'text-red-600 dark:text-red-400' : 'text-blue-700 dark:text-blue-400'}`}>
-                                {target.existing?.expired ? 'Grant sudah kedaluwarsa: ' : 'Sudah dibuka, berlaku sampai '}
-                                {expiresLabel}
-                            </p>
-                        )}
                     </div>
 
                     <div>
@@ -260,7 +287,7 @@ export default function SusulanModal({ target, endpoint, onClose, onResult }: Su
                             >
                                 {busy && <Loader2 className="w-4 h-4 animate-spin" />}
                                 {target.existing
-                                    ? (target.existing.expired ? 'Perpanjang Susulan' : 'Simpan Susulan')
+                                    ? (target.existing.expired ? `Perpanjang ${SUSULAN_VALIDITY_DAYS} Hari` : 'Simpan Perubahan')
                                     : 'Buka Susulan'}
                             </button>
                         </div>

@@ -14,6 +14,7 @@ import { round2, formatScore } from '@/lib/formatScore'
 import {
     Loader2, ArrowLeft, GraduationCap, Users,
     CheckCircle, AlertTriangle, Clock, PlayCircle, RefreshCw, CalendarClock,
+    PencilLine, XCircle,
 } from 'lucide-react'
 
 /**
@@ -112,6 +113,7 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
     const [resetMenuId, setResetMenuId] = useState<string | null>(null)
     // Susulan (attempt make-up setelah ujian berakhir)
     const [susulanTarget, setSusulanTarget] = useState<SusulanTarget | null>(null)
+    const [susulanRevokingId, setSusulanRevokingId] = useState<string | null>(null)
     const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
     const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -222,6 +224,31 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
         } catch {
             showToast('Gagal mereset attempt', 'error')
         } finally { setResettingId(null) }
+    }
+
+    // Batalkan grant susulan langsung dari baris (hanya sebelum siswa mulai).
+    const handleRevokeSusulan = async (student: StudentProgress) => {
+        if (!student.submission_id || !student.susulan) return
+        if (!confirm(`Batalkan susulan untuk ${student.student_name}?\n\nSiswa tidak akan bisa mengerjakan susulan ini sampai guru membukanya lagi.`)) return
+        setSusulanRevokingId(student.submission_id)
+        try {
+            const res = await fetch(susulanEndpoint, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ submission_id: student.submission_id }),
+            })
+            const data = await res.json().catch(() => null)
+            if (res.ok && data?.success) {
+                showToast(data.message || 'Susulan dibatalkan', 'success')
+                fetchMonitorData(true)
+            } else {
+                showToast(data?.error || 'Gagal membatalkan susulan', 'error')
+            }
+        } catch {
+            showToast('Gagal membatalkan susulan — periksa koneksi', 'error')
+        } finally {
+            setSusulanRevokingId(null)
+        }
     }
 
     // Close reset dropdown on outside click
@@ -503,16 +530,31 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
                                     ? Math.round((student.answered_count / student.total_questions) * 100)
                                     : 0
 
+                                const susulan = student.susulan
+                                const susulanCapLabel = typeof susulan?.max_percent === 'number' && susulan.max_percent < 100
+                                    ? `Maks ${susulan.max_percent}% nilai`
+                                    : 'Tanpa batas nilai'
+                                const susulanExpiryLabel = susulan?.expires_at
+                                    ? new Date(susulan.expires_at).toLocaleString('id-ID', {
+                                        day: '2-digit', month: 'short', year: 'numeric',
+                                        hour: '2-digit', minute: '2-digit',
+                                    })
+                                    : null
+                                const canManageSusulan = student.status === 'not_started'
+                                    && (!!susulan || (student.exam_ended && student.exam_active !== false))
+
                                 return (
                                     <tr key={student.student_id} className={`hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors ${isWorking ? 'bg-blue-50/30 dark:bg-blue-900/10' : ''}`}>
                                         <td className="p-4 text-center text-sm text-text-secondary font-medium">{idx + 1}</td>
                                         <td className="p-4">
                                             <div className="flex flex-wrap items-center gap-2">
                                                 <span className="font-bold text-text-main dark:text-white">{student.student_name}</span>
-                                                {student.susulan && (
+                                                {/* Status susulan untuk baris yang sudah mulai/selesai.
+                                                    Baris Belum Mulai menampilkan state + aksi di kolom Aksi. */}
+                                                {student.susulan && student.status !== 'not_started' && (
                                                     <span
                                                         className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                                                            student.susulan.expired
+                                                            student.susulan.expired && student.status === 'working'
                                                                 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'
                                                                 : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-400'
                                                         }`}
@@ -523,7 +565,6 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
                                                         Susulan{typeof student.susulan.max_percent === 'number' && student.susulan.max_percent < 100
                                                             ? ` · maks ${student.susulan.max_percent}%`
                                                             : ''}
-                                                        {student.susulan.expired ? ' (kedaluwarsa)' : ''}
                                                     </span>
                                                 )}
                                             </div>
@@ -634,33 +675,75 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
                                                     busy={resettingId === student.submission_id}
                                                     label="Reset"
                                                 />
-                                            ) : student.status === 'not_started'
-                                                && (!!student.susulan || (student.exam_ended && student.exam_active !== false)) ? (
-                                                <button
-                                                    onClick={() => setSusulanTarget({
-                                                        examId: student.exam_id || examId,
-                                                        studentId: student.student_id,
-                                                        studentName: student.student_name,
-                                                        submissionId: student.susulan ? (student.submission_id || null) : null,
-                                                        durationMinutes: student.duration_minutes ?? exam.duration_minutes,
-                                                        existing: student.susulan || null,
-                                                    })}
-                                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                                                        student.susulan
-                                                            ? student.susulan.expired
-                                                                ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-500/30'
-                                                                : 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-500/30'
-                                                            : 'bg-teal-100 dark:bg-teal-500/20 text-teal-700 dark:text-teal-400 hover:bg-teal-200 dark:hover:bg-teal-500/30'
-                                                    }`}
-                                                    title={student.susulan
-                                                        ? 'Kelola susulan siswa ini'
-                                                        : 'Buka kesempatan susulan setelah ujian berakhir'}
-                                                >
-                                                    <CalendarClock className="w-3.5 h-3.5" />
-                                                    {student.susulan
-                                                        ? (student.susulan.expired ? 'Perpanjang' : 'Susulan')
-                                                        : 'Susulan'}
-                                                </button>
+                                            ) : canManageSusulan ? (
+                                                susulan ? (
+                                                    // Grant sudah ada: tampilkan STATUS jelas + aksi,
+                                                    // bukan tombol yang cuma berubah warna.
+                                                    <div className="flex flex-col items-center gap-1.5 min-w-[190px]">
+                                                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                                                            susulan.expired
+                                                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'
+                                                                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400'
+                                                        }`}>
+                                                            <span className={`w-1.5 h-1.5 rounded-full ${susulan.expired ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                                                            {susulan.expired ? 'Susulan kedaluwarsa' : 'Susulan aktif'}
+                                                        </span>
+                                                        <p className="text-[10px] leading-tight text-text-secondary text-center">
+                                                            {susulanCapLabel}
+                                                            {susulanExpiryLabel ? <> · s.d. <span className="whitespace-nowrap">{susulanExpiryLabel}</span></> : ''}
+                                                        </p>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                onClick={() => setSusulanTarget({
+                                                                    examId: student.exam_id || examId,
+                                                                    studentId: student.student_id,
+                                                                    studentName: student.student_name,
+                                                                    submissionId: student.submission_id || null,
+                                                                    durationMinutes: student.duration_minutes ?? exam.duration_minutes,
+                                                                    existing: susulan,
+                                                                })}
+                                                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold transition-colors ${
+                                                                    susulan.expired
+                                                                        ? 'text-amber-700 dark:text-amber-400 hover:bg-amber-500/10'
+                                                                        : 'text-indigo-700 dark:text-indigo-400 hover:bg-indigo-500/10'
+                                                                }`}
+                                                                title={susulan.expired
+                                                                    ? 'Perpanjang masa berlaku susulan'
+                                                                    : 'Ubah batas nilai / perpanjang susulan'}
+                                                            >
+                                                                <PencilLine className="w-3 h-3" />
+                                                                {susulan.expired ? 'Perpanjang' : 'Kelola'}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleRevokeSusulan(student)}
+                                                                disabled={susulanRevokingId === student.submission_id}
+                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                                                                title="Batalkan susulan (hanya sebelum siswa mulai)"
+                                                            >
+                                                                {susulanRevokingId === student.submission_id
+                                                                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                                                                    : <XCircle className="w-3 h-3" />}
+                                                                Batalkan
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        onClick={() => setSusulanTarget({
+                                                            examId: student.exam_id || examId,
+                                                            studentId: student.student_id,
+                                                            studentName: student.student_name,
+                                                            submissionId: null,
+                                                            durationMinutes: student.duration_minutes ?? exam.duration_minutes,
+                                                            existing: null,
+                                                        })}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-teal-600 text-white hover:bg-teal-700 transition-colors shadow-sm"
+                                                        title="Buka kesempatan susulan setelah ujian berakhir"
+                                                    >
+                                                        <CalendarClock className="w-3.5 h-3.5" />
+                                                        Buka Susulan
+                                                    </button>
+                                                )
                                             ) : (
                                                 <span className="text-text-secondary">-</span>
                                             )}

@@ -150,7 +150,7 @@ async function main() {
         const text = await bodyText(cdp)
         check('A1 monitor guru termuat', text.includes('Progress Siswa'))
         check('A2 siswa demo tampil', text.includes('Siswa Demo s1'))
-        check('A3 tombol Susulan tampil', text.includes('Susulan'))
+        check('A3 tombol Buka Susulan tampil untuk siswa tanpa grant', text.includes('Buka Susulan'))
 
         const clicked = await openSusulanModalFor(cdp, 'Siswa Demo s1')
         await sleep(700)
@@ -161,8 +161,10 @@ async function main() {
         await closeModalIfAny(cdp)
 
         const after = await bodyText(cdp)
-        check('A7 badge/aksi grant expired tampil', after.includes('kedaluwarsa') || after.includes('Perpanjang'))
-        check('A8 siswa submit tampil Selesai', after.includes('Selesai'))
+        check('A7 status/aksi grant aktif tampil (Susulan aktif + Kelola)', after.includes('Susulan aktif') && after.includes('Kelola'))
+        check('A8 detail cap grant aktif tampil', after.includes('Maks 80% nilai'))
+        check('A9 status/aksi grant expired tampil', after.includes('Susulan kedaluwarsa') && after.includes('Perpanjang'))
+        check('A10 siswa submit tampil Selesai', after.includes('Selesai'))
     })
 
     console.log('\n[B] Siswa dengan grant aktif')
