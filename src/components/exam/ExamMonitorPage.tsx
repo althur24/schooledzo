@@ -7,6 +7,8 @@ import { Card } from '@/components/ui'
 import ResetAttemptMenu from '@/components/exam/ResetAttemptMenu'
 import ExtEndTimeMenu from '@/components/exam/ExtEndTimeMenu'
 import SusulanModal, { type SusulanTarget } from '@/components/exam/SusulanModal'
+import SusulanBatchModal, { type SusulanBatchStudent } from '@/components/exam/SusulanBatchModal'
+import StudentSearchInput from '@/components/StudentSearchInput'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
 import { labelForGradeType } from '@/lib/labels'
 import { getOfficialExamStatus } from '@/lib/exam'
@@ -114,6 +116,8 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
     // Susulan (attempt make-up setelah ujian berakhir)
     const [susulanTarget, setSusulanTarget] = useState<SusulanTarget | null>(null)
     const [susulanRevokingId, setSusulanRevokingId] = useState<string | null>(null)
+    const [batchSusulanOpen, setBatchSusulanOpen] = useState(false)
+    const [nameSearch, setNameSearch] = useState('')
     const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
     const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -320,11 +324,29 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
         return a.student_name.localeCompare(b.student_name)
     })
 
+    const nameQuery = nameSearch.trim().toLowerCase()
     const filteredStudents = sortedStudents.filter(s => {
         if (classFilter && s.class_name !== classFilter) return false;
         if (enableStatusFilter && statusFilter && s.status !== statusFilter) return false;
+        if (nameQuery && !s.student_name.toLowerCase().includes(nameQuery)) return false;
         return true;
     })
+
+    // Siswa yang bisa dibuka susulannya dari tombol header (belum mulai, ujian
+    // member sudah berakhir & masih aktif). Guru sudah ter-scope oleh API monitor.
+    const eligibleBatchStudents: SusulanBatchStudent[] = students
+        .filter(s => s.status === 'not_started' && s.exam_ended && s.exam_active !== false)
+        .map(s => ({
+            studentId: s.student_id,
+            studentName: s.student_name,
+            nis: s.nis,
+            className: s.class_name,
+            examId: s.exam_id || null,
+            durationMinutes: s.duration_minutes ?? exam.duration_minutes,
+            susulan: s.susulan || null,
+        }))
+    const eligibleToOpen = eligibleBatchStudents.filter(s => !s.susulan || s.susulan.expired).length
+    const alreadyOpenedCount = eligibleBatchStudents.length - eligibleToOpen
 
     // Timer display logic
     const formatTimeRemaining = (seconds: number) => {
@@ -391,7 +413,20 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
                     </p>
                 </div>
 
-                <div className="flex items-center gap-4 bg-white dark:bg-surface-dark px-4 py-3 rounded-2xl shadow-sm border border-secondary/20">
+                <div className="flex flex-wrap items-center gap-3 bg-white dark:bg-surface-dark px-4 py-3 rounded-2xl shadow-sm border border-secondary/20">
+                    {eligibleBatchStudents.length > 0 && (
+                        <button
+                            onClick={() => setBatchSusulanOpen(true)}
+                            className="inline-flex items-center gap-2 px-3.5 py-2 bg-primary hover:bg-primary-dark text-white rounded-xl text-xs font-bold shadow-sm transition-colors"
+                            title={`${eligibleToOpen} siswa perlu dibuka${alreadyOpenedCount > 0 ? `, ${alreadyOpenedCount} sudah punya susulan` : ''}`}
+                        >
+                            <CalendarClock className="w-4 h-4" />
+                            Buka Susulan
+                            <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px] font-black">
+                                {eligibleToOpen > 0 ? eligibleToOpen : alreadyOpenedCount}
+                            </span>
+                        </button>
+                    )}
                     <ExtEndTimeMenu
                         endpoint={mode === 'ulangan' ? '/api/exam-submissions/extend-time' : '/api/official-exam-submissions/extend-time'}
                         extraBody={{ exam_id: examId, ...(mode === 'ulangan' && batch ? { batch: true } : {}) }}
@@ -454,9 +489,16 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
             {/* Main Table */}
             <Card padding="p-0" className="overflow-hidden bg-white dark:bg-surface-dark border shadow-sm">
                 <div className="p-4 border-b border-secondary/10 flex flex-col sm:flex-row justify-between items-center gap-4 bg-secondary/5">
-                    <h2 className="text-lg font-bold text-text-main dark:text-white flex items-center gap-2">
-                        <GraduationCap className="w-5 h-5 text-primary" /> Progress Siswa
-                    </h2>
+                    <div className="flex items-center gap-3">
+                        <h2 className="text-lg font-bold text-text-main dark:text-white flex items-center gap-2">
+                            <GraduationCap className="w-5 h-5 text-primary" /> Progress Siswa
+                        </h2>
+                        {nameQuery && (
+                            <span className="text-xs font-medium text-text-secondary">
+                                {filteredStudents.length} dari {students.length} siswa
+                            </span>
+                        )}
+                    </div>
 
                     <div className="flex flex-col sm:flex-row gap-3">
                         {/* Class Filter */}
@@ -497,6 +539,13 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
                                 </select>
                             </div>
                         )}
+
+                        {/* Pencarian nama siswa */}
+                        <StudentSearchInput
+                            value={nameSearch}
+                            onChange={setNameSearch}
+                            className="w-full sm:w-60"
+                        />
                     </div>
                 </div>
 
@@ -761,6 +810,19 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
                 target={susulanTarget}
                 endpoint={susulanEndpoint}
                 onClose={() => setSusulanTarget(null)}
+                onResult={(ok, message) => {
+                    showToast(message, ok ? 'success' : 'error')
+                    if (ok) fetchMonitorData(true)
+                }}
+            />
+
+            {/* Modal Susulan Massal — tombol header Monitor Live */}
+            <SusulanBatchModal
+                open={batchSusulanOpen}
+                students={eligibleBatchStudents}
+                fallbackExamId={examId}
+                endpoint={susulanEndpoint}
+                onClose={() => setBatchSusulanOpen(false)}
                 onResult={(ok, message) => {
                     showToast(message, ok ? 'success' : 'error')
                     if (ok) fetchMonitorData(true)

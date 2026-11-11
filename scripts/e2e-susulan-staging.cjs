@@ -734,6 +734,59 @@ async function main() {
         check('admin revoke susulan UTS/UAS 200', offRev.ok)
     }
 
+    console.log('\nJ. Susulan massal (batch)')
+    {
+        const ids = [s3.student.id, s5.student.id]
+        const res = await api(guruCookie, '/api/exam-submissions/susulan', {
+            method: 'POST',
+            body: JSON.stringify({ exam_id: examEnded.id, student_ids: ids, max_percent: 75 }),
+        })
+        const body = await res.json()
+        check('batch 200 + 2 dibuka', res.ok && body.success === true && body.opened_count === 2, JSON.stringify(body).slice(0, 200))
+
+        const { data: rows } = await supabase.from('exam_submissions')
+            .select('student_id, started_at, is_submitted, susulan_max_percent')
+            .eq('exam_id', examEnded.id)
+            .in('student_id', ids)
+        check('batch membuat 2 placeholder cap 75',
+            (rows || []).length === 2 && rows.every(r => r.started_at === null && r.is_submitted === false && r.susulan_max_percent === 75),
+            JSON.stringify(rows))
+
+        const res2 = await api(guruCookie, '/api/exam-submissions/susulan', {
+            method: 'POST',
+            body: JSON.stringify({ exam_id: examEnded.id, student_ids: ids, max_percent: 100 }),
+        })
+        const body2 = await res2.json()
+        check('batch ulang → 2 diperbarui, 0 dibuka', res2.ok && body2.updated_count === 2 && body2.opened_count === 0, JSON.stringify(body2).slice(0, 200))
+
+        const mixed = await api(guruCookie, '/api/exam-submissions/susulan', {
+            method: 'POST',
+            body: JSON.stringify({ exam_id: examEnded.id, student_ids: [s1.student.id, s3.student.id], max_percent: 100 }),
+        })
+        const mixedBody = await mixed.json()
+        check('batch campuran: siswa sudah submit dilewati', mixed.ok && mixedBody.skipped_count >= 1 && mixedBody.failed_count === 0, JSON.stringify(mixedBody).slice(0, 200))
+
+        const outsider = await api(guruCookie, '/api/exam-submissions/susulan', {
+            method: 'POST',
+            body: JSON.stringify({ exam_id: examEnded.id, student_ids: [outsiderStudent.id], max_percent: 100 }),
+        })
+        const outsiderBody = await outsider.json()
+        check('batch siswa luar roster → dilewati', outsider.ok && outsiderBody.skipped_count === 1, JSON.stringify(outsiderBody).slice(0, 160))
+
+        const badPct = await api(guruCookie, '/api/exam-submissions/susulan', {
+            method: 'POST',
+            body: JSON.stringify({ exam_id: examEnded.id, student_ids: ids, max_percent: 0 }),
+        })
+        check('batch persen invalid → 400', badPct.status === 400, `status=${badPct.status}`)
+
+        const many = Array.from({ length: 201 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`)
+        const tooMany = await api(guruCookie, '/api/exam-submissions/susulan', {
+            method: 'POST',
+            body: JSON.stringify({ exam_id: examEnded.id, student_ids: many, max_percent: 100 }),
+        })
+        check('batch >200 siswa ditolak 400', tooMany.status === 400, `status=${tooMany.status}`)
+    }
+
     // ── Cleanup ──────────────────────────────────────────────────────────
     if (KEEP_FIXTURE) {
         console.log('\n=== FIXTURE DIPERTAHANKAN UNTUK UJI MANUAL ===')

@@ -5,6 +5,7 @@ import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '
 import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
 import { batchedIn } from '@/lib/batchedIn'
 import { fetchAllRows } from '@/lib/fetchAllRows'
+import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
 import { createAdminClient } from '@/lib/supabase'
 
 const supabase = createAdminClient()
@@ -105,6 +106,32 @@ export async function POST(req: NextRequest) {
             )
         }
 
+        // 2a. Guard integritas Susulan: jangan ganti soal saat ada siswa yang
+        // SEDANG mengerjakan target — soal berubah = cap/nilai tidak sinkron.
+        // Grant yang belum dimulai (placeholder) boleh dilanjutkan, tapi
+        // max_score-nya di-refresh setelah copy (lihat langkah 2b).
+        {
+            // Hanya attempt BERJALAN (sudah mulai, belum submit) yang memblokir.
+            // Yang sudah selesai submit tidak memakai soal lagi — memperbaiki
+            // soal batch yang sebagian kelasnya sudah selesai tetap boleh.
+            const busy = await batchedIn<{ exam_id: string }>(
+                'exam_id', target_exam_ids,
+                (chunk) => supabase
+                    .from('exam_submissions')
+                    .select('exam_id')
+                    .in('exam_id', chunk)
+                    .not('started_at', 'is', null)
+                    .eq('is_submitted', false)
+                    .order('id'))
+            const busyTargets = [...new Set((busy || []).map(r => r.exam_id))]
+            if (busyTargets.length > 0) {
+                return NextResponse.json({
+                    error: `Tidak bisa mengganti soal: ${busyTargets.length} ujian sedang dikerjakan siswa. Tunggu sampai selesai atau gunakan Reset.`,
+                    blocked_exam_ids: busyTargets,
+                }, { status: 409 })
+            }
+        }
+
         // 2. Copy questions to each target (per-target error isolation).
         // Insert-first, delete-after: kalau insert gagal, soal lama di target tetap utuh.
         let totalCopied = 0
@@ -170,10 +197,36 @@ export async function POST(req: NextRequest) {
                 }
 
                 totalCopied += questionsForTarget.length
+                // D1: soal target berubah → buang cache grading agar autosave
+                // berikutnya memakai kunci/poin terbaru (bukan versi lama 10 mnt).
+                invalidateExamQuestions(targetId)
             } catch (targetError) {
                 console.error(`Unexpected error for target ${targetId}:`, targetError)
                 failedTargets.push(targetId)
             }
+        }
+
+        // 2b. Refresh max_score pada placeholder Susulan target yang sukses
+        // disalin — poin soal bisa berubah, cap susulan harus tetap akurat.
+        try {
+            const successTargets = target_exam_ids.filter(id => !failedTargets.includes(id))
+            if (successTargets.length > 0) {
+                // Poin 0 legacy dihitung 0 (bukan fallback 1) agar max_score cap
+                // tidak lebih tinggi dari nilai sebenarnya.
+                const totalPoints = (sourceQuestions || []).reduce(
+                    (sum: number, q: { points?: number | null }) =>
+                        sum + (typeof q.points === 'number' ? q.points : 1), 0)
+                const maxScore = Math.round(totalPoints * 100) / 100
+                await supabase
+                    .from('exam_submissions')
+                    .update({ max_score: maxScore })
+                    .in('exam_id', successTargets)
+                    .is('started_at', null)
+                    .not('susulan_granted_at', 'is', null)
+                    .eq('is_submitted', false)
+            }
+        } catch (refreshErr) {
+            console.error('Gagal refresh max_score placeholder susulan:', refreshErr)
         }
 
         // 3. also_publish untuk target yang berhasil disalin — WAJIB mengikuti

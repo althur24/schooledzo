@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
         const { data: exam, error: examError } = await supabase
             .from('official_exams')
             .select(`
-                id, title, exam_type, duration_minutes, start_time, window_end_time, is_active, max_violations, subject_id, target_class_ids, is_remedial, allowed_student_ids,
+                id, title, exam_type, duration_minutes, start_time, window_end_time, is_active, max_violations, subject_id, target_class_ids, is_remedial, allowed_student_ids, academic_year_id,
                 subject:subjects(id, name, kkm, school_id)
             `)
             .eq('id', examId)
@@ -85,18 +85,26 @@ export async function GET(request: NextRequest) {
                 return NextResponse.json({ error: 'Teacher profile not found' }, { status: 404 })
             }
 
-            const { data: activeYear } = await supabase
-                .from('academic_years')
-                .select('id')
-                .eq('is_active', true)
-                .eq('school_id', schoolId)
-                .single()
+            // Tahun = tahun UJIAN (bukan tahun aktif) — agar guru yang mengampu
+            // kelas target pada tahun historis tetap melihat roster/tombol yang
+            // benar (paritas scope grant Susulan). Fallback ke tahun aktif bila
+            // ujian tanpa academic_year_id (data lama).
+            let scopeYearId = (exam as any).academic_year_id as string | null
+            if (!scopeYearId) {
+                const { data: activeYear } = await supabase
+                    .from('academic_years')
+                    .select('id')
+                    .eq('is_active', true)
+                    .eq('school_id', schoolId)
+                    .maybeSingle()
+                scopeYearId = activeYear?.id ?? null
+            }
 
             const { data: assignments } = await supabase
                 .from('teaching_assignments')
                 .select('class_id')
                 .eq('teacher_id', teacher.id)
-                .eq('academic_year_id', activeYear?.id || '')
+                .eq('academic_year_id', scopeYearId || '')
                 .eq('subject_id', exam.subject_id)
 
             const teacherClassIds = assignments?.map(a => a.class_id) || []

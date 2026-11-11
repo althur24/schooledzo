@@ -17,6 +17,7 @@
 require('dotenv').config({ path: process.env.ENV_FILE || '.env.staging' })
 const { createClient } = require('@supabase/supabase-js')
 const bcrypt = require('bcrypt')
+const crypto = require('crypto')
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 const APP_BASE = process.env.DEMO_BASE || 'https://schooledzo-production-e036.up.railway.app'
@@ -95,27 +96,32 @@ async function main() {
     })
     const guru = await ins('teachers', { user_id: guruU.id, school_id: SCHOOL })
     const kelas = await ins('classes', { name: `${P}kelas`, grade_level: 8, school_level: 'SMP', academic_year_id: YEAR })
+    const kelas2 = await ins('classes', { name: `${P}kelas 2`, grade_level: 8, school_level: 'SMP', academic_year_id: YEAR })
     const ta = await ins('teaching_assignments', {
         teacher_id: guru.id, subject_id: SUBJECT, class_id: kelas.id, academic_year_id: YEAR,
     })
+    const ta2 = await ins('teaching_assignments', {
+        teacher_id: guru.id, subject_id: SUBJECT, class_id: kelas2.id, academic_year_id: YEAR,
+    })
 
     const students = []
-    for (const [i, label] of ['s1', 's2', 's3', 's4'].entries()) {
+    for (const [i, label] of ['s1', 's2', 's3', 's4', 's5', 's6'].entries()) {
+        const targetClass = i < 4 ? kelas : kelas2
         const u = await ins('users', {
             username: uname(label), password_hash: hash, full_name: `Siswa Demo ${label}`,
             role: 'SISWA', school_id: SCHOOL, must_change_password: false, is_locked: false,
         })
         const s = await ins('students', {
-            user_id: u.id, nis: `${Date.now()}${i}`.slice(-9), class_id: kelas.id,
+            user_id: u.id, nis: `${Date.now()}${i}`.slice(-9), class_id: targetClass.id,
             school_id: SCHOOL, school_level: 'SMP', status: 'ACTIVE',
         })
         await ins('student_enrollments', {
-            student_id: s.id, class_id: kelas.id, academic_year_id: YEAR, status: 'ACTIVE',
+            student_id: s.id, class_id: targetClass.id, academic_year_id: YEAR, status: 'ACTIVE',
             enrolled_at: new Date(Date.now() - 40 * 86400000).toISOString(),
         })
         students.push({ label, user: u, student: s })
     }
-    const [s1, s2, s3, s4] = students
+    const [s1, s2, s3, s4, s5, s6] = students
 
     const exam = await ins('exams', {
         teaching_assignment_id: ta.id,
@@ -159,11 +165,53 @@ async function main() {
         susulan_max_percent: 80, susulan_granted_by: guruU.id,
     })
 
+    // ── Ujian BATCH 2 kelas (untuk uji tombol Buka Susulan multi-kelas) ──
+    const batchId = crypto.randomUUID()
+    const batchA = await ins('exams', {
+        teaching_assignment_id: ta.id, title: `${P}Ulangan Batch`,
+        start_time: new Date(Date.now() - 3 * 3600000).toISOString(),
+        duration_minutes: 60, is_active: true, max_violations: 3,
+        show_results_immediately: true, is_randomized: false, batch_id: batchId,
+    })
+    const batchB = await ins('exams', {
+        teaching_assignment_id: ta2.id, title: `${P}Ulangan Batch`,
+        start_time: new Date(Date.now() - 3 * 3600000).toISOString(),
+        duration_minutes: 60, is_active: true, max_violations: 3,
+        show_results_immediately: true, is_randomized: false, batch_id: batchId,
+    })
+    const batchQs = []
+    for (let i = 0; i < 5; i++) {
+        batchQs.push(await ins('exam_questions', {
+            exam_id: batchA.id, question_text: `${P}batch soal ${i + 1}`,
+            question_type: 'MULTIPLE_CHOICE', options: ['A', 'B', 'C', 'D'],
+            correct_answer: 'A', points: 20, order_index: i, status: 'approved',
+            difficulty: 'EASY', content_format: 'plain',
+        }))
+    }
+    const batchQsB = []
+    for (let i = 0; i < 5; i++) {
+        batchQsB.push(await ins('exam_questions', {
+            exam_id: batchB.id, question_text: `${P}batch soal ${i + 1}`,
+            question_type: 'MULTIPLE_CHOICE', options: ['A', 'B', 'C', 'D'],
+            correct_answer: 'A', points: 20, order_index: i, status: 'approved',
+            difficulty: 'EASY', content_format: 'plain',
+        }))
+    }
+    const batchQOrderB = batchQsB.map(q => q.id)
+    // s5 (kelas 2) sudah punya susulan aktif cap 90 → guru bisa lihat grouping.
+    await ins('exam_submissions', {
+        exam_id: batchB.id, student_id: s5.student.id, started_at: null, is_submitted: false,
+        question_order: batchQOrderB, max_score: 100, total_score: 0, is_graded: false,
+        susulan_granted_at: nowIso, susulan_expires_at: futureIso,
+        susulan_max_percent: 90, susulan_granted_by: guruU.id,
+    })
+    // s1 (kelas 1) & s6 (kelas 2) belum dibuka → muncul tercentang di modal batch.
+
     const off = await ins('official_exams', {
         school_id: SCHOOL, academic_year_id: YEAR, subject_id: SUBJECT, exam_type: 'UTS',
         title: `${P}UTS Berakhir`, start_time: new Date(Date.now() - 3 * 3600000).toISOString(),
         duration_minutes: 60, is_active: true, max_violations: 3,
-        target_class_ids: [kelas.id], created_by: guruU.id, show_results_immediately: true,
+        target_class_ids: [kelas.id, kelas2.id], created_by: guruU.id, show_results_immediately: true,
     })
     const offQs = []
     for (let i = 0; i < 10; i++) {
@@ -196,6 +244,9 @@ async function main() {
     console.log(`Siswa : ${uname('s1')} .. ${uname('s4')} / ${PASS}`)
     console.log(`Ulangan: ${exam.title}  id=${exam.id}`)
     console.log(`UTS    : ${off.title}  id=${off.id}`)
+    console.log(`Batch  : ${P}Ulangan Batch        id=${batchA.id} (kelas 1) & ${batchB.id} (kelas 2)`)
+    console.log(`Monitor batch (guru) : /dashboard/guru/ulangan/${batchA.id}/monitor?batch=1`)
+    console.log(`Monitor batch (admin): /dashboard/admin/uts-uas/${batchA.id}/monitor?type=ulangan&batch=1`)
     console.log(`Monitor guru ulangan : /dashboard/guru/ulangan/${exam.id}/monitor`)
     console.log(`Monitor admin ulangan: /dashboard/admin/uts-uas/${exam.id}/monitor?type=ulangan`)
     console.log(`Monitor guru/admin UTS: /dashboard/guru/uts-uas/${off.id}/monitor | /dashboard/admin/uts-uas/${off.id}/monitor`)

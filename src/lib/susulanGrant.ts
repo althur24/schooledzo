@@ -32,8 +32,21 @@ export interface SusulanAuthContext {
 }
 
 export type SusulanGrantResult =
-    | { ok: true; submissionId: string; expiresAt: string; maxPercent: number }
+    | { ok: true; submissionId: string; expiresAt: string; maxPercent: number; created: boolean }
     | { ok: false; status: number; error: string }
+
+/**
+ * Konteks grant yang HANYA bergantung pada ujian (bukan siswa). Di-resolve
+ * sekali per request (single maupun batch 200 siswa) agar tidak mengulang
+ * query exam/scope/tahun/max_score untuk tiap siswa.
+ */
+export interface SusulanGrantContext {
+    exam: ExamAuthRow
+    ulanganTa: UlanganTaAuth | null
+    maxScore: number
+    /** Scope guru tahun ujian (null untuk ADMIN) — dipakai ulang per siswa. */
+    teacherScope: Awaited<ReturnType<typeof getTeacherScope>> | null
+}
 
 export type SusulanRevokeResult = { ok: true } | { ok: false; status: number; error: string }
 
@@ -168,7 +181,7 @@ async function authorizeExam(
     kind: SusulanKind,
     examId: string,
     ctx: SusulanAuthContext,
-): Promise<{ ok: true; exam: ExamAuthRow; ulanganTa: UlanganTaAuth | null } | { ok: false; status: number; error: string }> {
+): Promise<{ ok: true; exam: ExamAuthRow; ulanganTa: UlanganTaAuth | null; teacherScope: Awaited<ReturnType<typeof getTeacherScope>> | null } | { ok: false; status: number; error: string }> {
     if (kind === 'exam') {
         const { data, error } = await supabase
             .from('exams')
@@ -191,16 +204,17 @@ async function authorizeExam(
             return { ok: false, status: 404, error: 'Ulangan tidak ditemukan' }
         }
 
+        let teacherScope: Awaited<ReturnType<typeof getTeacherScope>> | null = null
         if (ctx.role === 'GURU') {
-            const scope = await getTeacherScope(ctx.userId, ta?.academic_year_id ?? null)
-            if (!ownsTeachingAssignment(scope, ta?.teacher_id) && !coTeachesClassSubject(scope, ta?.subject_id, ta?.class_id)) {
+            teacherScope = await getTeacherScope(ctx.userId, ta?.academic_year_id ?? null)
+            if (!ownsTeachingAssignment(teacherScope, ta?.teacher_id) && !coTeachesClassSubject(teacherScope, ta?.subject_id, ta?.class_id)) {
                 return { ok: false, status: 403, error: 'Anda tidak memiliki akses ke ulangan ini' }
             }
         } else if (ctx.role !== 'ADMIN') {
             return { ok: false, status: 403, error: 'Forbidden' }
         }
 
-        return { ok: true, exam: row, ulanganTa: ta }
+        return { ok: true, exam: row, ulanganTa: ta, teacherScope }
     }
 
     const { data, error } = await supabase
@@ -219,10 +233,11 @@ async function authorizeExam(
         return { ok: false, status: 404, error: 'Ujian tidak ditemukan' }
     }
 
+    let teacherScope: Awaited<ReturnType<typeof getTeacherScope>> | null = null
     if (ctx.role === 'GURU') {
-        const scope = await getTeacherScope(ctx.userId, exam.academic_year_id ?? null)
+        teacherScope = await getTeacherScope(ctx.userId, exam.academic_year_id ?? null)
         const canRead = (exam.target_class_ids || []).some((cid: string) =>
-            coTeachesClassSubject(scope, exam.subject_id, cid),
+            coTeachesClassSubject(teacherScope, exam.subject_id, cid),
         )
         if (!canRead) {
             return { ok: false, status: 403, error: 'Anda tidak memiliki akses ke ujian ini' }
@@ -231,7 +246,7 @@ async function authorizeExam(
         return { ok: false, status: 403, error: 'Forbidden' }
     }
 
-    return { ok: true, exam, ulanganTa: null }
+    return { ok: true, exam, ulanganTa: null, teacherScope }
 }
 
 /** Siswa harus masih menjadi anggota roster ujian (paritas dengan roster Monitor Live). */
@@ -272,33 +287,21 @@ async function resolveRosterClassId(
 }
 
 /**
- * Buka/perpanjang susulan untuk satu siswa. Idempoten untuk placeholder yang
- * belum dimulai (cap & masa berlaku diperbarui).
+ * Resolve konteks grant yang hanya bergantung pada ujian — SEKALI per request.
+ * Dipakai baik oleh grant single maupun batch sehingga aturan tidak ditulis
+ * dua kali dan query exam/scope/tahun/max_score tidak diulang per siswa.
  */
-export async function grantSusulan(
+export async function resolveSusulanGrantContext(
     kind: SusulanKind,
-    params: { examId: string; studentId: string; maxPercent: unknown },
+    examId: string,
     ctx: SusulanAuthContext,
-): Promise<SusulanGrantResult> {
-    const { examId, studentId } = params
-    if (!examId || !studentId) {
-        return { ok: false, status: 400, error: 'exam_id dan student_id wajib diisi' }
-    }
+): Promise<{ ok: true; context: SusulanGrantContext } | { ok: false; status: number; error: string }> {
     // Fail-closed: GURU/ADMIN tanpa sekolah tidak boleh melakukan grant lintas tenant.
     if (!ctx.schoolId) return { ok: false, status: 403, error: 'Forbidden' }
 
-    const maxPercent = sanitizeSusulanMaxPercent(params.maxPercent)
-    if (maxPercent === null) {
-        return {
-            ok: false,
-            status: 400,
-            error: `susulan_max_percent harus angka bulat ${SUSULAN_MIN_PERCENT}–${SUSULAN_MAX_PERCENT}`,
-        }
-    }
-
     const auth = await authorizeExam(kind, examId, ctx)
     if (!auth.ok) return auth
-    const { exam, ulanganTa } = auth
+    const { exam, ulanganTa, teacherScope } = auth
 
     // Tahun ajaran arsip (COMPLETED) tidak boleh menerima grant/nilai baru
     // (paritas guard 11 route tulis lain). Revoke tetap diizinkan untuk cleanup.
@@ -330,6 +333,42 @@ export async function grantSusulan(
         return { ok: false, status: 400, error: 'Ujian ini tidak memiliki durasi pengerjaan — susulan tidak bisa dibuka' }
     }
 
+    const maxScore = await computeExamMaxScore(kind, examId)
+    if (maxScore === null) {
+        return { ok: false, status: 500, error: 'Gagal menghitung max_score ujian. Coba lagi.' }
+    }
+
+    return { ok: true, context: { exam, ulanganTa, maxScore, teacherScope } }
+}
+
+/**
+ * Buka/perpanjang susulan untuk satu siswa memakai konteks yang SUDAH dihitung.
+ * Semua guard yang bergantung pada siswa tetap dijalankan di sini.
+ */
+export async function grantSusulanWithContext(
+    kind: SusulanKind,
+    context: SusulanGrantContext,
+    params: { examId: string; studentId: string; maxPercent: unknown },
+    ctx: SusulanAuthContext,
+): Promise<SusulanGrantResult> {
+    const { examId, studentId } = params
+    if (!examId || !studentId) {
+        return { ok: false, status: 400, error: 'exam_id dan student_id wajib diisi' }
+    }
+    // Fail-closed: GURU/ADMIN tanpa sekolah tidak boleh melakukan grant lintas tenant.
+    if (!ctx.schoolId) return { ok: false, status: 403, error: 'Forbidden' }
+
+    const maxPercent = sanitizeSusulanMaxPercent(params.maxPercent)
+    if (maxPercent === null) {
+        return {
+            ok: false,
+            status: 400,
+            error: `susulan_max_percent harus angka bulat ${SUSULAN_MIN_PERCENT}–${SUSULAN_MAX_PERCENT}`,
+        }
+    }
+
+    const { exam, ulanganTa, maxScore } = context
+
     const { data: studentData } = await supabase
         .from('students')
         .select('id, class_id, school_id')
@@ -352,9 +391,9 @@ export async function grantSusulan(
     }
     // GURU UTS/UAS: scope harus mencakup kelas HISTORIS siswa (bukan sekadar
     // salah satu kelas target) — paritas revoke & roster Monitor Live.
+    // Scope di-resolve sekali di context (tidak query ulang per siswa).
     if (kind === 'official' && ctx.role === 'GURU') {
-        const scope = await getTeacherScope(ctx.userId, exam.academic_year_id ?? null)
-        if (!coTeachesClassSubject(scope, exam.subject_id, rosterClassId)) {
+        if (!coTeachesClassSubject(context.teacherScope, exam.subject_id, rosterClassId)) {
             return { ok: false, status: 403, error: 'Anda tidak mengajar kelas siswa ini' }
         }
     }
@@ -389,10 +428,6 @@ export async function grantSusulan(
 
     const nowIso = new Date().toISOString()
     const expiresAt = susulanExpiresAtIso()
-    const maxScore = await computeExamMaxScore(kind, examId)
-    if (maxScore === null) {
-        return { ok: false, status: 500, error: 'Gagal menghitung max_score ujian. Coba lagi.' }
-    }
     const grantFields = {
         // Normalisasi baris legacy yang is_submitted-nya NULL agar semua guard
         // `.eq('is_submitted', false)` (unpublish/delete/revoke) mendeteksinya.
@@ -419,7 +454,16 @@ export async function grantSusulan(
         if (error || !updated) {
             return { ok: false, status: 409, error: 'Gagal memperbarui susulan (siswa mungkin baru saja mulai/selesai)' }
         }
-        return { ok: true, submissionId: (updated as { id: string }).id, expiresAt, maxPercent }
+        // `created` = grant BARU dibuka. Baris legacy tanpa grant yang diadopsi
+        // juga dihitung "dibuka" (bukan "diperpanjang") agar label UI benar.
+        const wasAlreadyGranted = !!existing.susulan_granted_at
+        return {
+            ok: true,
+            submissionId: (updated as { id: string }).id,
+            expiresAt,
+            maxPercent,
+            created: !wasAlreadyGranted,
+        }
     }
 
     const { data: inserted, error: insertError } = await supabase
@@ -453,7 +497,7 @@ export async function grantSusulan(
                     .select('id')
                     .single()
                 if (updated) {
-                    return { ok: true, submissionId: (updated as { id: string }).id, expiresAt, maxPercent }
+                    return { ok: true, submissionId: (updated as { id: string }).id, expiresAt, maxPercent, created: false }
                 }
             }
             return { ok: false, status: 409, error: 'Siswa sudah mulai/selesai mengerjakan ujian ini' }
@@ -466,7 +510,25 @@ export async function grantSusulan(
         submissionId: (inserted as { id: string }).id,
         expiresAt,
         maxPercent,
+        created: true,
     }
+}
+
+/**
+ * Wrapper single-siswa: resolve konteks lalu buka/perpanjang susulan.
+ * Idempoten untuk placeholder yang belum dimulai (cap & masa berlaku diperbarui).
+ */
+export async function grantSusulan(
+    kind: SusulanKind,
+    params: { examId: string; studentId: string; maxPercent: unknown },
+    ctx: SusulanAuthContext,
+): Promise<SusulanGrantResult> {
+    if (!params.examId || !params.studentId) {
+        return { ok: false, status: 400, error: 'exam_id dan student_id wajib diisi' }
+    }
+    const resolved = await resolveSusulanGrantContext(kind, params.examId, ctx)
+    if (!resolved.ok) return resolved
+    return grantSusulanWithContext(kind, resolved.context, params, ctx)
 }
 
 /** Batalkan grant yang belum dimulai (placeholder). */

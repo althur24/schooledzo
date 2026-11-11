@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { grantSusulan, revokeSusulan } from '@/lib/susulanGrant'
+import { grantSusulanBatch } from '@/lib/susulanBatchGrant'
 
 /**
  * Grant/revoke Susulan untuk UTS/UAS.
@@ -19,10 +20,22 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json().catch(() => ({}))
+        const auth = { userId: user.id, role: user.role, schoolId }
+
+        if (Array.isArray(body?.student_ids)) {
+            const batch = await grantSusulanBatch(
+                'official',
+                { examId: body?.exam_id, studentIds: body.student_ids, maxPercent: body?.max_percent },
+                auth,
+            )
+            if (!batch.success) return NextResponse.json({ error: batch.error }, { status: batch.status })
+            return NextResponse.json(batch)
+        }
+
         const result = await grantSusulan(
             'official',
             { examId: body?.exam_id, studentId: body?.student_id, maxPercent: body?.max_percent },
-            { userId: user.id, role: user.role, schoolId },
+            auth,
         )
         if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
 

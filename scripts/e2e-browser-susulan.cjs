@@ -143,7 +143,9 @@ async function openSusulanModalFor(cdp, studentName) {
 async function main() {
     const { data: exam } = await supabase.from('exams').select('id').like('title', `${P}Ulangan Berakhir`).maybeSingle()
     const { data: off } = await supabase.from('official_exams').select('id').like('title', `${P}UTS Berakhir`).maybeSingle()
+    const { data: batchA } = await supabase.from('exams').select('id, batch_id').like('title', `${P}Ulangan Batch`).limit(1).maybeSingle()
     if (!exam?.id || !off?.id) throw new Error('Demo fixture belum ada. Jalankan seed-demo-susulan-staging.cjs dulu.')
+    const batchExamId = batchA?.id || exam.id
 
     console.log('\n[A] Guru Monitor Live (ulangan)')
     await withBrowser(`${P}guru`, `/dashboard/guru/ulangan/${exam.id}/monitor`, async (cdp) => {
@@ -189,6 +191,56 @@ async function main() {
         check('C1 kartu ulangan tampil', text.includes(`${P}Ulangan Berakhir`))
         check('C2 status Waktu Habis untuk tanpa grant', text.includes('Waktu Sudah Berakhir'))
         check('C3 tidak menampilkan Mulai Susulan', !text.includes('Mulai Susulan'))
+    })
+
+    console.log('\n[A2] Tombol "Buka Susulan" + pencarian + modal batch (monitor guru)')
+    await withBrowser(`${P}guru`, `/dashboard/guru/ulangan/${exam.id}/monitor`, async (cdp) => {
+        const text = await bodyText(cdp)
+        check('A2-1 tombol Buka Susulan tampil di header', text.includes('Buka Susulan'))
+
+        // Pencarian nama: filter tabel.
+        const typed = await evalInPage(cdp, `(() => {
+            const input = document.querySelector('input[aria-label="Cari nama siswa"]')
+            if (!input) return false
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+            setter.call(input, 's2')
+            input.dispatchEvent(new Event('input', { bubbles: true }))
+            return true
+        })()`)
+        await sleep(800)
+        const filtered = await bodyText(cdp)
+        check('A2-2 pencarian menyaring daftar', typed === true && filtered.includes('Siswa Demo s2'))
+        check('A2-3 siswa tidak cocok tersembunyi', !filtered.includes('Siswa Demo s3'))
+
+        // Buka modal batch.
+        await evalInPage(cdp, `(() => {
+            const btn = [...document.querySelectorAll('button')].find(b => b.innerText.trim().startsWith('Buka Susulan'))
+            if (btn) btn.click()
+            return !!btn
+        })()`)
+        await sleep(900)
+        const modalText = await bodyText(cdp)
+        check('A2-4 modal batch terbuka', modalText.includes('Pilih siswa yang belum mengerjakan'))
+        check('A2-5 opsi perbarui yang sudah dibuka ada', modalText.includes('Perbarui juga yang sudah dibuka'))
+        check('A2-6 pilihan nilai untuk semua ada', modalText.includes('Nilai untuk siswa yang dipilih'))
+        await closeModalIfAny(cdp)
+    })
+
+    console.log('\n[A3] Monitor batch multi-kelas (guru)')
+    await withBrowser(`${P}guru`, `/dashboard/guru/ulangan/${batchExamId}/monitor?batch=1`, async (cdp) => {
+        const text = await bodyText(cdp)
+        check('A3-1 siswa kedua kelas tampil', text.includes('Siswa Demo s1') && text.includes('Siswa Demo s5'))
+        check('A3-2 tombol Buka Susulan tampil', text.includes('Buka Susulan'))
+        await evalInPage(cdp, `(() => {
+            const btn = [...document.querySelectorAll('button')].find(b => b.innerText.trim().startsWith('Buka Susulan'))
+            if (btn) btn.click()
+            return !!btn
+        })()`)
+        await sleep(900)
+        const modalText = await bodyText(cdp)
+        check('A3-3 modal batch menampilkan dua kelas', modalText.includes('susa_kelas') && modalText.includes('susa_kelas 2'))
+        check('A3-4 siswa grant aktif ditandai Sudah dibuka', modalText.includes('Sudah dibuka'))
+        await closeModalIfAny(cdp)
     })
 
     console.log('\n[D] Admin Monitor Live')

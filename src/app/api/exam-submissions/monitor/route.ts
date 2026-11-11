@@ -445,7 +445,7 @@ export async function GET(request: NextRequest) {
                     // Konteks fitur Susulan (per member batch — jadwal bisa beda)
                     exam_id: m.id,
                     exam_ended: examEnded,
-                    exam_active: m.is_active,
+                    exam_active: !!m.is_active,
                     duration_minutes: m.duration_minutes,
                     susulan,
                 })

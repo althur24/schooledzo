@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, use, useCallback, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useState, use, useCallback, useMemo, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
@@ -21,6 +21,7 @@ import {
 import AssessmentAnalytics from '@/components/analytics/AssessmentAnalytics'
 import PDFDownloadButton from '@/components/analytics/pdf/PDFDownloadButton'
 import NotSubmittedPanel from '@/components/NotSubmittedPanel'
+import StudentSearchInput from '@/components/StudentSearchInput'
 import * as XLSX from 'xlsx'
 import QuestionImageUpload from '@/components/QuestionImageUpload'
 import QuestionOptionsEditor from '@/components/QuestionOptionsEditor'
@@ -236,6 +237,16 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
     const [submissions, setSubmissions] = useState<any[]>([])
     const [resultsLoading, setResultsLoading] = useState(false)
     const [resultsClassFilter, setResultsClassFilter] = useState('')
+    const [nameSearch, setNameSearch] = useState('')
+    const nameQuery = nameSearch.trim().toLowerCase()
+    // Filter nama dihitung SEKALI per perubahan — dipakai di tabel, hitungan
+    // header, dan empty-state (sebelumnya filter diulang 3×).
+    const filteredSubmissions = useMemo(
+        () => (!nameQuery
+            ? submissions
+            : submissions.filter((sub: any) => (sub.student?.user?.full_name || '').toLowerCase().includes(nameQuery))),
+        [submissions, nameQuery],
+    )
     const [selectedSubmission, setSelectedSubmission] = useState<any | null>(null)
     // Race guard fetchResults: id request terakhir yang boleh menulis state —
     // respons request lama (poll tumpang-tindih saat jaringan lambat) dibuang.
@@ -2247,7 +2258,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
             {activeTab === 'hasil' && (
                 <div className="space-y-4">
                     {/* Class/Action Bar */}
-                    <div className="flex justify-between items-center bg-white dark:bg-surface-dark border border-secondary/20 p-3 rounded-xl shadow-sm">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white dark:bg-surface-dark border border-secondary/20 p-3 rounded-xl shadow-sm">
                         <div className="flex gap-3 items-center flex-wrap">
                             {/* Filter kelas: official multi-kelas, atau ulangan BATCH
                                 (opsi = member batch, paritas guru). Ulangan single-kelas:
@@ -2280,9 +2291,17 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                                     Live
                                 </span>
                             )}
-                            <span className="text-sm font-medium text-text-secondary border-l border-secondary/20 pl-3">{submissions.length} submission</span>
+                            <span className="text-sm font-medium text-text-secondary border-l border-secondary/20 pl-3">
+                                {submissions.length} submission
+                                {nameQuery ? ` · ${filteredSubmissions.length} cocok` : ''}
+                            </span>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <StudentSearchInput
+                                value={nameSearch}
+                                onChange={setNameSearch}
+                                className="w-full sm:w-56"
+                            />
                             {submissions.length > 0 && (
                                 <PDFDownloadButton
                                     assessmentId={(isUlangan && isBatchView && resultsClassFilter) ? resultsClassFilter : examId}
@@ -2345,6 +2364,7 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                                     : classRoster)
                             return rosterInView
                                 .filter(s => s.id && !anyAttemptStudentIds.includes(s.id))
+                                .filter(s => !nameQuery || s.name.toLowerCase().includes(nameQuery))
                                 .sort((a, b) => a.name.localeCompare(b.name, 'id'))
                         })()}
                         groupByClass={!resultsClassFilter && (!isUlangan || isBatchView)}
@@ -2389,7 +2409,14 @@ export default function AdminUtsUasDetailPage({ params, searchParams, forcedIsUl
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-secondary/10">
-                                        {[...submissions].sort((a, b) => (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '')).map((sub: any, idx: number) => {
+                                        {nameQuery && filteredSubmissions.length === 0 && (
+                                            <tr>
+                                                <td colSpan={isBatchView ? 10 : 9} className="px-4 py-10 text-center text-sm text-text-secondary">
+                                                    Tidak ada siswa yang cocok dengan pencarian.
+                                                </td>
+                                            </tr>
+                                        )}
+                                        {[...filteredSubmissions].sort((a, b) => (a.student?.user?.full_name || '').localeCompare(b.student?.user?.full_name || '')).map((sub: any, idx: number) => {
                                             // pct MENTAH (round-2) — banding KKM pakai nilai asli (74.6 < 75 walau ≈75)
                                             const percentage = sub.max_score > 0 ? round2((sub.total_score / sub.max_score) * 100) : 0
                                             const studentKkm = getStudentKkm(sub.student, sub)

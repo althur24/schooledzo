@@ -2,6 +2,7 @@ import { supabaseAdmin } from './supabase'
 import { getMenuLabelsForSchool } from './serverLabels'
 import { batchedIn } from './batchedIn'
 import { fetchAllRows } from './fetchAllRows'
+import { invalidateExamQuestions } from './examQuestionsCache'
 
 /**
  * examBatch — sinkronisasi soal + status terbit untuk ujian/kuis multi-kelas
@@ -201,6 +202,9 @@ async function mirrorQuestionsToTarget(
         if (oldIds.length > 0) {
             await deleteQuestionsByIds(questionsTable, oldIds)
         }
+        // D1: soal target berubah → buang cache grading agar autosave berikutnya
+        // memakai kunci/poin terbaru (bukan versi lama s/d TTL 10 menit).
+        invalidateExamQuestions(targetId)
         return true
     } catch (e) {
         console.error(`[batch-mirror] gagal untuk ${targetId}:`, e)
@@ -357,6 +361,29 @@ async function syncBatch(
         const siblingIds = (siblings || []).map(s => s.id as string)
         if (siblingIds.length === 0) return { total: 0, failed: [] }
 
+        // D2: jangan menimpa soal sibling yang SEDANG DIKERJAKAN (attempt belum
+        // submit) — soal berubah di tengah attempt memutus jawaban yang mengacu
+        // id soal lama. Sibling yang sudah SELESAI submit tidak dianggap sibuk
+        // (soal tidak dipakai lagi; memperbaiki soal batch yang sebagian kelas
+        // sudah selesai tetap boleh). Sibling sibuk dilaporkan gagal (tidak dirusak).
+        const subsTable = table === 'exams' ? 'exam_submissions' : 'quiz_submissions'
+        const fkSub = table === 'exams' ? 'exam_id' : 'quiz_id'
+        let busySiblingIds = new Set<string>()
+        {
+            // siblingIds bisa ratusan → batchedIn (batas URL 16KB) + order stabil.
+            const busyRows = await batchedIn<{ [k: string]: string }>(
+                fkSub, siblingIds,
+                (chunk) => supabaseAdmin
+                    .from(subsTable)
+                    .select(fkSub)
+                    .in(fkSub, chunk)
+                    .not('started_at', 'is', null)
+                    .eq('is_submitted', false)
+                    .order('id'),
+            )
+            busySiblingIds = new Set((busyRows || []).map(r => (r as any)[fkSub] as string))
+        }
+
         const sourceQuestions = await fetchAllQuestions(questionsTable, fkColumn, primaryId)
         if (!sourceQuestions) throw new Error(`gagal membaca soal sumber ${primaryId}`)
         // Primary tanpa soal = semua sibling gagal (caller sudah menjaga publish 0 soal,
@@ -378,6 +405,12 @@ async function syncBatch(
 
         const failed: string[] = []
         for (const targetId of siblingIds) {
+            // D2: lewati sibling yang sedang dikerjakan (jangan ganti soalnya).
+            if (busySiblingIds.has(targetId)) {
+                console.warn(`[batch] skip sync ${table} ${targetId}: sedang dikerjakan siswa`)
+                failed.push(targetId)
+                continue
+            }
             try {
                 const mirrored = await mirrorQuestionsToTarget(
                     questionsTable, fkColumn, sourceQuestions, sourceSig, targetId

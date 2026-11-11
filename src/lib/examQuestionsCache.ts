@@ -47,4 +47,7 @@ export async function getExamQuestionsForGrading(
 export function invalidateExamQuestions(examId: string) {
     cache.delete(`exam_questions:${examId}`)
     cache.delete(`official_exam_questions:${examId}`)
+    // Kuis memakai key yang sama polanya (fkColumn quiz_id) — tanpa ini grading
+    // kuis menyajikan kunci/poin lama s/d TTL 10 menit setelah soal diubah.
+    cache.delete(`quiz_questions:${examId}`)
 }
