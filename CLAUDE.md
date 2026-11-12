@@ -1,5 +1,18 @@
 # LMS YPP — Catatan Workflow
 
+## Susulan Massal + Pencarian Nama (11 Nov 2026, staging `f70200c`)
+
+- **Tombol "Buka Susulan" di header Monitor Live** (bukan per siswa). Modal `SusulanBatchModal`: daftar siswa belum mulai dikelompokkan per kelas, pilih semua/per kelas, satu setelan nilai untuk semua, checkbox opsional "Perbarui juga yang sudah dibuka". Default centang: belum dibuka + kedaluwarsa; yang masih aktif tidak.
+- **API batch**: `POST /api/{exam,official-exam}-submissions/susulan` menerima `student_ids[]` (single `student_id` tetap). Balasan `{opened, updated, skipped, failed, *_count}`. Batas `SUSULAN_BATCH_MAX=200`, dedup, concurrency 5. UI kirim satu request per `exam_id` member (ulangan batch multi-kelas) via `Promise.allSettled` agar satu grup gagal tidak menggugurkan hasil lain.
+- **Refactor `susulanGrant.ts`**: `resolveSusulanGrantContext` (exam/scope/tahun/maxScore — SEKALI per request) + `grantSusulanWithContext` (guard per siswa). `grantSusulan` single = wrapper. Batch 200 siswa turun dari ±1.800 query menjadi ±4–5/siswa. `created = !existing.susulan_granted_at` → adopsi legacy dihitung "dibuka".
+- **Pencarian nama** `StudentSearchInput` di Monitor Live dan tab Hasil (tabel + panel belum mengerjakan + hitungan "cocok"), `useMemo` agar tidak filter 3×.
+- **D1 cache**: `invalidateExamQuestions` kini juga menghapus `quiz_questions:`; dipanggil di `copy-questions` (per target sukses) dan `mirrorQuestionsToTarget` (semua jalur sync batch). Tanpa ini autosave/grading memakai kunci/poin lama s.d. TTL 10 menit.
+- **D2 sync-batch**: sibling yang **sedang dikerjakan** (`started_at` terisi & `is_submitted=false`) dilewati (masuk `failed`), berlaku untuk exams & kuis (`quiz_submissions`), pakai `batchedIn`. Sibling yang sudah submit tetap boleh diganti.
+- **copy-questions**: blokir `409` hanya bila ada attempt berjalan; refresh `max_score` placeholder susulan setelah salin (poin `0` legacy dihitung 0).
+- **Scope guru UTS/UAS monitor**: memakai `academic_year_id` ujian (fallback tahun aktif hanya untuk data lama) — `official_exams` select sebelumnya tidak mengambil kolom itu sehingga scope selalu jatuh ke tahun aktif.
+- **Test**: `e2e-susulan-staging` **79/79**, `e2e-susulan-concurrency-staging` (baru) **27/27** lokal+remote, `e2e-browser-susulan` **33/33**, regresi gk **153/0**, unification **39/0**, admin-parity **24/0**, extend-time **26/0**, rescue **21/0**, roster **15/0**.
+- **Catatan test GK**: jika `e2e-gk` gagal di seksi [I] ("Kuis remedial harus berasal dari kelas & mapel yang sama"), itu sisa fixture run terinterupsi — bersihkan `quizzes/exams` ber-prefix `ltgk2` lalu ulang.
+
 ## Fitur Susulan Ulangan & UTS/UAS (29 Okt 2026)
 
 Fitur make-up attempt untuk siswa **Belum Mulai** setelah ujian berakhir, dari Monitor Live guru/admin.

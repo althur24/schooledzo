@@ -173,13 +173,15 @@ async function main() {
     {
         // Setengah siswa: guru perpanjang cap (grant ulang) BERSAMAAN dengan siswa start.
         const half = students.slice(0, Math.floor(N_STUDENTS / 2))
-        await Promise.all(half.map(async (s, i) => {
+        await Promise.all(half.map(async (s) => {
+            // Gunakan indeks siswa asli (bukan indeks potongan) agar cookie cocok.
+            const si = students.findIndex(x => x.student.id === s.student.id)
             const [startRes] = await Promise.all([
-                api(studentCookies[i], '/api/exam-submissions', { method: 'POST', body: JSON.stringify({ exam_id: exam.id }) }),
+                api(studentCookies[si], '/api/exam-submissions', { method: 'POST', body: JSON.stringify({ exam_id: exam.id }) }),
                 api(guruCookie, '/api/exam-submissions/susulan', { method: 'POST', body: JSON.stringify({ exam_id: exam.id, student_ids: [s.student.id], max_percent: 55 }) }),
             ])
             const body = await startRes.json()
-            check(`start race siswa ${i} → state sah`, startRes.ok || startRes.status === 409 || startRes.status === 400, `status=${startRes.status} ${JSON.stringify(body).slice(0, 120)}`)
+            check(`start race siswa ${si} → state sah`, startRes.ok || startRes.status === 409 || startRes.status === 400, `status=${startRes.status} ${JSON.stringify(body).slice(0, 120)}`)
         }))
         const { data: rows } = await supabase.from('exam_submissions')
             .select('student_id, started_at, is_submitted').eq('exam_id', exam.id)
@@ -275,14 +277,63 @@ async function main() {
         check('max_score placeholder ter-refresh ke 100', ph?.max_score === 100 && ph?.started_at === null, JSON.stringify(ph))
     }
 
-    console.log('\nF. copy-questions saat ada yang mengerjakan → 409 (D2)')
+    console.log('\nF. copy-questions saat ada yang SEDANG mengerjakan → 409 (D2)')
     {
-        // exam (fase D) masih punya submission ber-started_at → copy ke exam itu harus 409.
+        // Fase D sudah submit semua → tidak lagi "sedang dikerjakan" (by design).
+        // Buat ulangan baru + 1 submission berjalan (started_at terisi, belum submit).
+        const exam3 = await ins('exams', {
+            teaching_assignment_id: ta.id, title: `${P}Ulangan Sedang`,
+            start_time: new Date(Date.now() - 3 * 3600000).toISOString(),
+            duration_minutes: 60, is_active: true, max_violations: 3,
+            show_results_immediately: true, is_randomized: false,
+        })
+        for (let i = 0; i < 3; i++) {
+            await ins('exam_questions', {
+                exam_id: exam3.id, question_text: `${P}busy soal ${i + 1}`,
+                question_type: 'MULTIPLE_CHOICE', options: ['A', 'B', 'C', 'D'],
+                correct_answer: 'A', points: 10, order_index: i, status: 'approved',
+                difficulty: 'EASY', content_format: 'plain',
+            })
+        }
+        await ins('exam_submissions', {
+            exam_id: exam3.id, student_id: students[0].student.id,
+            started_at: new Date(Date.now() - 10 * 60000).toISOString(),
+            is_submitted: false, max_score: 30, total_score: 0, is_graded: false,
+        })
         const res = await api(guruCookie, '/api/exams/copy-questions', {
             method: 'POST',
-            body: JSON.stringify({ source_exam_id: exam.id, target_exam_ids: [exam.id] }),
+            body: JSON.stringify({ source_exam_id: exam.id, target_exam_ids: [exam3.id] }),
         })
         check('copy ke exam yang sedang dikerjakan ditolak 409', res.status === 409, `status=${res.status}`)
+
+        // Kontrol: target yang semua submission-nya sudah submit TIDAK diblokir.
+        // (Pakai exam4 terpisah — menyalin ke `exam` akan menghapus question_id
+        // yang dirujuk jawaban siswa, sehingga invariant G6 jadi tidak valid.)
+        const exam4 = await ins('exams', {
+            teaching_assignment_id: ta.id, title: `${P}Ulangan Selesai`,
+            start_time: new Date(Date.now() - 3 * 3600000).toISOString(),
+            duration_minutes: 60, is_active: true, max_violations: 3,
+            show_results_immediately: true, is_randomized: false,
+        })
+        for (let i = 0; i < 3; i++) {
+            await ins('exam_questions', {
+                exam_id: exam4.id, question_text: `${P}done soal ${i + 1}`,
+                question_type: 'MULTIPLE_CHOICE', options: ['A', 'B', 'C', 'D'],
+                correct_answer: 'A', points: 10, order_index: i, status: 'approved',
+                difficulty: 'EASY', content_format: 'plain',
+            })
+        }
+        await ins('exam_submissions', {
+            exam_id: exam4.id, student_id: students[1].student.id,
+            started_at: new Date(Date.now() - 30 * 60000).toISOString(),
+            submitted_at: new Date(Date.now() - 20 * 60000).toISOString(),
+            is_submitted: true, max_score: 30, total_score: 30, is_graded: true,
+        })
+        const resDone = await api(guruCookie, '/api/exams/copy-questions', {
+            method: 'POST',
+            body: JSON.stringify({ source_exam_id: exam3.id, target_exam_ids: [exam4.id] }),
+        })
+        check('copy ke exam yang semua sudah submit tetap boleh (200)', resDone.ok, `status=${resDone.status}`)
     }
 
     console.log('\nG. Invariant query (0 pelanggaran)')
@@ -317,8 +368,9 @@ async function main() {
         const violated = (over || []).filter(s => (s.max_score || 0) > 0 && (s.total_score || 0) > (s.susulan_max_percent / 100) * s.max_score + 0.01)
         check('G4 tidak ada nilai melebihi cap', violated.length === 0, JSON.stringify(violated.slice(0, 3)))
 
-        // 5. jawaban nyasar ke soal ujian lain
-        const { data: subs2 } = await supabase.from('exam_submissions').select('id').eq('exam_id', exam.id)
+        // 5. jawaban nyasar ke soal ujian lain (hanya exam fase D yang berjawaban)
+        const { data: subs2 } = await supabase.from('exam_submissions')
+            .select('id').eq('exam_id', exam.id).eq('is_submitted', true)
         const subIds = (subs2 || []).map(s => s.id)
         const qIds = new Set(questions.map(q2 => q2.id))
         let orphan = 0
@@ -328,18 +380,22 @@ async function main() {
         }
         check('G5 tidak ada jawaban soal dari ujian lain', orphan === 0, `orphan=${orphan}`)
 
-        // 6. total_score vs rekap ulang jawaban
+        // 6. total_score = min(rekap jawaban, cap) — baris submitted fase D.
+        // (Nilai sengaja di-cap, jadi bisa < rekap mentah; di atas rekap = bug.)
         let mismatch = 0
         for (let i = 0; i < subIds.length; i += 50) {
             const chunk = subIds.slice(i, i + 50)
             for (const sid of chunk) {
                 const { data: ans } = await supabase.from('exam_answers').select('points_earned').eq('submission_id', sid)
                 const recalc = Math.round((ans || []).reduce((s, a) => s + (a.points_earned || 0), 0) * 100) / 100
-                const { data: sub } = await supabase.from('exam_submissions').select('total_score, is_submitted').eq('id', sid).single()
-                if (sub?.is_submitted && Math.abs((sub.total_score || 0) - recalc) > 0.02) mismatch++
+                const { data: sub } = await supabase.from('exam_submissions').select('total_score, max_score, susulan_max_percent, is_submitted').eq('id', sid).single()
+                if (!sub?.is_submitted) continue
+                const capped = Math.min(recalc, ((sub.susulan_max_percent ?? 100) / 100) * (sub.max_score || 0))
+                const expected = Math.round(capped * 100) / 100
+                if (Math.abs((sub.total_score || 0) - expected) > 0.02) mismatch++
             }
         }
-        check('G6 total_score konsisten dengan jawaban', mismatch === 0, `mismatch=${mismatch}`)
+        check('G6 total_score = min(rekap jawaban, cap)', mismatch === 0, `mismatch=${mismatch}`)
     }
 
     if (process.env.KEEP_FIXTURE === '1') {
