@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSchoolContextOrError, isErrorResponse } from '@/lib/schoolContext'
 import { findQuizzesOutsideSchool } from '@/lib/tenantGuard'
 import { getYearStatusById, archivedYearResponse } from '@/lib/academicYear'
+import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
 import { createAdminClient } from '@/lib/supabase'
 
 const supabase = createAdminClient()
@@ -112,6 +113,10 @@ export async function POST(req: NextRequest) {
                         cleanupWarnings.push(targetId)
                     }
                 }
+
+                // Soal target berubah → buang cache grading agar autosave berikutnya
+                // memakai kunci/poin terbaru (bukan versi lama s/d TTL 10 menit).
+                invalidateExamQuestions(targetId)
 
                 totalCopied += questionsForTarget.length
             } catch (targetError) {

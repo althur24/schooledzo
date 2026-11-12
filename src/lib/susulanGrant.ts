@@ -170,8 +170,10 @@ async function computeExamMaxScore(kind: SusulanKind, examId: string): Promise<n
         // akan mengunci nilai siswa ke 0 permanen.
         return null
     }
+    // Poin desimal 0/legacy dihitung apa adanya (typeof check) — konsisten dengan
+    // refresh max_score di copy-questions; `|| fallback` membuat poin 0 jadi 1/10.
     const total = data.reduce(
-        (sum, q) => sum + (q.points || fallbackPoints),
+        (sum, q) => sum + (typeof q.points === 'number' ? q.points : fallbackPoints),
         0,
     )
     return Math.round(total * 100) / 100

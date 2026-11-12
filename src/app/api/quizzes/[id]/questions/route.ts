@@ -8,6 +8,7 @@ import { getYearStatusByTA, archivedYearResponse } from '@/lib/academicYear'
 import { getTeacherScope, ownsTeachingAssignment, coTeachesClassSubject } from '@/lib/teacherScope'
 import { syncQuestionsToBank } from '@/lib/questionBankSync'
 import { syncDraftQuizQuestions } from '@/lib/examBatch'
+import { invalidateExamQuestions } from '@/lib/examQuestionsCache'
 
 /**
  * Mirror soal ke sibling batch (draft) setelah mutasi sukses.
@@ -233,6 +234,8 @@ export async function POST(
                 if (updErr) throw updErr
                 updated++
             }
+            // Cache grading kuis dibuang agar urutan/soal terbaru dipakai autosave.
+            if (updated > 0) invalidateExamQuestions(id)
             await syncBatchDraft(id)
             return NextResponse.json({ updated })
         }
@@ -283,6 +286,8 @@ export async function POST(
                 .select()
 
             if (error) throw error
+            // Soal kuis berubah → buang cache grading (kunci/poin baru langsung dipakai).
+            invalidateExamQuestions(id)
 
             // --- Auto-sync to question_bank (Fire and Forget) ---
             // Fetch quiz data to get title, subject_id, teacher_id
@@ -393,6 +398,7 @@ export async function POST(
             .single()
 
         if (error) throw error
+        invalidateExamQuestions(id)
 
         // --- Auto-sync to question_bank (Fire and Forget) ---
         // Fetch quiz data to get title, subject_id, teacher_id
@@ -567,6 +573,8 @@ export async function PUT(
             .single()
 
         if (error) throw error
+        // Kunci/poin berubah → cache grading harus dibuang.
+        invalidateExamQuestions(id)
 
         // Re-trigger HOTS analysis (fire-and-forget) — hanya bila konten berubah
         if (data && aiEnabled && contentChanged) {
@@ -666,6 +674,8 @@ export async function DELETE(
 
             if (error) throw error
         }
+        // Soal dihapus → buang cache grading (jangan menyajikan soal yang sudah tiada).
+        invalidateExamQuestions(id)
 
         await syncBatchDraft(id)
 
