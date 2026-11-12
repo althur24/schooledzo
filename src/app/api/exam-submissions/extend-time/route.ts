@@ -145,12 +145,22 @@ export async function POST(request: NextRequest) {
         let windowShifted = false
         let newWindowEnd: string | null = null
         let newDuration: number | null = null
+        let noDeadline = false
         for (const m of members) {
             const r = await extendTimeForExam('exam', m, Number(minutes))
             extended += r.extended
             windowShifted = windowShifted || r.window_shifted
             newWindowEnd = r.new_window_end_time ?? newWindowEnd
             newDuration = r.new_duration_minutes ?? newDuration
+            noDeadline = noDeadline || !!r.no_deadline
+        }
+
+        // Ujian tanpa batas waktu: tidak ada yang berubah — tolak eksplisit
+        // (jangan balas sukses palsu yang menyesatkan guru).
+        if (noDeadline && !windowShifted && newDuration === null) {
+            return NextResponse.json({
+                error: 'Ujian ini tanpa batas waktu — tidak ada yang perlu ditambah.',
+            }, { status: 400 })
         }
 
         return NextResponse.json({

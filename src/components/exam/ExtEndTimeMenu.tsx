@@ -38,6 +38,13 @@ export default function ExtEndTimeMenu({
 
     const applyCustom = (raw: string) => {
         setCustomValue(raw)
+        // Kosong = kembali ke preset terpilih → jangan biarkan error terkunci
+        // (dulu: ketik nilai invalid lalu hapus → error tetap → tombol Terapkan mati
+        // padahal preset valid masih terpilih).
+        if (raw.trim() === '') {
+            setError(null)
+            return
+        }
         const n = parseInt(raw, 10)
         if (!Number.isNaN(n) && n >= MIN_MINUTES && n <= MAX_MINUTES) {
             setMinutes(n)

@@ -659,10 +659,30 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     ? questionsData.error
                     : `Gagal memuat soal ${configRef.current.fallbackLabel.toLowerCase()}`
 
-                // Susulan sudah POST start (timer berjalan). Jangan redirect &
-                // buang kesempatan retry — tampilkan layar Coba Lagi. retryLoad
-                // akan masuk alur normal/resume karena started_at sudah terisi.
-                if (susulanStarted) {
+                // Susulan sudah POST start (timer berjalan) ATAU attempt nyata sudah
+                // berjalan (mis. retry setelah susulan dimulai, saat susulan_pending
+                // sudah false tapi submission ada) → JANGAN redirect & buang
+                // kesempatan retry selama timer jalan: tampilkan layar Coba Lagi.
+                // Deteksi status attempt lewat probe POST start (idempoten: resume
+                // mengembalikan submission berjalan; gate menolak bila belum boleh).
+                let attemptRunning = susulanStarted
+                if (!attemptRunning) {
+                    try {
+                        const probeSub = await fetch(configRef.current.submissionApi, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ exam_id: examId })
+                        })
+                        const probeBody = await probeSub.json().catch(() => null)
+                        const hasSubmission = !!probeBody?.id && !probeBody?.error
+                        if (hasSubmission && probeBody?.started_at) attemptRunning = true
+                        // Simpan agar alur normal di bawah tidak POST dua kali bila
+                        // ternyata attempt memang belum berjalan.
+                        if (hasSubmission) subData = probeBody
+                    } catch { /* probe gagal = perlakukan seperti belum berjalan */ }
+                }
+
+                if (attemptRunning) {
                     setLoadError(message)
                     setLoading(false)
                     return

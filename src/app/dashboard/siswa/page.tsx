@@ -390,9 +390,9 @@ export default function SiswaDashboard() {
                     for (const e of exams) {
                         if (e.is_submitted) continue
 
-                        // Placeholder susulan diproses DI LUAR guard exam.is_active:
-                        // embed GET exam-submissions tidak memuat is_active (pre-existing),
-                        // sehingga tanpa ini prompt susulan ulangan tidak pernah muncul.
+                        // Placeholder susulan diproses DI LUAR guard exam.is_active
+                        // agar prompt susulan ulangan tetap muncul walau ujian sudah
+                        // ditarik/ditutup setelah grant dibuat.
                         if (!e.started_at && e.susulan_granted_at) {
                             const expMs = e.susulan_expires_at ? new Date(e.susulan_expires_at).getTime() : null
                             if (expMs !== null && serverNow() <= expMs && !susulanCandidate) {

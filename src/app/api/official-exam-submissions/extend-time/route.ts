@@ -90,6 +90,14 @@ export async function POST(request: NextRequest) {
         }
         const r = await extendTimeForExam('official', member, Number(minutes))
 
+        // Ujian tanpa batas waktu: tidak ada yang berubah — tolak eksplisit
+        // (paritas ulangan; hindari toast "durasi diperpanjang" palsu).
+        if (r.no_deadline && !r.window_shifted && r.new_duration_minutes === null) {
+            return NextResponse.json({
+                error: 'Ujian ini tanpa batas waktu — tidak ada yang perlu ditambah.',
+            }, { status: 400 })
+        }
+
         return NextResponse.json({
             success: true,
             extended: r.extended,

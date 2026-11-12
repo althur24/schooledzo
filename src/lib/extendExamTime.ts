@@ -45,6 +45,13 @@ export interface ExtendTimeResult {
     new_window_end_time: string | null
     /** Durasi baru (mode serentak; null bila tidak diubah). */
     new_duration_minutes: number | null
+    /**
+     * true bila ujian sama sekali tidak punya batas waktu (durasi 0 && tanpa
+     * jendela) — tidak ada yang bisa diperpanjang. Route WAJIB membalas 400
+     * (bukan sukses palsu) agar guru tidak melihat toast "durasi diperpanjang"
+     * padahal tidak ada yang berubah.
+     */
+    no_deadline?: boolean
 }
 
 export interface ExtendableExamRow {
@@ -132,8 +139,9 @@ export async function extendTimeForExam(
             .eq('id', exam.id)
         if (examErr) throw examErr
     } else {
-        // Tanpa batas waktu — tidak ada yang bisa/ perlu diperpanjang
-        return { extended: 0, window_shifted: false, new_window_end_time: null, new_duration_minutes: null }
+        // Tanpa batas waktu — tidak ada yang bisa/ perlu diperpanjang.
+        // Tandai no_deadline agar route membalas 400 (bukan sukses palsu).
+        return { extended: 0, window_shifted: false, new_window_end_time: null, new_duration_minutes: null, no_deadline: true }
     }
 
     // ── 2. Per-siswa: override semua yang sedang mengerjakan ────────

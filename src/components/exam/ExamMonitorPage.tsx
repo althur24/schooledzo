@@ -423,7 +423,7 @@ export default function ExamMonitorPage({ examId, mode, batch, backHref: backHre
                             <CalendarClock className="w-4 h-4" />
                             Buka Susulan
                             <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px] font-black">
-                                {eligibleToOpen > 0 ? eligibleToOpen : alreadyOpenedCount}
+                                {eligibleToOpen > 0 ? eligibleToOpen : ''}
                             </span>
                         </button>
                     )}

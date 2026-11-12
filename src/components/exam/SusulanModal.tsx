@@ -268,7 +268,7 @@ export default function SusulanModal({ target, endpoint, onClose, onResult }: Su
                                 className="px-3 py-2 rounded-xl text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-50 flex items-center gap-1.5"
                             >
                                 {revoking && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                                Batalkan Susulan
+                                {target.existing?.expired ? 'Hapus Susulan Kedaluwarsa' : 'Batalkan Susulan'}
                             </button>
                         ) : <span />}
 
