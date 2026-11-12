@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSchoolLabels } from '@/contexts/LabelsContext'
@@ -48,6 +48,19 @@ export default function SiswaDashboard() {
     const router = useRouter()
     const { offsetRef, now: serverNow, minutes, dismissed, sync, dismiss } = useServerTimeOffset()
     const [student, setStudent] = useState<StudentData | null>(null)
+    // Berbagi data antar dua effect (fetchData ↔ checkIncomplete): dulu keduanya
+    // memanggil ulang /api/students + exam-submissions + official-exam-submissions
+    // + quiz-submissions (dobel-fetch). fetchData mengisi dashDataRef lalu
+    // me-resolve dashPromiseRef; checkIncomplete meng-await promise itu → satu
+    // fetch untuk kedua consumer (logika auto-submit/resume TIDAK berubah).
+    const dashDataRef = useRef<{
+        studentId: string
+        quizSubs: any[]
+        examSubs: any[]
+        officialExamSubs: any[]
+    } | null>(null)
+    const dashPromiseRef = useRef<Promise<void> | null>(null)
+    const dashResolveRef = useRef<(() => void) | null>(null)
     const [loading, setLoading] = useState(true)
     // True bila fetch data utama gagal — tanpa ini halaman menampilkan
     // "Semua Sudah Dikerjakan!"/"Libur!" yang menyesatkan saat server error
@@ -80,6 +93,9 @@ export default function SiswaDashboard() {
 
     useEffect(() => {
         const fetchData = async () => {
+            // Sinyal "data bersama siap" untuk checkIncomplete (hindari dobel-fetch).
+            dashDataRef.current = null
+            dashPromiseRef.current = new Promise<void>((resolve) => { dashResolveRef.current = resolve })
             try {
                 // Fetch student data first to get class_id
                 // user_id WAJIB: tanpa ini guard SISWA di /api/students mengembalikan []
@@ -128,6 +144,12 @@ export default function SiswaDashboard() {
                         fetch('/api/official-exam-submissions')
                     ])
                     sync(examsRes)
+                    // Sync server-time juga dari exam-submissions & official (header
+                    // x-server-time) — dulu hanya checkIncomplete yang sync ini;
+                    // karena fetch kini dibagi, sync di sini agar offset tetap akurat
+                    // sebelum checkIncomplete memakai cache (menutup race auto-submit).
+                    sync(examSubmissionsRes)
+                    sync(officialExamSubsRes)
 
                     const assignmentsData = await assignmentsRes.json()
                     const examsData = await examsRes.json()
@@ -138,6 +160,15 @@ export default function SiswaDashboard() {
                     const scheduleData = await scheduleRes.json()
                     const officialExamsData = await officialExamsRes.json()
                     const officialExamSubsData = await officialExamSubsRes.json()
+
+                    // Simpan untuk dipakai checkIncomplete (hindari dobel-fetch).
+                    dashDataRef.current = {
+                        studentId: myStudent.id,
+                        quizSubs: Array.isArray(quizSubmissionsData) ? quizSubmissionsData : [],
+                        examSubs: Array.isArray(examSubmissionsData) ? examSubmissionsData : [],
+                        officialExamSubs: Array.isArray(officialExamSubsData) ? officialExamSubsData : [],
+                    }
+                    dashResolveRef.current?.()
 
                     setTodaySchedule(Array.isArray(scheduleData) ? scheduleData : [])
 
@@ -336,6 +367,10 @@ export default function SiswaDashboard() {
                 setDataFailed(true)
             } finally {
                 setLoading(false)
+                // Pastikan checkIncomplete tidak menggantung bila fetchData gagal
+                // atau berhenti lebih awal (mis. myStudent null) — ia akan fallback
+                // fetch sendiri bila dashDataRef kosong.
+                dashResolveRef.current?.()
             }
         }
         if (user) fetchData()
@@ -347,32 +382,49 @@ export default function SiswaDashboard() {
 
         const checkIncomplete = async () => {
             try {
-                // user_id WAJIB: tanpa ini guard SISWA di /api/students mengembalikan []
-                const studentsRes = await fetch(`/api/students?user_id=${user.id}`)
-                const students = await studentsRes.json()
-                const myStudent = students.find((s: any) => s.user.id === user.id)
+                // Tunggu data bersama dari fetchData (bila ada) → satu fetch untuk
+                // kedua consumer. Bila fetchData tak berjalan (mis. belum mount),
+                // fallback fetch sendiri di bawah.
+                if (dashPromiseRef.current) {
+                    try { await dashPromiseRef.current } catch { /* fallback */ }
+                }
+
+                let quizzes: any[]
+                let exams: any[]
+                let officialExamSubs: any[]
+                let myStudent: any
+
+                const shared = dashDataRef.current
+                if (shared) {
+                    myStudent = { id: shared.studentId }
+                    quizzes = shared.quizSubs
+                    exams = shared.examSubs
+                    officialExamSubs = shared.officialExamSubs
+                } else {
+                    // user_id WAJIB: tanpa ini guard SISWA di /api/students mengembalikan []
+                    const studentsRes = await fetch(`/api/students?user_id=${user.id}`)
+                    const students = await studentsRes.json()
+                    myStudent = students.find((s: any) => s.user.id === user.id)
+                    if (!myStudent) return
+
+                    const [quizRes, examRes, officialExamSubRes] = await Promise.all([
+                        fetch(`/api/quiz-submissions?student_id=${myStudent.id}`),
+                        fetch(`/api/exam-submissions?student_id=${myStudent.id}`),
+                        fetch('/api/official-exam-submissions')
+                    ])
+
+                    // Sync server-time offset dari header x-server-time. Menutup race
+                    // HIGH #1: offset harus ter-sync sebelum expiry check di bawah
+                    // (cegah auto-submit prematur saat jam HP meleset).
+                    sync(examRes)
+                    sync(officialExamSubRes)
+
+                    quizzes = await quizRes.json()
+                    exams = await examRes.json()
+                    officialExamSubs = await officialExamSubRes.json()
+                }
 
                 if (!myStudent) return
-
-                const [quizRes, examRes, officialExamSubRes] = await Promise.all([
-                    fetch(`/api/quiz-submissions?student_id=${myStudent.id}`),
-                    fetch(`/api/exam-submissions?student_id=${myStudent.id}`),
-                    fetch('/api/official-exam-submissions')
-                ])
-
-                // Sync server-time offset dari exam-submissions response header.
-                // Ini menutup race HIGH #1: sebelumnya checkIncomplete pakai serverNow()
-                // dgn offsetRef=0 (offset hanya di-sync dari fetchData /api/exams yang
-                // berjalan paralel). Bila HP siswa meleset & ujian baru berakhir,
-                // checkIncomplete bisa PUT submit:true prematur — server terima karena
-                // masih dalam grace. Sekarang sync dari exam-submissions (yang juga
-                // bawa header x-server-time) sebelum expiry check di bawah.
-                sync(examRes)
-                sync(officialExamSubRes)
-
-                const quizzes = await quizRes.json()
-                const exams = await examRes.json()
-                const officialExamSubs = await officialExamSubRes.json()
 
                 type ResumeCandidate = {
                     type: 'Kuis' | 'Ulangan' | 'UTS/UAS'

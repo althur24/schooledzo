@@ -39,6 +39,9 @@ export async function GET(
         if (isErrorResponse(ctx)) return ctx
         const { user, schoolId } = ctx
 
+        // Gerbang kunci jawaban siswa (diisi di blok SISWA, dipakai saat strip).
+        let siswaKeyGate: { hasSubmitted: boolean; examKeysWindow: boolean; resultsGate: boolean } | null = null
+
         // Tenant guard: exam harus milik sekolah caller (IDOR lintas sekolah —
         // paritas dengan /api/quizzes/[id]/questions). Cek sebelum soal dikirim.
         if (tenantMismatch(await resolveExamSchoolId(id), schoolId)) {
@@ -52,14 +55,17 @@ export async function GET(
         // Pengecualian: siswa yang sudah punya attempt tetap boleh memuat soal
         // (resume setelah ujian ditarik/diakhiri tidak boleh blank).
         if (user.role === 'SISWA') {
-            const { data: examTa } = await supabase
+            // Satu query per entitas (union kolom) — sebelumnya blok guard kelas
+            // & blok gerbang kunci masing-masing query exams/students/submission
+            // terpisah (duplikasi akumulatif) → ±7 query jadi ±4.
+            const { data: examRow } = await supabase
                 .from('exams')
-                .select('is_active, start_time, duration_minutes, window_end_time, teaching_assignment:teaching_assignments(class_id, academic_year_id)')
+                .select('is_active, start_time, duration_minutes, window_end_time, show_results_immediately, results_released, teaching_assignment:teaching_assignments(class_id, academic_year_id)')
                 .eq('id', id)
                 .single()
-            const examTaAny: any = examTa?.teaching_assignment
-            const taClassId = (Array.isArray(examTaAny) ? examTaAny[0] : examTaAny)?.class_id
-            const taYearId = (Array.isArray(examTaAny) ? examTaAny[0] : examTaAny)?.academic_year_id
+            const examRowAny: any = examRow?.teaching_assignment
+            const taClassId = (Array.isArray(examRowAny) ? examRowAny[0] : examRowAny)?.class_id
+            const taYearId = (Array.isArray(examRowAny) ? examRowAny[0] : examRowAny)?.academic_year_id
 
             const { data: student } = await supabase
                 .from('students')
@@ -85,14 +91,15 @@ export async function GET(
                 return notFound()
             }
 
+            // Union kolom: dipakai guard attempt/susulan DAN gerbang kunci.
             const { data: mySubmission } = await supabase
                 .from('exam_submissions')
-                .select('id, started_at, susulan_granted_at, susulan_expires_at, is_submitted')
+                .select('id, started_at, timer_override_until, susulan_granted_at, susulan_expires_at, is_submitted')
                 .eq('exam_id', id)
                 .eq('student_id', student.id)
                 .limit(1)
             const firstSub = (mySubmission || [])[0] as
-                { started_at: string | null; susulan_granted_at: string | null; susulan_expires_at: string | null; is_submitted: boolean | null } | undefined
+                { started_at: string | null; timer_override_until: string | null; susulan_granted_at: string | null; susulan_expires_at: string | null; is_submitted: boolean | null } | undefined
 
             const placeholderGrant = !!firstSub && !firstSub.started_at && !!firstSub.susulan_granted_at && !firstSub.is_submitted
             const grantExpiresMs = firstSub?.susulan_expires_at
@@ -108,14 +115,14 @@ export async function GET(
             // Baris legacy (started_at NULL tanpa grant) tetap dianggap attempt.
             // Placeholder grant kedaluwarsa diperlakukan sebagai belum attempt.
             const hasAttempt = !!firstSub && !placeholderGrant
-            const started = examTa?.start_time ? new Date(examTa.start_time).getTime() <= Date.now() : true
+            const started = examRow?.start_time ? new Date(examRow.start_time).getTime() <= Date.now() : true
             // Tanpa attempt, soal juga tidak boleh dibaca setelah ujian berakhir
             // (sebelumnya start_time lewat saja dianggap cukup).
             const globalExpiry = resolveWindowExpiry(
                 {
-                    start_time: examTa?.start_time ?? null,
-                    duration_minutes: examTa?.duration_minutes ?? null,
-                    window_end_time: examTa?.window_end_time ?? null,
+                    start_time: examRow?.start_time ?? null,
+                    duration_minutes: examRow?.duration_minutes ?? null,
+                    window_end_time: examRow?.window_end_time ?? null,
                 },
                 { started_at: null, timer_override_until: null },
             )
@@ -127,10 +134,36 @@ export async function GET(
                 if (!taClassId || studentClassId !== taClassId) {
                     return notFound()
                 }
-                if (!examTa?.is_active || !started || ended) {
+                if (!examRow?.is_active || !started || ended) {
                     return NextResponse.json({ error: 'Ulangan belum tersedia' }, { status: 403 })
                 }
             }
+
+            // Gerbang kunci (paritas strip correct_answer): siswa belum submit →
+            // kunci tertahan. Sudah submit → tampil hanya bila jendela tutup DAN
+            // hasil dirilis. Dihitung di sini (data sudah tersedia) untuk dipakai
+            // saat strip kunci di bawah — menggantikan query duplikat lama.
+            const hasSubmitted = !!firstSub?.is_submitted
+            let examKeysWindow = true
+            let resultsGate = true
+            if (hasSubmitted) {
+                const expiry = resolveWindowExpiry(
+                    {
+                        start_time: examRow?.start_time ?? null,
+                        duration_minutes: examRow?.duration_minutes ?? null,
+                        window_end_time: examRow?.window_end_time ?? null,
+                    },
+                    {
+                        started_at: firstSub?.started_at ?? null,
+                        timer_override_until: firstSub?.timer_override_until ?? null,
+                    },
+                )
+                examKeysWindow = !expiry.limited || Date.now() > expiry.endAt
+                const showImmediately = examRow?.show_results_immediately ?? true
+                const isReleased = (examRow as any)?.results_released || false
+                resultsGate = showImmediately || isReleased
+            }
+            siswaKeyGate = { hasSubmitted, examKeysWindow, resultsGate }
         }
 
         // GURU non-pemilik TA tidak boleh membaca soal ulangan guru lain
@@ -194,49 +227,11 @@ export async function GET(
         // = kunci tetap ditahan walau jendela sudah tutup (paritas pintu
         // detail submission: isHidden), seragam di semua pintu keluar soal.
         if (user.role === 'SISWA') {
-            const { data: student } = await supabase
-                .from('students')
-                .select('id')
-                .eq('user_id', user.id)
-                .single()
-
-            let hasSubmitted = false
-            let examKeysWindow = true
-            let resultsGate = true
-            if (student) {
-                const { data: submission } = await supabase
-                    .from('exam_submissions')
-                    .select('is_submitted, started_at, timer_override_until')
-                    .eq('exam_id', id)
-                    .eq('student_id', student.id)
-                    .single()
-                hasSubmitted = !!submission?.is_submitted
-
-                if (hasSubmitted) {
-                    const { data: examWin } = await supabase
-                        .from('exams')
-                        .select('start_time, duration_minutes, window_end_time, show_results_immediately, results_released')
-                        .eq('id', id)
-                        .single()
-                    const expiry = resolveWindowExpiry(
-                        {
-                            start_time: examWin?.start_time ?? null,
-                            duration_minutes: examWin?.duration_minutes ?? null,
-                            window_end_time: examWin?.window_end_time ?? null,
-                        },
-                        {
-                            started_at: submission?.started_at ?? null,
-                            timer_override_until: submission?.timer_override_until ?? null,
-                        },
-                    )
-                    examKeysWindow = !expiry.limited || Date.now() > expiry.endAt
-                    const showImmediately = examWin?.show_results_immediately ?? true
-                    const isReleased = examWin?.results_released || false
-                    resultsGate = showImmediately || isReleased
-                }
-            }
-
-            if (!hasSubmitted || !examKeysWindow || !resultsGate) {
+            // Gerbang kunci sudah dihitung di blok SISWA di atas (tanpa query
+            // duplikat). Fallback fail-safe: bila karena suatu hal belum terisi,
+            // anggap belum submit → kunci tetap tertahan.
+            const gate = siswaKeyGate ?? { hasSubmitted: false, examKeysWindow: true, resultsGate: true }
+            if (!gate.hasSubmitted || !gate.examKeysWindow || !gate.resultsGate) {
                 // Batas pilihan GK = jumlah kunci — dihitung SEBELUM kunci di-strip;
                 // hanya jumlahnya yang dikirim (kunci tidak bocor). UI siswa memblokir
                 // pilihan ke-(N+1) supaya over-pick tidak mungkin.
