@@ -42,6 +42,10 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
     useEffect(() => { configRef.current = config })
 
     const [exam, setExam] = useState<ExamData | null>(null)
+    // Ref exam untuk callback panjang (logViolation/flush) — hindari stale closure
+    // saat membaca max_violations tanpa menambah deps.
+    const examRef = useRef<ExamData | null>(null)
+    useEffect(() => { examRef.current = exam }, [exam])
     const [questions, setQuestions] = useState<RunnerQuestion[]>([])
     const [submission, setSubmission] = useState<RunnerSubmission | null>(null)
     const [answers, setAnswers] = useState<{ [key: string]: string }>({})
@@ -59,6 +63,13 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
     const [showViolationWarning, setShowViolationWarning] = useState(false)
     const [isFullscreen, setIsFullscreen] = useState(false)
     const [forceSubmitted, setForceSubmitted] = useState(false)
+    // Layar ujian terkunci karena pelanggaran mencapai batas. Dicek LOKAL (agar
+    // saat offline ujian berhenti seketika — tidak menunggu koneksi), lalu
+    // disinkronkan dengan angka otoritatif server saat online (dedup 3 dtk bisa
+    // membuat server < batas → kunci dibuka lagi, lihat syncViolationLock).
+    const [violationLocked, setViolationLocked] = useState(false)
+    const violationLockedRef = useRef(false)
+    useEffect(() => { violationLockedRef.current = violationLocked }, [violationLocked])
     const [loadError, setLoadError] = useState<string | null>(null) // gagal load (network dsb.) — bisa dicoba ulang
     const isOnline = useOnlineStatus()
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -251,6 +262,13 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         try {
             pendingViolationsRef.current = JSON.parse(localStorage.getItem(VIOLATION_QUEUE_KEY) || '[]')
         } catch { pendingViolationsRef.current = [] }
+        // Pemulihan kunci pasca-refresh: counter optimistis awal = jumlah
+        // pelanggaran yang belum terkirim. Angka otoritatif server nanti MENIMPA.
+        // Efek [violationCount] mengunci bila sudah mencapai batas (bila server
+        // ternyata < batas, syncViolationLock membuka lagi).
+        if (pendingViolationsRef.current.length > 0) {
+            setViolationCount(pendingViolationsRef.current.length)
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
@@ -285,6 +303,10 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 pendingViolationsRef.current = []
                 persistViolationQueue()
                 setForceSubmitted(true)
+                // Server sudah menutup resmi (draft request ini ikut direkap) →
+                // lepas layar kunci & buka hasil.
+                violationLockedRef.current = false
+                setViolationLocked(false)
                 alert(`${examLabelRef.current} otomatis dikumpulkan karena pelanggaran melebihi batas!`)
                 router.push(configRef.current.listRoute)
                 return
@@ -294,7 +316,11 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 // queue tidak akan pernah diterima, bersihkan supaya tidak dicoba selamanya.
                 pendingViolationsRef.current = []
                 persistViolationQueue()
-                if (typeof data?.violation_count === 'number') setViolationCount(data.violation_count)
+                if (typeof data?.violation_count === 'number') {
+                    setViolationCount(data.violation_count)
+                    // Angka otoritatif server: kunci/buka sesuai batas sebenarnya.
+                    syncViolationLock(data.violation_count)
+                }
 
                 // Fix 6: Propagasi "Tambah Waktu" via jalur pelanggaran — respons
                 // membawa ends_at, perbarui patokan timer (hanya memanjang).
@@ -386,9 +412,17 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             return draftKeys.some(qid => synced[qid] !== draft[qid])
         }
         if (saveStatus !== 'error' && !hasUnsyncedChanges() && pendingSubmitRef.current === null) return
-        const iv = setInterval(() => {
+        const iv = setInterval(async () => {
             if (saveStatus !== 'error' && !hasUnsyncedChanges() && pendingSubmitRef.current === null) return
-            syncLocalToServer()
+            await syncLocalToServer()
+            // Draft bisa kosong (semua jawaban sudah tersinkron) tetapi submit
+            // masih tertunda karena offline — jangan berhenti di sync no-op:
+            // coba kirim submit lagi selagi ada koneksi.
+            if (pendingSubmitRef.current !== null) {
+                const wasAuto = pendingSubmitRef.current
+                pendingSubmitRef.current = null
+                await handleSubmit(wasAuto)
+            }
         }, 15000)
         return () => clearInterval(iv)
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -510,6 +544,53 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             }
         }
     }
+
+    /**
+     * Batas pelanggaran efektif — SATU sumber dengan server
+     * (exam-submissions PUT: `maxViolations = max_violations || 3`).
+     */
+    const violationLimit = (): number => examRef.current?.max_violations || 3
+
+    /**
+     * Kunci layar ujian bila pelanggaran mencapai batas. Dipanggil dari jalur
+     * offline (optimistic) MAUPUN respons server. Saat terkunci: timer berhenti,
+     * jawaban tidak bisa diubah lagi, draft + pelanggaran dikirim begitu online.
+     */
+    const lockForViolations = (count: number) => {
+        if (count < violationLimit()) return
+        if (violationLockedRef.current) return
+        violationLockedRef.current = true
+        setViolationLocked(true)
+        setShowViolationWarning(false)
+        if (timerRef.current) clearInterval(timerRef.current)
+        // Kirim draft + pelanggaran sekarang bila online; saat offline retry loop
+        // akan mengulang sampai server menutup resmi.
+        flushPendingViolations()
+    }
+
+    /**
+     * Sinkronkan state kunci dengan angka OTORITATIF server. Dedup 3 dtk bisa
+     * membuat server menghitung < batas walau client sempat menaikkan counter
+     * optimistic — jangan salah mengunci: buka lagi bila server < batas.
+     */
+    const syncViolationLock = (serverCount: number) => {
+        if (serverCount >= violationLimit()) lockForViolations(serverCount)
+        else if (violationLockedRef.current) {
+            violationLockedRef.current = false
+            setViolationLocked(false)
+        }
+    }
+
+    /**
+     * Penguncian reaktif dari counter (menggantikan side-effect di dalam updater
+     * setViolationCount — StrictMode dev memanggil updater >1×). Guard di
+     * lockForViolations membuat ini idempoten (tidak loop) dan menangani baik
+     * jalur offline optimistic maupun counter yang di-restore dari server.
+     */
+    useEffect(() => {
+        if (violationCount >= violationLimit()) lockForViolations(violationCount)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [violationCount])
 
     /** Normalisasi data ujian dari API (embed ulangan vs UTS/UAS berbeda). */
     const normalizeExam = (raw: any): ExamData => ({
@@ -829,7 +910,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         const handleVisibilityChange = async () => {
             // 1g: Disable violation detection saat submit/menunggu koneksi —
             // siswa boleh switch ke WiFi settings untuk menyambungkan internet.
-            if (submittingRef.current || showOfflineTimeoutModalRef.current) return
+            // Juga saat layar terkunci (pelanggaran sudah melewati batas).
+            if (submittingRef.current || showOfflineTimeoutModalRef.current || violationLockedRef.current) return
             if (document.hidden) {
                 // 1g: kirim jawaban saat switch app (safety net)
                 flushAnswersKeepalive()
@@ -851,21 +933,25 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 setTimeout(() => { violationCooldownRef.current = false }, 5000)
 
                 await logViolation('TAB_SWITCH')
-                setShowViolationWarning(true)
-                setTimeout(() => setShowViolationWarning(false), 4000)
+                // Jangan tampilkan peringatan bila pelanggaran ini langsung
+                // mengunci layar (logViolation → lock) — hindari overlay residu.
+                if (!violationLockedRef.current) {
+                    setShowViolationWarning(true)
+                    setTimeout(() => setShowViolationWarning(false), 4000)
+                }
             }
         }
 
         // Method 2: Window blur/focus (works for PWA standalone + Alt+Tab)
         const handleWindowBlur = async () => {
-            if (submittingRef.current || showOfflineTimeoutModalRef.current) return
+            if (submittingRef.current || showOfflineTimeoutModalRef.current || violationLockedRef.current) return
             if (document.hidden) return // Already handled by visibilitychange
             // Only record timestamp for blur without visibility change
             if (hiddenAtRef.current === 0) hiddenAtRef.current = Date.now()
         }
 
         const handleWindowFocus = async () => {
-            if (submittingRef.current || showOfflineTimeoutModalRef.current) return
+            if (submittingRef.current || showOfflineTimeoutModalRef.current || violationLockedRef.current) return
             if (document.hidden) return
             if (hiddenAtRef.current <= 0) return
 
@@ -882,8 +968,10 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             setTimeout(() => { violationCooldownRef.current = false }, 5000)
 
             await logViolation('TAB_SWITCH')
-            setShowViolationWarning(true)
-            setTimeout(() => setShowViolationWarning(false), 4000)
+            if (!violationLockedRef.current) {
+                setShowViolationWarning(true)
+                setTimeout(() => setShowViolationWarning(false), 4000)
+            }
         }
 
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -964,12 +1052,20 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             if (data.force_submitted) {
                 setForceSubmitted(true)
                 pendingViolationRef.current = false // cancel warning
+                // Server sudah menutup resmi & nilai direkap (draft request ini ikut
+                // terselamatkan) — langsung ke halaman hasil. Layar kunci hanya
+                // dipakai saat BELUM bisa menghubungi server (offline).
+                violationLockedRef.current = false
+                setViolationLocked(false)
                 alert(`${examLabelRef.current} otomatis dikumpulkan karena pelanggaran melebihi batas!`)
                 router.push(configRef.current.listRoute)
                 return
             }
 
-            if (typeof data.violation_count === 'number') setViolationCount(data.violation_count)
+            if (typeof data.violation_count === 'number') {
+                setViolationCount(data.violation_count)
+                syncViolationLock(data.violation_count)
+            }
             // Wait to show violation warning when they return (handled in visibility handler)
         } catch {
             // Offline / server error: antre pelanggaran (persist ke localStorage)
@@ -982,6 +1078,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
             // double-count: flush/logViolation sukses selalu MENIMPA count dengan
             // angka otoritatif server (dedup 3 dtk di mergeViolations mengoreksi
             // bila increment ini ternyata ditolak server).
+            // Updater WAJIB pure — penguncian ditangani effect [violationCount]
+            // (lihat di bawah) agar tidak ada side-effect di dalam updater React.
             setViolationCount(c => c + 1)
         }
     }
@@ -1040,6 +1138,8 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
     }, [])
 
     const saveAnswer = (questionId: string, answer: string) => {
+        // Layar terkunci (pelanggaran lewat batas) — jawaban tidak boleh berubah lagi.
+        if (violationLockedRef.current) return
         const newAnswers = { ...answers, [questionId]: answer }
         setAnswers(newAnswers)
         saveAnswersToLocal(newAnswers)
@@ -1055,6 +1155,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
     }
 
     const saveAnswerImmediate = (questionId: string, answer: string) => {
+        if (violationLockedRef.current) return
         const newAnswers = { ...answers, [questionId]: answer }
         setAnswers(newAnswers)
         saveAnswersToLocal(newAnswers)
@@ -1232,6 +1333,31 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         router.push(configRef.current.listRoute)
     }, [router])
 
+    /**
+     * Probe koneksi manual (tombol "Coba Lagi" di layar menunggu koneksi).
+     * Event `online` browser tidak selalu fire (iOS Safari/PWA) → tanpa probe
+     * mandiri siswa bisa terjebak di layar menunggu walau internet sudah pulih.
+     * Sukses = endpoint ringan `/api/ping` terjangkau → flush draft/pelanggaran
+     * + retry submit tertunda.
+     */
+    const retryConnection = useCallback(async () => {
+        try {
+            const res = await fetch('/api/ping', { method: 'GET', cache: 'no-store' })
+            if (!res.ok) return
+        } catch {
+            // masih offline — biarkan layar menunggu (user bisa coba lagi)
+            return
+        }
+        await syncLocalToServer()
+        if (pendingSubmitRef.current !== null) {
+            const wasAuto = pendingSubmitRef.current
+            pendingSubmitRef.current = null
+            await handleSubmit(wasAuto)
+        }
+        await flushPendingViolations()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
     return {
         exam,
         questions,
@@ -1248,6 +1374,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         timeExtension,
         violationCount,
         showViolationWarning,
+        violationLocked,
         isFullscreen,
         examLabel,
         showConfirmSubmit,
@@ -1263,6 +1390,7 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
         continueResume,
         requestFullscreen,
         retryLoad,
+        retryConnection,
         goBack,
         containerRef,
     }

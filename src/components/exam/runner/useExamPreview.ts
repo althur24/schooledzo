@@ -55,6 +55,7 @@ export function useExamPreviewState(
         timeExtension: null,
         violationCount: 0,
         showViolationWarning: false,
+        violationLocked: false,
         isFullscreen: true,
         examLabel,
         showConfirmSubmit: false,
@@ -70,6 +71,7 @@ export function useExamPreviewState(
         continueResume: () => { },
         requestFullscreen: () => { },
         retryLoad: () => { },
+        retryConnection: () => { },
         goBack: () => { },
         containerRef,
     }

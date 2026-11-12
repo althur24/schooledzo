@@ -4,8 +4,10 @@
  * bukan sekadar mock fetch. Menguji jalur offline yang di-port ke runner:
  *
  *  [ONLINE]   Siswa kerja online: klik jawaban → autosave 1.5 dtk → tersimpan DB.
- *  [OFF-BANNER] emulateNetworkConditions offline → navigator.onLine=false →
- *             banner merah "Koneksi terputus" muncul.
+ *  [OFF-SILENT] emulateNetworkConditions offline → navigator.onLine=false →
+ *             TIDAK ada notifikasi offline apa pun (prinsip "zero distraction":
+ *             siswa mengerjakan tenang, jawaban aman di localStorage; verifikasi
+ *             jawaban terjadi di akhir saat menekan Selesai / waktu habis).
  *  [OFF-DRAFT] Ganti jawaban saat offline → draft masuk localStorage
  *             (exam_${id}_answers), TIDAK ke server.
  *  [OFF-TIMEOUT] Timer habis saat offline (durasi 1 menit) → modal
@@ -236,13 +238,18 @@ async function main() {
     check('[ONLINE] Autosave masuk DB (answer=A)', ans1?.answer === 'A', `answer=${ans1?.answer}`)
 
     // ---------- OFFLINE ----------
-    console.log('\n[2] [OFF-BANNER] emulateNetworkConditions offline=true')
+    console.log('\n[2] [OFF-SILENT] emulateNetworkConditions offline=true → TIDAK ada notif offline')
     await cdp.send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
     await sleep(1500)
     const offlineNav = await evalInPage(cdp, `navigator.onLine`)
-    const banner = await evalInPage(cdp, `document.body.innerText.includes('Koneksi terputus')`)
+    const bodyText = await evalInPage(cdp, `document.body.innerText`)
     check('navigator.onLine = false (emulasi offline aktif)', offlineNav === false)
-    check('[OFF-BANNER] Banner merah "Koneksi terputus" tampil', banner === true)
+    // Prinsip zero-distraction: ruang ujian tidak menampilkan notifikasi offline apa pun.
+    check('[OFF-SILENT] Tidak ada banner "Koneksi terputus"', String(bodyText).includes('Koneksi terputus') === false)
+    // Badge WiFi "Offline" dihapus dari header ruang ujian (NetworkBadge tidak dirender).
+    const offlineBadge = await evalInPage(cdp, `[...document.querySelectorAll('span')].some(s => s.textContent.trim() === 'Offline')`)
+    check('[OFF-SILENT] Tidak ada label badge "Offline" di header', offlineBadge === false)
+    check('[OFF-SILENT] Siswa masih bisa melihat soal (layar ujian tetap tampil)', String(bodyText).includes(String(q[0].question_text).slice(0, 12)))
 
     console.log('\n[3] [OFF-DRAFT] ganti jawaban saat offline → draft lokal, bukan server')
     const clickB = await evalInPage(cdp, `(() => {

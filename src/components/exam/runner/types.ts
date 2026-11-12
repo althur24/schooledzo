@@ -107,6 +107,12 @@ export interface ExamRunnerState {
     timeExtension: { minutes: number } | null
     violationCount: number
     showViolationWarning: boolean
+    /**
+     * Ruang ujian dikunci karena pelanggaran mencapai batas (dicek lokal saat
+     * offline, atau dari respons server saat online). Saat true, siswa tidak
+     * bisa menjawab lagi; draft terkirim begitu online dan server menutup resmi.
+     */
+    violationLocked: boolean
     isFullscreen: boolean
     examLabel: string
     showConfirmSubmit: boolean
@@ -124,6 +130,12 @@ export interface ExamRunnerState {
     requestFullscreen: () => void
     /** Coba muat ulang setelah layar error (koneksi putus dsb.). */
     retryLoad: () => void
+    /**
+     * Probe koneksi manual (tombol "Coba Lagi" pada layar menunggu koneksi) —
+     * tidak bergantung event `online` browser yang tidak selalu muncul
+     * (iOS Safari/PWA). Sukses → flush draft + retry submit tertunda.
+     */
+    retryConnection: () => void
     /** Kembali ke daftar ujian (layar error "Kembali"). */
     goBack: () => void
     containerRef: RefObject<HTMLDivElement | null>

@@ -2,7 +2,6 @@
 
 import { Document, Danger, Scan, TimeCircle, TickSquare } from 'react-iconly'
 import { Loader2 } from 'lucide-react'
-import NetworkBadge from '@/components/NetworkBadge'
 import ExamZoomControls from '@/components/exam/ExamZoomControls'
 import ExamZoomHint from '@/components/exam/ExamZoomHint'
 import { buildDisplayItems } from './displayItems'
@@ -29,7 +28,10 @@ interface ExamRunnerViewProps {
     /**
      * live  = ruang ujian siswa sesungguhnya (fullscreen, pelanggaran, autosave).
      * preview = replika 1:1 di PreviewModal guru/admin: markup identik, tanpa
-     *           NetworkBadge/counter pelanggaran, tombol kumpulkan disabled.
+     *           counter pelanggaran, tombol kumpulkan disabled.
+     * Catatan: indikator/notifikasi offline SENGAJA tidak dirender di ruang
+     * ujian — siswa mengerjakan tenang (offline aman, jawaban tersimpan lokal);
+     * verifikasi jawaban terjadi di akhir saat siswa menekan Selesai.
      */
     mode?: 'live' | 'preview'
 }
@@ -83,6 +85,50 @@ export function ExamRunnerView({ state, mode = 'live' }: ExamRunnerViewProps) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
                 <div className="text-center text-red-500 dark:text-red-400">{state.examLabel || 'Ujian'} tidak dapat dimulai</div>
+            </div>
+        )
+    }
+
+    // Layar terkunci — pelanggaran mencapai batas. Jawaban tidak bisa diubah lagi;
+    // draft + pelanggaran dikirim begitu online, server menutup resmi lalu redirect
+    // ke halaman hasil (ditangani useExamRunner). Mode preview tidak terkunci.
+    if (!isPreview && state.violationLocked) {
+        const lockMax = exam.max_violations || 3
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center bg-background-light dark:bg-background-dark p-6 text-center">
+                <div className="w-24 h-24 bg-red-500/10 text-red-500 dark:text-red-400 rounded-full flex items-center justify-center mb-6">
+                    <Danger set="bold" primaryColor="currentColor" size={48} />
+                </div>
+                <h2 className="text-2xl font-extrabold text-text-main dark:text-white mb-3">
+                    {state.examLabel} Dihentikan
+                </h2>
+                <p className="text-text-secondary max-w-md mb-2">
+                    Anda terdeteksi keluar dari halaman ujian melebihi batas yang diizinkan.
+                </p>
+                <p className="text-lg font-bold text-red-500 dark:text-red-400 mb-6">
+                    Pelanggaran: {state.violationCount} / {lockMax}
+                </p>
+                <p className="text-sm text-green-600 dark:text-green-400 font-medium mb-1">
+                    ✓ Jawaban Anda aman tersimpan
+                </p>
+                {!state.isOnline && (
+                    <>
+                        <p className="text-sm text-text-secondary mb-6">
+                            Sambungkan internet untuk mengirim jawaban Anda.
+                        </p>
+                        <button
+                            onClick={state.retryConnection}
+                            className="px-6 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary-dark transition-colors"
+                        >
+                            Coba Lagi
+                        </button>
+                    </>
+                )}
+                {state.isOnline && (
+                    <p className="text-sm text-text-secondary mb-6">
+                        Mengirim jawaban & menutup ujian...
+                    </p>
+                )}
             </div>
         )
     }
@@ -177,13 +223,6 @@ export function ExamRunnerView({ state, mode = 'live' }: ExamRunnerViewProps) {
                 </div>
             )}
 
-            {/* Offline Banner */}
-            {!state.isOnline && (
-                <div className="bg-red-500 text-white text-xs font-bold text-center py-1.5 animate-pulse w-full">
-                    ⚠️ Koneksi terputus — jawaban disimpan lokal & akan otomatis dikirim saat online
-                </div>
-            )}
-
             {/* "Tambah Waktu" guru — patokan timer sudah diperbarui via autosave */}
             {state.timeExtension && (
                 <div className="bg-emerald-600 text-white text-xs font-bold text-center py-1.5 w-full">
@@ -199,9 +238,6 @@ export function ExamRunnerView({ state, mode = 'live' }: ExamRunnerViewProps) {
                         <p className="text-sm text-text-secondary">{exam.subjectName}</p>
                     </div>
                     <div className="flex items-center justify-between md:justify-end gap-3 md:gap-6 flex-wrap">
-                        {!isPreview && (
-                            <NetworkBadge isOnline={state.isOnline} />
-                        )}
                         <ExamZoomControls
                             zoomLevel={zoom.zoomLevel}
                             canZoomIn={zoom.canZoomIn}
@@ -336,6 +372,15 @@ export function ExamRunnerView({ state, mode = 'live' }: ExamRunnerViewProps) {
                         <p className="text-xs text-text-secondary mt-2">
                             Jawaban akan dikirim otomatis saat koneksi tersambung.
                         </p>
+                        {/* Probe manual: event `online` browser tidak selalu fire
+                            (iOS Safari/PWA) → tanpa tombol ini siswa bisa terjebak
+                            di layar menunggu walau internet sudah pulih. */}
+                        <button
+                            onClick={state.retryConnection}
+                            className="mt-4 w-full px-5 py-2.5 bg-primary text-white rounded-xl font-bold hover:bg-primary-dark transition-colors"
+                        >
+                            Coba Lagi
+                        </button>
                     </div>
                 </div>
             )}
