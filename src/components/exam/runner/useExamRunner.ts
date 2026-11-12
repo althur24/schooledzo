@@ -85,6 +85,11 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
 
     const containerRef = useRef<HTMLDivElement>(null)
     const hasStarted = useRef(false)
+    // true bila attempt sudah pernah dimulai di sesi ini (start/resume sukses).
+    // Dipakai agar kegagalan muat soal TIDAK mengusir siswa ketika timer sudah
+    // berjalan (retry kedua dst.) — TANPA mem-probe POST start yang bisa
+    // memulai timer baru secara tak sengaja.
+    const attemptKnownRef = useRef(false)
     const timerRef = useRef<NodeJS.Timeout | null>(null)
     const answersRef = useRef(answers)
     // Patokan waktu dari server: ends_at (batas efektif, sudah termasuk override hard reset)
@@ -647,6 +652,9 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     }
                 } else {
                     susulanStarted = true
+                    // Attempt susulan sudah resmi mulai (timer jalan) — ingat agar
+                    // retry (saat susulan_pending sudah false) tidak mengusir siswa.
+                    attemptKnownRef.current = true
                 }
                 questionsRes = await fetch(`${configRef.current.examApiBase}/${examId}/questions`)
                 questionsData = await questionsRes.json()
@@ -660,27 +668,12 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                     : `Gagal memuat soal ${configRef.current.fallbackLabel.toLowerCase()}`
 
                 // Susulan sudah POST start (timer berjalan) ATAU attempt nyata sudah
-                // berjalan (mis. retry setelah susulan dimulai, saat susulan_pending
-                // sudah false tapi submission ada) → JANGAN redirect & buang
-                // kesempatan retry selama timer jalan: tampilkan layar Coba Lagi.
-                // Deteksi status attempt lewat probe POST start (idempoten: resume
-                // mengembalikan submission berjalan; gate menolak bila belum boleh).
-                let attemptRunning = susulanStarted
-                if (!attemptRunning) {
-                    try {
-                        const probeSub = await fetch(configRef.current.submissionApi, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ exam_id: examId })
-                        })
-                        const probeBody = await probeSub.json().catch(() => null)
-                        const hasSubmission = !!probeBody?.id && !probeBody?.error
-                        if (hasSubmission && probeBody?.started_at) attemptRunning = true
-                        // Simpan agar alur normal di bawah tidak POST dua kali bila
-                        // ternyata attempt memang belum berjalan.
-                        if (hasSubmission) subData = probeBody
-                    } catch { /* probe gagal = perlakukan seperti belum berjalan */ }
-                }
+                // pernah dimulai di sesi ini (retry setelah soal gagal) → JANGAN
+                // redirect & buang kesempatan retry selama timer jalan: tampilkan
+                // layar Coba Lagi. Sengaja TIDAK mem-probe POST start di sini:
+                // POST start bisa MEMBUAT attempt baru (menyalakan timer tanpa soal)
+                // bila ujian sebenarnya belum dimulai.
+                const attemptRunning = susulanStarted || attemptKnownRef.current || !!submissionRef.current?.started_at
 
                 if (attemptRunning) {
                     setLoadError(message)
@@ -737,6 +730,10 @@ export function useExamRunner(examId: string, config: ExamRunnerConfig): ExamRun
                 router.push(configRef.current.listRoute)
                 return
             }
+
+            // Attempt resmi berjalan (start/resume sukses) — catat agar kegagalan
+            // muat soal berikutnya tidak mengusir siswa selama timer jalan.
+            attemptKnownRef.current = true
 
             // Patokan waktu server: koreksi jam HP + batas efektif (jendela global / override hard reset)
             if (subData.server_time) {
