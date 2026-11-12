@@ -1,5 +1,6 @@
 // ============================================================
-// LOAD TEST k6 — ULANGAN SERENTAK 1000 SISWA (mode exam_submissions)
+// LOAD TEST k6 — ULANGAN SERENTAK (mode exam_submissions) — default 1500 siswa
+// (15 kelas × 100; override -e PEAK= / -e LT_CLASSES= / -e LT_PER_CLASS=)
 // ============================================================
 // Reproduksi volume insiden 29 Sep 2026: siswa mengerjakan ULANGAN
 // (bukan UTS/UAS) dengan autosave berkelanjutan — target ±147.000
@@ -35,7 +36,7 @@ import http from 'k6/http'
 import { check, sleep } from 'k6'
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000'
-const PEAK = parseInt(__ENV.PEAK || '1000', 10)
+const PEAK = parseInt(__ENV.PEAK || '1500', 10)
 const HOLD_MIN = parseInt(__ENV.HOLD_MIN || '13', 10)
 const EXAM_MIN = parseInt(__ENV.EXAM_MIN || '15', 10) // rentang menit pengerjaan
 const EXAM_MAX = parseInt(__ENV.EXAM_MAX || '19', 10) // → gelombang submit natural
@@ -46,11 +47,15 @@ const SAVE_MIN = parseFloat(__ENV.SAVE_MIN || '5')
 const SAVE_MAX = parseFloat(__ENV.SAVE_MAX || '9')
 const NOTIF_SEC = parseInt(__ENV.NOTIF_SEC || '60', 10)
 
-// Exam batch member (seed_ulangan_loadtest.cjs): 10 kelas × 100 siswa
+// Exam batch member (seed_ulangan_loadtest.cjs): N kelas × 100 siswa.
+// Kelas ke-i punya exam 7e5789..-i. CONFIGS: LT_CLASSES (default 15),
+// LT_PER_CLASS (default 100) — harus sinkron dengan seeder.
 function examIdForClass(i) {
     return '7e578900-0000-0000-0000-' + i.toString(16).padStart(12, '0')
 }
-const TOTAL_USERS = 1000
+const LT_CLASSES = parseInt(__ENV.LT_CLASSES || '15', 10)
+const PER_CLASS = parseInt(__ENV.LT_PER_CLASS || '100', 10)
+const TOTAL_USERS = LT_CLASSES * PER_CLASS
 const OPTION_LETTERS = ['A', 'B', 'C', 'D']
 
 export const options = {
@@ -125,7 +130,7 @@ let nextNotifMs = 0
 export default function () {
     const userNum = ((__VU - 1) % TOTAL_USERS) + 1
     const token = 'lt_token_' + pad(userNum, 4)
-    const classIdx = Math.floor((userNum - 1) / 100) + 1
+    const classIdx = Math.floor((userNum - 1) / PER_CLASS) + 1
     const examId = examIdForClass(classIdx)
 
     // 1) Mulai / resume ulangan — sekali per VU

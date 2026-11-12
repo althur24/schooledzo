@@ -31,7 +31,7 @@ const P = {
 }
 const GURU_TOKEN = 'lt_guru_ulg_token_0001'
 const BATCH_ID = '7e57a000-0000-0000-0000-000000000002'
-const N_CLASS = 10, N_Q = 50
+const N_CLASS = parseInt(process.env.LT_CLASSES || '15', 10), N_Q = 50
 const EXAMS = Array.from({ length: N_CLASS }, (_, i) => P.exam(i + 1))
 const TAS = Array.from({ length: N_CLASS }, (_, i) => P.ta(i + 1))
 
@@ -53,7 +53,7 @@ async function seed() {
 
     // 10 exam batch — mode jendela +2 jam (sweep aman untuk run ±20 mnt)
     await supabase.from('exams').upsert(EXAMS.map((id, i) => ({
-        id, title: 'LT-ULG Ulangan 1000 Siswa', description: 'load test ulangan autosave — jangan dipakai nilai asli',
+        id, title: 'LT-ULG Ulangan Loadtest', description: 'load test ulangan autosave — jangan dipakai nilai asli',
         start_time: new Date(now - 600e3).toISOString(), duration_minutes: 120,
         window_end_time: new Date(now + 2 * 3600e3).toISOString(),
         teaching_assignment_id: TAS[i], is_active: true, is_randomized: false,
