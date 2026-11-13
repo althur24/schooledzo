@@ -124,13 +124,26 @@ async function main() {
     check('tombol back header menuju /dashboard/siswa', backHref?.hasDash === true, backHref)
     check('TIDAK ada link ke /dashboard/siswa/ulangan', backHref?.hasList === false, backHref)
 
+    // Tunggu pemindaian draft selesai (scan berjalan di useEffect, bisa perlu
+    // waktu di server produksi) — jangan baca body terlalu cepat.
+    const cardReady = await waitFor(cdp, `document.body.innerText.includes('E2FD Ulangan Rescue') || document.body.innerText.includes('Tidak ada draft jawaban')`, 25000)
+    check('pemindaian draft selesai', cardReady)
+
     const text = await ev(cdp, `document.body.innerText`)
+    if (!/E2FD Ulangan Rescue/.test(String(text))) {
+        console.log('DEBUG path:', await ev(cdp, `location.pathname`))
+        console.log('DEBUG origin:', await ev(cdp, `location.origin`))
+        console.log('DEBUG ls-answers-keys:', await ev(cdp, `Object.keys(localStorage).filter(k=>k.endsWith('_answers'))`))
+        console.log('DEBUG memuat-user:', /Memuat data pengguna/.test(String(text)))
+        console.log('DEBUG tidak-ada-draft:', /Tidak ada draft jawaban/.test(String(text)))
+        console.log('DEBUG body:', String(text).slice(0, 260).replace(/\n/g, ' | '))
+    }
     check('TIDAK ada teks "Kembali ke daftar"', !/Kembali ke daftar/i.test(String(text)))
     check('TIDAK ada teks "ID:" pada kartu', !/\bID:\s*[0-9a-f]{8}/i.test(String(text)))
     check('kartu draft tampil (E2FD Ulangan Rescue)', /E2FD Ulangan Rescue/.test(String(text)))
 
     // Tombol kirim ada & berfungsi
-    const hasBtn = await ev(cdp, `[...document.querySelectorAll('button')].some(b=>/Kirim Jawaban Saya/i.test(b.textContent))`)
+    const hasBtn = await waitFor(cdp, `[...document.querySelectorAll('button')].some(b=>/Kirim Jawaban Saya/i.test(b.textContent))`, 15000)
     check('tombol "Kirim Jawaban Saya" tampil', hasBtn === true)
     if (hasBtn) {
         await ev(cdp, `(() => { const b=[...document.querySelectorAll('button')].find(x=>/Kirim Jawaban Saya/i.test(x.textContent)); b.click(); return true })()`)
