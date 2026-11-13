@@ -117,7 +117,12 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
                     }
                 })
             } else {
-                // Official: soal di-join per answer, skor di field `points_earned`
+                // Official: seed daftar soal dari `data.questions` (server kini
+                // mengirim soal lengkap untuk guru/admin) agar soal yang TIDAK
+                // dijawab tetap tampil bernilai 0 — sebelumnya map dibangun hanya
+                // dari answers → submission 0-jawaban tampil kosong tanpa soal.
+                // Fallback ke question per-answer (kompatibilitas respons lama).
+                ;(data.questions || []).forEach((q: Question) => questionMap.set(q.id, q))
                 answers.forEach((ans: any) => {
                     if (ans.question) {
                         questionMap.set(ans.question.id, ans.question as Question)
@@ -341,6 +346,15 @@ export default function AdminUtsUasGradingPage({ params, searchParams, forcedIsU
                                     </div>
 
                                     <GradingAnswerDisplay question={q as any} answer={ans} />
+
+                                    {/* Penanda eksplisit: soal ini tidak dijawab siswa (tidak ada
+                                        baris jawaban). Nilai otomatis 0; guru tidak perlu bingung
+                                        melihat kolom jawaban kosong. */}
+                                    {!ans && (
+                                        <p className="mt-3 text-sm font-bold text-amber-600 dark:text-amber-400">
+                                            ⚠ Tidak dijawab siswa — nilai 0
+                                        </p>
+                                    )}
                                 </div>
                             </div>
 

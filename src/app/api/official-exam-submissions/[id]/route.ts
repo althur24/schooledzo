@@ -6,7 +6,7 @@ import { getTeacherScope, canTeachStudentSubmission } from '@/lib/teacherScope'
 import { logError } from '@/lib/logError'
 import { logGradeChange } from '@/lib/gradeHistory'
 import { resolveWindowExpiry } from '@/lib/examExpiry'
-import { needsManualGrading } from '@/lib/questionTypeUtils'
+import { needsManualGrading, parseQuestionOptions } from '@/lib/questionTypeUtils'
 import { getExamQuestionsForGrading } from '@/lib/examQuestionsCache'
 import { applySusulanCap } from '@/lib/susulan'
 
@@ -130,7 +130,34 @@ export async function GET(
             }))
             : (answers || [])
 
-        const responseData: any = { ...submission, answers: processedAnswers, results_hidden: isHidden }
+        // Soal lengkap untuk halaman KOREKSI guru/admin. WAJIB disertakan agar
+        // soal yang TIDAK dijawab siswa (tidak ada baris official_exam_answers)
+        // tetap tampil bernilai 0 di halaman koreksi — sebelumnya halaman koreksi
+        // membangun daftar soal HANYA dari answers sehingga submission tanpa
+        // jawaban tampil kosong tanpa soal. Tidak dikirim ke SISWA (halaman hasil
+        // siswa hanya ringkasan; kunci tidak boleh bocor).
+        let examQuestionsForGrading: any[] | undefined
+        if (ctx.user.role === 'GURU' || ctx.user.role === 'ADMIN') {
+            const examIdForQ = (submission as any)?.exam?.id
+            if (examIdForQ) {
+                const { data: qs } = await supabase
+                    .from('official_exam_questions')
+                    .select('id, question_text, question_type, options, correct_answer, points, order_index, passage_text, passage_audio_url, text_direction')
+                    .eq('exam_id', examIdForQ)
+                    .order('order_index', { ascending: true })
+                examQuestionsForGrading = (qs || []).map((q: any) => ({
+                    ...q,
+                    options: parseQuestionOptions(q.options),
+                }))
+            }
+        }
+
+        const responseData: any = {
+            ...submission,
+            answers: processedAnswers,
+            results_hidden: isHidden,
+            ...(examQuestionsForGrading ? { questions: examQuestionsForGrading } : {}),
+        }
         if (isHidden) {
             responseData.total_score = null
             responseData.max_score = null
