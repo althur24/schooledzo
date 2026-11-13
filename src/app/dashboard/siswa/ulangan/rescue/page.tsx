@@ -1,10 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import Link from 'next/link'
 import PageHeader from '@/components/ui/PageHeader'
 import { useAuth } from '@/contexts/AuthContext'
-import { useSchoolLabels } from '@/contexts/LabelsContext'
 
 /**
  * Halaman Rescue Draft Ulangan/UTS-UAS.
@@ -28,14 +26,12 @@ const EXAM_TYPES = [
         prefix: 'exam',
         kind: 'exam' as const,
         submissionApi: '/api/exam-submissions',
-        listRoute: '/dashboard/siswa/ulangan',
         label: 'Ulangan',
     },
     {
         prefix: 'official_exam',
         kind: 'official' as const,
         submissionApi: '/api/official-exam-submissions',
-        listRoute: '/dashboard/siswa/ulangan',
         label: 'UTS/UAS',
     },
 ] as const
@@ -46,7 +42,6 @@ interface DraftEntry {
     kind: 'exam' | 'official'
     examId: string
     label: string
-    listRoute: string
     submissionApi: string
     answers: Record<string, string>
     synced: Record<string, string>
@@ -63,7 +58,6 @@ interface SubmissionInfo {
 
 export default function RescueDraftPage() {
     const { user } = useAuth()
-    const labels = useSchoolLabels()
 
     const [scanning, setScanning] = useState(true)
     const [drafts, setDrafts] = useState<DraftEntry[]>([])
@@ -101,7 +95,6 @@ export default function RescueDraftPage() {
                                 kind: t.kind,
                                 examId,
                                 label: t.label,
-                                listRoute: t.listRoute,
                                 submissionApi: t.submissionApi,
                                 answers,
                                 synced: parsed?.synced || {},
@@ -210,15 +203,15 @@ export default function RescueDraftPage() {
             <PageHeader
                 title="Selamatkan Draft Jawaban"
                 subtitle="Kirim jawaban yang tersimpan di perangkat ini ke server"
-                backHref="/dashboard/siswa/ulangan"
+                backHref="/dashboard/siswa"
             />
 
             <div className="bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30 rounded-xl p-4">
                 <h3 className="font-bold text-amber-700 dark:text-amber-400">Perhatian</h3>
                 <ul className="text-sm text-amber-600/90 dark:text-amber-200/80 list-disc ml-5 mt-1 space-y-1">
-                    <li>Halaman ini <strong>harus dibuka di perangkat yang sama</strong> saat kamu mengerjakan ujian — draft tersimpan di memori browser perangkat, bukan di akun.</li>
+                    <li>Buka halaman ini di <strong>perangkat yang sama</strong> saat kamu mengerjakan ujian — draft tersimpan di browser perangkat, bukan di akun.</li>
                     <li><strong>Jangan hapus</strong> data/cache browser sebelum draft berhasil dikirim.</li>
-                    <li>Jawaban yang sudah ada di server tidak akan ditimpa — hanya jawaban yang belum terkirim yang dikirim sekarang.</li>
+                    <li>Jawaban yang sudah ada di server tidak ditimpa — hanya jawaban yang belum terkirim yang dikirim sekarang.</li>
                 </ul>
             </div>
 
@@ -258,7 +251,7 @@ export default function RescueDraftPage() {
                                                 : d.label}
                                         </p>
                                         <p className="text-xs text-text-secondary mt-1">
-                                            {d.label} · ID: <span className="font-mono break-all">{d.examId.slice(0, 8)}…</span>
+                                            {d.label}
                                         </p>
                                         {d.lastSaved && (
                                             <p className="text-xs text-text-secondary mt-1">
@@ -311,9 +304,6 @@ export default function RescueDraftPage() {
                                     ) : (
                                         <span className="text-xs text-text-secondary">Tidak ada yang bisa dikirim untuk ujian ini.</span>
                                     )}
-                                    <Link href={d.listRoute} className="text-sm text-primary hover:underline">
-                                        Kembali ke daftar {labels.ulangan}
-                                    </Link>
                                 </div>
                             </div>
                         )
